@@ -15,13 +15,9 @@ into an architecture.
   - both repositories;
   - `LDO_DECONFOUNDING_DESIGN.md`;
   - the GPU and modularisation critiques.
-- **Not read yet:**
-  - `PEGASUS_MATH_CRITIQUE.md` (387 KB);
-  - most of `PEGASUS_MATH_CRITIQUE_STEELMAN.md` (only its first six verdicts,
-    LDO-MARG-01 to 06).
-  
-  They are the deepest statistical material, and OPEN_QUESTIONS Q13 keeps
-  them.
+- **Extracted by agents, not yet read by me:** the two math critiques
+  (`docs/digests/`). They are the deepest statistical material (OPEN_QUESTIONS
+  Q13).
 
 ---
 
