@@ -10,6 +10,12 @@
 It argues positions so they can be argued with. It decides nothing (see
 `OPEN_QUESTIONS.md`).
 
+**Corrected the same day** after the full recollection (`docs/RECOLLECTION.md`,
+rewritten), which covers the May formalisation, MSD-I/II/III and the
+Conceptual Foundations that this assessment had not read. Four statements
+below were wrong or incomplete. Each is marked **[corrected]** where it
+stands, and §11 adds what the fuller record changes.
+
 ---
 
 ## 1. The short verdict
@@ -18,13 +24,19 @@ The earlier attempts failed for one root reason, which showed up in several
 forms. **PegaSUS tried to build the answer before it had defined the question
 or a way to know whether an answer was right.**
 - **April** defined a search space.
-- **May–July** built an estimator over that space and then spent its last
-  weeks discovering, through thirty self-critiques, that it could not tell a
-  finding from an artefact.
+- **May** formalised it: a typed measure algebra (Problem 1), a nonlinear
+  dependence scanner (Problem 2) and reconstruction under data sovereignty
+  (Problem 3).
+- **June–July** specified it in three Master System Documents, built it, and
+  then spent the last weeks discovering, through thirty self-critiques, that
+  it could not tell a finding from an artefact.
 - **The north star** is a lucid document, but it arrived on the last day. It
   correctly retreated from "find links" to "reveal leads", and it named the
-  identification wall. It still did not say how anyone would know that a lead
-  was good.
+  identification wall.
+- **[corrected]** A way to know whether an answer was right *had* been
+  specified: MSD-III Part IX's validation battery and the Zika → microcephaly
+  acceptance test (§XI.4). Its synthetic half was partly built. It was never
+  run on real data, so the question was defined and left unanswered.
 
 Meanwhile the work that produced value went the other way round: question
 first, data second, discipline throughout. That covers brepi's leptospirosis
@@ -66,9 +78,20 @@ distribution that generated them**:
 
 "Reducing epidemiology to statistics" is therefore **true for the descriptive
 layer, true as computation for the associational layer, and false for the
-causal layer**. The earlier engine lived in the second row and wanted to act
-as if it were in the third. It also neglected the first, which is where the
-certain value lies and where DATASUS is richest.
+causal layer**. The earlier engine's discovery half lived in the second row and
+kept being pulled toward the third. The fuller record shows its own documents
+resisted that pull: "a causal clue, not a causal theorem" (GPT, May), the
+causal ladder with typed rungs (MSD-III Part IV), and "association is not
+causation" as a permanent limit (MSD-III §0.4).
+
+**[corrected]** I first wrote that the engine neglected the descriptive layer.
+It did not, by design. The canonical core generated standard stratified
+indicators always and exempted them from pruning. miniPegaSUS made the variable
+DAG itself "the central analytic engine": rates, standardised rates, burden
+measures, inequality decompositions and anomaly reports, with the state tensor
+read as a result in its own right. What went wrong was execution, not intent:
+direct standardisation at municipal scale without shrinkage, age-unknown deaths
+filed as infants, and rate intervals computed and never propagated.
 
 ### 2.3 What an "ecological link" is
 
@@ -116,12 +139,28 @@ multiplicity control otherwise has to supply.
    found the same thing in miniature: the "hub" hospitals for maternal heart
    disease may just be the hospitals that record secondary diagnoses. An
    engine ranking by signal strength ranks artefacts first.
-3. **No ground truth was ever used to calibrate the engine.** Without known
-   positives (Zika → microcephaly 2015–16; COVID excess mortality 2020–21;
-   the leptospirosis–flood association) and known negatives (drought →
-   leptospirosis, brepi's placebo), there was no way to measure sensitivity
-   or false discovery. So the project calibrated itself by critique:
-   165 findings, each argued, none scored.
+3. **Ground truth was designed but never used on real data.**
+   **[corrected]** I first wrote "no ground truth was ever used", which is
+   wrong about the design.
+   - **Specified.** MSD-III Part IX specified:
+     - known-positive controls (Zika → microcephaly, sanitation → diarrhoeal
+       disease, vaccination → decline);
+     - known-negative controls with a measured false-alarm rate;
+     - synthetic ground truth;
+     - temporal holdout;
+     - exact-versus-approximate checks.
+     
+     The program acceptance test (§XI.4) required a monthly Alagoas run to
+     discover the arbovirus → microcephaly lag of 6–9 months unprompted.
+   - **Built.** Synthetic planted-lag and sparse + low-rank recovery tests;
+     the race planted-signal probe.
+   - **Never done.** The real-data half. `tests/acceptance/` is empty and
+     the issue ledger deferred the Zika test.
+   
+   So sensitivity and false discovery on real data were never measured, and
+   the project calibrated itself largely by critique: 165 argued findings, of
+   which the steelman adjudicated 20, a few by experiment. The candidate
+   benchmark in §9 extends the battery MSD-III already wrote.
 4. **The model families did not match the data.**
    - Counts are overdispersed and zero-inflated, and small areas are unstable.
    - The Gaussian copula with a Poisson margin, one global separable
@@ -191,9 +230,11 @@ rather than argued.
   uncertainty not propagated, magic numbers, certification certifying the
   wrong thing, canonical code orphaned while copies ran.
 - **More fundamentally, the order of work.** The engine was scaled
-  nationally (memory walls, GPU plans on a CPU-only install) before any lens
-  was shown to find a planted signal and reject a null on one state. The
-  engine was optimised before it was known to be right. That is the same
+  nationally (memory walls, GPU plans on a CPU-only install) before any
+  capability was shown on one state to find a *known real* signal and reject
+  a real null. **[corrected]** Synthetic planted signals were recovered; the
+  first version of this sentence said they were not. The engine was optimised
+  before it was known to be right on real data. That is the same
   error pegasus_data's discipline now forbids: "correct but unusably slow is
   not finished", and equally, fast but unvalidated is not started.
 
@@ -235,7 +276,7 @@ EPI-01 used it this morning.
 | root cause | evidence | what a redesign would need |
 |---|---|---|
 | **Purpose unsettled while building** | April "links"; July "leads"; now "links" again; the delivered value was studies | Settle what PegaSUS produces and for whom, before any architecture |
-| **No external criterion of correctness** | 30 critiques and 165 argued findings, zero measured error rates | A benchmark of known answers (positive and negative) that every capability must pass, run live |
+| **An external criterion specified, never run** | MSD-III Part IX and the Zika acceptance test written; synthetic half built; no real-data error rate ever measured; 165 argued findings instead | A benchmark of known answers (positive and negative) that every capability must pass, run live, before the capability is scaled or built upon |
 | **Scale before correctness** | national OOMs and GPU plans before any single-state validation | State-scale validation first; national only once a capability is known to be right |
 | **Aggregation mistaken for the object** | panel-first design; the north star's own correction | Grain chosen per question; records and links available (pegasus_data) |
 | **Contracts unenforced** | reliability computed and ignored; canonical code orphaned; helpers duplicated across sessions | Estimators whose signatures require the uncertainty they need; one implementation per concept, found before written |
@@ -385,3 +426,56 @@ The GPU is not needed for any of it.
    single claim can use?
 4. PHAROS: what from its agent design should carry over, and what proved too
    heavy?
+
+---
+
+## 11. What the full record changes (added after the recollection)
+
+1. **The three problems remain the right decomposition, and they fared very
+   differently.**
+   - **Problem 1 (what the quantities are) is the solid part.** Typed
+     measures, Radon–Nikodym rates with legality, the canonical core and the
+     measured-quantity output survived every critique. The compliance report
+     rated the legality predicate compliant, and brepi re-derived the same
+     algebra independently.
+   - **Problem 3 (reconstruction under sovereignty) is sound doctrine.** It
+     comprises the regime classifier, a process model for population, and
+     only stocks, denominators and outcomes made dynamic, with staleness as
+     uncertainty. It is mostly a *gateway* concern: denominators and SIDRA
+     belong behind pegasus_data, typed by regime.
+   - **Problem 2 (finding relations) is where every attempt broke,** in three
+     successive forms: the pairwise HSIC scanner, the NB GLM with a residual
+     scan, and the joint sparse + low-rank precision. Each broke on the same
+     properties of the data, not on its choice of dependence measure:
+     overdispersed, zero-inflated counts; small unstable areas; dependence in
+     space and time; a 25-year non-stationary window; and multiplicity. The
+     critique's remedies are the standard areal-data toolkit.
+2. **The recurring mathematical error was a single global object.** One
+   national rate for every cell, one covariance pooled over 2000–2024, one
+   separable precision for all of Brazil, one frozen randomised PIT. Brazilian
+   health data are heterogeneous by region, period and scale, and the areal
+   toolkit (negative binomial with varying baselines, BYM2 shrinkage toward a
+   parent) exists precisely for that. This is a statistical diagnosis, not an
+   engineering one.
+3. **The information ceiling (Conceptual Foundations §10; MSD-III §0.4) is the
+   corpus's most consequential sentence for the redesign.** If reliably
+   discoverable epidemiology is bounded by effective independent
+   observations, the discoverable set at fine grain is small. A design should
+   be sized to the information, not to the compute. Much of the May–July
+   effort (Kronecker operators, randomised NLA, the GPU) went into searching
+   more candidates than the data could support.
+4. **The shape the author already wrote down is option C.** MSD-III's
+   "living skeleton" with five verbs (interrogate, lens, escalate, steer,
+   inject) is a build/serve split: the skeleton is the lead engine, and the
+   escalation layer is where studies happen. An agent loop is a natural
+   occupant of the serve side. What the record adds is the missing step: the
+   skeleton was never scored against known answers before being served.
+5. **The grain has moved since July.** The whole lineage was panel-first; the
+   record-level functionals and bridges were specified but secondary.
+   pegasus_data now gives records and linked cohorts with measured linkage
+   error. Some "ecological links" can therefore be asked at the individual
+   grain, where the ecological fallacy does not arise, and Problem 2's object
+   is no longer only a municipality × time panel.
+6. **Unchanged:** the order argued in §5 and §9. Settle what PegaSUS produces;
+   then the benchmark, which extends MSD-III Part IX, run on real data first;
+   then the agent contract; only then the architecture.
