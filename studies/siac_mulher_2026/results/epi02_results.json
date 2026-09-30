@@ -1,0 +1,231 @@
+{
+ "deaths_women": 6282106,
+ "maternal_final": 17749,
+ "maternal_final_by_year": {
+  "2014": 1717,
+  "2015": 1717,
+  "2016": 1661,
+  "2017": 1713,
+  "2018": 1649,
+  "2019": 1572,
+  "2020": 1977,
+  "2021": 3038,
+  "2022": 1373,
+  "2023": 1332
+ },
+ "causabas_o_filled_in_maternal": 0.9983661051326835,
+ "changed_in_maternal": 0.388754296016677,
+ "entered_maternal_after_investigation": 4635,
+ "left_maternal_after_investigation": 603,
+ "transition_original_to_final_maternal_or_cvd": [
+  [
+   "materna, outra",
+   "materna, outra",
+   8652
+  ],
+  [
+   "não materna, outra",
+   "materna, outra",
+   3098
+  ],
+  [
+   "hipertensiva",
+   "hipertensiva",
+   2574
+  ],
+  [
+   "cardiovascular",
+   "cardiovascular",
+   1207
+  ],
+  [
+   "circulatória não materna (I00-I99)",
+   "cardiovascular",
+   557
+  ],
+  [
+   "materna, outra",
+   "não materna, outra",
+   431
+  ],
+  [
+   "circulatória não materna (I00-I99)",
+   "materna, outra",
+   298
+  ],
+  [
+   "não materna, outra",
+   "hipertensiva",
+   287
+  ],
+  [
+   "materna, outra",
+   "hipertensiva",
+   210
+  ],
+  [
+   "circulatória não materna (I00-I99)",
+   "hipertensiva",
+   201
+  ],
+  [
+   "não materna, outra",
+   "cardiovascular",
+   194
+  ],
+  [
+   "materna, outra",
+   "cardiovascular",
+   139
+  ],
+  [
+   "hipertensiva",
+   "materna, outra",
+   121
+  ],
+  [
+   "cardiovascular",
+   "materna, outra",
+   82
+  ],
+  [
+   "cardiovascular",
+   "não materna, outra",
+   79
+  ],
+  [
+   "cardiovascular",
+   "hipertensiva",
+   67
+  ],
+  [
+   "hipertensiva",
+   "não materna, outra",
+   44
+  ],
+  [
+   "hipertensiva",
+   "cardiovascular",
+   33
+  ],
+  [
+   "cardiovascular",
+   "circulatória não materna (I00-I99)",
+   26
+  ],
+  [
+   "sem registro",
+   "materna, outra",
+   25
+  ],
+  [
+   "materna, outra",
+   "circulatória não materna (I00-I99)",
+   15
+  ],
+  [
+   "hipertensiva",
+   "circulatória não materna (I00-I99)",
+   8
+  ],
+  [
+   "sem registro",
+   "cardiovascular",
+   3
+  ],
+  [
+   "sem registro",
+   "hipertensiva",
+   1
+  ]
+ ],
+ "cvd_final": 2133,
+ "cvd_original": 1461,
+ "cvd_revealed": 923,
+ "cvd_removed": 254,
+ "cvd_final_codes": [
+  [
+   "O994",
+   1288
+  ],
+  [
+   "O882",
+   482
+  ],
+  [
+   "O903",
+   268
+  ],
+  [
+   "O871",
+   46
+  ],
+  [
+   "O873",
+   22
+  ],
+  [
+   "O223",
+   18
+  ],
+  [
+   "O225",
+   9
+  ]
+ ],
+ "maternal_noncvd_with_cvd_in_lines": 2990,
+ "maternal_noncvd": 15616,
+ "pregnant_puerperal_underlying_I_not_maternal": 1597,
+ "cvd_share_final_by_year": [
+  [
+   2014,
+   254,
+   1717
+  ],
+  [
+   2015,
+   229,
+   1717
+  ],
+  [
+   2016,
+   241,
+   1661
+  ],
+  [
+   2017,
+   240,
+   1713
+  ],
+  [
+   2018,
+   238,
+   1649
+  ],
+  [
+   2019,
+   222,
+   1572
+  ],
+  [
+   2020,
+   184,
+   1977
+  ],
+  [
+   2021,
+   196,
+   3038
+  ],
+  [
+   2022,
+   156,
+   1373
+  ],
+  [
+   2023,
+   173,
+   1332
+  ]
+ ]
+}

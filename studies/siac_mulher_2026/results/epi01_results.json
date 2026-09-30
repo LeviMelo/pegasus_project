@@ -1,0 +1,264 @@
+{
+ "linked_births": 1515701,
+ "linked_admissions": 1515163,
+ "no_heart_disease": {
+  "births": 1514925,
+  "admissions": 1514388,
+  "rates": {
+   "obito": 0.0002250936515008994,
+   "uti": 0.005169232800303646,
+   "prematuro": 0.11143218613714577,
+   "bpn": 0.08751456342723238,
+   "apgar_baixo": 0.010208663812917334,
+   "anomalia": 0.009559160962496678
+  },
+  "n_nonnull": {
+   "obito": 1514925,
+   "uti": 1514925,
+   "prematuro": 1502591,
+   "bpn": 1514925,
+   "apgar_baixo": 1505388,
+   "anomalia": 1501387
+  },
+  "los_median": 2.0
+ },
+ "any_heart_disease": {
+  "births": 776,
+  "admissions": 775,
+  "rates": {
+   "obito": 0.007731958762886598,
+   "uti": 0.1056701030927835,
+   "prematuro": 0.2108667529107374,
+   "bpn": 0.19458762886597938,
+   "apgar_baixo": 0.030927835051546393,
+   "anomalia": 0.03096774193548387
+  },
+  "n_nonnull": {
+   "obito": 776,
+   "uti": 776,
+   "prematuro": 773,
+   "bpn": 776,
+   "apgar_baixo": 776,
+   "anomalia": 775
+  },
+  "los_median": 3.0
+ },
+ "hdp_without_heart": {
+  "births": 83179,
+  "admissions": 83135,
+  "rates": {
+   "obito": 0.0006612245879368591,
+   "uti": 0.05140720614578199,
+   "prematuro": 0.22625701696142936,
+   "bpn": 0.19555416631601727,
+   "apgar_baixo": 0.015341970473034046,
+   "anomalia": 0.013946781698332687
+  },
+  "n_nonnull": {
+   "obito": 83179,
+   "uti": 83179,
+   "prematuro": 82835,
+   "bpn": 83179,
+   "apgar_baixo": 82975,
+   "anomalia": 82528
+  },
+  "los_median": 3.0
+ },
+ "phenotypes": {
+  "valvopatia": {
+   "births": 43,
+   "admissions": 43,
+   "rates": {
+    "obito": 0.023255813953488372,
+    "uti": 0.046511627906976744,
+    "prematuro": 0.2558139534883721,
+    "bpn": 0.2558139534883721,
+    "apgar_baixo": 0.06976744186046512,
+    "anomalia": 0.023809523809523808
+   },
+   "n_nonnull": {
+    "obito": 43,
+    "uti": 43,
+    "prematuro": 43,
+    "bpn": 43,
+    "apgar_baixo": 43,
+    "anomalia": 42
+   },
+   "los_median": 3.0
+  },
+  "cardiopatia congênita": {
+   "births": 64,
+   "admissions": 64,
+   "rates": {
+    "obito": 0.015625,
+    "uti": 0.046875,
+    "prematuro": 0.14285714285714285,
+    "bpn": 0.140625,
+    "apgar_baixo": 0.03125,
+    "anomalia": 0.125
+   },
+   "n_nonnull": {
+    "obito": 64,
+    "uti": 64,
+    "prematuro": 63,
+    "bpn": 64,
+    "apgar_baixo": 64,
+    "anomalia": 64
+   },
+   "los_median": 3.0
+  },
+  "cardiomiopatia/IC (inclui O90.3)": {
+   "births": 126,
+   "admissions": 126,
+   "rates": {
+    "obito": 0.015873015873015872,
+    "uti": 0.1111111111111111,
+    "prematuro": 0.336,
+    "bpn": 0.2619047619047619,
+    "apgar_baixo": 0.023809523809523808,
+    "anomalia": 0.023809523809523808
+   },
+   "n_nonnull": {
+    "obito": 126,
+    "uti": 126,
+    "prematuro": 125,
+    "bpn": 126,
+    "apgar_baixo": 126,
+    "anomalia": 126
+   },
+   "los_median": 3.0
+  },
+  "hipertensão pulmonar": {
+   "births": 8,
+   "admissions": 8,
+   "rates": {
+    "obito": 0.0,
+    "uti": 0.25,
+    "prematuro": 0.375,
+    "bpn": 0.125,
+    "apgar_baixo": 0.125,
+    "anomalia": 0.0
+   },
+   "n_nonnull": {
+    "obito": 8,
+    "uti": 8,
+    "prematuro": 8,
+    "bpn": 8,
+    "apgar_baixo": 8,
+    "anomalia": 8
+   },
+   "los_median": 7.0
+  },
+  "arritmia": {
+   "births": 76,
+   "admissions": 75,
+   "rates": {
+    "obito": 0.0,
+    "uti": 0.02631578947368421,
+    "prematuro": 0.2,
+    "bpn": 0.2236842105263158,
+    "apgar_baixo": 0.013157894736842105,
+    "anomalia": 0.02631578947368421
+   },
+   "n_nonnull": {
+    "obito": 76,
+    "uti": 76,
+    "prematuro": 75,
+    "bpn": 76,
+    "apgar_baixo": 76,
+    "anomalia": 76
+   },
+   "los_median": 3.0
+  },
+  "doença isquêmica": {
+   "births": 11,
+   "admissions": 11,
+   "rates": {
+    "obito": 0.0,
+    "uti": 0.09090909090909091,
+    "prematuro": 0.36363636363636365,
+    "bpn": 0.2727272727272727,
+    "apgar_baixo": 0.18181818181818182,
+    "anomalia": 0.09090909090909091
+   },
+   "n_nonnull": {
+    "obito": 11,
+    "uti": 11,
+    "prematuro": 11,
+    "bpn": 11,
+    "apgar_baixo": 11,
+    "anomalia": 11
+   },
+   "los_median": 3.0
+  },
+  "aortopatia": {
+   "births": 1,
+   "admissions": 1,
+   "rates": {
+    "obito": 0.0,
+    "uti": 1.0,
+    "prematuro": 1.0,
+    "bpn": 1.0,
+    "apgar_baixo": 0.0,
+    "anomalia": 0.0
+   },
+   "n_nonnull": {
+    "obito": 1,
+    "uti": 1,
+    "prematuro": 1,
+    "bpn": 1,
+    "apgar_baixo": 1,
+    "anomalia": 1
+   },
+   "los_median": 3.0
+  },
+  "O99.4 sem outro código cardíaco": {
+   "births": 452,
+   "admissions": 452,
+   "rates": {
+    "obito": 0.004424778761061947,
+    "uti": 0.1261061946902655,
+    "prematuro": 0.17699115044247787,
+    "bpn": 0.168141592920354,
+    "apgar_baixo": 0.02654867256637168,
+    "anomalia": 0.01991150442477876
+   },
+   "n_nonnull": {
+    "obito": 452,
+    "uti": 452,
+    "prematuro": 452,
+    "bpn": 452,
+    "apgar_baixo": 452,
+    "anomalia": 452
+   },
+   "los_median": 3.0
+  }
+ },
+ "adjusted_rr_any_heart_disease": {
+  "obito": [
+   32.64814099514229,
+   14.515747759420133,
+   73.43067185408782
+  ],
+  "uti": [
+   15.336719977661804,
+   11.638809812296175,
+   20.209538901882446
+  ],
+  "prematuro": [
+   1.7502233768684905,
+   1.5282755764640632,
+   2.0044041245652755
+  ],
+  "bpn": [
+   1.9412176850636147,
+   1.672831989739335,
+   2.2526626247689885
+  ],
+  "apgar_baixo": [
+   2.9108579026182433,
+   1.9616620530758417,
+   4.319344260113234
+  ]
+ }
+}

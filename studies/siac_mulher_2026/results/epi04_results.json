@@ -1,0 +1,110 @@
+{
+ "cardio_obstetric": {
+  "admissions": 2047,
+  "outside_municipality": 0.4137762579384465,
+  "outside_health_region": 0.2783864541832669,
+  "outside_state": 0.013190034196384953,
+  "in_hospital_death": 0.006350757205666829,
+  "icu": 0.10112359550561797,
+  "hospitals": 356,
+  "destination_municipalities": 258
+ },
+ "other_obstetric": {
+  "admissions": 2490127,
+  "outside_municipality": 0.30832082058465293,
+  "outside_health_region": 0.1455025062821508,
+  "outside_state": 0.012839104190268208,
+  "in_hospital_death": 0.00035058452841963485,
+  "icu": 0.0069522558487980736,
+  "hospitals": 3305,
+  "destination_municipalities": 2733
+ },
+ "cardio_top50_hospital_share": 0.6585246702491451,
+ "cardio_hhi_hospitals": 0.018943446496344215,
+ "cardio_hospitals": 356,
+ "cardio_hospitals_needed_for_half": 22,
+ "cardio_by_region_outside_hr": [
+  [
+   "1",
+   96,
+   0.3020833333333333,
+   0.052083333333333336
+  ],
+  [
+   "2",
+   397,
+   0.39646464646464646,
+   0.02518891687657431
+  ],
+  [
+   "3",
+   925,
+   0.1590909090909091,
+   0.006486486486486486
+  ],
+  [
+   "4",
+   495,
+   0.42424242424242425,
+   0.0
+  ],
+  [
+   "5",
+   134,
+   0.16494845360824742,
+   0.04477611940298507
+  ]
+ ],
+ "cardio_top_destinations": [
+  [
+   "São Paulo, SP",
+   237,
+   0.3459915611814346
+  ],
+  [
+   "Lages, SC",
+   132,
+   0.36363636363636365
+  ],
+  [
+   "Maceió, AL",
+   88,
+   0.5568181818181818
+  ],
+  [
+   "Salvador, BA",
+   80,
+   0.4625
+  ],
+  [
+   "Blumenau, SC",
+   72,
+   0.5
+  ],
+  [
+   "São José do Rio Pardo, SP",
+   65,
+   0.3076923076923077
+  ],
+  [
+   "Recife, PE",
+   60,
+   0.8
+  ],
+  [
+   "Florianópolis, SC",
+   56,
+   0.5
+  ],
+  [
+   "Joinville, SC",
+   56,
+   0.2857142857142857
+  ],
+  [
+   "Sorocaba, SP",
+   52,
+   0.4807692307692308
+  ]
+ ]
+}
