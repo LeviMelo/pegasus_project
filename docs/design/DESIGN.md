@@ -1,6 +1,6 @@
 # PegaSUS: design proposal v0
 
-**2026-10-03.** A complete proposal, written so the author can react to something concrete. The author asked the agent to adjudicate. **Everything here is a proposal until the author accepts it**; the choices the agent was least sure of are listed in §13.
+**2026-10-03, revised the same day (v0.1):** own demographic model (§4.1); subset scanning, pattern decomposition and dependency maps (§7.4–7.6). A complete proposal, written so the author can react to something concrete. The author asked the agent to adjudicate. **Everything here is a proposal until the author accepts it**; the choices the agent was least sure of are listed in §13.
 
 **Inputs:**
 - the discussion of 2026-10-03;
@@ -118,32 +118,54 @@ The same applies to parent and child codes, a count and its own share, and one d
 
 ## 4. L2: denominators and measurement
 
-### 4.1 Population at risk
+### 4.1 Population at risk: our own demographic account
 
-**Age × sex: POPSVS, adopted as published.** It is the Ministry's denominator. It is a demographic model already: cohort ratios, anchored on three censuses, constrained to IBGE's projections and official totals. PegaSUS does not rebuild it.
+**Decision (author, 2026-10-03): PegaSUS builds its own population model.** POPSVS is one of its inputs, and the benchmark it must beat.
 
-**Race composition, a PegaSUS model:**
+**The model.** The true resident population is a hidden state, `N(u, t, a, s, r)`: municipality, year, single age, sex, race. It moves by **demographic accounting**:
 
 ```
-P(u, t, a, s, r) = POPSVS(u, t, a, s) · π(r | u, t, a, s)
+N(u, t+1, a+1, s, r) = N(u, t, a, s, r) · S(u, t, a, s) + M(u, t, a, s, r) + R(u, t, a, s, r)
+N(u, t+1, 0,   s, r) = B(u, t, s, r) · S₀(u, t, s)
 ```
 
-- **Anchors.**
-  - Censuses 2010 and 2022 at municipality × single age × sex × race (SIDRA 9606).
-  - The 2000 census at 13 age groups (SIDRA 2093), split to single ages by the 2010 within-group shape. Undeclared race is reallocated by local composition.
-- **Interpolation along cohorts.** A cohort keeps much of its racial identification as it ages. The composition at (t, a) is therefore interpolated between the same cohort's census observations, at (t₀, t₀ − c) and (t₁, t₁ − c) with c = t − a, linearly in **isometric log-ratio** coordinates.
-  - **Cohorts born between censuses** take the composition of their age group at the next census.
-  - **80+ is pooled.**
-- **Small cells** are shrunk toward the intermediate region by Dirichlet–multinomial empirical Bayes.
-- **Validation: leave one census out.** Rebuild 2010 from 2000 and 2022 by the same rule, and compare cell by cell. The residual distribution, by cell size and age, *is* the uncertainty model; no flat constant.
-- **A by-product.** A cohort's change in composition between censuses measures reclassification (for example "browning"). It becomes a field like any other.
+- S is survival.
+- M is net migration.
+- R is race reclassification between categories, which sums to zero over r.
+- B is births.
 
-**Shocks POPSVS cannot see,** and RIPSA says so. The vital records serve as **tension diagnostics**, not inputs:
-- births from SINASC against POPSVS women aged 15–49 × the state's fertility;
-- deaths from SIM against a life-table expectation;
-- school or labour series where they are available.
+**Many sources observe it, each through its own data model** (coverage, completeness, delay, noise). This is the "Bayesian demographic account" of Bryant & Zhang, *Bayesian Demographic Estimation and Forecasting* (2018).
 
-A municipality-period where these diverge (out-migration after an industry closes, a mining boom) gets its **exposure flagged and down-weighted**, and the divergence is itself a lead in the observation family.
+| source | observes | data model |
+|---|---|---|
+| censuses 2000, 2010, 2022 | N, by municipality × age × sex × race | coverage error by age, sex and region |
+| IBGE annual municipal totals | Σ N | small noise; the official constraint |
+| IBGE state projections, life tables, fertility | S and B by state | priors |
+| POPSVS (RIPSA) | N by age × sex | another model's estimate: an informative observation, not truth |
+| SINASC | B, by mother's residence × age × race | completeness by state and year |
+| SIM | deaths, so S | completeness by state, age and year |
+| electoral roll (TSE), every two years | adults by municipality × age × sex | registration lag; transfers reveal adult migration |
+| school census (INEP) | children by municipality × age | enrolment coverage |
+| CadÚnico | persons by municipality × age × sex × race | covers the poorer population; race declared |
+| primary-care registrations (SISAB) | persons by municipality | coverage varies by team |
+| formal employment (RAIS/CAGED) | workers by municipality × age × sex × race | an economic-shock signal |
+| census migration questions | origin–destination flows, 5-year | prior on M |
+
+**Availability.** These sources are not yet behind pegasus_data except the censuses, POPSVS and IBGE totals. Each one is acquired behind the gateway first.
+
+**Inference.** A Bayesian state-space fit on the log scale, hierarchical by intermediate region and state. It runs per state in parallel; states are coupled through migration totals.
+
+**Outputs, each a field in its own right:**
+- the posterior of N per cell, with its interval;
+- **net migration** by municipality × age × year, which shows where people went and when;
+- **reclassification** by cohort ("browning");
+- **the completeness of SINASC and SIM** by municipality-year;
+- **shocks** between censuses: a municipality whose sources disagree with smooth growth (a mine closing, a dam failing, a frontier opening).
+
+**The test that shows we do better.**
+- Predict the **2022 census** by municipality × age × sex from data up to 2021 only.
+- Compare with RIPSA's pre-census estimates for 2021–2022 (its 2000–2021 series).
+- The error, by municipality size and age, becomes the uncertainty model.
 
 ### 4.2 Race misclassification
 
@@ -278,6 +300,42 @@ On linked cohorts, every record attribute (diagnosis nodes, procedures, the moth
 
 This is the PheWAS shape. It is free of the ecological fallacy by construction.
 
+### 7.4 Subset scanning: the needle finder
+
+The surprise cube has many dimensions: place, time, age, sex, race, code (a tree), institution. A real signal is rarely one cell. It is usually a **coherent subset** whose small surprises add up: these 7 municipalities × these 5 months × women over 60 × these three codes.
+
+**Subset scanning searches for the subset whose combined surprise is largest:**
+- **Statistic:** an expectation-based score over a subset of cells, Poisson or NB log-likelihood ratio of observed against expected, each cell weighted by its precision.
+- **Search:** over subsets constrained along each dimension:
+  - places connected or within a radius;
+  - times contiguous;
+  - strata any subset;
+  - codes along the tree.
+- **It is efficient:** the linear-time subset scanning property (Neill 2012; Neill, McFowland & Zheng 2013 for several streams and dimensions; McFowland, Speakman & Neill 2013) finds the best subset of each dimension in linear time. Alternating over dimensions reaches the joint optimum.
+- **It finds signals no single-cell test can:** each cell's excess is within its noise, but 100 such cells together are not.
+- **Null:** simulation from the predictive with an extreme-value fit of the maximum, so there is no Monte-Carlo floor.
+- **Recursive:** after the top subset is reported, it is conditioned out and the next is sought.
+
+### 7.5 Pattern decomposition
+
+A non-negative Poisson tensor factorisation (CP-APR; Chi & Kolda 2012) is fitted to the **counts against their expectations** over place × time × condition (× stratum). Each component is a pattern: *these conditions rose together in these places at these times.*
+
+- **COVID** appears as one component.
+- **A coding change** appears as a pair of components: a cause falling exactly where another rises.
+- **A new epidemic** appears as a component that is new in time.
+
+Components are leads of the kind "co-occurrence pattern", with stability checked across halves of the data.
+
+### 7.6 Dependency maps
+
+On the **calibrated** surprises of one estimand, a sparse plus low-rank Gaussian graphical model maps which fields move together **after** their expectations, with the shared factors kept apart. The old LDO goal is kept; its failures are not:
+- inputs are calibrated per cell, not pooled ranks;
+- each cell carries its precision weight;
+- one map per estimand;
+- the penalty is chosen by stability across the replication halves, not by hand.
+
+This is phase 3, once the pair scans are calibrated, so the map can be checked against them.
+
 ---
 
 ## 8. L6: error control and replication
@@ -371,16 +429,16 @@ Exploration tools read only the exploration half. The systematic scan reads ever
 | phase | builds | its gate |
 |---|---|---|
 | 0 | the harness (§11): positives, negatives, spike-in, surrogates | the harness reproduces itself |
-| 1 | registry (record fields from SIM, SINASC, SIH; annual); race composition with its leave-one-census-out test; expectations B0–B2; the surprise cube; the six lenses | the positives that are univariate; false-lead rate on surrogates |
+| 1 | registry (record fields from SIM, SINASC, SIH; annual); the demographic account (§4.1) with its 2022 hold-out test against RIPSA; expectations B0–B2; the surprise cube; the six lenses; subset scanning (§7.4) | the positives that are univariate; false-lead rate on surrogates |
 | 2 | pair scans E_b and E_w; ledger, FDR, replication; measured overlap | the pair positives; the negatives; power curves |
-| 3 | race misclassification (§4.2); agent tools; institution lattice; cohort scans; monthly grain for dense families; context from IBGE | each with its own positives |
+| 3 | race misclassification (§4.2); pattern decomposition (§7.5); dependency maps (§7.6); agent tools; institution lattice; cohort scans; monthly grain for dense families; new demographic sources (TSE, INEP, CadÚnico) | each with its own positives |
 
 ---
 
 ## 13. What is left out, and the choices most open to change
 
 **Deliberately excluded from v0, with the evidence:**
-- **One joint precision model over all fields.** Its penalty had no stable value, and its time and space structure were never fitted. Any later "network" lens is fitted on the calibrated surprise cube, not on raw fields.
+- **A joint model fitted on raw fields.** Its penalty had no stable value, and its time and space structure were never fitted. The dependency map (§7.6) is fitted on calibrated surprises instead.
 - **HSIC as the primary statistic.** It was dominated by haze, degenerate samples and permutation arithmetic.
 - **Dense reconstruction of context for scanning.**
 - **Automated causal escalation.**
