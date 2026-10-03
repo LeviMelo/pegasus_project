@@ -7,6 +7,10 @@ Conceptual Foundations, the mathematics of every subsystem, and the July
 reckoning. The author pointed this out ("You have not recollect any of the
 actual major concepts and investments of pegasus"). This version replaces it.
 
+**Corrected 2026-10-03:** `docs/discussion/2026-10-03-what-was-built.md`
+records what the engine actually ran. Where this file describes a
+specification, that note says what the code did.
+
 **It is an inventory, not a design.** PegaSUS will be redesigned from first
 principles (author, 2026-09-30); nothing here is adopted by being recorded.
 Where a document's claim was later shown wrong, both are given.

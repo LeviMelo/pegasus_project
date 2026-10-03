@@ -1,15 +1,16 @@
 # Status
 
-**2026-09-30.** Repository created. Before design.
+**2026-10-03.** Design proposal v0 written, for the author's feedback.
 
-- `docs/RECOLLECTION.md`: the inventory of the earlier attempts, rewritten the
-  same day to cover the May formalisation, MSD-I/II/III, the Conceptual
-  Foundations, the mathematics by subsystem, the July reckoning and the
-  validation program (designed, synthetic half built, never run on real data).
-- `docs/digests/`: five agent extractions the recollection draws on.
-- `docs/discussion/2026-09-30-assessment.md`: the assessment, with four
-  statements corrected in place and §11 added after the full recollection.
-- `OPEN_QUESTIONS.md`: Q1–Q15.
+- `docs/design/DESIGN.md`: the proposed architecture and specification. It
+  has eight layers over pegasus_data and a validation harness, built first.
+  Its least certain calls are §13 O1–O5.
+- `docs/discussion/2026-10-03-what-was-built.md`: what the May–July engine
+  actually ran, from four audits of `LEVI/PegaSUS`; it corrects
+  `docs/RECOLLECTION.md` where the latter took specifications for the running
+  system. It also summarises the POPSVS method (RIPSA Note 01/2025).
+- `OPEN_QUESTIONS.md`: Q1–Q15, each now pointing to the design section that
+  proposes an answer.
 - `studies/siac_mulher_2026/`: three abstracts for SIAC Mulher 2026.
 
-Next: the design discussion with the author, starting from Q1, Q9, Q13 and Q14.
+Next: the author's review of the design; then phase 0, the validation harness.
