@@ -27,6 +27,9 @@ dependencies = [
   "pyyaml>=6",
 ]
 
+[project.scripts]
+pegasus-core = "pegasus_core.cli:app"
+
 [project.optional-dependencies]
 sparse = ["scikit-sparse>=0.4"]
 dev = ["ruff>=0.6", "mypy>=1.10"]
@@ -41,6 +44,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/pegasus_core/cli.py" = ["B008"]  # typer declares options in defaults
 
 [tool.mypy]
 python_version = "3.11"

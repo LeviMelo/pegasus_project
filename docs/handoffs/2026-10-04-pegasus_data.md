@@ -199,3 +199,18 @@ Built and versioned like other reference tables, as edge lists `(from, to, weigh
 
 - ICD tree pooling against held-out years, chapter by chapter (SIM 2021–2023).
 - Which proximity graph best explains between-municipality variation for a few causes.
+
+## 10. Decisions returned (2026-10-04)
+
+**pegasus_data's open question 69, item (2), the GBD cause hierarchy: do not ship it.**
+- **Why:** pegasus_data is MIT-licensed. Bundling IHME's mapping, which is licensed for non-commercial use only, would break that promise for every downstream user, invisibly.
+- **Allowed instead:** an opt-in fetch. A user who asks for `GBD` downloads IHME's published files into their own data home, under IHME's terms. The structure is then served with `licence: IHME non-commercial`, and named as such in `code_structures()`.
+- **What must stay true:**
+  - nothing default, and no test, depends on it;
+  - an absent GBD raises with instructions, never an empty table.
+- **Garbage codes:** verify whether an openly licensed list exists (the garbage-code lists published as supplements to open-access papers, e.g. Naghavi et al. 2010, *Population Health Metrics*). Ship it only after checking the licence.
+- **PegaSUS's needs:** PegaSUS does not need GBD. Its blocks are ICD-10 chapters, and GBD would only be one more overlapping list.
+
+**Defects found while consuming §5 and §6 (2026-10-04):**
+- **`code_structure("ICD10")`: categories U07 and U09 are absent.** U071, U072 and U099 name parents that are not nodes, and no group above them is present (WHO's U00–U49). COVID-19 deaths (U071/U072, about 700,000 in 2020–21) therefore fall outside the tree. PegaSUS counts them as unallocated rather than dropping them, but cannot scan its first known positive until the nodes exist.
+- **`proximity_graph("contiguity")`: 32 edges (64 directed rows) have a null weight,** for example 1303007–1303403 and 2901155–2919157. In addition, 511 edges have weight 0 (corner touches). PegaSUS uses the median border length for the nulls and a 1 km floor for corner touches. A null should either be computed or documented as unknown.

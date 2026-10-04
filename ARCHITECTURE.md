@@ -216,15 +216,16 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 
 ### 5.2 Dispersion
 
-φ_b is estimated by the Pearson moment equation:
+φ_b is estimated by **maximum likelihood with μ fixed** at the mean's fit:
 
 ```
-Σ_c (y−μ)²/μ = Σ_c (1 + μ/φ_b) · (1 − h_c)
+ℓ(φ) = Σ_{y>0} log NB(y | μ, φ)  −  φ · [ Σ_{all c} log(1 + μ_c/φ)  −  Σ_{y>0} log(1 + μ_c/φ) ]
 ```
 
-- **Leverages are ignored** (h_c ≈ 0) at these sizes.
-- **Empty cells are included in closed form.** Their contribution Σ_{y=0} μ = Λ − Σ_{y>0} μ factorises, and Σ μ² factorises through the same contractions with exp(2·).
-- **A field whose PIT is miscalibrated** (§6.2) with a block-level φ gets a field-level φ.
+- **Non-empty cells enter exactly.**
+- **Empty cells enter through log p(0) = −φ log(1 + μ/φ).** The sum over every cell is streamed one leaf at a time: a [U, T, G] slab, the size of the population tensor (P10). One evaluation over chapter IX's 216 M implicit cells takes about a second; the one-dimensional optimum needs about 14.
+- **This text replaces a Pearson moment equation, measured wrong on chapter IX 2010–2023** (2026-10-04). Cells with tiny μ and y ≥ 1 dominate the Pearson sum, which gave φ = 0.013. A power-series expansion of the empty cells' term also fails: empty cells hold 1.95 M of the 4.99 M expected events, so μ/φ is not small there. The ML estimate is φ = 5.98.
+- **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2).
 
 ### 5.3 Optimisation and uncertainty
 
@@ -290,6 +291,8 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 | **B2s** | B2 + season (sub-annual grains) | out-of-season events |
 
 - **Tiers are computed from one fit:** B0 and B1 by dropping terms, B2 by a cheap per-field refit of `(α_u, β_u)` with the rest as offset.
+- **B0 is re-levelled to the national total of each year.** Dropping centred log-scale place effects also drops E[exp(s + v)] > 1. Without the re-levelling, B0 fell 11% short on chapter IX.
+- **B2 is an exact 2 × 2 Newton per place** under NB working weights, with τ_α and τ_β by Fellner–Schall. Where B1 already carries the field's place effects, τ_α runs to its bound and only the trends β_u remain (measured on chapter IX).
 - **The interaction ψωτ is never part of a tier.** It is read as patterns (§7.4).
 
 ### 6.2 Calibration
@@ -302,7 +305,17 @@ u_c = F(y_c − 1) + V_c · p(y_c),   V_c ~ U(0,1) seeded by (field, cell)
 
 **Uniformity** is tested by KS and by the PIT histogram per field, per tier and per macro-region.
 
-**A miscalibrated field:** gets a field-level φ (§5.2). If still miscalibrated, it is **flagged**. A flagged field stays visible in lenses with its flag, and is excluded from pair scans and dependency maps at that tier.
+**The criterion is a minimum relevant departure (P5), not a p-value.** With 10⁵ cells, any departure is significant.
+- A field is calibrated when its PIT's KS distance is ≤ 0.03 overall and ≤ 0.05 in every macro-region.
+- A macro-region's 5,000–25,000 cells reach KS ≈ 0.02 by sampling alone.
+
+**A miscalibrated field** gets a field-level **place-year variance component**: Var(Y_ut) = μ + μ²/φ_agg + μ²/φ_extra, with φ_extra by maximum likelihood on the field's aggregate cells.
+- **Why it is needed:** cells within a place-year share variation that the expectation does not model, and summing them adds it coherently. The independent-cell φ_agg misses it.
+- **What was measured** on chapter IX B1 (2026-10-04): a U-shaped PIT, with both tails at about 0.13 against 0.10. The component flattened it, bringing KS from 0.035 to 0.010.
+
+**If the field is still miscalibrated, it is flagged.** A flagged field stays visible in lenses with its flag, and is excluded from pair scans and dependency maps at that tier.
+
+**B0 is expected to fail calibration.** It ignores geography by design and serves the spatial-cluster lens, never pairs.
 
 ### 6.3 Surprise
 
@@ -379,7 +392,7 @@ minimise Σ_c [ μ_c m_c − y_c log(μ_c m_c) ]  over  m_c = Σ_r λ_r a_r(u) b
 
 | estimand | statistic | null |
 |---|---|---|
-| **E_b, between places** | weighted correlation ρ̂ over units of place effects b̂(u) (the posterior mean of a field-specific place intercept over B0, shrunk), weights `w_u = (1/se_X² + 1/se_Y²)⁻¹` | **Dutilleul's modified t:** `n_eff = 1 + n² / tr(R̂_X R̂_Y)`, with R̂ from each field's spatial correlogram on the graph's distance classes |
+| **E_b, between places** | weighted correlation ρ̂ over units of place effects b̂(u) (the posterior mean of a field-specific place intercept over B0, shrunk), pair weight `√(w_X w_Y)` with `w = 1/se²`, each field centred by its own weighted mean | **Dutilleul's modified t:** `n_eff = 1 + n² / tr(R̂_X R̂_Y)`, with R̂ from each field's spatial correlogram on the graph's distance classes |
 | **E_b\|Z, adjusted** | partial correlation given a declared adjustment set Z (urbanisation, income, macro-region) | same, with n_eff − dim(Z) |
 | **E_w, within places, lag ℓ** | `ρ̂_ℓ = Σ_{u,t} w z^X_{u,t} z^Y_{u,t+ℓ} / norm`, pooled over places, on B2 surprises | per place, `n_eff,u = T_u (1−φ̂_X φ̂_Y)/(1+φ̂_X φ̂_Y)` (AR(1)); summed over places; divided by the design effect `1 + (U−1) ρ̄_space` for cross-place correlation at equal t |
 | **E_i, between institutions** | as E_b on the institution lattice | as E_b, on the care-flow graph |
@@ -394,7 +407,17 @@ z = (atanh|ρ̂| − atanh δ_E) · √(n_eff − 3),   p = 1 − Φ(z)
 
 δ_E is set by §8.4.
 
-**Computation.** For one estimand and support class, all pairs come from one weighted Gram matrix `ZᵀWZ` (GPU), plus per-field n_eff ingredients. Lags shift Z.
+**Computation.** For one estimand and support class, all pairs come from one Gram matrix `AᵀA` (GPU), with `a_f = √w_f ⊙ (x_f − x̄_f)`, plus per-field n_eff ingredients. Lags shift A.
+
+**Why the weights factorise.** A pair weight that factorises is what lets one Gram matrix serve every pair. The geometric mean √(w_X w_Y) is that weight. The form written here first, `(1/se_X² + 1/se_Y²)⁻¹`, was a variance rather than a weight: it gave the noisiest units the most weight.
+
+**Dutilleul for every pair at once.** Each field's correlogram r_f(k) is computed over 20 distance classes of equal pair counts (great-circle distance between population centres, GPU). Then:
+
+```
+tr(R_X R_Y) = n + Σ_k n_k r_X(k) r_Y(k)
+```
+
+This is the same Gram form, so n_eff comes for every pair at once.
 
 **Nonlinear dependence:** rank (Spearman) versions in v1. HSIC only on pairs short-listed by another statistic, with a calibrated null and a CKA effect floor.
 
@@ -467,7 +490,7 @@ A **family** is (lens or estimand, tier, field family or pair of field families,
 
 Until the curves exist, the provisional rule: at least 1,000 events over the window and events in at least 5% of units. **A code tree is descended only while children stay admissible.**
 
-**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls share the data's structure but no relation: random partitions of one system's events, fields against their own year-shifted copies.
+**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
 
 This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.**
 
@@ -549,9 +572,12 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 
 ### 10.2 Known negatives
 
-- random partitions of one system's events into two fields;
-- a field against its year-shifted copy;
-- unrelated events sharing a denominator.
+Each negative keeps a field's own dependence and removes the relation:
+
+- **Between places:** Moran spectral randomisation (Wagner & Dray 2015). The field's coordinates in the graph's Moran eigenvectors get random signs, which keeps its spatial autocorrelation spectrum exactly.
+- **Within places:** the field's series shifted by k ≥ 2 years within each place.
+
+**Withdrawn from this list:** "random partitions of one system's events into two fields". Both halves inherit the same place risk, so they correlate by construction. That makes them a positive for power, not a negative.
 
 ### 10.3 Planted signals
 
@@ -586,9 +612,10 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `config` | homes, versions, seeds | — |
 | `fields` | field specs, registry, admission (§8.4), common-support lifting, overlap requests | gateway |
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
+| `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), fit and Laplace (§5.3), blocks and model choice (§5.4), marks (§4.4), prediction for any slice | structures, fields |
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith |
-| `scans` | lenses (§7.1), subset scanning (§7.2–7.3), patterns (§7.4), pairs (§7.5), maps (§7.6), explaining away and decomposition (§7.7), cohort scans (§7.8) | surprise, monolith, fields |
+| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `explain` (§7.7), `cohort` (§7.8); maps (§7.6) in phase 3 | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
@@ -656,6 +683,18 @@ Every random draw is seeded from (object, cell, purpose).
 
 ## 13. Departures
 
-*Where the code knowingly departs from this document, with the reason and the ADR.*
+*Where the code knowingly departs from this document, with the reason. Each row closes when the code catches up.*
 
-None yet.
+| § | the document says | the code does | why |
+|---|---|---|---|
+| 4.3 | horseshoe on tree levels, one variance per level per top branch | iid Gaussian per level, τ by Fellner–Schall, per block (= per top branch) | the horseshoe needs sampling or a reweighted penalty; the iid level is its first step |
+| 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the same model reparametrised, its τ's learned by the same updates as every other effect; the priors differ |
+| 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
+| 4.2, 5.4 | the low-rank interaction ψωτ | not yet built | main effects and tiers first; patterns across blocks (CP-APR) read the interaction meanwhile |
+| 5.3 | Laplace uncertainty; the predictive inflated by Var(η) | MAP only; the predictive is NB(μ̂, φ) | the B2 per-place refit carries its own posterior sd; full Laplace is OQ-2 |
+| 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged | the exact trace per effect is affordable, the cross-effect terms are not |
+| 6.1 | B2s | raises: the monolith is annual | O1: annual first, then monthly |
+| 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
+| 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
+| 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version; its commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every concurrent edit |
+| 4.3 | graph weights from pegasus_data | contiguity: 32 null border lengths take the median; 511 corner touches (length 0) get a 1 km floor | the defects are reported to pegasus_data (handoff §10) |

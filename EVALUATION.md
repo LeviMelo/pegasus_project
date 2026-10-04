@@ -11,3 +11,4 @@ The index of measurements: harness runs, budgets, comparisons. One file per entr
 
 | date | entry | regime |
 |---|---|---|
+| 2026-10-04 | [Chapter IX, the first fit read end to end](docs/evaluation/2026-10-04-chapter-ix-first-fit.md): φ by ML (5.98, not 0.013), calibration B0/B1/B2, lenses, pairs | SIM.DO 2010–2023, knn6, pegasus_data 0.1.0a1 |

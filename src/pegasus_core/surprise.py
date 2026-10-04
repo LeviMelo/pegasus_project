@@ -1,0 +1,275 @@
+"""Expectation tiers, calibration and surprise (ARCHITECTURE §6).
+
+For a field (a node of a block's tree) and a tier, every cell (place, year)
+gets its observed count y, its expectation μ, the aggregate dispersion
+φ_agg = φ·μ²/Σμ² (a sum of independent NB cells with a common φ), the
+randomised PIT u, the surprise z = Φ⁻¹(u) and the information weight
+w = μ/(1+μ/φ_agg). Nothing is averaged over z: subset statistics use Σy, Σμ.
+
+The cube is virtual: `Expectations.surprise` computes it from the fitted
+parameters on demand and caches it only when asked (scanned fields).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+import pyarrow as pa
+from scipy import optimize, special, stats
+
+from . import config, fields, gateway, monolith, store
+
+TIERS = ("B0", "B1", "B2", "B2s")
+SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True}
+
+# flags, a bitmask per cell
+DENOMINATOR = 1      # events where the population is zero (denominator tension)
+CALIBRATION = 2      # the field failed calibration at this tier even with its own φ
+RECORDING = 4        # pegasus_data marks the recording unreliable (not yet served)
+NO_INFORMATION = 8   # μ ≈ 0: the cell carries no information
+
+# a field is calibrated when its PIT's KS distance is below these, whatever the p-value
+# (with 10⁵ cells any departure is "significant"; P5: test against a relevant effect). A
+# macro-region holds ~5,000–25,000 cells, whose sampling KS alone reaches ~0.02.
+KS_TOLERANCE = 0.03
+KS_REGION_TOLERANCE = 0.05
+
+
+@dataclass
+class Surprise:
+    field: fields.Field
+    tier: str
+    places: np.ndarray
+    years: np.ndarray
+    y: np.ndarray            # [U, T]
+    mu: np.ndarray           # [U, T]
+    phi: np.ndarray          # [U, T] aggregate dispersion (inf: Poisson)
+    u: np.ndarray            # [U, T] randomised PIT
+    z: np.ndarray            # [U, T]
+    w: np.ndarray            # [U, T]
+    flags: np.ndarray        # [U, T] int8
+    calibration: dict = field(default_factory=dict)
+    extras: dict = field(default_factory=dict)   # B2: alpha, beta and their posterior sd per place
+
+    def table(self) -> pa.Table:
+        U, T = self.y.shape
+        return pa.table({"u": np.repeat(self.places, T).astype(np.int32),
+                         "year": np.tile(self.years, U).astype(np.int16),
+                         "y": self.y.ravel(), "mu": self.mu.ravel(), "phi": self.phi.ravel(),
+                         "pit": self.u.ravel(), "z": self.z.ravel(), "w": self.w.ravel(),
+                         "flags": self.flags.ravel().astype(np.int8)})
+
+
+class Expectations:
+    """The fitted monolith of one event type, read field by field and tier by tier."""
+
+    def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
+                 structure: str = "ICD10"):
+        self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
+        self.registry = fields.Registry(dataset, event, structure)
+        self._models: dict[str, monolith.Monolith] = {}
+        self._macro: np.ndarray | None = None
+
+    def model(self, block: str) -> monolith.Monolith:
+        if block not in self._models:
+            self._models[block] = monolith.Monolith.load(self.dataset, self.event, block, self.years, self.graph)
+        return self._models[block]
+
+    def field(self, node: str) -> fields.Field:
+        return self.registry.field(node)
+
+    def place_effects(self, node: str | fields.Field) -> tuple[np.ndarray, np.ndarray]:
+        """E_b's input: the field's own place intercept over B0 (shrunk), with its posterior sd."""
+        s = self.surprise(node, "B0")
+        _, b, sd, _ = refit_place(s.y, s.mu, s.phi, np.ones((s.y.shape[1], 1)))
+        return b[:, 0], sd[:, 0]
+
+    def macroregions(self, places: np.ndarray) -> np.ndarray:
+        if self._macro is None:
+            self._macro = gateway.regions(places, "ibge_macroregion")
+        return self._macro
+
+    def surprise(self, node: str | fields.Field, tier: str = "B1", cache: bool = False) -> Surprise:
+        f = node if isinstance(node, fields.Field) else self.field(node)
+        if tier not in TIERS:
+            raise KeyError(tier)
+        if tier == "B2s":
+            raise NotImplementedError("B2s needs a sub-annual grain; the monolith is annual (ARCHITECTURE §12)")
+        m = self.model(f.block)
+        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 1}
+        if cache:
+            hit = store.get_table("surprise", key)
+            if hit is not None:
+                return _from_table(f, tier, hit, store.manifest("surprise", key))
+        leaves = np.array([m.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in m.data.leaves])
+        if len(leaves) == 0:
+            raise LookupError(f"{f.id}: no leaf of the node is in block {f.block}")
+        mu, mu2 = m.expected(leaves, spatial=SPATIAL[tier])
+        if tier == "B0":
+            # dropping centred log-scale place effects drops E[exp(s + v)] > 1 too: re-level B0 to
+            # the national total of each year, so B0 says how a place differs from Brazil
+            ref, _ = m.expected(leaves, spatial=True)
+            c = ref.sum(0) / np.maximum(mu.sum(0), 1e-300)
+            mu, mu2 = mu * c, mu2 * c ** 2
+        y = m.observed(leaves)
+        extras: dict = {}
+        if tier == "B2":
+            mu, extras = refit_place_trend(y, mu, mu2, m.phi, m.data.years)
+        out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places))
+        out.extras = extras
+        if cache:
+            store.put_table("surprise", key, out.table(), {"calibration": out.calibration,
+                                                            **{k: v.tolist() for k, v in extras.items()}})
+        return out
+
+
+def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, mu: np.ndarray, mu2: np.ndarray,
+              phi_block: float, macro: np.ndarray) -> Surprise:
+    """PIT and calibration with the block's φ; if miscalibrated, with the field's own φ; if
+    still miscalibrated, flagged (ARCHITECTURE §6.2)."""
+    pop = m.data.N.sum(axis=2)
+    seed = config.seed(f.id, tier, "pit", m.key())
+    cells = aggregate_phi(mu, mu2, phi_block)
+    extra = place_year_phi(y, mu, cells)
+    attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra))]
+    for source, phi, phi_agg in attempts:
+        u, z = randomised_pit(y, mu, phi_agg, seed)
+        cal = calibration(u, mu, macro)
+        cal["phi_source"], cal["phi"] = source, phi
+        if cal["calibrated"]:
+            break
+    flags = np.zeros(y.shape, dtype=np.int8)
+    flags[(pop <= 0) & (y > 0)] |= DENOMINATOR
+    flags[mu < 1e-6] |= NO_INFORMATION
+    if not cal["calibrated"]:
+        flags |= CALIBRATION
+    w = np.where(np.isinf(phi_agg), mu, mu / (1 + mu / phi_agg))
+    return Surprise(f, tier, m.data.places, m.data.years, y, mu, phi_agg, u, z, w, flags, cal)
+
+
+def aggregate_phi(mu: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:
+    """φ of a sum of NB(μ_i, φ) cells: Var = Σμ + Σμ²/φ = μ + μ²/φ_agg."""
+    if not np.isfinite(phi):
+        return np.full(mu.shape, np.inf)
+    return np.divide(phi * mu ** 2, mu2, out=np.full(mu.shape, np.inf), where=mu2 > 0)
+
+
+def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray) -> float:
+    """The field's place-year variance component, by maximum likelihood on its aggregate cells:
+    Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
+    within a place-year share variation the expectation does not model; summing them adds it
+    coherently, which the independent-cell φ_cells misses (a U-shaped PIT, chapter IX B1)."""
+    ok = mu > 1e-9
+    yy, mm, pc = y[ok], mu[ok], phi_cells[ok]
+    inv_c = np.where(np.isfinite(pc), 1.0 / pc, 0.0)
+
+    def nll(log_extra: float) -> float:
+        phi = 1.0 / (inv_c + np.exp(-log_extra))
+        return -float(np.sum(special.gammaln(yy + phi) - special.gammaln(phi) + phi * np.log(phi / (phi + mm))
+                             + yy * np.log(mm / (phi + mm))))
+
+    res = optimize.minimize_scalar(nll, bounds=(np.log(1e-2), np.log(1e7)), method="bounded")
+    return float("inf") if res.x > np.log(0.99e7) else float(np.exp(res.x))
+
+
+def randomised_pit(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """u = F(y−1) + V·p(y), V ~ U(0,1); z = Φ⁻¹(u) computed from the nearer tail, so
+    surprises far in either tail keep their precision."""
+    V = np.random.default_rng(seed).random(y.shape)
+    pois = ~np.isfinite(phi_agg)
+    lower = np.empty(y.shape)
+    upper = np.empty(y.shape)
+    if pois.any():
+        d = stats.poisson(mu[pois])
+        pm = d.pmf(y[pois])
+        lower[pois] = d.cdf(y[pois] - 1) + V[pois] * pm
+        upper[pois] = d.sf(y[pois]) + (1 - V[pois]) * pm
+    nb = ~pois
+    if nb.any():
+        n = phi_agg[nb]
+        d = stats.nbinom(n, n / (n + np.maximum(mu[nb], 1e-300)))
+        pm = d.pmf(y[nb])
+        lower[nb] = d.cdf(y[nb] - 1) + V[nb] * pm
+        upper[nb] = d.sf(y[nb]) + (1 - V[nb]) * pm
+    lower = np.clip(lower, 1e-300, 1.0)
+    upper = np.clip(upper, 1e-300, 1.0)
+    z = np.where(lower < 0.5, special.ndtri(lower), -special.ndtri(upper))
+    return np.clip(lower, 0.0, 1.0), z
+
+
+def calibration(u: np.ndarray, mu: np.ndarray, macro: np.ndarray) -> dict:
+    """Uniformity of the PIT: KS overall and per macro-region, and the 10-bin histogram."""
+    informative = mu > 1e-6
+    flat = u[informative]
+    ks = stats.kstest(flat, "uniform")
+    hist = np.histogram(flat, bins=10, range=(0, 1))[0]
+    by_region = {}
+    for r in np.unique(macro):
+        sel = (macro[:, None] == r) & informative
+        if sel.sum() >= 50:
+            by_region[str(r)] = float(stats.kstest(u[sel], "uniform").statistic)
+    worst = max(by_region.values(), default=0.0)
+    return {"ks": float(ks.statistic), "ks_p": float(ks.pvalue), "histogram": (hist / hist.sum()).round(4).tolist(),
+            "ks_by_macroregion": by_region, "cells": int(informative.sum()),
+            "calibrated": bool(ks.statistic <= KS_TOLERANCE and worst <= KS_REGION_TOLERANCE)}
+
+
+def refit_place_trend(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float, years: np.ndarray
+                      ) -> tuple[np.ndarray, dict]:
+    """B2: per place, log μ' = log μ + α_u + β_u·s_t (s standardised years), the B1
+    expectation as offset, so a place's course shrinks to its region's."""
+    s = (years - years.mean()) / max(years.std(), 1e-9)
+    mu_new, b, sd, tau = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.stack([np.ones_like(s), s], axis=1))
+    return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau}
+
+
+def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float) -> tuple[np.ndarray, np.ndarray]:
+    """A field's own place effect over an expectation (B0 for E_b): α_u ~ N(0, 1/τ), shrunk."""
+    _, b, sd, _ = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.ones((y.shape[1], 1)))
+    return b[:, 0], sd[:, 0]
+
+
+def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
+                outer: int = 20) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per place u, log μ'_ut = log μ_ut + X_t·b_u with b_u ~ N(0, diag(1/τ)): exact p×p Newton per
+    place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ)."""
+    live = mu.sum(axis=1) > 0
+    U, k = mu.shape[0], X.shape[1]
+    pois = np.isinf(phi_agg)
+    b = np.zeros((U, k))
+    tau = np.ones(k)
+    H = np.broadcast_to(np.eye(k), (U, k, k)).copy()
+    for _ in range(outer):
+        for _ in range(iterations):
+            m = mu * np.exp(b @ X.T)
+            wgt = np.where(pois, m, m / (1 + m / np.where(pois, 1.0, phi_agg)))
+            resid = np.where(pois, y - m, (y - m) / (1 + m / np.where(pois, 1.0, phi_agg)))
+            grad = resid @ X - tau * b
+            H = np.einsum("ut,ti,tj->uij", wgt, X, X) + np.diag(tau)
+            step = np.linalg.solve(H, grad[..., None])[..., 0]
+            step[~live] = 0
+            b += np.clip(step, -3, 3)
+            if np.abs(step).max() < 1e-6:
+                break
+        Hinv = np.linalg.inv(H)
+        quad = (b[live] ** 2).sum(axis=0)
+        tr = np.einsum("uii->ui", Hinv[live]).sum(axis=0)
+        new = np.clip((live.sum() - tau * tr) / np.maximum(quad, 1e-12), 1e-4, 1e8)
+        change = np.abs(np.log(new / tau)).max()
+        tau = new
+        if change < 0.01:
+            break
+    sd = np.sqrt(np.clip(np.einsum("uii->ui", np.linalg.inv(H)), 0, None))
+    return mu * np.exp(b @ X.T), b, sd, tau
+
+
+def _from_table(f: fields.Field, tier: str, t: pa.Table, meta: dict | None) -> Surprise:
+    places = np.unique(t.column("u").to_numpy())
+    years = np.unique(t.column("year").to_numpy())
+    shape = (len(places), len(years))
+    col = lambda c: t.column(c).to_numpy().reshape(shape)  # noqa: E731
+    meta = meta or {}
+    extras = {k: np.asarray(meta[k]) for k in ("alpha", "beta", "alpha_sd", "beta_sd", "tau") if k in meta}
+    return Surprise(f, tier, places, years, col("y"), col("mu"), col("phi"), col("pit"), col("z"), col("w"),
+                    col("flags"), meta.get("calibration", {}), extras)
