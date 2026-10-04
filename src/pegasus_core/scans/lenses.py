@@ -89,40 +89,46 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05) -> l
     return out
 
 
-def change_point(s: surprise.Surprise, ledger: control.Ledger, replicates: int = 200, q: float = 0.05,
-                 min_years: int = 2) -> list[Finding]:
-    """A level shift in a place's trailing years: the best window [t, T−1] (at least ``min_years``
-    long) by the Poisson score, against replicates of the same maximum per place; p from a
-    Gumbel fitted per place by moments. BH across places."""
-    from .. import config
+def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, min_years: int = 2,
+                 replicates: int | None = None) -> list[Finding]:
+    """A level shift in a place's trailing years: for each window [t, T−1] (at least ``min_years``
+    long), the exact upper tail of its total under the predictive, a sum of NB cells
+    moment-matched to NB(M, M²/Σ μ²/φ); the place's p is the smallest window p times the number
+    of windows (Bonferroni: exact for discrete counts, conservative across nested windows, no
+    simulation and no floor). BH across places. ``replicates`` is accepted and unused.
 
+    Two simulated nulls were tried first and failed on sparse fields (survey of IX, 2026-10-04):
+    a Gumbel fitted by moments to replicate maxima, most of them zero, flagged 25 small places for
+    rheumatic heart disease; fitting the Gumbel to the positive maxima only still gave p = 4e-9 to
+    2 deaths against 0.03 expected, where the exact tail is near 1e-3."""
     family = f"change_point|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "change_point", "field": s.field.id,
-                                                               "tier": s.tier, "replicates": replicates}))
-
-    def trailing(y: np.ndarray, m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        cy, cm = np.cumsum(y[:, ::-1], 1)[:, ::-1], np.cumsum(m[:, ::-1], 1)[:, ::-1]
-        sc = subset.score(cy, cm)[:, : y.shape[1] - min_years + 1]
-        return sc.max(1), sc.argmax(1)
-
-    obs, start = trailing(s.y, s.mu)
-    rng = np.random.default_rng(config.seed("change_point", s.field.id, s.tier))
-    maxima = np.stack([trailing(subset.replicate(s.mu, s.phi, rng), s.mu)[0] for _ in range(replicates)])
-    sd = maxima.std(0)
-    beta = np.maximum(sd * np.sqrt(6) / np.pi, 1e-12)
-    loc = maxima.mean(0) - 0.5772156649 * beta
-    p = np.where(obs > 0, stats.gumbel_r.sf(obs, loc, beta), 1.0)
-    ok = ((s.flags & (surprise.DENOMINATOR | surprise.CALIBRATION)) == 0).all(1) & (sd > 0)
+                                                               "tier": s.tier, "null": "exact NB, Bonferroni"}))
+    U, T = s.y.shape
+    starts = T - min_years + 1
+    Y = np.cumsum(s.y[:, ::-1], 1)[:, ::-1][:, :starts]
+    M = np.cumsum(s.mu[:, ::-1], 1)[:, ::-1][:, :starts]
+    extra_cells = np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
+    E = np.cumsum(extra_cells[:, ::-1], 1)[:, ::-1][:, :starts]
+    p_win = np.ones((U, starts))
+    up = (Y > M) & (M > 0)
+    pois = up & (E <= 0)
+    p_win[pois] = stats.poisson.sf(Y[pois] - 1, M[pois])
+    nb = up & (E > 0)
+    n = M[nb] ** 2 / E[nb]
+    p_win[nb] = stats.nbinom.sf(Y[nb] - 1, n, n / (n + M[nb]))
+    start = p_win.argmin(1)
+    p = np.minimum(1.0, p_win.min(1) * starts)
+    ok = ((s.flags & (surprise.DENOMINATOR | surprise.CALIBRATION)) == 0).all(1)
     p = np.where(ok, p, 1.0)
     hits = np.nonzero(control.bh(p, q))[0]
     out = []
     for u in hits:
         t = int(start[u])
-        Y, M = s.y[u, t:].sum(), s.mu[u, t:].sum()
         out.append(Finding("change_point", s.field.id, s.tier, {"places": [int(s.places[u])],
                                                                 "years": [int(s.years[t]), int(s.years[-1])]},
-                           float(Y / M), float(p[u]), {"score": float(obs[u]), "observed": float(Y),
-                                                       "expected": float(M)}))
+                           float(Y[u, t] / M[u, t]), float(p[u]), {"observed": float(Y[u, t]),
+                                                                   "expected": float(M[u, t]), "windows": starts}))
     ledger.complete(test, float(p.min()), None, {"places": int(ok.sum()), "hits": len(out)})
     return out
 

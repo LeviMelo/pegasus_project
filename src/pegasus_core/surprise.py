@@ -65,15 +65,21 @@ class Expectations:
     """The fitted monolith of one event type, read field by field and tier by tier."""
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
-                 structure: str = "ICD10"):
+                 structure: str = "ICD10", source: dict | None = None):
+        """``source`` names a non-default reader (``monolith.assemble``): code-list counts
+        ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
+        "mark": "PESO", "bounds": (200, 7000)})."""
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
-        self.registry = fields.Registry(dataset, event, structure)
+        self.source = dict(source or {})
+        classifier = self.source.get("column") or self.source.get("classifier")
+        self.registry = fields.Registry(dataset, event, structure, classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
         self._macro: np.ndarray | None = None
 
     def model(self, block: str) -> monolith.Monolith:
         if block not in self._models:
-            self._models[block] = monolith.Monolith.load(self.dataset, self.event, block, self.years, self.graph)
+            cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
+            self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph, **self.source)
         return self._models[block]
 
     def field(self, node: str) -> fields.Field:
@@ -82,6 +88,9 @@ class Expectations:
     def place_effects(self, node: str | fields.Field) -> tuple[np.ndarray, np.ndarray]:
         """E_b's input: the field's own place intercept over B0 (shrunk), with its posterior sd."""
         s = self.surprise(node, "B0")
+        if s.extras.get("kind") == "mark":
+            b, sd, _ = ridge_place(s.y - s.mu, s.w, np.ones((s.y.shape[1], 1)))
+            return b[:, 0], sd[:, 0]
         _, b, sd, _ = refit_place(s.y, s.mu, s.phi, np.ones((s.y.shape[1], 1)))
         return b[:, 0], sd[:, 0]
 
@@ -105,6 +114,11 @@ class Expectations:
         leaves = np.array([m.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in m.data.leaves])
         if len(leaves) == 0:
             raise LookupError(f"{f.id}: no leaf of the node is in block {f.block}")
+        if isinstance(m, monolith.MarkModel):
+            out = _mark_surprise(f, tier, m, leaves, self.macroregions(m.data.places))
+            if cache:
+                store.put_table("surprise", key, out.table(), {"calibration": out.calibration})
+            return out
         mu, mu2 = m.expected(leaves, spatial=SPATIAL[tier])
         if tier == "B0":
             # dropping centred log-scale place effects drops E[exp(s + v)] > 1 too: re-level B0 to
@@ -146,6 +160,74 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
         flags |= CALIBRATION
     w = np.where(np.isinf(phi_agg), mu, mu / (1 + mu / phi_agg))
     return Surprise(f, tier, m.data.places, m.data.years, y, mu, phi_agg, u, z, w, flags, cal)
+
+
+def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np.ndarray,
+                   macro: np.ndarray) -> Surprise:
+    """A mark field's cells (u, t): y the observed mean log mark, μ its expectation, z Gaussian
+    with the variance of a mean of n events; w = 1/variance. Cells without events carry nothing."""
+    mu, var = m.expected(leaves, spatial=SPATIAL[tier])
+    y = m.observed(leaves)
+    n = m.events(leaves)
+    has = n > 0
+    if tier == "B0":
+        # additive re-levelling on the log scale: B0 matches B1's n-weighted national mean per year
+        ref, _ = m.expected(leaves, spatial=True)
+        shift = (np.nansum(n * ref, 0) - np.nansum(n * mu, 0)) / np.maximum(n.sum(0), 1e-300)
+        mu = mu + shift[None, :]
+    extras: dict = {"kind": "mark", "events": n}
+    w = np.where(has, 1.0 / np.where(has, var, 1.0), 0.0)
+    if tier == "B2":
+        s = (m.data.years - m.data.years.mean()) / max(m.data.years.std(), 1e-9)
+        X = np.stack([np.ones_like(s), s], axis=1)
+        b, sd, tau = ridge_place(np.where(has, y - mu, 0.0), w, X)
+        mu = mu + b @ X.T
+        extras.update({"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau})
+    extra_var = 0.0
+    for source in ("model", "field"):
+        sdv = np.sqrt(np.where(has, var + extra_var, 1.0))
+        z = np.where(has, (np.where(has, y, 0.0) - np.where(has, mu, 0.0)) / sdv, 0.0)
+        u = special.ndtr(z)
+        cal = calibration(np.where(has, u, 0.5), np.where(has, 1.0, 0.0), macro)
+        cal["variance_source"], cal["extra_variance"] = source, extra_var
+        if cal["calibrated"]:
+            break
+        # a place-year component by moments over the informative cells
+        r2 = (y - mu)[has] ** 2 - var[has]
+        extra_var = float(max(np.mean(r2), 0.0))
+    flags = np.where(has, 0, NO_INFORMATION).astype(np.int8)
+    if not cal["calibrated"]:
+        flags |= CALIBRATION
+    w = np.where(has, 1.0 / np.where(has, var + extra_var, 1.0), 0.0)
+    return Surprise(f, tier, m.data.places, m.data.years, np.where(has, y, np.nan), np.where(has, mu, np.nan),
+                    np.full(y.shape, np.nan), u, z, w, flags, cal, extras)
+
+
+def ridge_place(r: np.ndarray, w: np.ndarray, X: np.ndarray, outer: int = 30
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per place, a Gaussian ridge of residuals r_ut on X_t with weights w_ut and b_u ~ N(0, 1/τ):
+    exact per place, the τ's by Fellner–Schall. Returns (b, posterior sd, τ)."""
+    k = X.shape[1]
+    tau = np.ones(k)
+    live = w.sum(1) > 0
+    for _ in range(outer):
+        H = np.einsum("ut,ti,tj->uij", w, X, X) + np.diag(tau)
+        g = (w * r) @ X
+        b = np.linalg.solve(H, g[..., None])[..., 0]
+        b[~live] = 0
+        Hinv = np.linalg.inv(H)
+        tr = np.einsum("uii->ui", Hinv[live]).sum(0)
+        quad = (b[live] ** 2).sum(0)
+        new = np.clip((live.sum() - tau * tr) / np.maximum(quad, 1e-12), 1e-4, 1e8)
+        done = np.abs(np.log(new / tau)).max() < 0.01
+        tau = new
+        if done:
+            break
+    H = np.einsum("ut,ti,tj->uij", w, X, X) + np.diag(tau)
+    b = np.linalg.solve(H, ((w * r) @ X)[..., None])[..., 0]
+    b[~live] = 0
+    sd = np.sqrt(np.clip(np.einsum("uii->ui", np.linalg.inv(H)), 0, None))
+    return b, sd, tau
 
 
 def aggregate_phi(mu: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:

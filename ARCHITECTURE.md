@@ -173,7 +173,7 @@ Every structured effect is a **Gaussian Markov random field** whose precision is
 
 - **Graph choice.** Each block's geography may use one graph, or a mixture (one BYM2 term per graph, each with its own σ). The graph family comes from pegasus_data: contiguity weighted by border length, population-weighted distance, care flows, REGIC, health regions. **The selected graph and ρ are reported per field:** they are findings.
 - **Identifiability.** Every GMRF is constrained to sum to zero over its index. Tree levels are centred within siblings. The interaction loadings are orthogonalised against the main effects.
-- **Unequal places.** BYM2's unstructured part carries population-scaled precision. Graph weights use border length and population-weighted distance, never bare adjacency.
+- **Unequal places.** BYM2's unstructured part carries population-scaled precision. Graph weights use border length and population-weighted distance, never bare adjacency. A corner touch (border length 0; 514 edges in 2022) keeps its edge at a 1 km floor.
 
 ### 4.4 Marks
 
@@ -181,7 +181,7 @@ For a mark m of event type e (length of stay, cost, birth weight, gestational we
 
 | mark type | model |
 |---|---|
-| positive continuous | log-normal: `log m ~ N(ν, ς²)`. The likelihood needs only (n, Σlog m, Σ(log m)²) per cell. |
+| positive continuous | log-normal: `log m ~ N(ν, ς²)`. The likelihood needs only (n, Σlog m, Σ(log m)²) per cell (pegasus_data's `logmoments`). A cell's mean log has variance σ²_w/n + σ²_c: σ²_w within cells from the log-moments, σ²_c a cell-level component by moments, re-estimated each outer iteration. There are no empty cells and no factorised total. |
 | count-valued (prenatal visits, ICU days) | negative binomial on (n, Σm, Σm²) by moments, or on the histogram |
 | bounded score (Apgar) | ordinal (cumulative logit) on the histogram |
 | binary share (death in hospital, caesarean) | beta-binomial |
@@ -340,7 +340,7 @@ Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family 
 | lens | statistic | null |
 |---|---|---|
 | spatial cluster | expectation-based Poisson scan over graph-connected place sets (§7.2 restricted to places) | §7.2 |
-| outbreak, change point | per place or region: Farrington-flexible (Noufaily et al. 2013) against the B2/B2s predictive; Bayesian change point for level shifts | the predictive |
+| outbreak, change point | outbreak: each cell's upper tail under the B2/B2s predictive (the PIT), with BH. Change point: per place, the exact NB tail of each trailing window, with Bonferroni over the windows, then BH across places | the predictive, exact; simulated nulls failed on sparse fields (evaluation 2026-10-04) |
 | space-time cluster | §7.2 over place × time | §7.2 |
 | group disparity | per place: likelihood-ratio heterogeneity of the groups' SIRs against the national group pattern (B0 by group) | χ² against an NB-adjusted reference distribution |
 | trend divergence | `β_u − mean_{N(u)} β` from B2, in posterior standard deviations | the posterior |
@@ -696,5 +696,5 @@ Every random draw is seeded from (object, cell, purpose).
 | 6.1 | B2s | raises: the monolith is annual | O1: annual first, then monthly |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
-| 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version; its commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every concurrent edit |
-| 4.3 | graph weights from pegasus_data | contiguity: 32 null border lengths take the median; 511 corner touches (length 0) get a 1 km floor | the defects are reported to pegasus_data (handoff §10) |
+| 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
+| 7.2 | subset scans over every field | Poisson-score scans only; mark fields get the outbreak and trend lenses and pairs, not subset scans | a Gaussian (expectation-based) score for marks is not yet written |

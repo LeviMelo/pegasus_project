@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import gateway, store, structures
+from . import config, gateway, store, structures
 
 DEFAULT = "contiguity"
 
@@ -30,7 +30,8 @@ def edges(places: np.ndarray, kind: str = DEFAULT) -> np.ndarray:
 def graph(places: np.ndarray, kind: str = DEFAULT) -> tuple[np.ndarray, np.ndarray]:
     """(edges [m, 2] with i < j, weights [m]) of a named graph over ``places``."""
     key = {"what": "graph", "kind": kind, "places": int(len(places)), "first": int(places[0]),
-           "last": int(places[-1]), "sum": int(np.sum(places)), "v": 3}
+           "last": int(places[-1]), "sum": int(np.sum(places)), "v": 3,
+           **({} if kind.startswith("knn") else {"resource": config.resource_version("proximity.parquet")})}
     cached = store.get_arrays("graphs", key)
     if cached is not None:
         return cached["edges"], cached["weights"]
@@ -46,8 +47,8 @@ def graph(places: np.ndarray, kind: str = DEFAULT) -> tuple[np.ndarray, np.ndarr
         keep = (a >= 0) & (b >= 0) & (a < b)
         out = np.column_stack([a[keep], b[keep]])
         if kind == "contiguity":
-            # border length, scale-free; an unknown length (null in pegasus_data) gets the median,
-            # a corner touch (length 0) keeps its edge at a 1 km floor
+            # border length, scale-free; a corner touch (length 0) keeps its edge at a 1 km floor.
+            # (An unknown length would take the median; pegasus_data fixed its 32 nulls, 70b56fc.)
             known = np.isfinite(raw[keep])
             length = np.where(known, raw[keep], np.median(raw[keep][known]))
             w = np.maximum(length, 1.0) / np.median(length)

@@ -87,6 +87,17 @@ def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 
 @app.command()
+def harness(dataset: str, event: str, node: str, lens: str, years: str = Years, graph: str = "contiguity",
+            surrogates: int = 20, loci: int = 40, replicates: int = 100) -> None:
+    """A lens's false-lead rate on surrogates and its power curve on planted signals (§10)."""
+    from . import harness as h
+
+    out = h.run(_session(dataset, event, years, graph), node, lens, surrogates=surrogates, loci=loci,
+                replicates=replicates, log=console.print)
+    console.print_json(json.dumps({k: v for k, v in out.items() if k != "calibration"}, default=float))
+
+
+@app.command()
 def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     """The lead register, best rank first."""
     from . import leads as register

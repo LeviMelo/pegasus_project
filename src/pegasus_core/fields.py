@@ -53,14 +53,21 @@ class Registry:
     def __init__(self, dataset: str, event: str, structure: str = "ICD10", classifier: str | None = None):
         import pegasus_data as pg  # only for the event type's declared classifier name
 
-        spec = next(e for e in pg.event_types(dataset) if e["name"] == event) if classifier is None else None
-        self.classifier = classifier or next(c["column"] for c in spec["classifiers"] if c["role"] == "primary")
-        self.dataset, self.event, self.structure = dataset, event, structure
-        tree = gateway.code_structure(structure)
-        codes = tree.column("code").to_pylist()
-        self.parent = dict(zip(codes, tree.column("parent").to_pylist(), strict=True))
-        self.level = dict(zip(codes, tree.column("level").to_pylist(), strict=True))
-        self.label = dict(zip(codes, tree.column("label").to_pylist(), strict=True))
+        if classifier is None:
+            spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+            primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
+            classifier = primary[0] if primary else None
+        self.classifier = classifier or "*"
+        self.dataset, self.event, self.structure = dataset, event, structure if classifier else None
+        if classifier is None:
+            # an event type without a classifier: one field, all its events
+            self.parent, self.level, self.label = {"*": None}, {"*": "category"}, {"*": event}
+        else:
+            tree = gateway.code_structure(structure)
+            codes = tree.column("code").to_pylist()
+            self.parent = dict(zip(codes, tree.column("parent").to_pylist(), strict=True))
+            self.level = dict(zip(codes, tree.column("level").to_pylist(), strict=True))
+            self.label = dict(zip(codes, tree.column("label").to_pylist(), strict=True))
         self.children: dict[str | None, list[str]] = {}
         for c, p in self.parent.items():
             self.children.setdefault(p, []).append(c)

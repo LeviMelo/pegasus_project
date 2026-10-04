@@ -28,7 +28,8 @@ class Shape:
 
 
 def iid(n: int) -> Shape:
-    return Shape("iid", sp.identity(n, format="csr"), n, centred=True)
+    """Independent effects, centred: the sum-to-zero constraint leaves n − 1 free dimensions."""
+    return Shape("iid", sp.identity(n, format="csr"), n - 1, centred=True)
 
 
 def random_walk(n: int, order: int = 2, cyclic: bool = False) -> Shape:

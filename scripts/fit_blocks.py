@@ -2,7 +2,9 @@
 
 Usage: python scripts/fit_blocks.py DATASET EVENT FIRST_YEAR LAST_YEAR GRAPH BLOCK [BLOCK ...]
 
-``PEGASUS_DEVICE=cuda`` fits the mean on the GPU. One summary line per block (``BLOCK <name> <json>``), so a detached run can be
+``PEGASUS_DEVICE=cuda`` fits the mean on the GPU. ``PEGASUS_SOURCE`` (JSON) chooses a
+non-default reader, e.g. ``{"source": "mark", "mark": "PESO", "bounds": [200, 7000]}`` or
+``{"source": "code_list", "column": "CODANOMAL"}``; block ``*`` is an event type without a tree. One summary line per block (``BLOCK <name> <json>``), so a detached run can be
 watched; a failed block is reported and the next one fitted.
 """
 
@@ -20,9 +22,14 @@ def main(dataset: str, event: str, first: int, last: int, graph: str, blocks: li
     for block in blocks:
         start = time.time()
         try:
-            data = monolith.assemble(dataset, event, block, range(first, last + 1))
-            print(f"ASSEMBLED {block} nnz {len(data.y)} events {data.y.sum():.0f} {time.time() - start:.0f}s", flush=True)
-            model = monolith.Monolith(data, graphs.graph(data.places, graph), graph,
+            source = json.loads(os.environ.get("PEGASUS_SOURCE", "{}"))
+            if "bounds" in source:
+                source["bounds"] = tuple(source["bounds"])
+            data = monolith.assemble(dataset, event, block, range(first, last + 1), **source)
+            events = data.n.sum() if data.n is not None else data.y.sum()
+            print(f"ASSEMBLED {block} nnz {len(data.y)} events {events:.0f} {time.time() - start:.0f}s", flush=True)
+            cls = monolith.MarkModel if source.get("source") == "mark" else monolith.Monolith
+            model = cls(data, graphs.graph(data.places, graph), graph,
                                       device=os.environ.get("PEGASUS_DEVICE", "cpu"))
             model.fit(outer=40, log=lambda line, b=block: print(f"  {b} {line}", flush=True))
             model.save()

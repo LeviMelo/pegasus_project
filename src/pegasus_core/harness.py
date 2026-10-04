@@ -83,11 +83,13 @@ def jaccard(a: set, b: set) -> float:
 
 
 def power_curve(s: surprise.Surprise, edges: np.ndarray, loci: list[np.ndarray], thetas: list[float],
-                k: int = 30, max_window: int | None = 4, replicates: int = 100, alpha: float = Q) -> dict[str, Any]:
+                k: int = 30, max_window: int | None = 4, replicates: int = 100, alpha: float = Q,
+                full_period: bool = False) -> dict[str, Any]:
     """Recovery of planted subsets by the space–time scan, per θ. A locus is a boolean [U, T]
     mask; recovered when the top subset reaches α and its cells overlap the locus with
     Jaccard ≥ 0.5. One null serves every injection (it depends on μ and φ only)."""
-    scanner = subset.Scanner(subset.neighbourhoods(edges, len(s.places), k), max_window=max_window)
+    scanner = subset.Scanner(subset.neighbourhoods(edges, len(s.places), k), max_window=max_window,
+                             full_period=full_period)
     nul = subset.null(scanner, s.mu, s.phi, replicates, ("power", s.field.id, s.tier))
     rng = np.random.default_rng(config.seed("power", s.field.id, s.tier))
     curve = {}
@@ -187,6 +189,43 @@ class GateRecord:
     def open(self) -> bool:
         return (bool(self.positives) and all(self.positives.values()) and self.false_lead_share is not None
                 and self.false_lead_share <= Q and self.power_curve is not None)
+
+
+def run(session: Any, node: str, lens: str, surrogates: int = 20, loci: int = 40,
+        thetas: tuple[float, ...] = (1.1, 1.25, 1.5, 2.0), replicates: int = 100, log=print) -> dict[str, Any]:
+    """One lens on one field through the harness: its false-lead rate on NB surrogates and, for the
+    subset lenses, its power curve on planted (immediate region × year) signals (§10.3–10.4).
+    Surrogate tests go to the harness's own ledger, never the production one."""
+    from . import config, control, gateway, tools
+    from .scans import lenses
+
+    tier = tools.LENS_TIERS[lens]
+    s = session.surprise(node, tier)
+    edges = session.edges()
+    sandbox = control.Ledger(config.home() / "harness" / "ledger")
+    runners = {
+        "space_time": lambda x: lenses.space_time(x, edges, sandbox, replicates=replicates),
+        "spatial_cluster": lambda x: lenses.spatial_cluster(x, edges, sandbox, replicates=replicates),
+        "outbreak": lambda x: lenses.outbreak(x, sandbox),
+        "change_point": lambda x: lenses.change_point(x, sandbox, replicates=replicates),
+    }
+    out: dict[str, Any] = {"field": s.field.id, "lens": lens, "tier": tier, "calibration": s.calibration}
+    log(f"{s.field.id} {lens}: surrogates")
+    out["false_leads"] = false_lead_rate(runners[lens], s, surrogates)
+    log(f"  false leads {out['false_leads']}")
+    if lens in ("space_time", "spatial_cluster"):
+        regions = gateway.regions(s.places, "ibge_immediate_region")
+        full = lens == "spatial_cluster"
+        candidates = region_year_loci(regions, len(s.years), length=len(s.years) if full else 1)
+        rng = np.random.default_rng(config.seed("loci", s.field.id, lens))
+        chosen = [candidates[i] for i in rng.choice(len(candidates), size=min(loci, len(candidates)), replace=False)]
+        log(f"  power on {len(chosen)} loci")
+        out["power"] = power_curve(s, edges, chosen, list(thetas), max_window=None if full else 4,
+                                   replicates=replicates, full_period=full)
+        log(f"  power {out['power']['curve']}")
+    record("gate", {"field": s.field.id, "lens": lens, "tier": tier, "graph": session.graph,
+                    "surrogates": surrogates, "loci": loci}, out)
+    return out
 
 
 def record(kind: str, key: dict[str, Any], result: dict[str, Any]) -> None:

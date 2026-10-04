@@ -21,7 +21,15 @@
   - `cli` (`pegasus-core`).
 - **Known departures** are listed in ARCHITECTURE §13.
 
-**Running:** contiguity fits of chapters IX, I, X, II, XX and XVIII (`data/logs/fit_blocks.log`).
+**Fitted (contiguity):**
+- **SIM:** IX, I, X (II, XX and XVIII are running).
+- **SINASC:** births; anomalies (XVII, from CODANOMAL); birth weight (mark model).
+
+**Running:** held-out IX (graph and pooling), the harness on IX fields, the first survey of IX, and the microcephaly positive.
+
+**The first lead examined:** São Borja (RS), acute MI ×2 in 2018 against flat neighbours (evaluation 2026-10-04, SINASC entry).
+
+**pegasus_data is developed from this session too** (since 2026-10-04): branch `pegasus-core-fixes` (ICD-10 COVID categories, border lengths, `logmoments`, pegasus_data's ADR on GBD).
 
 **Next:**
 1. **Held-out deviance** (fit 2010–2021, score 2022–2023). It serves two first measurements: contiguity against kNN, and tree pooling.
@@ -29,4 +37,4 @@
 3. **The harness** on surrogates and planted signals: false-lead rates and power curves per lens.
 4. **SINASC and SIH** through the gateway.
 
-**Blocked on pegasus_data:** ICD-10 lacks U07 and U09, so COVID cannot be scanned (handoff §10).
+**Unblocked:** ICD-10 U07/U09/U10 now exist (pegasus_data 70b56fc), so chapter XXII (COVID-19) can be fitted.

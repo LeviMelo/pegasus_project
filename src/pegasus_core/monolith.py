@@ -64,10 +64,25 @@ class BlockData:
     y: np.ndarray
     unallocated: dict[str, int] = field(default_factory=dict)
     key: dict = field(default_factory=dict)
+    n: np.ndarray | None = None       # marks: events per cell (y is then the mean of log m)
+    l2: np.ndarray | None = None      # marks: Σ (log m)² per cell
 
 
-def assemble(dataset: str, event: str, block: str, years: range | list[int]) -> BlockData:
-    """One chapter's counts and populations, from the gateway."""
+def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
+             source: str = "events", **source_args) -> BlockData:
+    """One block's cells and populations, from the gateway.
+
+    ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
+    ``profile`` is the tree level that carries profiles, history and geography: ``group``
+    (the ICD block, pooling its categories) or ``category`` (each category its own).
+    ``source`` chooses the gateway reader, each giving cells of (u, year, sex, age, code):
+
+        events       counts of the event type (y)
+        code_list    counts of events under each category of a code-list column, e.g.
+                     SINASC's CODANOMAL (``column=``); the exposure is still the population
+        mark         accumulator states of a numeric mark (``mark=``, ``bounds=``,
+                     ``classifier=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
+    """
     years = np.array(sorted(set(years)))
     pop = gateway.population(years.tolist())
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
@@ -79,47 +94,67 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int]) -> 
     pg = (pop.column("sex").to_numpy().astype(int) - 1) * N_BANDS + age_band(pop.column("age").to_numpy())
     np.add.at(N, (pu, pt, pg), pop.column("n").to_numpy())
 
-    tree = gateway.code_structure("ICD10")
-    code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
-    parent_of = dict(zip(code, parent, strict=True))
-    level_of = dict(zip(code, level, strict=True))
-    categories = sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block)
-    groups = sorted({parent_of[c] for c in categories})
+    strata = gateway._strata(dataset)
+    if strata["sex"] is None:
+        # the subject has one sex by definition (a mother): the other sex is not exposed
+        N[:, :, (2 - strata["implied_sex"]) * N_BANDS:(3 - strata["implied_sex"]) * N_BANDS] = 0.0
+
+    if block == "*":
+        # an event type without a classifier tree: one leaf, every event in it
+        parent_of, level_of = {"*": None}, {"*": "category"}
+    else:
+        tree = gateway.code_structure("ICD10")
+        code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
+        parent_of = dict(zip(code, parent, strict=True))
+        level_of = dict(zip(code, level, strict=True))
+    categories = (["*"] if block == "*" else
+                  sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block))
+    carrier = {c: (parent_of[c] if profile == "group" and parent_of[c] is not None else c) for c in categories}
+    groups = sorted(set(carrier.values()))
     gidx = {g: i for i, g in enumerate(groups)}
     eidx = {c: i for i, c in enumerate(categories)}
+    values = ("n", "l1", "l2") if source == "mark" else ("y",)
+    weight = "n" if source == "mark" else "y"
+    readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments}
 
     parts, unallocated = [], {}
     for year in years:
-        ec = gateway.event_counts(dataset, event, int(year), places=pa.array(places, pa.int32()))
+        ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args)
         tab = ec.counts
-        cat = np.array([c[:3] for c in tab.column("code").to_pylist()])
+        cat = np.array([c if block == "*" else c[:3] for c in tab.column("code").to_pylist()])
         in_block = np.array([c in eidx for c in cat])
         other = ~in_block & np.array([level_of.get(c) is None for c in cat])
         unallocated["code not in ICD-10 tree"] = unallocated.get("code not in ICD-10 tree", 0) + int(
-            tab.column("y").to_numpy()[other].sum())
+            tab.column(weight).to_numpy()[other].sum())
         for r in ec.unallocated.to_pylist():
-            if _chapter(str(r["code"] or "")[:3], parent_of) == block:
+            if block == "*" or _chapter(str(r["code"] or "")[:3], parent_of) == block:
                 unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
         sub = tab.filter(pa.array(in_block))
-        parts.append((np.array([eidx[c[:3]] for c in sub.column("code").to_pylist()], dtype=np.int64),
+        parts.append((np.array([eidx[c if block == "*" else c[:3]] for c in sub.column("code").to_pylist()],
+                               dtype=np.int64),
                       np.array([uidx[int(x)] for x in sub.column("u").to_numpy()], dtype=np.int64),
                       np.full(sub.num_rows, tidx[int(year)], dtype=np.int64),
                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * N_BANDS
                        + age_band(sub.column("age").to_numpy())).astype(np.int64),
-                      sub.column("y").to_numpy().astype(np.float64)))
-    e, u, t, g, y = (np.concatenate(z) for z in zip(*parts, strict=True))
-    # several subcategories share a category: sum them into one cell
+                      *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
+    e, u, t, g, *vals = (np.concatenate(z) for z in zip(*parts, strict=True))
+    # several subcategories share a category, several ages a band: sum them into one cell
     flat = ((e * len(places) + u) * len(years) + t) * (2 * N_BANDS) + g
     uniq, inv = np.unique(flat, return_inverse=True)
-    ysum = np.bincount(inv, weights=y)
+    sums = {v: np.bincount(inv, weights=x) for v, x in zip(values, vals, strict=True)}
     g = uniq % (2 * N_BANDS)
     rest = uniq // (2 * N_BANDS)
     t, rest = rest % len(years), rest // len(years)
     u, e = rest % len(places), rest // len(places)
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
-           "data": config.data_version()}
-    return BlockData(dataset, event, block, years, places, categories, groups,
-                     np.array([gidx[parent_of[c]] for c in categories]), N, e, u, t, g, ysum, unallocated, key)
+           "data": config.data_version(), **({} if profile == "group" else {"profile": profile}),
+           **({} if source == "events" else {"source": source, **source_args})}
+    y = sums["l1"] / sums["n"] if source == "mark" else sums["y"]
+    data = BlockData(dataset, event, block, years, places, categories, groups,
+                     np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key)
+    if source == "mark":
+        data.n, data.l2 = sums["n"], sums["l2"]
+    return data
 
 
 def _chapter(code: str, parent_of: dict[str, str | None]) -> str | None:
@@ -141,10 +176,13 @@ class Component:
     shape: structures.Shape     # precision along the structured (last) axis
     batch: int                  # leading dimension (1 when shared by the block)
     tau: float = 1.0
+    free: float = 1.0           # share of the batch's dimensions left free by constraints across rows
 
     @property
-    def rank(self) -> int:
-        return self.shape.rank * self.batch
+    def rank(self) -> float:
+        """The effective rank: the shape's rank per row, less the dimensions that centring
+        across rows removes (across groups: 1/nGrp of them; within groups: nGrp/nE)."""
+        return self.shape.rank * self.batch * self.free
 
 
 class Monolith:
@@ -154,6 +192,7 @@ class Monolith:
                  device: str = "cpu"):
         self.data = data
         self.graph_kind = graph_kind
+        self.graph = graph
         self.device = torch.device(device)
         self.dtype = torch.float64
         nU, nT, nG = data.N.shape
@@ -165,14 +204,14 @@ class Monolith:
             "th_grp": Component("th_grp", structures.iid(nGrp), 1),
             "th_cat": Component("th_cat", _within_groups(data.leaf_group, nE), 1),
             "f_all": Component("f_all", rw_age, 2),
-            "f_grp": Component("f_grp", rw_age, nGrp * 2),
+            "f_grp": Component("f_grp", rw_age, nGrp * 2, free=(nGrp - 1) / nGrp),
             "h_all": Component("h_all", rw_t, 1),
-            "h_grp": Component("h_grp", rw_t, nGrp),
+            "h_grp": Component("h_grp", rw_t, nGrp, free=(nGrp - 1) / nGrp),
             "s_all": Component("s_all", icar, 1),
             "v_all": Component("v_all", structures.iid(nU), 1),
-            "s_grp": Component("s_grp", icar, nGrp),
-            "v_grp": Component("v_grp", structures.iid(nU), nGrp),
-            "v_cat": Component("v_cat", structures.iid(nU), nE),
+            "s_grp": Component("s_grp", icar, nGrp, free=(nGrp - 1) / nGrp),
+            "v_grp": Component("v_grp", structures.iid(nU), nGrp, free=(nGrp - 1) / nGrp),
+            "v_cat": Component("v_cat", structures.iid(nU), nE, free=(nE - nGrp) / nE),
         }
         self.params = {"b0": torch.zeros(1, dtype=self.dtype, device=self.device, requires_grad=True)}
         for c in self.components.values():
@@ -247,6 +286,11 @@ class Monolith:
                                 device=self.device).index_add_(0, self.grp, leaf_place)  # [K, U]
         return (per_group[:, :, None] * self._place_time(x, spatial)).sum()
 
+    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """A scalar whose gradient in each effect is that effect's Fisher diagonal: for Poisson
+        counts Λ = Σ μ (∂Λ/∂effect = Σ μ over the cells the effect touches)."""
+        return self.total(x)
+
     def penalty(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
         for name, c in self.components.items():
@@ -265,8 +309,11 @@ class Monolith:
     def fit(self, outer: int = 25, inner: int = 300, tol: float = 0.02, log=print) -> Monolith:
         start = time.time()
         self._initialise()
+        changes = [np.inf]
         for it in range(outer):
-            self._fit_mean(inner)
+            # the mean need not be precise while the τ's still move: a third of the iterations until
+            # they settle (measured: L-BFGS uses all it is given here, chapter IX, evaluation 2026-10-04)
+            self._fit_mean(inner if max(changes) < 0.1 else max(inner // 3, 50))
             changes = self._update_taus()
             self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
@@ -286,40 +333,76 @@ class Monolith:
         d = self.data
         nE = len(d.leaves)
         rate = d.y.sum() / (d.N.sum() * nE)
-        by_g = np.bincount(d.g, weights=d.y, minlength=d.N.shape[2]) / (d.N.sum(axis=(0, 1)) * nE * rate)
-        by_t = np.bincount(d.t, weights=d.y, minlength=d.N.shape[1]) / (d.N.sum(axis=(0, 2)) * nE * rate)
-        by_e = np.bincount(d.e, weights=d.y, minlength=nE) / (d.N.sum() * rate)
+        def ratio(obs: np.ndarray, exposure: np.ndarray) -> np.ndarray:
+            # an unexposed group (a mother's male cells) starts at the flat rate, log 0
+            return np.divide(obs, exposure, out=np.ones_like(obs), where=exposure > 0)
+
+        by_g = ratio(np.bincount(d.g, weights=d.y, minlength=d.N.shape[2]), d.N.sum(axis=(0, 1)) * nE * rate)
+        by_t = ratio(np.bincount(d.t, weights=d.y, minlength=d.N.shape[1]), d.N.sum(axis=(0, 2)) * nE * rate)
+        by_e = ratio(np.bincount(d.e, weights=d.y, minlength=nE), np.full(nE, d.N.sum() * rate))
         with torch.no_grad():
             self.params["b0"].fill_(float(np.log(rate)))
             self.params["f_all"].copy_(torch.as_tensor(np.log(np.clip(by_g, 1e-6, None))).reshape(2, -1))
             self.params["h_all"].copy_(torch.as_tensor(np.log(np.clip(by_t, 1e-6, None)))[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
 
-    def _fit_mean(self, iterations: int) -> None:
-        params = list(self.params.values())
-        opt = torch.optim.LBFGS(params, lr=1, max_iter=iterations, tolerance_grad=1e-6, tolerance_change=1e-10,
-                                history_size=20, line_search_fn="strong_wolfe")
+    def _fit_mean(self, iterations: int, tolerance: float = 1e-9) -> int:
+        """MAP of the mean given the τ's: L-BFGS on diagonally preconditioned parameters,
+        p = s ⊙ p̃ with s = 1/√(Fisher diagonal + τ·diag Q) per coordinate, so every coordinate's
+        curvature is about one. Unpreconditioned, curvatures spanned ~1e6 (b0 against a small
+        leaf's place effect) and L-BFGS ran its full 300 iterations every time (chapter IX).
+        Returns the iterations used."""
+        scale = self._preconditioner()
+        z = {k: (v.detach() / scale[k]).requires_grad_(True) for k, v in self.params.items()}
+        opt = torch.optim.LBFGS(list(z.values()), lr=1, max_iter=iterations, tolerance_grad=1e-7,
+                                tolerance_change=tolerance, history_size=30, line_search_fn="strong_wolfe")
+        leaves = self.params
 
         def closure():
             opt.zero_grad()
+            self.params = {k: z[k] * scale[k] for k in z}
             loss = self.objective()
             loss.backward()
             return loss
 
         opt.step(closure)
+        self.params = {k: (z[k] * scale[k]).detach().requires_grad_(True) for k in leaves}
+        return int(opt.state[opt._params[0]]["n_iter"])
+
+    def _preconditioner(self) -> dict[str, torch.Tensor]:
+        """1/√(curvature) per raw parameter, in the units of the scaled objective."""
+        x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
+        names = ["b0", *self.components]
+        grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in names])
+        norm = self._objective_norm()
+        out = {}
+        for name, d in zip(names, grads, strict=True):
+            curv = d.detach().reshape(self.params[name].shape).abs()
+            if name in self.components:
+                c = self.components[name]
+                diag = torch.as_tensor(c.shape.Q.diagonal(), dtype=self.dtype, device=self.device)
+                curv = curv + c.tau * diag[None, :].expand_as(curv)
+            out[name] = 1.0 / torch.sqrt(curv / norm + 1e-12)
+        return out
+
+    def _objective_norm(self) -> float:
+        """The divisor of the objective (events for counts)."""
+        return self.scale
 
     def _update_taus(self) -> list[float]:
         """Fellner–Schall: τ ← (rank − τ·tr(H⁻¹Q)) / (xᵀQx), H ≈ D + τQ per batch row."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
-        lam = self.total(x)
-        grads = torch.autograd.grad(lam, [x[k] for k in self.components])
+        grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in self.components])
         changes = []
         for (name, c), d in zip(self.components.items(), grads, strict=True):
-            D = d.detach().reshape(c.batch, -1).cpu().numpy()  # Poisson: ∂Λ/∂effect = Σμ = the Fisher diagonal
+            if c.rank <= 0:
+                changes.append(0.0)  # the constraints leave this effect nothing (a single group or leaf)
+                continue
+            D = d.detach().reshape(c.batch, -1).cpu().numpy()  # the Fisher diagonal (see _fisher_mass)
             v = x[name].detach().reshape(c.batch, -1).cpu().numpy()
             Q = c.shape.Q
             quad = float(sum(v[b] @ (Q @ v[b]) for b in range(c.batch)))
-            trace = sum(_trace_inv_times(D[b], c.tau, Q) for b in range(c.batch))
+            trace = c.free * sum(_trace_inv_times(D[b], c.tau, Q) for b in range(c.batch))
             new = (c.rank - c.tau * trace) / max(quad, 1e-12)
             new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
             new = float(np.clip(new, *TAU_BOUNDS))
@@ -442,11 +525,11 @@ class Monolith:
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
-             graph_kind: str = "contiguity") -> Monolith:
+             graph_kind: str = "contiguity", profile: str = "group", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache)."""
         from . import graphs
 
-        data = assemble(dataset, event, block, years)
+        data = assemble(dataset, event, block, years, profile, **source)
         model = cls(data, graphs.graph(data.places, graph_kind), graph_kind)
         arrays = store.get_arrays("monolith", model.key())
         meta = store.manifest("monolith", model.key())
@@ -457,9 +540,160 @@ class Monolith:
                 model.params[k].copy_(torch.as_tensor(v))
         for k, tau in meta["taus"].items():
             model.components[k].tau = float(tau)
-        model.phi = float(meta["phi"])
+        model.phi = float(meta["phi"]) if meta.get("phi") is not None else float("nan")
+        model._restore(meta)
         model.history = [{"seconds": meta.get("fit_seconds")}]
         return model
+
+    def _restore(self, meta: dict) -> None:
+        """Model-specific state beyond parameters and τ's (none for counts)."""
+
+
+class MarkModel(Monolith):
+    """A positive continuous mark (ARCHITECTURE §4.4): log m ~ N(ν, ς²) per event, with ν the
+    same linear predictor as the counts' η (levels, profiles, history, geography), without
+    exposure. Each non-empty cell carries n events, l1 = Σ log m and l2 = Σ (log m)², so its
+    mean log ȳ = l1/n has variance σ²_w/n + σ²_c: σ²_w within cells (from l2), σ²_c a cell-level
+    component learned from the residuals. Marks exist only where events do: there are no
+    empty cells and no factorised total; the likelihood is a weighted Gaussian over the
+    non-empty cells."""
+
+    def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
+                 device: str = "cpu"):
+        if data.n is None:
+            raise ValueError("a mark model needs mark data (assemble(..., source='mark'))")
+        super().__init__(data, graph, graph_kind, device)
+        self.logN_nnz = torch.zeros_like(self.logN_nnz)        # no exposure: η is the mean log mark
+        n = data.n
+        within = float(np.sum(data.l2 - n * data.y ** 2) / max(np.sum(n - 1), 1.0))  # l1²/n = n·ȳ²
+        self.sigma2_w = max(within, 1e-12)
+        self.sigma2_c = 0.1 * self.sigma2_w
+        self.n_t = torch.as_tensor(n, dtype=self.dtype, device=self.device)
+        self.scale = float(np.sum(n))
+        self._weights()
+
+    def _weights(self) -> None:
+        self.w = 1.0 / (self.sigma2_w / self.n_t + self.sigma2_c)
+
+    def objective(self) -> torch.Tensor:
+        x = self.effects()
+        r = self.y - self.eta_nnz(x)
+        return (0.5 * (self.w * r * r).sum() + self.penalty(x)) / float(self.w.sum())
+
+    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Gaussian: the Fisher diagonal of an effect is Σ w over the cells it touches."""
+        return (self.w * self.eta_nnz(x)).sum()
+
+    def _objective_norm(self) -> float:
+        return float(self.w.sum())
+
+    def _initialise(self) -> None:
+        d = self.data
+        with torch.no_grad():
+            self.params["b0"].fill_(float(np.sum(d.n * d.y) / np.sum(d.n)))
+
+    def fit(self, outer: int = 25, inner: int = 300, tol: float = 0.02, log=print) -> MarkModel:
+        start = time.time()
+        self._initialise()
+        for it in range(outer):
+            self._fit_mean(inner)
+            changes = self._update_taus()
+            old = self.sigma2_c
+            self.sigma2_c = self._cell_variance()
+            self._weights()
+            changes.append(abs(np.log(max(self.sigma2_c, 1e-12) / max(old, 1e-12))))
+            self.history.append({"iteration": it, "taus": {k: c.tau for k, c in self.components.items()},
+                                 "sigma2_c": self.sigma2_c, "seconds": time.time() - start})
+            taus = " ".join(f"{k}={c.tau:.3g}" for k, c in self.components.items())
+            log(f"outer {it}: max change {max(changes):.3f}, σ²_w {self.sigma2_w:.4g} σ²_c {self.sigma2_c:.4g}, "
+                f"{time.time() - start:.0f}s | {taus}")
+            if max(changes) < tol:
+                break
+        self._fit_mean(inner)
+        self.phi = float("nan")
+        return self
+
+    def _cell_variance(self) -> float:
+        """σ²_c by moments: E[(ȳ − ν)²] = σ²_w/n + σ²_c, cells weighted by n."""
+        with torch.no_grad():
+            r = (self.y - self.eta_nnz(self.effects())).cpu().numpy()
+        n = self.data.n
+        return float(max(np.sum(n * (r ** 2 - self.sigma2_w / n)) / np.sum(n), 1e-8))
+
+    def expected(self, leaves: np.ndarray, spatial: bool = True) -> tuple[np.ndarray, np.ndarray]:
+        """For a set of leaves: the n-weighted mean of ν over each (u, t)'s non-empty cells, and
+        the variance of the observed mean log there, (σ²_w Σn + σ²_c Σn²)/(Σn)²."""
+        d = self.data
+        with torch.no_grad():
+            nu = self.eta_nnz(self.effects(), spatial).cpu().numpy()
+        m = np.isin(d.e, leaves)
+        U, T = d.N.shape[:2]
+        sn, snn, snu = np.zeros((U, T)), np.zeros((U, T)), np.zeros((U, T))
+        np.add.at(sn, (d.u[m], d.t[m]), d.n[m])
+        np.add.at(snn, (d.u[m], d.t[m]), d.n[m] ** 2)
+        np.add.at(snu, (d.u[m], d.t[m]), d.n[m] * nu[m])
+        mean = np.divide(snu, sn, out=np.full((U, T), np.nan), where=sn > 0)
+        var = np.divide(self.sigma2_w * sn + self.sigma2_c * snn, sn ** 2, out=np.full((U, T), np.nan), where=sn > 0)
+        return mean, var
+
+    def observed(self, leaves: np.ndarray) -> np.ndarray:
+        """The observed mean log mark per (u, t) over the leaves' cells (NaN where no event)."""
+        d = self.data
+        m = np.isin(d.e, leaves)
+        U, T = d.N.shape[:2]
+        sn, sl = np.zeros((U, T)), np.zeros((U, T))
+        np.add.at(sn, (d.u[m], d.t[m]), d.n[m])
+        np.add.at(sl, (d.u[m], d.t[m]), d.n[m] * d.y[m])
+        return np.divide(sl, sn, out=np.full((U, T), np.nan), where=sn > 0)
+
+    def events(self, leaves: np.ndarray) -> np.ndarray:
+        d = self.data
+        m = np.isin(d.e, leaves)
+        out = np.zeros(d.N.shape[:2])
+        np.add.at(out, (d.u[m], d.t[m]), d.n[m])
+        return out
+
+    def summary(self) -> dict:
+        out = super().summary()
+        out.update({"kind": "mark", "events": float(np.sum(self.data.n)), "sigma2_w": self.sigma2_w,
+                    "sigma2_c": self.sigma2_c, "phi": None})
+        return out
+
+    def _restore(self, meta: dict) -> None:
+        self.sigma2_w, self.sigma2_c = float(meta["sigma2_w"]), float(meta["sigma2_c"])
+        self._weights()
+
+
+# ---------------------------------------------------------------------- model choice
+
+
+def heldout(model: Monolith, test: BlockData) -> dict:
+    """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
+    h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
+    Returns the Poisson deviance over every test cell (empty cells through the factorised
+    total) and the NB log-likelihood of the non-empty cells at the fitted φ."""
+    if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves             or test.groups != model.data.groups:
+        raise ValueError("test data must share the fit's places, leaves and profile carriers")
+    tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
+    with torch.no_grad():
+        x = {k: v.detach().clone() for k, v in model.effects().items()}
+        last = float(model.data.years[-1])
+        steps = torch.as_tensor(test.years.astype(float) - last, dtype=model.dtype, device=model.device)
+        for name in ("h_all", "h_grp"):
+            h = x[name]
+            slope = h[:, -1:] - h[:, -2:-1]
+            x[name] = h[:, -1:] + slope * steps[None, :]
+        eta = tm.eta_nnz(x)
+        lam = float(tm.total(x))
+        mu = torch.exp(eta).cpu().numpy()
+    y = test.y
+    dev = 2 * (float(np.sum(y * np.log(y / mu))) - float(y.sum()) + lam)
+    phi = model.phi
+    nb = float(np.sum(special.gammaln(y + phi) - special.gammaln(phi) - special.gammaln(y + 1)
+                      + phi * np.log(phi / (phi + mu)) + y * np.log(mu / (phi + mu)))) if np.isfinite(phi) else None
+    return {"deviance": dev, "events": float(y.sum()), "expected": lam, "deviance_per_event": dev / float(y.sum()),
+            "nb_loglik_nonempty": nb, "years": test.years.tolist(), "graph": model.graph_kind,
+            "profile": test.key.get("profile", "group")}
 
 
 # ---------------------------------------------------------------------- helpers

@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -47,6 +47,22 @@ def data_version() -> str:
     import pegasus_data
 
     return str(pegasus_data.__version__)
+
+
+@cache
+def resource_version(file: str) -> str:
+    """The sha256 (12 characters) of one of pegasus_data's shipped resources, from its manifest:
+    the key of anything derived from that resource (code structures, graphs), so a rebuilt
+    resource is a new key even when the package version is unchanged."""
+    import json
+
+    import pegasus_data
+
+    manifest = Path(pegasus_data.__file__).resolve().parent / "resources" / "manifest.json"
+    entries = json.loads(manifest.read_text(encoding="utf-8"))
+    entries = entries.get("resources", entries)
+    entry = next(v for v in entries.values() if isinstance(v, dict) and v.get("file") == file)
+    return str(entry["sha256"])[:12]
 
 
 @lru_cache(maxsize=1)

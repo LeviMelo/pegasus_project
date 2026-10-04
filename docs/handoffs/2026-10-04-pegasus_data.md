@@ -214,3 +214,8 @@ Built and versioned like other reference tables, as edge lists `(from, to, weigh
 **Defects found while consuming §5 and §6 (2026-10-04):**
 - **`code_structure("ICD10")`: categories U07 and U09 are absent.** U071, U072 and U099 name parents that are not nodes, and no group above them is present (WHO's U00–U49). COVID-19 deaths (U071/U072, about 700,000 in 2020–21) therefore fall outside the tree. PegaSUS counts them as unallocated rather than dropping them, but cannot scan its first known positive until the nodes exist.
 - **`proximity_graph("contiguity")`: 32 edges (64 directed rows) have a null weight,** for example 1303007–1303403 and 2901155–2919157. In addition, 511 edges have weight 0 (corner touches). PegaSUS uses the median border length for the nulls and a 1 km floor for corner touches. A null should either be computed or documented as unknown.
+- **Fixed in pegasus_data 70b56fc** (branch `pegasus-core-fixes`, from this session after the two repositories were centralised):
+  - the ICD-10 categories U07, U09 and U10 now exist, and the build fails on dangling parents;
+  - border lengths are computed for collections left by `make_valid`;
+  - the `logmoments` accumulator kind is added (§4);
+  - ADR-0140 records the GBD decision.

@@ -24,7 +24,7 @@ from . import control, fields, gateway, graphs, leads, store, surprise
 from .scans import explain, lenses
 
 LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
-              "spatial_cluster": "B0"}
+              "spatial_cluster": "B0", "group_disparity": "B0"}
 SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
@@ -62,6 +62,19 @@ class Session:
     def surprise(self, node: str, tier: str = "B1") -> surprise.Surprise:
         return self.expectations.surprise(node, tier)
 
+    def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
+        """Observed and B0-expected counts by (place, year, group), B0 re-levelled per year and
+        group to the national totals, so a place's group pattern is read against Brazil's."""
+        f = self.expectations.field(node)
+        m = self.expectations.model(f.block)
+        reg = self.expectations.registry
+        leaves = np.array([m.data.leaves.index(c) for c in reg.leaves(f.node) if c in m.data.leaves])
+        y = m.observed_by_group(leaves)
+        mu = m.expected_by_group(leaves, spatial=False)
+        ref = m.expected_by_group(leaves, spatial=True)
+        mu = mu * (ref.sum(0) / np.maximum(mu.sum(0), 1e-300))[None]
+        return y, mu
+
     def expected(self, node: str, tier: str = "B1") -> dict[str, Any]:
         s = self.surprise(node, tier)
         return {"places": s.places, "years": s.years, "observed": s.y, "expected": s.mu}
@@ -83,13 +96,17 @@ class Session:
 
     def scan(self, node: str, lens: str, tier: str | None = None, **kw) -> list[lenses.Finding]:
         tier = tier or LENS_TIERS[lens]
+        if lens == "group_disparity":
+            y_g, mu_g = self.by_group(node)
+            places = self.expectations.model(self.expectations.field(node).block).data.places
+            return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger, **kw)
         s = self.surprise(node, tier)
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
 
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
-               "trend_divergence", "space_time"), q: float = 0.05, replicates: int = 100, log=print) -> list[leads.Lead]:
+               "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print) -> list[leads.Lead]:
         """The scheduled pass over every admissible field; returns the leads admitted."""
         found: dict[str, list[lenses.Finding]] = {}
         for block in blocks or self._blocks():
