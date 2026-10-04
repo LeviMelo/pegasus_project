@@ -15,7 +15,8 @@ specification, that note says what the code did.
 principles (author, 2026-09-30); nothing here is adopted by being recorded.
 Where a document's claim was later shown wrong, both are given.
 
-**Sources.** Read in full for this document, or extracted in full by agents
+**Sources** (frozen copies of all of them are in `docs/history/`, gathered
+2026-10-04). Read in full for this document, or extracted in full by agents
 whose digests are in `docs/digests/` (their source lists are in each file):
 
 | corpus | where | read as |

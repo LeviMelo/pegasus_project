@@ -1,452 +1,621 @@
-# PegaSUS: design proposal v0
+# PegaSUS: design v0.2
 
-**2026-10-03, revised the same day (v0.1):** own demographic model (§4.1); subset scanning, pattern decomposition and dependency maps (§7.4–7.6). A complete proposal, written so the author can react to something concrete. The author asked the agent to adjudicate. **Everything here is a proposal until the author accepts it**; the choices the agent was least sure of are listed in §13.
+**2026-10-04.** This proposal carries the design discussion of 3–4 October with the author. The author asked the agent to adjudicate, so **everything here is a proposal until the author accepts it**. The agent's least certain calls are in §16.
 
-**Inputs:**
-- the discussion of 2026-10-03;
-- `docs/discussion/2026-10-03-what-was-built.md`, what the earlier engine actually did;
-- `docs/RECOLLECTION.md`, the ideas and their history.
+**Companion documents:**
+- `docs/discussion/2026-10-03-what-was-built.md`: what the earlier engine actually ran;
+- `docs/RECOLLECTION.md` and `docs/history/`: the earlier ideas and documents;
+- `docs/handoffs/2026-10-04-pegasus_data.md`: what this design asks of pegasus_data.
 
 ---
 
 ## 1. What PegaSUS is
 
-**PegaSUS scans all of Brazil's health, demographic, institutional and context data for leads, with a known error rate.**
+Brazil's health data are observations of one process: **events happening to people, in places, over time, each event carrying attributes**. Mathematically, that is a **marked point process**.
 
-- **A lead** is a structure in the data that departs from a declared expectation beyond a calibrated null, has an effect size worth knowing, and comes with a record of whether it replicates.
-- **Leads are not conclusions.** They need not be epidemiologically interpretable when found.
-- **Two kinds of explorer use the same substrate:**
-  - the **systematic scan**, deterministic and exhaustive over what it enumerates;
-  - **agents** (LLMs in a single loop, with tools and an objective), which go where no enumeration reaches.
+PegaSUS builds **one hierarchical model of that process for all of Brazil**, "normal Brazil", from all the data, through pegasus_data. It then reads three things from it, for people and for AI agents:
+- **where the data depart from it;**
+- **what its own structure reveals;**
+- **how the departures relate.**
 
-**Principles**, each traced to a documented failure:
+Each such reading is a **lead**: a structure with its size, its certainty, its checks and its replication record. **Leads are not conclusions.** They need not be epidemiologically interpretable when found. People, agents and studies follow them.
+
+**The ambition:** use the entire haystack to learn what normal is, so that the needles (departures) are as sharp as the data allow, at any grain where they are coherent.
+
+**Principles**, each traced to a documented failure of the earlier engine:
 
 | principle | the failure it answers |
 |---|---|
-| **The expectation comes first.** Every cell is compared with what it should be given its population, place and time. Sophistication goes into that expectation. | pooled rank transforms baked gradients into "standardised" data; corr(z, log population) = 0.93 |
-| **The estimand is declared.** Between places, within places over time, between strata, between institutions: separate scans, separate nulls, never switched silently. | a fixed effect turned the residual scan into a within-place test without anyone deciding it |
-| **Every cell carries its precision.** A cell with 2 deaths and one with 2,000 never weigh the same. | unit-variance transforms; weights computed and unused |
-| **Effect sizes against minimum-effect nulls.** At national n, "different from zero" is not a lead. | CKA 0.04 certified; the effect floor was the strongest lever |
-| **The multiplicity arithmetic is designed, not discovered.** Analytic p-values with calibrated tails; every test counted. | the output size was set by permutation floor × BY |
-| **Observed data stay observed.** Sparse context is used where observed. Modelled quantities (denominators, race composition) are labelled, carry uncertainty, and are validated by holding data out. | an interpolation presented as a tensor; reconstructed context never certified; a flat 0.02 uncertainty |
-| **Nothing is trusted before it passes the benchmark** of known positives, known negatives and planted signals, run on real data. | the validation programme written and never run |
-| **Nothing is blind.** Records, linked cohorts, places, institutions and recording practice are all scannable. | — |
+| **Expectation first.** Every cell is judged against what it should be given its population, place, time and case-mix. | pooled rank transforms baked gradients into "standardised" data; corr(z, log population) = 0.93 |
+| **Model events and their attributes, not correlations of columns.** | one Gaussian covariance over all variables, places and years |
+| **Every cell carries its precision.** | unit-variance transforms; weights computed and never used |
+| **Declared estimands:** between places, within places over time, between groups, between institutions. | a fixed effect silently turned the scan into a within-place test |
+| **Minimum-effect nulls and designed multiplicity arithmetic.** | CKA 0.04 certified at huge n; output size set by permutation floor × BY |
+| **Structure priors on levels, never on relations.** | the ICD tree used as a prior on dependence penalised dengue ↔ microcephaly |
+| **Strengths are learned, not set.** | κ = 1, λ₂ = 1.0, hand-set loss weights |
+| **Observed stays observed.** Modelled quantities are typed, carry uncertainty, and are validated by holding data out. | an interpolation presented as a tensor; context reconstructed and never certified |
+| **Nothing is trusted before passing the benchmark** of known positives, known negatives and planted signals, run on real data. | the validation programme written and never run |
+| **Nothing is blind:** records, cohorts, places, institutions and recording practice. | — |
 
 ---
 
-## 2. Layers
+## 2. Two repositories, one rule
 
-```
-                ┌──────────────────────────────────────────────────────────┐
- agents, people │  L8 tools      search · describe · map · scan · compare · confirm · records
-                ├──────────────────────────────────────────────────────────┤
-                │  L7 leads      typed leads, tiers, rank, provenance         ◄─ L6 ledger + error control
-                │  L5 scans      lenses (one field) · pair scans (two fields) · cohort scans
-                │  L4 surprise   per field, per cell: y, μ, z, w at each expectation tier
-                │  L3 expectation per field: a model of what each cell should be
-                │  L2 denominators & measurement: population at risk; race composition;
-                │                 race misclassification; recording-reliability flags
-                │  L1 fields     registry of every field: kind, lattice, support, law,
-                │                 exposure, construction signature, provenance
-                ├──────────────────────────────────────────────────────────┤
- pegasus_data   │  L0 gateway    records · aggregates · labels · linkage · POPSVS · census ·
-                │                 IBGE context · CNES · geography lattices
-                └──────────────────────────────────────────────────────────┘
- across all:  V  validation harness: known positives, known negatives, planted signals, null surrogates
-```
+**pegasus_data is the data module of the whole project.** It will be open source, and **every input that reaches PegaSUS comes through it**.
 
-**The boundary with pegasus_data:**
-- **pegasus_data holds observed data and its meaning.** It never models.
-- **PegaSUS holds every model:** race composition, misclassification, expectations; and every result: surprises, scans, leads, ledger.
-- **PegaSUS reads only through pegasus_data's API.**
+The boundary is drawn by the question each piece answers:
 
----
-
-## 3. L1: fields
-
-### 3.1 The object
-
-```
-Field
-  id, name, family            # family = a node in a hierarchy (ICD tree, CNES type, SIDRA theme)
-  kind      count | total | share(num, den) | level | published_rate
-  lattice   municipality | comparable_area | health_region | state | institution | …
-  grain     day | week | month | year
-  strata    axes inside the field: age × sex (× race)   — strata are axes, not separate fields
-  support   the observed (unit, time, stratum) cells; missing cells stay missing
-  law       sum | ratio_of_sums | weighted_mean(weight field) | none
-  exposure  the person-time field it is measured against (counts), with its strata
-  signature the predicate that defines its events (record-derived fields)
-  provenance pegasus_data query, data version, code version
-```
-
-### 3.2 Where fields come from
-
-| source | generator | lattice |
+| the piece answers | it lives in | examples |
 |---|---|---|
-| **Event records** (SIM, SIH, SINASC, SINAN, SIA, CIHA) | system × event × condition × code role (underlying cause, any mention, principal or secondary diagnosis) × place role (residence or occurrence). Conditions descend a code hierarchy (chapter → block → three characters) **only while the expected count supports it** (§3.3). | municipality, institution |
-| **Linked cohorts** | cohort outcomes aggregated per place-time: births followed by neonatal death, admissions followed by death within 30 days, readmission | municipality, institution |
-| **CNES** | capacity (beds by type, equipment, staff, accreditations), per establishment-month; summed to places | institution, municipality |
-| **Recording practice** | share of ill-defined causes, of secondary diagnoses coded, race-recording reliability, notification timeliness | institution, municipality |
-| **IBGE and SIDRA context** | as observed, at their own support and years | as published |
-| **Climate, environment** | as published | as published |
+| **What exists, and what does it mean?** | **pegasus_data, observed tier** | sources, decoding, labels, validity windows, roles, event-type declarations, code structures, geography and proximity graphs, aggregations, record identity, linkage |
+| **What was there, and how was it recorded?** That is, estimates of the world's state and of the observation process, wanted by any analyst whether or not they use PegaSUS. | **pegasus_data, modelled tier**: typed as modelled, versioned, with uncertainty and validation evidence; never replacing an official series | the population account (§5.1); system completeness; race misclassification (§5.2); SUS-dependent population |
+| **What is normal, what departs from it, and what relates?** | **PegaSUS** | the monolith, expectations, surprises, scans, leads, ledger, validation harness, agent tools, studies |
 
-### 3.3 Sizing by information, not enumeration
+**The test for a doubtful case:** would an epidemiologist who never uses PegaSUS want this as data? If yes, pegasus_data. If it is a judgement about normality, surprise or relation, PegaSUS.
 
-- **A record-derived field is admitted only if its expected events support a test.** The default rule is at least 1,000 events over the scan window *and* events in at least 5% of units. A code-tree branch stops descending where its children would fall below that.
-- **Strata never multiply fields.** Age, sex and race are axes inside a field: expectations use them, and the stratum lens scans them.
-- **Expected size:** a few thousand record fields, plus a few hundred context fields. That is about 10⁷ pairs per estimand, enumerable and countable.
-
-### 3.4 Construction signatures and mechanical overlap
-
-Every record-derived field carries the predicate defining its events. Its overlap with another field can therefore be **measured exactly** from the records:
-
-```
-overlap(F, G) = |events(F) ∩ events(G)| / min(|events(F)|, |events(G)|)
-```
-
-The same applies to parent and child codes, a count and its own share, and one death counted under two causes. Pairs above 0.05 are never tested for dependence. They may be tested *conditionally*, on the events not shared.
-
-### 3.5 The support lattice
-
-- **Spatial units are partially ordered:** municipality ⊂ immediate region ⊂ intermediate region ⊂ state ⊂ macro-region ⊂ Brazil; municipality ⊂ health region ⊂ state; institution → municipality. Comparable-area lattices (pegasus_data ADR-0126) absorb boundary changes.
-- **Time:** day ⊂ week ⊂ month ⊂ year.
-- **Two fields are compared on their common support:** the finest support to which both can be lifted by their aggregation laws. A field with law `none` cannot be lifted.
-- **Census-year context compares at census years.** It is never densified for a test.
+**What this settles:**
+- **The population account and the race model sit in pegasus_data's modelled tier.** They are estimates of what the population was and how systems record it.
+- **Linkage is already there,** on the same rule.
+- **POPSVS stays served as published** beside our estimate, following pegasus_data's rule never to recompute an official series.
 
 ---
 
-## 4. L2: denominators and measurement
+## 3. The ontology: from columns to the process
 
-### 4.1 Population at risk: our own demographic account
+### 3.1 Entities and the test
 
-**Decision (author, 2026-10-03): PegaSUS builds its own population model.** POPSVS is one of its inputs, and the benchmark it must beat.
+| entity | examples |
+|---|---|
+| **person** | patient, deceased, mother, baby |
+| **event** | death, birth, hospitalisation, notification, treatment-month |
+| **institution** | establishment (CNES) |
+| **place** | municipality and its hierarchies |
+| **time** | the calendar |
 
-**The model.** The true resident population is a hidden state, `N(u, t, a, s, r)`: municipality, year, single age, sex, race. It moves by **demographic accounting**:
+Every column states a property of one of them. The test, for each column: **if the same person had a different event, would this value change?**
+- **No:** a **person** attribute.
+- **Yes, the event sets it:** an **event** attribute, a *mark*.
+- **It describes what the event points to:** an **institution** or **place** attribute, reached through the reference.
+- **It identifies:** an **identifier**, used only to link.
+
+**Linkage measures the test.** Across the linked records of one person, person attributes agree up to recording error, and event attributes vary.
+
+### 3.2 A role for every column (declared in pegasus_data)
+
+pegasus_data's `roles.yml` already writes `<entity>.<property>` for the columns linkage uses. **It is extended to every column of every dataset PegaSUS reads**, each with three statements:
+
+```
+role:        entity.property            e.g. admission.length_of_stay, mother.education, baby.weight
+value kind:  category | code tree | number | date | place | institution reference | identifier | text
+model role:  stratum | dimension | event type | mark | when | where | institution | link-only | excluded
+```
+
+- **A stratum of a rate must be carried by the population account:** age, sex, race, residence. Mother's education or marital status cannot be rate strata, because no population of "married women aged 25" by municipality-year exists. **They are marks:** the composition of events is a field like any other.
+- **One record can describe several entities.** SINASC has the mother, the baby, the pregnancy and the birth. An infant's SIM record has the child and the mother.
+- **The first draft is generated** from pegasus_data's existing typing (codelists → category, numeric → number, identifier flags → link-only), then reviewed.
+
+**What pegasus_data already provides**, each mapping onto this ontology:
+
+| pegasus_data concept | what it provides |
+|---|---|
+| roles | entity.property |
+| semantic axes | whose place: residence, occurrence, facility |
+| grain ("what one row is") | the event kind |
+| measures with accumulator states | mark summaries |
+| VariableDoc | codes, trees, validity windows |
+| personal-identifier flags and join keys | identifiers |
+
+### 3.3 Event types
+
+The record a system publishes is not always the event:
+- **an SIH AIH is a billing document,** not a hospitalisation;
+- **a SINAN row is a notification,** not a case.
+
+So every event type is **declared** in pegasus_data:
+
+```
+EventType = ( dataset,
+              grain          what one row is
+              kind           death | foetal death | birth | hospitalisation | case | notification | treatment-month …
+              classifier(s)  the code columns that partition it, with their role; one primary, others alternative
+              status         which rows count
+              consolidation  how rows become events )
+```
+
+| system | event | primary classifier | alternatives | status / consolidation |
+|---|---|---|---|---|
+| SIM | death; foetal death (`TIPOBITO`) | final underlying cause | original cause (`CAUSABAS_O`); certificate lines as marks | — |
+| SIH | **hospitalisation episode** | principal diagnosis | **procedure performed:** the epidemiology of procedures and surgeries; childbirth is defined by procedure | AIH continuations consolidated (`IDENT`); transfers through linkage |
+| SINASC | live birth | none (all marks) | anomalies (`CODANOMAL`) | — |
+| SINAN | **case, or notification** (two types) | the disease (one dataset each) | final classification, outcome | confirmed by `CLASSI_FIN` |
+| CIHA | as SIH, non-SUS | as SIH | as SIH | as SIH |
+| CNES | **not an event:** institution state per month | — | — | — |
+
+**Primary and alternative classifiers are different families of fields over the same events.** Their overlap is measured exactly, so they are never tested against each other as if independent.
+
+**Each classifier has its own observation process.** "The diagnosis that justified the bill" and "the cause selected by rule" are different statements, and their disagreement is information about coding.
+
+### 3.4 Structured variables
+
+Each structured variable declares its **shape**, and the shape becomes the prior of the effects along it: a sparse Gaussian Markov prior in every case.
+
+| shape | examples | prior on effects |
+|---|---|---|
+| **tree** | ICD-10, SIGTAP (group → subgroup → form → procedure), CBO, CNAE, ATC, ICD-O; geography hierarchies | nested effects: a leaf's effect = the sum along its path |
+| **overlapping lists** | CID-BR mortality list, morbidity list, the GBD cause hierarchy, garbage codes, ICSAP, avoidable causes, notifiable diseases | an effect per list, carried by every member (multiple membership) |
+| **ordinal** | age, gestational weeks, birth weight, education | random walk |
+| **cyclic** | month, week, weekday | cyclic random walk |
+| **graph** | proximity graphs (§4) | BYM2 / ICAR |
+
+**How trees are used, given the earlier failure:**
+- **Trees pool levels (rates), never relations.** Which codes move together is found, never assumed.
+- **Pooling strength is learned per level and per subtree.** Heterogeneous branches (chapter XVIII) keep their codes apart; homogeneous ones pool.
+- **Heavy-tailed shrinkage** (horseshoe-type) lets a single code escape its family.
+- **Several trees at once:** ICD chapters, the GBD hierarchy, the CID-BR lists. Held-out prediction weights them per chapter, and **turns tree pooling off where it doesn't predict better.**
+
+**Code systems change.**
+- Validity windows come from pegasus_data.
+- Crosswalks map codes into one stable tree where one exists (ICD-9 → ICD-10).
+- Where none exists, the change is a **declared break**, not a lead.
+
+**Code roles.**
+- **Primary classifiers** define event types.
+- **Secondary diagnoses and certificate lines** are multiple-membership marks.
+- **"Any mention" fields** exist in their own right, with their overlap measured.
+
+### 3.5 Fields: what the model and the scans see
+
+**A field is a projection of events onto a lattice:** the counts of an event type, or the summaries of a mark, by place × time × groups (× institution).
+
+```
+Field: id, family (its node in a code structure), kind (count | mark summary | share | level),
+       lattice, grain, groups (axes inside the field, never separate fields), support (observed cells),
+       aggregation law, exposure (counts), signature (the predicate defining its events), provenance
+```
+
+- **Admitted by information, not enumeration.** A field enters the scans only if its expected events support a test (§16 O4). A code tree is descended only while children stay above that bar.
+- **Overlap is measured exactly** from the signatures: shared events over the smaller field's events. Pairs above 0.05 are never tested against each other as if independent.
+- **Comparisons happen at a common support:** the finest support to which both fields lift by their aggregation laws. Context observed in census years is compared in census years, never densified.
+- **Context fields** (IBGE, SIDRA, climate) are observed fields at their own support.
+
+---
+
+## 4. Space: three roles, many proximities
+
+**The earlier spatial kernel changed nothing:** residual Moran's I was 0.50 before and 0.50 after. It whitened the covariance between variables while the spatial structure sat in each variable's *mean*; its strength was fixed (κ = 1); and queen contiguity treats a 160,000 km² municipality and a 3 km² one alike.
+
+**Here space has three distinct roles:**
+
+| role | what it does | how it is set |
+|---|---|---|
+| **expectation** | places inform each other's levels and trends (BYM2) | **learned:** BYM2's mixing parameter estimates how much variation is spatially structured. Near 0, "space doesn't help here" is a reported finding. |
+| **null** | neighbouring places are not independent evidence | effective sample size from each field's own spatial autocorrelation (Dutilleul); surrogates with matched variograms |
+| **search geometry** | which sets of places count as a cluster | a declared graph |
+
+**Proximity is a family of graphs**, built by pegasus_data. Each model component selects or mixes graphs by held-out fit:
+
+| graph | captures | built from |
+|---|---|---|
+| contiguity, **weighted by shared border length** | shared borders | geometry |
+| population-weighted distance | nearness of where people live | census tracts, geometry |
+| travel time | reachability by road and river | road network, to acquire |
+| **care flows** | where residents of A go for care | **SIH itself:** residence → hospital municipality, per year, per specialty; SINASC for births; SIM for deaths |
+| urban hierarchy | influence of regional centres | IBGE REGIC |
+| commuting | daily movement | census |
+| health regions, comparable areas | administrative grouping | pegasus_data |
+
+**Which graph explains a field best is itself a lead about it**, for example whether a disease follows commuting or referral.
+
+**Unequal areas are handled two ways:**
+- the graph weights (border length, population-weighted distance);
+- the population-scaled precision of each place's effect, so a large empty municipality and a dense small one do not borrow equally.
+
+---
+
+## 5. The modelled tier (in pegasus_data)
+
+### 5.1 The population account
+
+**The decision (author, 2026-10-03): our own model**, with POPSVS as one input and as the benchmark to beat.
+
+**The state.** The true resident population, `N(u, t, a, s, r)`: municipality, year, single age, sex, race. It moves by **demographic accounting**:
 
 ```
 N(u, t+1, a+1, s, r) = N(u, t, a, s, r) · S(u, t, a, s) + M(u, t, a, s, r) + R(u, t, a, s, r)
 N(u, t+1, 0,   s, r) = B(u, t, s, r) · S₀(u, t, s)
 ```
 
-- S is survival.
-- M is net migration.
-- R is race reclassification between categories, which sums to zero over r.
-- B is births.
+S is survival, M net migration, R race reclassification (summing to zero over r), B births.
 
-**Many sources observe it, each through its own data model** (coverage, completeness, delay, noise). This is the "Bayesian demographic account" of Bryant & Zhang, *Bayesian Demographic Estimation and Forecasting* (2018).
+**Many sources observe it, each through its own data model** (coverage, completeness, delay, selection). This is the Bayesian demographic account of Bryant & Zhang (2018).
 
-| source | observes | data model |
+| source | observes | known flaw |
 |---|---|---|
-| censuses 2000, 2010, 2022 | N, by municipality × age × sex × race | coverage error by age, sex and region |
-| IBGE annual municipal totals | Σ N | small noise; the official constraint |
+| censuses 2000, 2010, 2022 | N by municipality × age × sex × race | coverage error by age and region |
+| IBGE municipal totals (annual) | Σ N | the official constraint |
 | IBGE state projections, life tables, fertility | S and B by state | priors |
-| POPSVS (RIPSA) | N by age × sex | another model's estimate: an informative observation, not truth |
-| SINASC | B, by mother's residence × age × race | completeness by state and year |
-| SIM | deaths, so S | completeness by state, age and year |
-| electoral roll (TSE), every two years | adults by municipality × age × sex | registration lag; transfers reveal adult migration |
-| school census (INEP) | children by municipality × age | enrolment coverage |
-| CadÚnico | persons by municipality × age × sex × race | covers the poorer population; race declared |
-| primary-care registrations (SISAB) | persons by municipality | coverage varies by team |
-| formal employment (RAIS/CAGED) | workers by municipality × age × sex × race | an economic-shock signal |
+| POPSVS (RIPSA, Duchesne cohort ratios) | N by age × sex | another model's estimate |
+| SINASC, SIM | B; deaths | completeness by place and year |
+| civil registry (SIDRA) | registered births and deaths | completeness |
+| **school census (INEP)** | children by age, sex, **race** (declared by the family) | enrolment coverage |
+| **CadÚnico (CECAD)** | about 40% of people, by age, sex, **race** | poorer population only |
+| **RAIS** | formal workers by age, sex, **race** | formal jobs only |
+| **ANS** | private-plan holders by age, sex | gives the **SUS-dependent population** |
+| **TSE electoral roll** | voters 16+ by age band and sex; race self-declared since 2022 | race **79% missing in 2026**, selectively |
 | census migration questions | origin–destination flows, 5-year | prior on M |
+| WorldPop / GHSL | gridded population, built-up area | physical shocks |
 
-**Availability.** These sources are not yet behind pegasus_data except the censuses, POPSVS and IBGE totals. Each one is acquired behind the gateway first.
+**Outputs,** each a field:
+- N with intervals;
+- **net migration** by municipality × age × year;
+- **race reclassification** by cohort;
+- **completeness of SINASC and SIM** by municipality-year;
+- **dated shocks**;
+- **the SUS-dependent population** (residents − plan holders), the right denominator for SIH and SIA.
 
-**Inference.** A Bayesian state-space fit on the log scale, hierarchical by intermediate region and state. It runs per state in parallel; states are coupled through migration totals.
+**Inference.** A state-space fit on the log scale, hierarchical by intermediate region and state, per state in parallel, with states coupled through migration totals.
 
-**Outputs, each a field in its own right:**
-- the posterior of N per cell, with its interval;
-- **net migration** by municipality × age × year, which shows where people went and when;
-- **reclassification** by cohort ("browning");
-- **the completeness of SINASC and SIM** by municipality-year;
-- **shocks** between censuses: a municipality whose sources disagree with smooth growth (a mine closing, a dam failing, a frontier opening).
+**The test.** Predict the 2022 census by municipality × age × sex from data up to 2021, and compare with RIPSA's pre-census estimates. **If ours does not win, it is not used.**
 
-**The test that shows we do better.**
-- Predict the **2022 census** by municipality × age × sex from data up to 2021 only.
-- Compare with RIPSA's pre-census estimates for 2021–2022 (its 2000–2021 series).
-- The error, by municipality size and age, becomes the uncertainty model.
+### 5.2 Race measurement
 
-### 4.2 Race misclassification
+**Code faults are removed first:** default fills and another system's codes, flagged per hospital-month (pegasus_data ADR-0128).
 
-**Settings.** σ = (system, who records, region, period). Code faults are removed before modelling: a hospital-month whose race field is a default fill or another system's codes (pegasus_data ADR-0128 flags them).
-
-**A structured confusion matrix.** No one misclassifies at random.
-- **On the ordered axis branca (1) – parda (2) – preta (3):**
-  ```
-  C_σ(k | j) = 1 − λ_σ − δ_σ    if k = j   (boundary rows renormalised)
-               λ_σ               if k = j − 1   (lightening)
-               δ_σ               if k = j + 1   (darkening)
-  ```
-- **Amarela and indígena:** a retention probability each, with leakage to parda or branca.
-- **Missing:** its own column, with p_miss,σ(j) allowed to depend on j.
-- **The propensities depend on the setting:**
-  ```
-  logit λ_σ = x_σ' β_λ ,  logit δ_σ = x_σ' β_δ      (x = system, recorder class, region, period, age band)
-  ```
-  The coefficients get hierarchical priors, and priors centred on published comparisons of self- and other-classification. That is a few dozen parameters, against 20 free ones per setting.
-
-**The likelihood: ecological, age and sex adjusted.**
+**A structured confusion matrix per setting** σ (system, who records, region, period, age band). On the ordered axis branca – parda – preta:
 
 ```
-Y_{u,k}^{sys} ~ NegBin( Σ_j C_σ(k|j) · Σ_{a,s} P(u,t,a,s,j) · m^{sys}_{a,s,t} · θ^{sys}_j · e^{b_u} ,  φ )
+C_σ(k|j) = 1 − λ_σ − δ_σ  (k = j),   λ_σ  (k = j − 1, lightening),   δ_σ  (k = j + 1, darkening)
+logit λ_σ = x_σ'β_λ ,  logit δ_σ = x_σ'β_δ        hierarchical priors; literature-centred
 ```
 
-- m is the system's national age × sex rate.
-- θ_j are the race rate ratios, the quantities of interest.
-- b_u are shrunk place effects.
+- **Amarela and indígena:** a retention probability each, with leakage.
+- **Missing:** its own column, allowed to depend on true race.
 
-**Identification** comes from how recorded shares track census composition across places. θ and C are partly confounded, so disparities are reported as **intervals over the posterior of C**, not as point corrections.
+**The likelihood is ecological, adjusted for age and sex:**
 
-**Validation:**
-1. **Planted misclassification.** Apply a known C to real SIM counts, then recover it.
-2. **Linked pairs.** Where the same person appears in two systems, the model predicts their joint classification, `P(k₁, k₂) = Σ_j π_j C_σ₁(k₁|j) C_σ₂(k₂|j)`. The observed cross-table tests the model. Linkage validates; it is not the estimator.
+```
+Y_{u,k}^{sys} ~ NegBin( Σ_j C_σ(k|j) · Σ_{a,s} N(u,t,a,s,j) · m^{sys}_{a,s,t} · θ_j · e^{b_u} , φ )
+```
 
-**How it is used.** Race-stratified expectations are computed **in the recorded space**: `μ_{u,k} = Σ_j C(k|j) μ_{u,j}`. Recorded counts are compared with expected recorded counts, and a race lead must survive the plausible range of C ("C-robust").
+- **Identified by** how recorded shares track census composition across places, plus the race-declaring sources of §5.1.
+- **Validated by:**
+  - planted misclassification in real counts;
+  - **linked pairs**, whose joint classification the model predicts: `P(k₁,k₂) = Σ_j π_j C_σ₁(k₁|j) C_σ₂(k₂|j)`.
+- **Disparities are reported as intervals over the posterior of C.**
 
 ---
 
-## 5. L3: expectations
+## 6. The monolith: normal Brazil
 
-### 5.1 The tiers: what counts as boring
+### 6.1 Intensity
 
-Each count field gets a **ladder of expectations**. Each tier declares more structure boring, and every lead states which tier it departs from. For a cell (u, t, g) with exposure N:
+For event type e, place u, time t, persons with attributes x (age, sex, race):
 
-| tier | log μ | what remains surprising |
+```
+λ_e(u, t, x) = N(u, t, x) · exp( η_e(u, t, x) )
+
+η_e(u,t,x) = α_e + f_e(x)                       the normal level of e for each group
+           + g_e(u)                              its geography  (graph priors, §4)
+           + h_e(t)                              its history: trend, season (ordinal / cyclic priors)
+           + Σ low-rank interactions             place × time, e × place, e × age × time … (patterns, §8.3)
+           + β_e · context(u, t)                 observed context, where observed
+```
+
+- **Effects over e follow the code structures** (§3.4).
+- **Interactions are low-rank:** a few patterns combine place, time and cause, so that a model over ~10¹² cells is estimable.
+- **Observation enters through the modelled tier:**
+  - expected *recorded* counts = expected true counts × completeness;
+  - race is mapped through C.
+- **SUS systems use the SUS-dependent population;** SIM and SINASC use all residents.
+
+### 6.2 Marks
+
+Every mark (length of stay, cost, ICU days, birth weight, gestational weeks, Apgar, prenatal visits, mother's age, derived intervals) gets the same treatment:
+
+```
+mark | e, u, t, x, institution  ~  a distribution whose centre and spread depend on
+                                    case-mix + place + time + institution, hierarchically
+```
+
+**The families:**
+- **counts and durations:** negative binomial, Gamma or log-normal with a hurdle;
+- **shares:** beta-binomial;
+- **bounded scores:** ordinal.
+
+### 6.3 The tiers of "boring" are nested versions of the monolith
+
+| tier | terms switched on | what remains surprising |
 |---|---|---|
-| **B0 composition** | log N_{utg} + log r_{g,t} (national rate by stratum and year) | everything a place does differently from Brazil, given its population and the year |
-| **B1 smooth space** | B0 + s_u, a BYM2 spatial effect (smooth + unstructured), shrunk | non-smooth spatial anomalies; departures in time |
-| **B2 own place** | B0 + α_u + β_u (t − t̄), level and trend per place, shrunk to their region | departures of a place from its own course: outbreaks, breaks, co-movements |
-| **seasonal** (sub-annual grains) | the tier + a seasonal profile per region, shrunk | out-of-season events |
+| **B0** | group levels × national year | anything a place does differently from Brazil, given its population |
+| **B1** | + spatial effects | departures from the region |
+| **B2** | + each place's own level and trend | departures from its own history |
+| seasonal | + seasons | out-of-season events |
 
-**Your "north–south gradient" question is answered by the ladder, not by a choice.** A gradient is a lead at B0 and boring at B1. Both readings are kept.
+A lead states the tier it departs from. **A north–south gradient is a lead at B0 and boring at B1; both readings are kept.**
 
-### 5.2 Model family and estimation
+### 6.4 Calibration
 
-- **Counts:** negative binomial with field-specific dispersion φ, estimated per field. Zero-heavy fields use a hurdle. Shares: beta-binomial. Levels: Gaussian or Student-t on their natural scale.
-- **v0 estimation, Python:**
-  - B0 in closed form;
-  - B1 as a sparse Gaussian Markov random field (the BYM2 precision on the adjacency graph), solved by sparse Cholesky with hyperparameters set per field family;
-  - B2 as Poisson–gamma / normal empirical Bayes with hierarchical shrinkage.
-- **Reference check:** the same models in R-INLA on a random sample of fields, across scopes (not only the densest slice), as a measured agreement.
-- **Libraries:** numpy, scipy, scikit-sparse (CHOLMOD), glum or statsmodels, duckdb/polars; R-INLA as the reference.
-
-### 5.3 Calibration of each expectation
-
-- For every field and tier: the **randomised PIT** of each observed cell under its predictive distribution, then a uniformity test per field, per tier, and per region.
-- **A field whose predictive distribution is miscalibrated is flagged** and excluded from pair scans at that tier. It stays visible in the lenses with the flag.
+For every field and tier: the randomised PIT of every observed cell under its predictive distribution, tested for uniformity per field, tier and region. A miscalibrated field is flagged and kept out of pair scans at that tier.
 
 ---
 
-## 6. L4: the surprise cube
+## 7. Surprises
 
-**One table per field family**, one row per cell × tier:
+For every cell of every field and tier:
+- `y`, the observed value;
+- `μ`, the expected value;
+- `z = Φ⁻¹(PIT)`, the surprise on a common scale. It is computed **after** the expectation: the earlier engine's Gaussianisation, in the right order;
+- `w`, the cell's information (for counts, μ / (1 + μ/φ));
+- flags: denominator tension, unreliable recording, calibration failure.
 
-```
-field_id, unit, time, stratum, tier, y, mu, z, w, flags
-```
-
-- `z` = Φ⁻¹(PIT), the surprise on a common scale. **It is computed after the expectation, never before it.** That is Gaussianisation in the right order.
-- `w` = the cell's information, μ / (1 + μ/φ) for counts, carried into every statistic.
-- `flags`:
-  - denominator tension (§4.1);
-  - unreliable recording (§4.2);
-  - calibration failure (§5.3).
-- **Size:** 5,570 municipalities × 25 years × a few thousand fields × 3 tiers is about 10⁹ rows of a few floats. That is tens of GB of Parquet, partitioned and scanned by family. Monthly grain only for families with enough counts.
-- **This is also what agents see first:** for any field, where and when it is surprising.
+**The cube is virtual.**
+- Expected values come from the monolith's parameters on demand.
+- Observed values are the non-empty cells already in the lake.
+- Surprises of empty cells have a closed form.
+- **What is stored:** parameters, leads and caches of the scans.
 
 ---
 
-## 7. L5: scans
+## 8. Reading the monolith: the scans
 
-### 7.1 Lenses: one field
+### 8.1 Lenses on one field
 
-| lens | statistic | tier | null |
-|---|---|---|---|
-| **spatial cluster** | Kulldorff Poisson/NB scan of y against μ | B0, B1 | simulation from the predictive, max statistic with an extreme-value tail fit (no Monte-Carlo floor) |
-| **outbreak / change point** | surveillance-grade algorithms on each place's series (Farrington-flexible / Noufaily-type for counts; Bayesian change point) | B2, seasonal | the predictive distribution |
-| **space-time cluster** | space-time scan | B2 | simulation, extreme-value tail |
-| **stratum disparity** | per place, heterogeneity of stratum SIRs against the national stratum pattern | B0 by stratum | NB likelihood ratio |
-| **trend divergence** | β_u against its neighbours' | B2 | posterior of β |
-| **observation** | the same lenses on recording-practice fields | any | as above |
+| lens | statistic | null |
+|---|---|---|
+| spatial cluster | expectation-based Poisson/NB scan | predictive simulation + extreme-value tail of the maximum |
+| outbreak / change point | Farrington-flexible / Noufaily-type; Bayesian change point | predictive |
+| space-time cluster | space-time scan | as above |
+| group disparity | heterogeneity of a stratum's SIR against the national pattern | NB likelihood ratio |
+| trend divergence | a place's trend against its neighbours' | posterior |
+| observation | the same lenses on recording-practice fields | as above |
 
-### 7.2 Pair scans: two fields, at their common support
+### 8.2 Subset scanning: the needle finder
 
-**Between places (E_b).** The correlation, across units, of the two fields' **place effects**: time-aggregated log SIR at B0, shrunk, weighted.
-- **Null:** spatial autocorrelation shrinks the effective sample, so p-values use Dutilleul's modified t (Clifford–Richardson–Hémon effective n from both fields' spatial structure).
-- **Calibration:** checked on variogram-matched surrogate maps for a random subset of pairs.
-- **Adjusted version (E_b|Z):** partial correlation given a fixed declared set (urbanisation, income, region), stated with the lead.
+**A real signal is rarely one cell.** It is a coherent subset whose small surprises add up: these 7 neighbouring municipalities × these 5 months × women over 60 × these three codes.
 
-**Within places over time (E_w).** The pooled correlation of B2 surprises z, lags 0…L, across places.
-- **Null:** analytic, with each place's autocorrelation deflating its effective degrees of freedom.
-- **Calibration:** checked by circular time shifts per place on a subset.
+- **What it searches:** the subset with the largest combined surprise across all dimensions at once. Places connected in a proximity graph; times contiguous; any subset of groups; codes within a subtree or list.
+- **How:** the linear-time subset scanning property (Neill 2012; Neill, McFowland & Zheng 2013; McFowland, Speakman & Neill 2013) finds the best subset per dimension in linear time, alternating over dimensions.
+- **Null:** predictive simulation with an extreme-value tail.
+- **Recursive:** report the top subset, condition it out, look again.
 
-**Between institutions (E_i):** the same, on the institution lattice.
+**This finds signals that are invisible cell by cell.**
 
-**Effect sizes** are reported as the correlation and as the implied rate ratio per standard deviation of the other field.
+### 8.3 Patterns
 
-**Minimum-effect null:** H₀: |ρ| ≤ δ (default δ = 0.1, set per estimand by the benchmark's power curves). This is tested with a shifted Fisher z, so negligible dependence is never "significant".
+The monolith's low-rank interactions (non-negative Poisson tensor factorisation against the expectations; CP-APR, Chi & Kolda 2012) are patterns: *these causes rose together, in these places, at these times.*
+- COVID is one pattern.
+- **A coding change is a mirror pair:** "ill-defined" falls where a specific cause rises.
+- **A new disease is a pattern new in time.**
 
-**Compute:** for one estimand, one support class and p fields, the statistic is one weighted Gram matrix `ZᵀWZ`. With p in the low thousands and about 10⁵ cells, that is minutes. Lags multiply it by L + 1.
+### 8.4 Pairs and dependency maps
 
-**Nonlinearity:** rank correlations in v0. Kernel dependence (HSIC) only on short-listed pairs, with its own calibrated null.
+On calibrated surprises, at each pair's common support:
+- **between places (E_b):** correlation of place effects, with Dutilleul's effective n; and an adjusted version (E_b|Z);
+- **within places over time (E_w):** correlation of B2 surprises at lags 0…L, with effective degrees of freedom per place;
+- **between institutions (E_i)**;
+- **across systems:** the same quantity recorded twice (notifications against admissions).
 
-### 7.3 Cohort scans: the record grain (v1)
+**Tests:** effects with **minimum-effect nulls**, H₀: |ρ| ≤ δ. Computed as weighted Gram matrices `ZᵀWZ`. Rank correlations first; HSIC on short-listed pairs.
 
-On linked cohorts, every record attribute (diagnosis nodes, procedures, the mother's attributes) is scanned against every cohort outcome:
-- Poisson or logistic regression, with a fixed adjustment set (age, sex, year, place effect);
-- FDR over the grid;
-- the same lead object.
+**The dependency map** (phase 3): a sparse + low-rank graphical model on the surprises of one estimand, penalty chosen by stability across replication halves. This is the old LDO's goal, on correctly prepared inputs.
 
-This is the PheWAS shape. It is free of the ecological fallacy by construction.
+### 8.5 Cohort scans
 
-### 7.4 Subset scanning: the needle finder
+On linked cohorts: every record attribute against every outcome, with a fixed adjustment set and FDR over the grid. This is the PheWAS shape, at the person level, free of the ecological fallacy.
 
-The surprise cube has many dimensions: place, time, age, sex, race, code (a tree), institution. A real signal is rarely one cell. It is usually a **coherent subset** whose small surprises add up: these 7 municipalities × these 5 months × women over 60 × these three codes.
+### 8.6 Explaining away and decomposition (on demand)
 
-**Subset scanning searches for the subset whose combined surprise is largest:**
-- **Statistic:** an expectation-based score over a subset of cells, Poisson or NB log-likelihood ratio of observed against expected, each cell weighted by its precision.
-- **Search:** over subsets constrained along each dimension:
-  - places connected or within a radius;
-  - times contiguous;
-  - strata any subset;
-  - codes along the tree.
-- **It is efficient:** the linear-time subset scanning property (Neill 2012; Neill, McFowland & Zheng 2013 for several streams and dimensions; McFowland, Speakman & Neill 2013) finds the best subset of each dimension in linear time. Alternating over dimensions reaches the joint optimum.
-- **It finds signals no single-cell test can:** each cell's excess is within its noise, but 100 such cells together are not.
-- **Null:** simulation from the predictive with an extreme-value fit of the maximum, so there is no Monte-Carlo floor.
-- **Recursive:** after the top subset is reported, it is conditioned out and the next is sought.
-
-### 7.5 Pattern decomposition
-
-A non-negative Poisson tensor factorisation (CP-APR; Chi & Kolda 2012) is fitted to the **counts against their expectations** over place × time × condition (× stratum). Each component is a pattern: *these conditions rose together in these places at these times.*
-
-- **COVID** appears as one component.
-- **A coding change** appears as a pair of components: a cause falling exactly where another rises.
-- **A new epidemic** appears as a component that is new in time.
-
-Components are leads of the kind "co-occurrence pattern", with stability checked across halves of the data.
-
-### 7.6 Dependency maps
-
-On the **calibrated** surprises of one estimand, a sparse plus low-rank Gaussian graphical model maps which fields move together **after** their expectations, with the shared factors kept apart. The old LDO goal is kept; its failures are not:
-- inputs are calibrated per cell, not pooled ranks;
-- each cell carries its precision weight;
-- one map per estimand;
-- the penalty is chosen by stability across the replication halves, not by hand.
-
-This is phase 3, once the pair scans are calibrated, so the map can be checked against them.
+- **Explaining away:** add a candidate driver (a context field, a capacity change) to the monolith for one lead, and report how much of its surprise it absorbs.
+- **Decomposition:** split a change between two periods into population, place-mix and risk components, and say where the risk change sits.
 
 ---
 
-## 8. L6: error control and replication
+## 9. Error control, replication, leads
 
-**The ledger.** Every test the system or an agent runs is written down **before** it runs, with its family. The systematic scan's hypotheses are enumerated from the registry before execution, so m is known in advance.
+**The ledger.** Every test, by the scan or by an agent, is written down before it runs. The scan's hypotheses are enumerated in advance.
 
-**Families and FDR.**
-- Families are lens or estimand × tier × field-family pair.
-- **Within a family:** Benjamini–Hochberg on analytic p-values.
-- **Across families:** hierarchical selection (family-level first, Benjamini–Bogomolov). TreeBH where fields are nested in a code tree.
+**FDR.**
+- Within a family: BH on analytic p-values.
+- Across families: hierarchical selection (Benjamini–Bogomolov).
+- Down code trees: TreeBH.
 
-**Replication tiers,** recorded on every lead:
+**Replication tiers:**
 
 | tier | meaning |
 |---|---|
-| R0 | passes FDR on the full data |
-| R1 | same sign and at least half the effect in the other temporal half (2008–2015 / 2016–2023 by default) |
-| R2 | same in a disjoint spatial half (immediate regions split at random within each state) |
-| R3 | the same estimand found through another system (SIM and SIH; SINAN and SIH) |
+| R0 | passes FDR on all the data |
+| R1 | same sign and at least half the effect in the other temporal half |
+| R2 | the same in a disjoint spatial half (immediate regions split within states) |
+| R3 | found again through another system |
 
-**The confirmation reserve, for agents.** One spatial half (§13, O3) is invisible to exploration tools. An agent's claim is confirmed on it once, through a logged tool call.
+**Agents** explore one spatial half, and confirm once on the reserve through a logged tool call.
 
----
-
-## 9. L7: leads
+**The lead:**
 
 ```
 Lead
-  id, kind (lens | pair | cohort), estimand, tier
-  fields, support, locus (units, times, strata)
-  effect (estimate, interval), test (statistic, p, q, family, null, calibration status)
-  replication (R0..R3 with effects), robustness (C-robust, denominator tension, recording flags)
-  overlap (measured), provenance (data versions, code version, ledger id)
-  rank   = evidence × effect × replication, never p alone
+  kind (residual | subset | pattern | relation | cohort | observation | structural)
+  estimand, tier, fields, support, locus (places, times, groups, codes, institutions)
+  effect (estimate, interval), test (statistic, p, q, family, null, calibration)
+  replication (R0..R3), robustness (C-robust, denominator tension, recording flags, measured overlap)
+  provenance (data versions, model version, ledger id)
+  rank = evidence × effect × replication
 ```
 
 ---
 
-## 10. L8: tools for agents and people
+## 10. How PegaSUS is used: a survey
 
-Thin, composable, logged:
+**The model is a sky survey's.** The Vera Rubin Observatory subtracts a template (the normal sky) from each night's image and issues alerts. Brokers filter them, scientists query the catalogue, teams follow up.
+
+| survey | PegaSUS |
+|---|---|
+| the template | the monolith |
+| tonight's image | the latest data |
+| the difference image | the surprises |
+| alerts | leads |
+| brokers | agents |
+| the catalogue | the atlas and the model |
+| follow-up | studies |
+
+**Seven ways of use:**
+1. **The alert stream.** Each data update brings new leads, ranked.
+2. **Any slice, observed against expected, at question time,** including slices nobody precomputed.
+3. **Explaining away.** Does candidate X absorb this lead?
+4. **Decomposition.** Why did Y change, and where?
+5. **Relations, on demand.** What moves with X, between places or over time?
+6. **The data's own health.** Completeness, coding changes and default fills by system, place and hospital.
+7. **Hand-off.** A lead becomes a study, with its cohort, fields and checks ready.
+
+**Agents (LLMs in a single loop, with tools and an objective) can drive all seven.**
 
 | tool | does |
 |---|---|
-| `search_fields(text, filters)`, `describe_field(id)` | the registry: meaning, support, provenance |
-| `surprise(field, tier, scope)` | the surprise cube: maps and series |
-| `leads(filters)`, `lead(id)` | the lead store |
-| `scan(field, lens, tier, scope)` | runs a lens (ledger entry) |
-| `compare(field_a, field_b, estimand, tier, scope)` | runs a pair test (ledger entry) |
-| `cohort(definition)`, `records(query)` | the record grain, through pegasus_data |
-| `confirm(lead_or_claim)` | one run on the reserve; logged; once per claim |
-
-Exploration tools read only the exploration half. The systematic scan reads everything, under FDR.
+| `search_fields`, `describe_field` | the registry |
+| `expected(slice)`, `surprise(field, tier, scope)` | the atlas |
+| `leads(filters)`, `lead(id)` | the lead register |
+| `scan`, `compare`, `subset_scan` | logged tests |
+| `explain_away(lead, candidate)`, `decompose(field, periods, scope)` | on demand |
+| `cohort`, `records` | through pegasus_data |
+| `confirm(claim)` | once, on the reserve, logged |
 
 ---
 
-## 11. V: the validation harness, built first
+## 11. Computation
 
-**Known positives.** Each has the lens, tier and locus where it must appear:
+**The machine:** 32 GB RAM, 20 logical cores, RTX 4050 (6 GB), about 177 GB free disk.
 
-| signal | lens / estimand | where |
+**Four tricks:**
+1. **The model touches only cells where something happened.**
+
+   `log L = Σ_{non-empty} y log λ − Σ_{all} λ`
+
+   The second sum over ~10¹² cells factorises through the model's structure into a contraction of the population tensor (millions of cells) with small factor matrices. Each evaluation costs about `nnz + |P| × rank`.
+2. **The model is the compression.** The surprise cube is virtual (§7).
+3. **Blocks, warm starts, incremental updates, content-addressed caches.**
+   - A two-level fit: a top model of chapter-level effects, then chapters in parallel.
+   - Monthly data → warm-started refits of the affected blocks.
+4. **Hardware does what it is built for.**
+   - Gram matrices and contractions on the GPU (JAX, float32 with float64 accumulation, chunked to 6 GB).
+   - Sparse Cholesky (CHOLMOD) for the graph priors.
+   - Laplace or variational uncertainty, checked against exact fits on samples across many states.
+   - DuckDB aggregation over the lake.
+
+**Scaling:** cost ∝ (non-empty cells + population cells × rank) × iterations, × blocks in parallel.
+- **Health regions instead of municipalities:** ÷12 in population cells, and more power per cell.
+- **Monthly grain:** ×12. **Race:** ×5. **Full code depth:** more non-empty cells.
+
+**The starting setup:** SIM, SINASC, SIH and SINAN; municipality × year, 2010–2023; 18 ages × 2 sexes; codes to three characters.
+
+| task | estimate |
+|---|---|
+| population tensor | 2.8 M cells (11 MB) |
+| aggregation from the lake | minutes per system |
+| monolith, all four systems | under an hour |
+| subset scan per field | seconds to a minute |
+| pair scans, one estimand, ~2,000 fields | minutes on the GPU |
+| memory | a few GB per block |
+
+**All figures are estimates,** measured first in phase 1 on one family.
+
+**Storage:** pegasus_data's operational changes (handoff §1) bring the starting setup from roughly 35–45 GB to 12–18 GB.
+
+---
+
+## 12. Data scope
+
+**Phase 1–2 systems:** SIM, SINASC, SIH (diagnoses and procedures), SINAN, CIHA when useful. Context: IBGE and SIDRA, as observed.
+
+**Excluded:**
+- **SIA PA and BI** (406 GB of production accounting).
+- **CNES** at first (institution lattice in phase 3).
+
+**Later, as care-pathway sources:** SIA's APAC families, small and person-level: oncology (AQ, AR), dialysis (ATD), specialised medicines (AM), psychosocial care (PS).
+
+---
+
+## 13. Validation harness, built first
+
+**Known positives,** each with its lens, tier and locus:
+- microcephaly 2015–16, Northeast;
+- arbovirus → microcephaly at 6–9 months;
+- COVID excess deaths, including Manaus in January 2021;
+- dengue epidemics and seasonality;
+- leptospirosis after the 2024 Rio Grande do Sul floods;
+- the endemic geography of Chagas disease and schistosomiasis;
+- infant mortality ↔ income and sanitation (between places);
+- diarrhoea ↔ sewerage (between places);
+- winter respiratory admissions.
+
+**Known negatives:**
+- random partitions of one system's records;
+- a field against itself shifted by years;
+- unrelated events on the same denominator.
+
+**Planted signals:** known effects injected into real counts give each lens's power curve, and set δ.
+
+**Null surrogates:** the whole pipeline run on data simulated from the expectations, which gives the false-lead rate.
+
+**Gate:** a lens enters production only after it recovers its positives, holds its false-lead rate on surrogates, and publishes its power curve.
+
+---
+
+## 14. Build order
+
+| phase | PegaSUS | needs from pegasus_data | gate |
+|---|---|---|---|
+| 0 | the harness | — | reproduces itself |
+| 1 | the monolith for SIM, SINASC, SIH (annual); surprises; lenses; subset scanning | roles and event types for those systems; code structures; contiguity and distance graphs; aggregation API; POPSVS (until the population account exists) | the univariate positives; false-lead rate; measured compute |
+| 2 | pair scans; the ledger; FDR; replication; explaining away; decomposition; SINAN | care-flow graph; the population account v1 with its 2022 test | the pair positives; negatives; power curves |
+| 3 | patterns; dependency maps; agent tools; institution lattice; cohort scans; monthly grain | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
+
+**First measurements, once set up:**
+- does ICD tree pooling improve held-out prediction, chapter by chapter (SIM 2021–2023)?
+- which proximity graph best explains between-municipality variation for a few causes?
+
+---
+
+## 15. The fate of the earlier concepts
+
+Most of the earlier ideas survive. What dies is mostly the machinery that implemented them.
+
+| earlier concept | now |
+|---|---|
+| Problem 1: typed measures, aggregation laws, measured quantity (count + exposure) | field kinds; pegasus_data's accumulator states; **the measured quantity is the monolith's only input** |
+| Radon–Nikodym rate | λ = N · exp(η): a parameter, not a division |
+| legality | role rules (a stratum only if the population carries it); race only through C |
+| EFG as a variable generator; composites; utility score; semantic entropy | replaced by the registry and admission by information; the monolith's interactions cover combinations |
+| canonical core | every standard indicator is a slice of the monolith |
+| node life cycle, institutional signature, "anomaly sub-graph as an audit of DATASUS" | **promoted:** observation leads, measurement models, calibration flags |
+| state tensor Q(v) | each cell's information weight; calibration per field |
+| Problem 3: data sovereignty | observed stays observed |
+| one common support; ST-DFM; regimes | dropped: comparisons at their own support; context as observed |
+| the CTR kernel (constrained latent reconstruction) | lives where it belongs: the population account |
+| population tensor | the Bayesian demographic account, multi-source, tested against 2022 |
+| race bridge | structured C, validated by linkage |
+| disease semantic axis, L_D | structure priors for every structured variable, **on levels only** |
+| HSIC scanner, copula/PIT | PIT after expectation; HSIC on a short list |
+| LDO (sparse + low-rank, lags, multiresolution shrinkage) | low-rank patterns in the monolith; graph and tree priors; lagged pair scans; the dependency map on surprises |
+| block permutations, FDR families, stability | analytic nulls with calibration; hierarchical FDR; replication tiers |
+| causal ladder | explaining away, decomposition, agents, studies |
+| bounded exhaustiveness, coverage manifest | admission by information; the ledger; subset scanning (no Simpson cancellation) |
+| information ceiling | admission thresholds and power curves |
+| living skeleton; the five verbs | the survey; interrogate = slices, lens = scans, escalate = explain and study, steer = the agent's objective, inject = sources and candidates |
+| finding ontology | the lens catalogue |
+| north star | the principles |
+| validation battery; Zika acceptance test | the harness, phase 0 |
+| compute levers (Kronecker, randomised SVD, GPU everywhere) | replaced by never building dense objects |
+| the prime directive | kept verbatim |
+
+---
+
+## 16. The agent's least certain calls
+
+| | call | the alternative |
 |---|---|---|
-| microcephaly and congenital anomalies, 2015–16 | space-time cluster, B2 | Northeast |
-| arbovirus → microcephaly births, lag 6–9 months | E_w, monthly | Northeast, 2015–16 |
-| COVID-19 excess deaths; Manaus, January 2021 | outbreak, space-time, B2 | national; Amazonas |
-| dengue epidemic years and seasonality | outbreak, seasonal | many states |
-| leptospirosis after the 2024 Rio Grande do Sul floods | space-time cluster | RS, May–July 2024 |
-| Chagas and schistosomiasis geography | spatial cluster, B0 | known endemic areas |
-| infant mortality ↔ income and sanitation | E_b | national |
-| diarrhoeal admissions ↔ sewerage coverage | E_b, census years | national |
-| respiratory admissions in winter | seasonal | South and Southeast |
-
-**Known negatives.**
-- Random partitions of one system's records into two fields: only shared structure can link them.
-- A field against its own values shifted by years.
-- Fields of unrelated events on the same denominator.
-
-**Planted signals.** A known effect exp(β·x) is injected into real fields' counts (by thinning or adding draws), with a chosen locus. Recovery against β gives each lens's **power curve** and sets δ.
-
-**Null surrogates.** The whole pipeline is run on data simulated from the expectations, with no cross-dependence. The leads found are the **false-lead rate**.
-
-**Gate.** A lens or estimand enters production only when it:
-1. recovers its listed positives at its declared tier;
-2. keeps the false-lead rate on surrogates at or below its target;
-3. reports its power curve.
-
----
-
-## 12. Build order
-
-| phase | builds | its gate |
-|---|---|---|
-| 0 | the harness (§11): positives, negatives, spike-in, surrogates | the harness reproduces itself |
-| 1 | registry (record fields from SIM, SINASC, SIH; annual); the demographic account (§4.1) with its 2022 hold-out test against RIPSA; expectations B0–B2; the surprise cube; the six lenses; subset scanning (§7.4) | the positives that are univariate; false-lead rate on surrogates |
-| 2 | pair scans E_b and E_w; ledger, FDR, replication; measured overlap | the pair positives; the negatives; power curves |
-| 3 | race misclassification (§4.2); pattern decomposition (§7.5); dependency maps (§7.6); agent tools; institution lattice; cohort scans; monthly grain for dense families; new demographic sources (TSE, INEP, CadÚnico) | each with its own positives |
-
----
-
-## 13. What is left out, and the choices most open to change
-
-**Deliberately excluded from v0, with the evidence:**
-- **A joint model fitted on raw fields.** Its penalty had no stable value, and its time and space structure were never fitted. The dependency map (§7.6) is fitted on calibrated surprises instead.
-- **HSIC as the primary statistic.** It was dominated by haze, degenerate samples and permutation arithmetic.
-- **Dense reconstruction of context for scanning.**
-- **Automated causal escalation.**
-- **GPU work.** The Gram matrix and sparse solves fit this machine.
-
-**The agent's least certain calls:**
-- **O1, grain.** Year first; month only for families with dense counts (arboviruses, respiratory, births). Should month come first?
-- **O2, the joint model.** Excluded in v0. Is a single model of all fields still part of the vision, beyond what the pair scans give?
-- **O3, the confirmation reserve.** A spatial half (immediate regions within states) rather than a temporal one. A temporal reserve would sit on the COVID years, which distort everything.
-- **O4, thresholds.** 1,000 events and 5% of units for field admission; δ = 0.1 for pair effects. Both are placeholders until the power curves exist.
-- **O5, the record-grain scan.** Phase 3 here. It may deserve to come earlier, given pegasus_data's linkage.
+| O1 | annual grain first; monthly for dense families in phase 3 | monthly earlier |
+| O2 | the dependency map waits for phase 3 | earlier, since it is the old engine's core wish |
+| O3 | spatial confirmation reserve | temporal (but COVID years distort it) |
+| O4 | admission ≥ 1,000 events and ≥ 5% of units; δ = 0.1 | placeholders until the power curves exist |
+| O5 | cohort scans in phase 3 | earlier, given pegasus_data's linkage |
+| O6 | the population account and race model live in pegasus_data's modelled tier | in PegaSUS (§2 gives the rule) |
