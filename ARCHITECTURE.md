@@ -354,6 +354,8 @@ Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family 
 F(S) = Y log(Y/M) + M − Y    if Y > M,   else 0
 ```
 
+**For marks,** the Gaussian expectation-based score `F(S) = (Σ_S w r)² / (2 Σ_S w)` on weighted residuals r of the mean log mark, scanned in both directions (p × 2). It keeps the same linear-time property.
+
 **The search.** The space is a product: places (connected in a graph) × contiguous times × any subset of groups × codes within a subtree or list.
 - **Linear-time subset scanning (LTSS).** For F, the best subset of a *free* dimension, given the others fixed, is among the top-k cells ranked by the priority `y/μ`. That is O(n log n).
 - **Places use LTSS within graph neighbourhoods.** For each centre, its k nearest neighbours by graph distance.
@@ -697,4 +699,3 @@ Every random draw is seeded from (object, cell, purpose).
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
-| 7.2 | subset scans over every field | Poisson-score scans only; mark fields get the outbreak and trend lenses and pairs, not subset scans | a Gaussian (expectation-based) score for marks is not yet written |
