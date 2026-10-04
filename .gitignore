@@ -1,3 +1,6 @@
 data/
 *.parquet
 __pycache__/
+pegasus_home/
+*.egg-info/
+.ruff_cache/

@@ -1,35 +1,21 @@
 # Status
 
-**2026-10-04.** Design v0.2 written, for the author's review; handoff to
-pegasus_data written; the project's documentary history gathered.
+**2026-10-04.** The architecture is accepted and the repository is set up. No model code exists yet.
 
-- `docs/design/DESIGN.md` v0.2: PegaSUS as one hierarchical model of
-  Brazil's health events ("normal Brazil"), read for leads. It covers:
-  - the boundary with pegasus_data (§2);
-  - the ontology and event types (§3);
-  - space (§4);
-  - the population account and race measurement (§5);
-  - the monolith (§6);
-  - surprises and scans (§7–8);
-  - error control and leads (§9);
-  - use as a survey (§10);
-  - computation (§11).
-  
-  The least certain calls are §16 O1–O6.
-- `docs/handoffs/2026-10-04-pegasus_data.md`: what pegasus_data should
-  build for this design, in priority order: storage, roles for every column,
-  event types, aggregation, code structures, proximity graphs, the modelled
-  tier.
-- `docs/history/`: the earlier PegaSUS documents (April plans, May
-  formalisation, the June–July engine), as frozen copies.
-- `docs/discussion/2026-10-03-what-was-built.md`: what the earlier engine
-  actually ran.
-- `OPEN_QUESTIONS.md`: Q1–Q15, each pointing to its proposed answer.
-- `studies/siac_mulher_2026/`: three abstracts for SIAC Mulher 2026.
+**Done:**
+- **`ARCHITECTURE.md`:** the authority on objects, mathematics (monolith, estimation, tiers, surprise), scans, error control, use, the harness, code and phases. ADR-0001–0003.
+- **Agent rules** (`CLAUDE.md` = `AGENTS.md`), the documentation policy, `scripts/check_docs.py` (green).
+- **Package `pegasus_core`,** installed editable in the `pegasus` environment beside pegasus_data. PyTorch reaches the GPU (CUDA 12.1).
+- **The handoff to pegasus_data** (`docs/handoffs/2026-10-04-pegasus_data.md`): storage, roles for every column, event types, aggregation with mark accumulators, code structures, proximity graphs, the modelled tier.
+- **History:** the earlier documents (`docs/history/`); the redesign questions resolved (`docs/history/open_questions_resolved.md`); the design reasoning archived (`docs/discussion/2026-10-04-design-v0.2.md`).
+- **Brand:** the logo, wordmark and mark in `assets/brand/`.
 
-**Next:**
-1. The author's review.
-2. pegasus_data works through the handoff.
-3. Phase 0: the validation harness.
-4. Two first measurements: ICD tree pooling, chapter by chapter; which
-   proximity graph explains between-municipality variation.
+**Next: phase 0** (ARCHITECTURE §12):
+1. `gateway`, over pegasus_data's existing aggregates;
+2. `store`;
+3. the ledger in `control`;
+4. the harness: positives, negatives, planted signals, surrogates.
+
+Then phase 1, as pegasus_data delivers roles, event types, structures and graphs. Its first measurements:
+- ICD tree pooling, chapter by chapter;
+- which proximity graph explains between-municipality variation.

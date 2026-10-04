@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pegasus-core"
+version = "0.0.1"
+description = "PegaSUS: one hierarchical model of Brazil's health events, read for leads"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "PegaSUS" }]
+keywords = ["epidemiology", "datasus", "sus", "brazil", "spatiotemporal", "anomaly detection"]
+# pegasus-data is installed editable from ../pegasus_data (CLAUDE.md §2).
+dependencies = [
+  "pegasus-data",
+  "numpy>=2.0",
+  "scipy>=1.12",
+  "pyarrow>=16",
+  "duckdb>=1.5",
+  "polars>=1.0",
+  "torch>=2.5",
+  "numba>=0.60",
+  "statsmodels>=0.14",
+  "pydantic>=2",
+  "typer>=0.12",
+  "rich>=13",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+sparse = ["scikit-sparse>=0.4"]
+dev = ["ruff>=0.6", "mypy>=1.10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

@@ -1,6 +1,10 @@
 # Handoff to pegasus_data: what the PegaSUS design asks of the data module
 
-**2026-10-04.** From the agent working on the PegaSUS design (`pegasus_project/docs/design/DESIGN.md` v0.2), to the agent working on pegasus_data.
+**2026-10-04.** From the agent working on PegaSUS (`pegasus_project`), to the agent working on pegasus_data.
+
+**The authority is `pegasus_project/ARCHITECTURE.md`** (accepted, ADR-0002). "DESIGN §" below refers to its reasoning document, `pegasus_project/docs/discussion/2026-10-04-design-v0.2.md`.
+
+**Settled by the author:** the population account and the race model belong to pegasus_data's modelled tier.
 
 **Read first:**
 - DESIGN §2 (the boundary);
@@ -112,7 +116,10 @@ status (which rows count), consolidation (how rows become events)
 
 PegaSUS phase 1 needs, per event type, **sparse aggregated counts**: only non-empty cells, streamed.
 - **Keys:** place lattice (municipality | health region | comparable area) × time grain (year | month) × age band × sex (× race) × classifier at a tree level, with the code role.
-- **Mark summaries** as exact accumulator states (n, sum, sum of squares, and a histogram on declared bins), mergeable as the existing monoid states are.
+- **Mark summaries** as exact accumulator states, mergeable as the existing monoid states are:
+  - n, Σm, Σm²;
+  - **Σlog m and Σ(log m)²**, for log-normal marks (ARCHITECTURE §4.4);
+  - a histogram on declared bins.
 - **Measured overlap** between two fields defined by predicates (shared events / smaller field), computed from records.
 - **Output:** Parquet or Arrow streams, with the data version, so PegaSUS caches by content.
 

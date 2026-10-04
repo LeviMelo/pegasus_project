@@ -1,20 +1,36 @@
+<p align="center"><img src="assets/brand/pegasus-logo.png" alt="PegaSUS" width="560"></p>
+
 # PegaSUS
 
-The restart of PegaSUS: the author's project to generalise epidemiology over
-Brazil's public health, demographic and socioeconomic data, with AI agents
-conducting the work.
+**PegaSUS reads Brazil's public health data as one process:** events happening to people, in places, over time. It fits one hierarchical model of that process for the whole country, "normal Brazil", and from it finds **leads**:
+- where the data depart from what they should be;
+- what the model's own structure reveals;
+- how the departures relate.
 
-**State: design v0.2** (`docs/design/DESIGN.md`), under the author's
-review. Nothing from the earlier attempts is adopted by default.
+Each lead carries its size, its certainty, its checks and its replication record. People and AI agents follow leads into studies.
 
-What exists:
+It reads all its data through **[pegasus_data](../pegasus_data)**, the project's data module: DATASUS decoded and labelled, linked records, populations and context.
 
-| File | What it is |
+**State:**
+- architecture accepted (2026-10-04);
+- package `pegasus_core` set up;
+- **phase 0 next:** the validation harness.
+
+| document | what it holds |
 |---|---|
-| `docs/RECOLLECTION.md` | An inventory of the earlier attempts (April PegaSUS, May–July PegaSUS, brepi, the compendium builders, pegasus_data): their goals, the problems they named, the ideas and lessons worth knowing, and what failed, with paths. It is input to the redesign, not a design. |
-| `docs/design/DESIGN.md` | The design proposal: what PegaSUS is, its layers, objects, statistics, validation and build order. |
-| `docs/discussion/2026-10-03-what-was-built.md` | What the earlier engine actually ran, as opposed to what it specified. |
-| `docs/handoffs/2026-10-04-pegasus_data.md` | What the design asks of pegasus_data, the project's data module. |
-| `docs/history/` | The earlier PegaSUS documents, frozen. |
-| `OPEN_QUESTIONS.md` | The questions the redesign has to answer. |
-| `studies/siac_mulher_2026/` | The first work done under this name: abstracts for SIAC Mulher 2026, computed with pegasus_data. |
+| `ARCHITECTURE.md` | **the authority:** objects, mathematics, scans, error control, code, phases |
+| `CLAUDE.md` / `AGENTS.md` | how to work in this repository: disciplines, documentation policy |
+| `STATUS.md` | the state of the work |
+| `DECISIONS.md`, `EVALUATION.md` | decisions and measurements, indexed |
+| `OPEN_QUESTIONS.md` | what is still open |
+| `GLOSSARY.md`, `RUNBOOK.md` | terms; commands |
+| `docs/handoffs/` | what PegaSUS needs from pegasus_data |
+| `docs/discussion/` | the reasoning behind the design, and what the 2026 engine actually did |
+| `docs/RECOLLECTION.md`, `docs/history/` | the earlier attempts and their documents |
+| `studies/` | studies done with pegasus_data (SIAC Mulher 2026) |
+
+```bash
+PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
+PYTHONUTF8=1 $PY -m pip install -e . --no-deps
+$PY scripts/check_docs.py
+```
