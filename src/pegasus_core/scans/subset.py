@@ -48,8 +48,13 @@ class Subset:
         return self.observed / self.expected if self.expected > 0 else float("inf")
 
 
-def score(Y: np.ndarray, M: np.ndarray) -> np.ndarray:
+def score(Y: np.ndarray, M: np.ndarray, kind: str = "poisson") -> np.ndarray:
+    """Expectation-based scores (Neill 2012). ``poisson``: Y = Σy, M = Σμ. ``gaussian`` (marks):
+    Y = Σ w·(y − μ), M = Σ w, F = Y²/(2M) for Y > 0. Both keep the linear-time property with
+    priority Y/M per element."""
     Y, M = np.asarray(Y, dtype=float), np.asarray(M, dtype=float)
+    if kind == "gaussian":
+        return np.where((Y > 0) & (M > 0), Y * Y / (2 * np.maximum(M, 1e-300)), 0.0)
     with np.errstate(divide="ignore", invalid="ignore"):
         s = Y * np.log(np.where(M > 0, Y / M, 1.0)) + M - Y
     return np.where((Y > M) & (M > 0), s, 0.0)
@@ -90,9 +95,10 @@ def windows(T: int, max_length: int | None, full_only: bool = False) -> np.ndarr
 class Scanner:
     """A configured search over arrays y, μ of shape [U, T, *free] (free dims optional)."""
 
-    def __init__(self, nbr: np.ndarray, max_window: int | None = None, full_period: bool = False,
+    def __init__(self, nbr: np.ndarray, max_window: int | None = None, full_period: bool = False, kind: str = "poisson",
                  refine: int = 50, sweeps: int = 6):
         self.nbr = nbr
+        self.kind = kind
         self.valid = nbr >= 0
         self.max_window = max_window
         self.full_period = full_period
@@ -116,7 +122,7 @@ class Scanner:
             # windows given places
             Yw = (cy[:, :, W[:, 1] + 1] - cy[:, :, W[:, 0]])          # [C, K, W]
             Mw = (cm[:, :, W[:, 1] + 1] - cm[:, :, W[:, 0]])
-            sw = score((Yw * P[..., None]).sum(1), (Mw * P[..., None]).sum(1))
+            sw = score((Yw * P[..., None]).sum(1), (Mw * P[..., None]).sum(1), self.kind)
             new_win = sw.argmax(1)
             # places given windows: LTSS on y/μ within the neighbourhood
             Yk = Yw[np.arange(len(P)), :, new_win]                   # [C, K]
@@ -125,7 +131,7 @@ class Scanner:
             order = np.argsort(-prio, axis=1)
             sy = np.cumsum(np.take_along_axis(Yk, order, 1), 1)
             sm = np.cumsum(np.take_along_axis(Mk, order, 1), 1)
-            sp = score(sy, sm)
+            sp = score(sy, sm, self.kind)
             sp[~np.isfinite(np.take_along_axis(prio, order, 1))] = 0
             top = sp.argmax(1)
             ranks = np.argsort(order, axis=1)
@@ -155,28 +161,28 @@ class Scanner:
             for d in range(len(free)):
                 Ysel = _reduce(Yc, P, (t0, t1), free, keep=2 + d)
                 Msel = _reduce(Mc, P, (t0, t1), free, keep=2 + d)
-                mask, s = _ltss(Ysel, Msel)
+                mask, s = _ltss(Ysel, Msel, self.kind)
                 changed |= not np.array_equal(mask, free[d])
                 free[d], best = mask, s
             # windows
             Yt = _reduce(Yc, P, None, free, keep=1)
             Mt = _reduce(Mc, P, None, free, keep=1)
             cy, cm = np.concatenate([[0], np.cumsum(Yt)]), np.concatenate([[0], np.cumsum(Mt)])
-            sw = score(cy[W[:, 1] + 1] - cy[W[:, 0]], cm[W[:, 1] + 1] - cm[W[:, 0]])
+            sw = score(cy[W[:, 1] + 1] - cy[W[:, 0]], cm[W[:, 1] + 1] - cm[W[:, 0]], self.kind)
             k = int(sw.argmax())
             changed |= (int(W[k, 0]), int(W[k, 1])) != (t0, t1)
             t0, t1 = int(W[k, 0]), int(W[k, 1])
             # places
             Yp = _reduce(Yc, None, (t0, t1), free, keep=0)
             Mp = _reduce(Mc, None, (t0, t1), free, keep=0)
-            mask, best = _ltss(Yp, Mp)
+            mask, best = _ltss(Yp, Mp, self.kind)
             changed |= not np.array_equal(mask, P)
             P = mask
             if not changed:
                 break
         Y = float(_reduce(Yc, P, (t0, t1), free, keep=None))
         M = float(_reduce(Mc, P, (t0, t1), free, keep=None))
-        return Subset(float(score(Y, M)), centre, nbr[P], (t0, t1), [np.nonzero(f)[0] for f in free], Y, M)
+        return Subset(float(score(Y, M, self.kind)), centre, nbr[P], (t0, t1), [np.nonzero(f)[0] for f in free], Y, M)
 
     # ---- the search ------------------------------------------------------------------
 
@@ -211,10 +217,10 @@ def _reduce(A: np.ndarray, places: np.ndarray | None, window: tuple[int, int] | 
     return X.sum(axis=tuple(a for a in range(X.ndim) if a != keep))
 
 
-def _ltss(Y: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, float]:
+def _ltss(Y: np.ndarray, M: np.ndarray, kind: str = "poisson") -> tuple[np.ndarray, float]:
     prio = np.where(M > 0, Y / np.maximum(M, 1e-300), -np.inf)
     order = np.argsort(-prio)
-    s = score(np.cumsum(Y[order]), np.cumsum(M[order]))
+    s = score(np.cumsum(Y[order]), np.cumsum(M[order]), kind)
     s[~np.isfinite(prio[order])] = 0
     k = int(s.argmax())
     mask = np.zeros(len(Y), dtype=bool)
@@ -228,8 +234,10 @@ def _ltss(Y: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, float]:
 # ---------------------------------------------------------------------- the null
 
 
-def replicate(m: np.ndarray, phi: np.ndarray | float, rng: np.random.Generator) -> np.ndarray:
+def replicate(m: np.ndarray, phi: np.ndarray | float, rng: np.random.Generator, kind: str = "poisson") -> np.ndarray:
     """y* ~ NB(μ, φ) cellwise (Poisson where φ is infinite), via the gamma–Poisson mixture."""
+    if kind == "gaussian":
+        return rng.normal(0.0, np.sqrt(np.maximum(m, 0.0)))  # w·(y − μ) ~ N(0, w) under the model
     phi = np.broadcast_to(np.asarray(phi, dtype=float), m.shape)
     lam = m.copy()
     finite = np.isfinite(phi) & (m > 0)
@@ -253,7 +261,7 @@ class Null:
 def null(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int = 200,
          seed_parts: tuple = ("subset-null",)) -> Null:
     rng = np.random.default_rng(config.seed(*seed_parts))
-    maxima = np.array([scanner.best(replicate(m, phi, rng), m).score for _ in range(replicates)])
+    maxima = np.array([scanner.best(replicate(m, phi, rng, scanner.kind), m).score for _ in range(replicates)])
     loc, sc = stats.gumbel_r.fit(maxima)
     return Null(maxima, float(loc), float(sc))
 
@@ -261,10 +269,12 @@ def null(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: i
 def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner, alpha: float = 0.05,
          max_subsets: int = 20, replicates: int = 200, seed_parts: tuple = ("subset",),
          nul: Null | None = None) -> tuple[list[Subset], Null]:
-    """The recursive scan: report the best subset, condition it out (μ ← y on its cells),
-    repeat until the next p exceeds α. Returns the subsets with Gumbel and empirical p."""
+    """The recursive scan: report the best subset, condition it out (μ ← y on its cells; for the
+    Gaussian score, its residuals ← 0), repeat until the next p exceeds α. Returns the subsets
+    with Gumbel and empirical p."""
     nul = nul or null(scanner, m, phi, replicates, seed_parts)
     m = m.copy()
+    y = y.copy()
     out: list[Subset] = []
     for _ in range(max_subsets):
         s = scanner.best(y, m)
@@ -274,5 +284,8 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
         out.append(s)
         sel = np.ix_(s.places, np.arange(s.window[0], s.window[1] + 1), *s.free) if s.free else \
             np.ix_(s.places, np.arange(s.window[0], s.window[1] + 1))
-        m[sel] = np.maximum(m[sel], y[sel])
+        if scanner.kind == "gaussian":
+            y[sel] = 0.0
+        else:
+            m[sel] = np.maximum(m[sel], y[sel])
     return out, nul

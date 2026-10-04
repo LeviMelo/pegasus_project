@@ -71,3 +71,40 @@ The survey of IX flagged 25 small places for rheumatic heart disease (I00–I02)
 **Status:** unexplained and unreplicated. The candidate drivers are a cardiology service, death verification and residence coding, through explain-away once CNES enters.
 
 **The neighbours show a second pattern:** I63 rose from 1–5 to 14–24 a year from 2019, while I64 fell. That is a regional shift from unspecified to ischaemic stroke coding.
+
+## The first known positive: microcephaly (§10.1)
+
+**Script:** `data/positive_microcephaly.py`.
+
+**Q02 subsets from the space–time lens** (100 replicates, Gumbel; 20 subsets at B1 and 20 at B2), the same loci at both tiers:
+
+| locus | years | observed / expected | RR (B2) |
+|---|---|---|---|
+| Pernambuco, 28 places | 2015–16 | 419 / 94 | 4.4 |
+| Bahia, 22 places | 2015–16 | 347 / 76 | 4.6 |
+| Rio de Janeiro, 16 places | 2016 | 162 / 35 | 4.6 |
+| PI, CE, PE, 21 places | 2015–16 | 100 / 18 | 5.7 |
+| São Paulo, 17 places | 2016–17 | 136 / 34 | 4.0 |
+
+**The pass criterion is met:** the locus lies in the Northeast in 2015–16, the sign is positive, and the result holds at B2 as well. The lens's surrogate false-lead rate is still pending.
+
+## Held-out graph choice, chapter IX
+
+Fit on 2010–2021, scored on 2022–23. The kNN6 and contiguity rows are from `scripts/measure_heldout.py`.
+
+| graph | deviance per event |
+|---|---|
+| kNN6 | 2.21759 |
+| contiguity | 2.21785 |
+
+- **So far the graph barely matters out of sample.**
+- **The trend extrapolation over-predicts** (850 k expected against 788 k observed): the training period ends in the COVID years.
+
+## Marks: subset scans
+
+**The score:** a Gaussian expectation-based score F = (Σw r)²/(2Σw) on weighted residuals of the mean log mark. It keeps the linear-time subset structure, scans two tails, and multiplies p by 2 for the two directions.
+
+**Birth weight at B1:**
+- KS 0.023, worst region 0.033: calibrated.
+- 40 subsets, the strongest about 2% heavier in Northeast clusters in 2010–13.
+- These are not read as leads until δ for marks is calibrated (P5).

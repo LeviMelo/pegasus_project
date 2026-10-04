@@ -49,18 +49,31 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": lens, "field": s.field.id, "tier": s.tier,
                                                                "k": k, "max_window": max_window,
                                                                "replicates": replicates}))
-    usable = (s.flags & (surprise.DENOMINATOR | surprise.CALIBRATION)) == 0
-    y = np.where(usable, s.y, 0.0)
-    m = np.where(usable, s.mu, 0.0)
+    usable = (s.flags & (surprise.DENOMINATOR | surprise.CALIBRATION | surprise.NO_INFORMATION)) == 0
+    mark = s.extras.get("kind") == "mark"
+    if mark:
+        # marks: the Gaussian score over weighted residuals of the mean log mark
+        y = np.where(usable, s.w * (np.nan_to_num(s.y) - np.nan_to_num(s.mu)), 0.0)
+        m = np.where(usable, s.w, 0.0)
+    else:
+        y = np.where(usable, s.y, 0.0)
+        m = np.where(usable, s.mu, 0.0)
     scanner = subset.Scanner(subset.neighbourhoods(edges, len(s.places), k), max_window=max_window,
-                             full_period=full_period)
-    found, nul = subset.scan(y, m, s.phi, scanner, alpha=alpha, replicates=replicates,
-                             seed_parts=(lens, s.field.id, s.tier))
-    out = [Finding(lens, s.field.id, s.tier,
-                   {"places": s.places[f.places].tolist(),
-                    "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])]},
-                   f.ratio, f.p, {"score": f.score, "observed": f.observed, "expected": f.expected,
-                                  "p_empirical": f.p_empirical}) for f in found]
+                             full_period=full_period, kind="gaussian" if mark else "poisson")
+    # a mark departs in either direction (low birth weight matters as much as high): both tails,
+    # one null serving both (the Gaussian null is symmetric)
+    directions = (("up", 1.0), ("down", -1.0)) if mark else (("up", 1.0),)
+    out, nul = [], None
+    for name, sign in directions:
+        found, nul = subset.scan(sign * y, m, s.phi, scanner, alpha=alpha, replicates=replicates,
+                                 seed_parts=(lens, s.field.id, s.tier), nul=nul)
+        out += [Finding(lens, s.field.id, s.tier,
+                        {"places": s.places[f.places].tolist(),
+                         "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])], "direction": name},
+                        float(np.exp(sign * f.observed / f.expected)) if mark else f.ratio,
+                        min(1.0, f.p * len(directions)),
+                        {"score": f.score, "observed": f.observed, "expected": f.expected,
+                         "p_empirical": f.p_empirical}) for f in found]
     ledger.complete(test, min([f.p for f in out], default=1.0), out[0].effect if out else None,
                     {"subsets": len(out), "null_loc": nul.loc, "null_scale": nul.scale,
                      "calibrated": s.calibration.get("calibrated")})
