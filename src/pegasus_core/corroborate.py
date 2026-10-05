@@ -67,8 +67,15 @@ class Corroboration:
                 "null_median": self.null_median, "p": self.p, **(self.detail or {})}
 
 
-def rule_for(code: str) -> dict[str, Any] | None:
-    for r in RULES:
+#: The rules for a lead of SIH-RD: the independent fields are SINAN (notified diseases) and SIM deaths **outside hospitals**
+#: (an in-hospital death is the same person as an admission that ended in death, ARCHITECTURE §8.5).
+SIH_RULES: list[dict[str, Any]] = [r for r in RULES if r["source"] == "sinan"] + [
+    {"prefix": ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"), "source": "sim",
+     "label": "SIM deaths outside hospital of the same category"}]
+
+
+def rule_for(code: str, dataset: str = "SIM.DO") -> dict[str, Any] | None:
+    for r in (SIH_RULES if dataset.startswith("SIH") else RULES):
         if any(code.startswith(p) for p in r["prefix"]):
             return r
     return None
@@ -119,6 +126,28 @@ def sih_year(year: int) -> pa.Table:
     return t
 
 
+def sim_year(year: int) -> pa.Table:
+    """SIM.DO deaths of a year by residence × ICD-10 category (3 characters) × death in a hospital (LOCOCOR = 1)."""
+    import pegasus_data as pg
+
+    key = {"what": "sim", "year": year, "data": config.data_version(), "v": 1}
+    hit = store.get_table("corroborate", key)
+    if hit is not None:
+        return hit
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = pg.count_events("SIM.DO", "death", period=year, geography="BR", by=["CODMUNRES", "CAUSABAS", "LOCOCOR"],
+                              root=config.data_root(), allow_partial=False, max_download=8 * 1024**3)
+    con = duckdb.connect()
+    con.register("r", raw)
+    t = con.execute("""SELECT TRY_CAST(left(CAST(CODMUNRES AS VARCHAR), 6) AS INTEGER) AS u,
+        left(upper(trim(CAST(CAUSABAS AS VARCHAR))), 3) AS code,
+        CAST(coalesce(TRY_CAST(CAST(LOCOCOR AS VARCHAR) AS INTEGER), 9) = 1 AS TINYINT) AS hospital, CAST(sum(events) AS INTEGER) AS y
+        FROM r GROUP BY ALL""").fetch_arrow_table()
+    store.put_table("corroborate", key, t, {"source": "pegasus_data.count_events(SIM.DO)", "year": year})
+    return t
+
+
 def sinan_matrix(dataset: str, event: str, places: np.ndarray, years: np.ndarray) -> np.ndarray:
     """Notifications [place, year] of a SINAN system (all strata summed)."""
     out = np.zeros((len(places), len(years)))
@@ -152,6 +181,7 @@ class Fields:
         self._index = {int(u): i for i, u in enumerate(places)}
         self._cache: dict[Any, np.ndarray] = {}
         self._sih: pa.Table | None = None
+        self._sim: pa.Table | None = None
         self._s2id: pa.Table | None = None
 
     def adjacent(self) -> list[np.ndarray]:
@@ -215,6 +245,33 @@ class Fields:
                 if i is not None:
                     (dead if d else alive)[i, ti[int(b)]] += float(v)
             self._cache[key] = (alive, dead)
+        return self._cache[key]
+
+
+    # -- SIM (the corroborating field of an SIH lead)
+    def sim(self, categories: list[str]) -> tuple[np.ndarray, np.ndarray]:
+        """(deaths outside hospital, deaths in hospital) [place, year] for the 3-character categories."""
+        key = ("sim", tuple(sorted(categories)))
+        if key not in self._cache:
+            if self._sim is None:
+                parts = []
+                for y in self.years:
+                    t = sim_year(int(y))
+                    parts.append(t.append_column("year", pa.array(np.full(t.num_rows, int(y), dtype=np.int16))))
+                self._sim = pa.concat_tables(parts)
+            con = duckdb.connect()
+            con.register("s", self._sim)
+            con.register("c", pa.table({"code": sorted(categories)}))
+            r = con.execute("""SELECT u, year, hospital, sum(y) AS y FROM s WHERE code IN (SELECT code FROM c) GROUP BY ALL"""
+                            ).fetch_arrow_table()
+            outside = np.zeros((len(self.places), len(self.years)))
+            inside = np.zeros_like(outside)
+            ti = {int(y): j for j, y in enumerate(self.years)}
+            for a, b, h, v in zip(*(r.column(c).to_pylist() for c in ("u", "year", "hospital", "y")), strict=True):
+                i = self._index.get(int(a)) if a is not None else None
+                if i is not None:
+                    (inside if h else outside)[i, ti[int(b)]] += float(v)
+            self._cache[key] = (outside, inside)
         return self._cache[key]
 
 
@@ -295,9 +352,9 @@ def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, repli
 
 
 def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarray, years: list[int], direction: int,
-                seed_text: str, replicates: int = 4999, connected: bool = True) -> Corroboration:
+                seed_text: str, replicates: int = 4999, connected: bool = True, dataset: str = "SIM.DO") -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
-    rule = rule_for(code)
+    rule = rule_for(code, dataset)
     if rule is None:
         return Corroboration(False, detail={"reason": "no independent field for this code"})
     if direction <= 0:
@@ -319,7 +376,7 @@ def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarr
         if rule["source"] == "sinan":
             y = fields.sinan(rule["system"])
         else:
-            alive, dead = fields.sih(categories)
+            alive, dead = fields.sim(categories) if rule["source"] == "sim" else fields.sih(categories)
             y = alive
             tot = float(alive[rows][:, cols].sum() + dead[rows][:, cols].sum())
             detail["overlap_upper_bound"] = float(dead[rows][:, cols].sum() / tot) if tot > 0 else 0.0
