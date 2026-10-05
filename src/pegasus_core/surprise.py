@@ -16,9 +16,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pyarrow as pa
+import torch
 from scipy import optimize, special, stats
 
-from . import config, fields, gateway, monolith, store
+from . import config, fields, gateway, laplace, monolith, store
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True}
@@ -65,12 +66,17 @@ class Expectations:
     """The fitted monolith of one event type, read field by field and tier by tier."""
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
-                 structure: str = "ICD10", source: dict | None = None):
+                 structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
+                 forecast: bool = True):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
-        "mark": "PESO", "bounds": (200, 7000)})."""
+        "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
+        MAP's predictive, NB(mu, phi)); with draws, a cell's predictive integrates mu over the Laplace
+        posterior (ARCHITECTURE 5.3, `laplace.py`)."""
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})
+        self.laplace, self.device, self.forecast = int(laplace), device, forecast
+        self._posteriors: dict = {}
         classifier = self.source.get("column") or self.source.get("classifier")
         self.registry = fields.Registry(dataset, event, structure, classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
@@ -79,8 +85,16 @@ class Expectations:
     def model(self, block: str) -> monolith.Monolith:
         if block not in self._models:
             cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
-            self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph, **self.source)
+            self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
+                                           device=self.device, **self.source)
         return self._models[block]
+
+    def posterior(self, key, model: monolith.Monolith) -> laplace.Posterior:
+        """The Laplace posterior of a fitted block, drawn once per Expectations (``key`` names the fit)."""
+        if key not in self._posteriors:
+            self._posteriors[key] = laplace.Posterior(model)
+            self._posteriors[key].sample(self.laplace)
+        return self._posteriors[key]
 
     def field(self, node: str) -> fields.Field:
         return self.registry.field(node)
@@ -97,12 +111,22 @@ class Expectations:
         cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
         if cls is monolith.MarkModel:
             raise NotImplementedError("the prospective tier is for counts")
-        model = cls.load(self.dataset, self.event, f.block, train, self.graph, **self.source)
+        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self.source)
         tm, x = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test, **self.source))
         leaves = np.array([tm.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in tm.data.leaves])
         mu, mu2 = tm.expected(leaves, spatial=True, x=x)
+        var = None
+        if self.laplace:
+            post = self.posterior(("BP", f.block, train_last), model)
+            fv = laplace.forecast_variance(model, tm) if self.forecast else None
+            gen = torch.Generator(device=model.device)
+            gen.manual_seed(config.seed("laplace", "forecast", model.key()))
+            mom = post.moments(leaves, True, x_fn=lambda xd: (tm, monolith.extrapolate_effects(
+                model, tm, xd, increments=None if fv is None else laplace.forecast_increments(model, tm, fv, gen))))
+            mu, mu2, var = mom["mean"], mom["mu2"], mom["var"]
         y = tm.observed(leaves)
-        out = _assemble(f, "BP", tm, y, mu, mu2, model.phi, self.macroregions(tm.data.places), flag_calibration=False)
+        out = _assemble(f, "BP", tm, y, mu, mu2, model.phi, self.macroregions(tm.data.places), flag_calibration=False,
+                        var=var)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
         return out
 
@@ -149,12 +173,20 @@ class Expectations:
             mu, mu2 = mu * c, mu2 * c ** 2
         y = m.observed(leaves)
         extras: dict = {}
+        mom = None
+        if self.laplace:
+            mom = self.posterior(f.block, m).moments(leaves, SPATIAL[tier], relevel=(tier == "B0"))
+        mu_point = mu
         if tier == "B2":
             axis = m.data.years if m.data.grain == "year" else np.arange(y.shape[1], dtype=float)
             mu, extras = refit_place_trend(y, mu, mu2, m.phi, axis)
         elif tier == "B2s":
             mu, extras = refit_place_season(y, mu, mu2, m.phi, m.data.month_of_year)
-        out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places))
+        var = None
+        eta_var = extras.pop("eta_var", None)
+        if mom is not None:
+            mu, mu2, var = _predictive(mom, mu, mu_point, eta_var)
+        out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places), var=var)
         out.extras = extras
         if cache:
             store.put_table("surprise", key, out.table(), {"calibration": out.calibration,
@@ -162,13 +194,31 @@ class Expectations:
         return out
 
 
+def _predictive(mom: dict, mu_tier: np.ndarray, mu_point: np.ndarray, eta_var: np.ndarray | None
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The posterior-predictive mean, sum of mu^2 and Var(mu) of a tier from the draws' moments of the
+    B1/B0 expectation. B2 and B2s refit each place's course around the B1 expectation: the refit scales
+    the draws by r = mu_tier/mu_point and adds the place coefficients' own posterior variance
+    ``eta_var`` (independent of the draws: an approximation, additive on the log scale)."""
+    mean, var, mu2 = mom["mean"], mom["var"], mom["mu2"]
+    if eta_var is None:
+        return mean, mu2, var
+    r = np.divide(mu_tier, mu_point, out=np.ones_like(mu_tier), where=mu_point > 0)
+    cv2 = var / np.maximum(mean, 1e-300) ** 2
+    mean = r * mean * np.exp(eta_var / 2)
+    cv2_total = (1 + cv2) * np.exp(eta_var) - 1
+    return mean, r ** 2 * mu2, cv2_total * mean ** 2
+
+
 def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, mu: np.ndarray, mu2: np.ndarray,
-              phi_block: float, macro: np.ndarray, flag_calibration: bool = True) -> Surprise:
-    """PIT and calibration with the block's φ; if miscalibrated, with the field's own φ; if
-    still miscalibrated, flagged (ARCHITECTURE §6.2)."""
+              phi_block: float, macro: np.ndarray, flag_calibration: bool = True,
+              var: np.ndarray | None = None) -> Surprise:
+    """PIT and calibration with the block's phi; if miscalibrated, with the field's own phi; if
+    still miscalibrated, flagged (ARCHITECTURE 6.2). ``var`` is Var(mu) over the Laplace posterior
+    (None: the MAP's predictive)."""
     pop = m.data.N.sum(axis=2)
     seed = config.seed(f.id, tier, "pit", m.key())
-    cells = aggregate_phi(mu, mu2, phi_block)
+    cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
     extra = place_year_phi(y, mu, cells)
     attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra))]
     for source, phi, phi_agg in attempts:
@@ -331,8 +381,10 @@ def refit_place_trend(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float
     """B2: per place, log μ' = log μ + α_u + β_u·s_t (s standardised years), the B1
     expectation as offset, so a place's course shrinks to its region's."""
     s = (years - years.mean()) / max(years.std(), 1e-9)
-    mu_new, b, sd, tau = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.stack([np.ones_like(s), s], axis=1))
-    return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau}
+    mu_new, b, sd, tau, ev = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.stack([np.ones_like(s), s], axis=1),
+                                         variance=True)
+    return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau,
+                    "eta_var": ev}
 
 
 def refit_place_season(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float, month_of_year: np.ndarray
@@ -343,9 +395,9 @@ def refit_place_season(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: floa
     s = (np.arange(T) - (T - 1) / 2) / max(np.arange(T).std(), 1e-9)
     angle = 2 * np.pi * month_of_year / 12
     X = np.stack([np.ones(T), s, np.sin(angle), np.cos(angle)], axis=1)
-    mu_new, b, sd, tau = refit_place(y, mu, aggregate_phi(mu, mu2, phi), X)
+    mu_new, b, sd, tau, ev = refit_place(y, mu, aggregate_phi(mu, mu2, phi), X, variance=True)
     return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
-                    "season_sin": b[:, 2], "season_cos": b[:, 3], "tau": tau}
+                    "season_sin": b[:, 2], "season_cos": b[:, 3], "tau": tau, "eta_var": ev}
 
 
 def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float) -> tuple[np.ndarray, np.ndarray]:
@@ -355,7 +407,7 @@ def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float)
 
 
 def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
-                outer: int = 20, tau: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                outer: int = 20, tau: np.ndarray | None = None, variance: bool = False) -> tuple:
     """Per place u, log μ'_ut = log μ_ut + X_t·b_u with b_u ~ N(0, diag(1/τ)): exact p×p Newton per
     place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ)."""
     live = mu.sum(axis=1) > 0
@@ -387,7 +439,10 @@ def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarra
         tau = new
         if change < 0.01:
             break
-    sd = np.sqrt(np.clip(np.einsum("uii->ui", np.linalg.inv(H)), 0, None))
+    Hinv = np.linalg.inv(H)
+    sd = np.sqrt(np.clip(np.einsum("uii->ui", Hinv), 0, None))
+    if variance:   # Var(X_t . b_u): the refit's own contribution to the uncertainty of log mu'
+        return mu * np.exp(b @ X.T), b, sd, tau, np.einsum("ti,uij,tj->ut", X, Hinv, X)
     return mu * np.exp(b @ X.T), b, sd, tau
 
 

@@ -304,10 +304,13 @@ class Monolith:
 
     # ---- effects (centred) -------------------------------------------------
 
-    def effects(self) -> dict[str, torch.Tensor]:
-        out = {"b0": self.params["b0"]}
+    def effects(self, params: dict[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
+        """The centred effects of ``params`` (default: the fitted ones). The map is linear, which the
+        Laplace approximation uses (``laplace.py``)."""
+        params = self.params if params is None else params
+        out = {"b0": params["b0"]}
         for name in self.components:
-            v = _centre(self.params[name], self._labels[name])
+            v = _centre(params[name], self._labels[name])
             # group deviations sum to zero across groups; a leaf's place effect within its group
             if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
                 v = v - v.mean(dim=0, keepdim=True)
@@ -655,12 +658,12 @@ class Monolith:
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
-             graph_kind: str = "contiguity", profile: str = "group", **source) -> Monolith:
+             graph_kind: str = "contiguity", profile: str = "group", device: str = "cpu", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache)."""
         from . import graphs
 
         data = assemble(dataset, event, block, years, profile, **source)
-        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind)
+        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device)
         arrays = store.get_arrays("monolith", model.key())
         meta = store.manifest("monolith", model.key())
         if arrays is None or meta is None:
@@ -808,12 +811,23 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
     if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
             or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
+    tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
+    tm.phi = model.phi
+    return tm, extrapolate_effects(model, tm, model.effects(), history)
+
+
+def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.Tensor],
+                        history: str = "auto", increments: dict[str, torch.Tensor] | None = None
+                        ) -> dict[str, torch.Tensor]:
+    """The effects (the fitted ones, or a posterior draw's) with their histories h carried over the
+    test periods of ``tm`` (see `extrapolate`); ``increments`` adds a draw of the history's forecast
+    error (`laplace.forecast_increments`)."""
     monthly = model.data.grain == "month"
     if history == "auto":
         history = "level" if monthly else "linear"
-    tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
+    test = tm.data
     with torch.no_grad():
-        x = {k: v.detach().clone() for k, v in model.effects().items()}
+        x = {k: v.detach().clone() for k, v in effects.items()}
         if monthly:
             # months after the last fitted month; the cyclic season repeats as fitted
             steps = torch.arange(1, test.N.shape[1] + 1, dtype=model.dtype, device=model.device)
@@ -827,8 +841,9 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
             else:
                 slope = h[:, -1:] - h[:, -2:-1]
                 x[name] = h[:, -1:] + slope * steps[None, :]
-    tm.phi = model.phi
-    return tm, x
+            if increments is not None:
+                x[name] = x[name] + increments[name]
+    return x
 
 
 def heldout(model: Monolith, test: BlockData) -> dict:
