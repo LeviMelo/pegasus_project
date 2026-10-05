@@ -120,6 +120,13 @@ def decompose(N0: np.ndarray, r0: np.ndarray, N1: np.ndarray, r1: np.ndarray) ->
 # ---------------------------------------------------------------------- triage
 
 SUBSTITUTION, SYSTEM, NOISE, SIGNAL, FACILITY = "substitution", "system", "noise", "signal", "facility"
+#: How far a recording explanation is established. ``tested``: a test separates it from the claim (a marker at the
+#: level of the deaths, a facility step against stable volume elsewhere, a person-year check). ``bound``: it can
+#: account for at most a stated share of the effect, under a stated assumption (a conserved total across siblings
+#: says nothing of who was recoded). ``consistent``: the aggregates cannot exclude it, nothing more. Only a tested
+#: explanation downgrades a lead; the other two keep it alive with the explanation attached.
+TESTED, BOUND, CONSISTENT = "tested", "bound", "consistent"
+GRADES = (TESTED, BOUND, CONSISTENT)
 THETA = 1.2               # the lenses' minimum rate ratio (§8.4)
 DRIFT = 3.0               # a code whose national level moves by more than this over the period is being introduced or retired
 SURGE = 5.0               # a place's peak year against its median: the expectation may have learned a surge
@@ -173,9 +180,14 @@ class Evidence:
 
 @dataclass
 class Triage:
+    """A lead's class, why, and how far that explanation is established (`GRADES`): only a ``tested`` explanation
+    takes a lead out of the running; ``bound`` and ``consistent`` stay attached to it."""
+
     cls: str
     reason: str
     evidence: dict
+    grade: str = ""                 # tested | bound | consistent ("" for a signal: nothing is claimed)
+    bound: float | None = None      # grade bound: the most of the lead's change the explanation can account for (0-1)
 
 
 def _contrast(a: np.ndarray, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> tuple[float, float]:
@@ -253,13 +265,13 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     pop = _annual(ev.pop[rows].sum(0), ppy)
     y_rows = _annual(ev.y[rows].sum(0), ppy)
     if (pop <= 0).any() and y_rows[pop <= 0].sum() > 0:
-        return Triage(SYSTEM, "denominator: events in years without person-years (municipality created)", info)
+        return Triage(SYSTEM, "denominator: events in years without person-years (municipality created)", info, TESTED)
     near = (yrs[1:] >= span_y[0] - 1) & (yrs[:-1] <= span_y[-1] + 1) if windowed else np.ones(len(yrs) - 1, bool)
     if ev.total is not None:
         deaths = _annual(ev.total[rows].sum(0), ppy)
         if np.any((deaths == 0) & (pop >= EMPTY_YEAR_POP)):
             info["empty_years"] = [int(t) for t in yrs[(deaths == 0) & (pop >= EMPTY_YEAR_POP)]]
-            return Triage(SYSTEM, "denominator: a year with no deaths of any cause in a place with person-years", info)
+            return Triage(SYSTEM, "denominator: a year with no deaths of any cause in a place with person-years", info, TESTED)
         with np.errstate(divide="ignore", invalid="ignore"):
             rate = np.log((deaths - y_rows + 0.5) / np.maximum(pop, 1.0))     # without the lead's own events
             nat_rate = np.log(_annual(ev.total.sum(0), ppy) / _annual(ev.pop.sum(0), ppy))
@@ -267,12 +279,12 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
         big = (pop[1:] >= RATE_BREAK_POP) & (pop[:-1] >= RATE_BREAK_POP)
         if np.any(brk[near & big] > np.log(RATE_BREAK)):
             info["death_rate_break"] = round(float(np.exp(brk[near & big].max())), 2)
-            return Triage(SYSTEM, "denominator: the place's all-cause death rate breaks (boundary change or registration)", info)
+            return Triage(SYSTEM, "denominator: the place's all-cause death rate breaks (boundary change or registration)", info, CONSISTENT)
     with np.errstate(divide="ignore", invalid="ignore"):
         jump = np.abs(np.diff(np.log(pop))) - np.abs(np.diff(np.log(_annual(ev.pop.sum(0), ppy))))
     if np.any(jump[near] > np.log(POP_BREAK)):
         info["population_jump"] = round(float(np.exp(np.nanmax(jump[near]))), 2)
-        return Triage(SYSTEM, "denominator: the place's person-years break (boundary change or re-estimate)", info)
+        return Triage(SYSTEM, "denominator: the place's person-years break (boundary change or re-estimate)", info, CONSISTENT)
 
     # 2. coding substitution: the siblings under the same parent move the other way and absorb the change
     if ev.siblings is not None and direction != 0:
@@ -280,18 +292,18 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
         d_sib, z_sib = _moves(ev.siblings, rows, win, base)
         info.update(sibling_window=round(s_w, 2), sibling_base=round(s_b, 2))
         if d_node * d_sib < 0 and abs(d_sib) >= ABSORB * abs(d_node) and abs(z_sib) >= SIGNIFICANT:
-            return Triage(SUBSTITUTION, "siblings move opposite and absorb most of the change", info)
+            return Triage(SUBSTITUTION, "siblings move opposite and absorb most of the change", info, BOUND, min(1.0, abs(d_sib) / abs(d_node)))
 
     # 3. certification: the ill-defined chapter
     if ev.chapter == "XVIII":
-        return Triage(SYSTEM, "certification: the lead is an ill-defined cause", info)
+        return Triage(SYSTEM, "certification: the lead is an ill-defined cause", info, CONSISTENT)
     if ev.ill_defined is not None and ev.total is not None and direction != 0:
         i_w, i_b = _contrast(ev.ill_defined, rows, win, base)
         t_w, t_b = _contrast(ev.total, rows, win, base)
         info.update(ill_share_window=round(i_w / max(t_w, 1.0), 3), ill_share_base=round(i_b / max(t_b, 1.0), 3))
         d_ill, z_ill = _moves(ev.ill_defined, rows, win, base)
         if d_node * d_ill < 0 and abs(d_ill) >= ABSORB * abs(d_node) and abs(z_ill) >= SIGNIFICANT:
-            return Triage(SYSTEM, "certification: the change goes to the ill-defined chapter", info)
+            return Triage(SYSTEM, "certification: the change goes to the ill-defined chapter", info, BOUND, min(1.0, abs(d_ill) / abs(d_node)))
 
     # 4. recording: the code is being introduced or retired nationally, or the expectation learned a surge
     #    (the national course and a surge elsewhere are read in calendar years: a window touches every year it has a month in)
@@ -305,24 +317,24 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     ratio = (last + 0.5) / (first + 0.5)
     national_peak = spike and direction > 0 and nat[win].max() >= 2 * max(np.median(nat[base]), 1.0)   # the nation peaks there too: an event
     if not national_peak and max(first, last) >= 20 and (ratio >= DRIFT or ratio <= 1 / DRIFT):
-        return Triage(SYSTEM, f"recording: the code's national level moves x{ratio:.2g} over the period", info)
+        return Triage(SYSTEM, f"recording: the code's national level moves x{ratio:.2g} over the period", info, CONSISTENT)
     if direction < 0 and windowed:
         rest = y_rows[~win_a]
         if rest.size >= 4 and rest.max() >= SURGE * max(np.median(rest), 1.0) and rest.max() - np.median(rest) >= 20:
             info["surge"] = [int(yrs[~win_a][rest.argmax()]), float(rest.max())]
-            return Triage(SYSTEM, "model: a deficit against an expectation that learned a surge elsewhere in the period", info)
+            return Triage(SYSTEM, "model: a deficit against an expectation that learned a surge elsewhere in the period", info, TESTED)
 
     # 5. residual categories ("other", "unspecified") that trend or differ by age and sex are coding practice;
     #    a small group spread is the minimum effect
     if ev.residual and estimand in ("trend_divergence", "change_point"):
-        return Triage(SYSTEM, "coding practice: a residual category trending away from its neighbours", info)
+        return Triage(SYSTEM, "coding practice: a residual category trending away from its neighbours", info, CONSISTENT)
     if estimand == "group_disparity":
         if ev.group_spread is not None:
             info["group_spread"], info["groups"] = round(ev.group_spread[0], 3), ev.group_spread[1]
         if ev.residual:
-            return Triage(SYSTEM, "coding practice: a residual category whose age-sex pattern differs", info)
+            return Triage(SYSTEM, "coding practice: a residual category whose age-sex pattern differs", info, CONSISTENT)
         if ev.group_spread is not None and ev.group_spread[0] < MIN_SPREAD:
-            return Triage(NOISE, "the groups' log SIR spreads little more than the minimum effect", info)
+            return Triage(NOISE, "the groups' log SIR spreads little more than the minimum effect", info, TESTED)
         return Triage(SIGNAL, "age-sex pattern differs from the nation's in a specific category", info)
 
     # 6. noise: few events above or below the expectation, or an effect near the minimum with few events
@@ -330,12 +342,12 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
         info["observed"], info["expected"] = round(observed, 1), round(expected, 1)
         rr = observed / max(expected, 1e-9)
         if abs(observed - expected) < MIN_EXCESS or (observed < 30 and 1 / (THETA * 1.25) < rr < THETA * 1.25):
-            return Triage(NOISE, f"small count: {abs(observed - expected):.0f} events from the expectation", info)
+            return Triage(NOISE, f"small count: {abs(observed - expected):.0f} events from the expectation", info, TESTED)
     elif estimand == "trend_divergence" and ev.y[rows].sum() < 100:
-        return Triage(NOISE, f"small count: {ev.y[rows].sum():.0f} events in the place over the period", info)
+        return Triage(NOISE, f"small count: {ev.y[rows].sum():.0f} events in the place over the period", info, TESTED)
     # 7. one institution: the change is carried by one (or a few) recording facilities whose own behaviour steps
     if fac is not None and fac["facility"]:
-        return Triage(FACILITY, fac["reason"], info)
+        return Triage(FACILITY, fac["reason"], info, TESTED)
     return Triage(SIGNAL, "no recording or denominator explanation found in the data", info)
 
 
@@ -462,3 +474,172 @@ def split_effect(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, rows: np.ndarra
     if M <= 0:
         return float("nan"), 1.0
     return float(np.log((Y + 0.5) / (M + 0.5))), tail_p(Y, mu[sub], phi[sub], up=sign > 0)
+
+
+# ---------------------------------------------------------------------- series-level tests of a unit claim
+# (Obs, E) are a unit's observed deaths and the deaths expected from the year's national rates of each sex x age
+# stratum (direct standardisation); every function reads those two series and nothing else. They back the
+# artefact-aware replication of a unit claim (`replication.audit`, ADR-0019).
+
+STEP_DELTA = 6.0         # deviance gap, in units of the dispersion, by which a one-year step must beat the best gradual course
+EXCHANGE_SHARE = 0.5     # a pool's opposite move must undo at least this share of the claim's change in excess deaths ...
+EXCHANGE_Z = 3.0         # ... and be this many standard errors from nothing
+PROFILE_ALPHA = 0.05
+PROFILE_MIN = 20         # fewer displaced deaths than this cannot tell one profile from another
+
+
+def glm_poisson(Obs: np.ndarray, E: np.ndarray, X: np.ndarray, iterations: int = 40
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Poisson log-linear fits of rows ``Obs`` [N, T] with offset log ``E`` on the design ``X`` [T, p], by Newton steps.
+    Returns the coefficients [N, p], their covariance [N, p, p] scaled by the quasi-Poisson dispersion (floored at 1),
+    the fitted means [N, T] and the dispersions [N]. Rows with fewer than 5 events or no exposure are NaN."""
+    Obs = np.atleast_2d(np.asarray(Obs, float))
+    E = np.atleast_2d(np.asarray(E, float))
+    n, T = Obs.shape
+    p = X.shape[1]
+    ok = (Obs.sum(1) >= 5) & (E > 0).all(1)
+    Obs = np.where(ok[:, None], Obs, 1.0)
+    E = np.where(ok[:, None], E, 1.0)
+    b = np.zeros((n, p))
+    b[:, 0] = np.log(np.maximum(Obs.sum(1), 0.5) / np.maximum(E.sum(1), 1e-300))
+    eta0 = np.log(E)
+    for _ in range(iterations):
+        mu = np.exp(np.clip(eta0 + b @ X.T, -50, 50))
+        g = (Obs - mu) @ X
+        h = np.einsum("nt,tp,tq->npq", mu, X, X) + 1e-9 * np.eye(p)
+        step = np.linalg.solve(h, g[..., None])[..., 0]
+        b = b + np.clip(step, -2, 2)
+        if np.abs(step).max() < 1e-9:
+            break
+    mu = np.exp(np.clip(eta0 + b @ X.T, -50, 50))
+    h = np.einsum("nt,tp,tq->npq", mu, X, X) + 1e-9 * np.eye(p)
+    x2 = ((Obs - mu) ** 2 / np.maximum(mu, 1e-300)).sum(1)
+    kappa = np.maximum(x2 / max(T - p, 1), 1.0)
+    cov = np.linalg.inv(h) * kappa[:, None, None]
+    b[~ok] = np.nan
+    cov[~ok] = np.nan
+    return b, cov, mu, kappa
+
+
+def design(years: np.ndarray, degree: int = 1) -> np.ndarray:
+    t = np.asarray(years, float)
+    x = (t - t.mean()) / max(t.std(), 1e-9)
+    return np.stack([x ** j for j in range(degree + 1)], 1)
+
+
+def loglinear(Obs: np.ndarray, E: np.ndarray, years: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The slope of log Obs/E on the standardised years (per standard deviation of the years, the lenses' beta) and its
+    quasi-Poisson standard error, for each row."""
+    b, cov, _, _ = glm_poisson(Obs, E, design(years))
+    return b[:, 1], np.sqrt(cov[:, 1, 1])
+
+
+def slope_p(beta: np.ndarray, se: np.ndarray, direction: int, delta: float, dof: int) -> np.ndarray:
+    """One-sided p that the slope exceeds the minimum divergence ``delta`` in ``direction`` (Student t)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return stats.t.sf((direction * beta - delta) / se, dof)
+
+
+def _deviance(Obs: np.ndarray, mu: np.ndarray) -> np.ndarray:
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return 2 * np.sum(np.where(Obs > 0, Obs * np.log(Obs / np.maximum(mu, 1e-300)), 0.0) - (Obs - mu), axis=-1)
+
+
+def shape_test(Obs: np.ndarray, E: np.ndarray, years: np.ndarray, delta: float | None = None) -> dict:
+    """Abrupt or gradual. The best one-year step (a level before and a level after, the break year searched among those
+    leaving two years on each side) against the better of a log-linear and a log-quadratic course, by the gap in
+    deviance in units of the dispersion. ``delta`` (`STEP_DELTA`, calibrated on negative-binomial worlds by
+    `replication.simulate_shape`) is what the step must win by to be called a step; a quadratic is a gradual course
+    that accelerates. A step is a level shift that persists: replication in later years and other places confirms it as
+    readily as a real change, and the shape alone cannot say which it is (grade ``consistent``)."""
+    delta = STEP_DELTA if delta is None else delta
+    Obs = np.atleast_2d(np.asarray(Obs, float))
+    E = np.atleast_2d(np.asarray(E, float))
+    T = Obs.shape[1]
+    dev = []
+    for deg in (1, 2):
+        _, _, mu, _ = glm_poisson(Obs, E, design(years, deg))
+        dev.append(_deviance(Obs, mu))
+    grad = np.minimum(*dev)
+    best = np.full(Obs.shape[0], np.inf)
+    where = np.zeros(Obs.shape[0], dtype=int)
+    jump = np.full(Obs.shape[0], np.nan)
+    for k in range(2, T - 1):
+        r1 = Obs[:, :k].sum(1) / np.maximum(E[:, :k].sum(1), 1e-300)
+        r2 = Obs[:, k:].sum(1) / np.maximum(E[:, k:].sum(1), 1e-300)
+        mu = E * np.where(np.arange(T)[None, :] < k, r1[:, None], r2[:, None])
+        d = _deviance(Obs, mu)
+        better = d < best
+        best = np.where(better, d, best)
+        where = np.where(better, k, where)
+        jump = np.where(better, (Obs[:, k:].sum(1) + 0.5) / (Obs[:, :k].sum(1) + 0.5) * E[:, :k].sum(1) / E[:, k:].sum(1), jump)
+    phi = np.maximum(np.minimum(grad, best) / max(T - 4, 1), 1.0)
+    gap = (grad - best) / phi
+    cls = np.where(gap >= delta, "step", np.where(gap <= -delta, "gradual", "indeterminate"))
+    return {"shape": cls, "gap": gap, "year": np.asarray(years)[where], "jump": jump}
+
+
+def robust_dispersion(Obs: np.ndarray) -> np.ndarray:
+    """The dispersion of yearly counts (rows) from their second differences, which a trend and a step or two do not
+    inflate (a log-linear fit's lack of fit, read as noise, would hide exactly the series that moved): the median of
+    the squared second differences over six times the local mean, over the median of a chi-squared on one df. Floored at 1."""
+    Obs = np.atleast_2d(np.asarray(Obs, float))
+    d2 = Obs[:, 2:] - 2 * Obs[:, 1:-1] + Obs[:, :-2]
+    mu = np.maximum((Obs[:, 2:] + Obs[:, 1:-1] + Obs[:, :-2]) / 3.0, 1.0)
+    return np.maximum(np.median(d2 ** 2 / (6.0 * mu), axis=1) / 0.455, 1.0)
+
+
+def excess_slope(Obs: np.ndarray, E: np.ndarray, years: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The change per year of the excess deaths Obs - E (a straight line through the years) of each row and its standard
+    error (Poisson counts times `robust_dispersion`)."""
+    tc = np.asarray(years, float) - np.mean(years)
+    sxx = float((tc ** 2).sum())
+    b = ((Obs - E) * tc).sum(1) / sxx
+    se = np.sqrt(robust_dispersion(Obs) * (np.maximum(Obs, 1.0) * tc ** 2).sum(1)) / sxx
+    return b, se
+
+
+def partners(node_slope: float, Obs: np.ndarray, E: np.ndarray, years: np.ndarray) -> np.ndarray:
+    """The codes (rows of ``Obs``, ``E``) of a pool that move against the node: opposite in sign, at a one-sided
+    Bonferroni level over the pool's codes (floor 3 standard errors). A transfer between codes is usually between a
+    few of them, and the rest of a large pool only adds noise to its total."""
+    b, se = excess_slope(Obs, E, years)
+    z = np.where(se > 0, -np.sign(node_slope) * b / se, 0.0)
+    return z >= max(EXCHANGE_Z, float(stats.norm.isf(0.05 / max(len(b), 1))))
+
+
+def exchange(node: tuple[np.ndarray, np.ndarray], rest: tuple[np.ndarray, np.ndarray], years: np.ndarray) -> dict:
+    """Does the rest of a pool move the other way? The change per year of the excess deaths (`excess_slope`) of the
+    claim's node and of the rest. ``share`` is the rest's opposite move over the node's; ``bound`` caps it at 1: the
+    largest part of the node's change that the pool could account for, **if** every death the rest lost (or gained) were a
+    death of the node's, which the totals cannot tell. ``moves`` marks an opposite move of at least `EXCHANGE_SHARE` of the
+    node's at `EXCHANGE_Z`."""
+    bn = float(excess_slope(node[0][None], node[1][None], years)[0][0])
+    br, se = (float(v[0]) for v in excess_slope(rest[0][None], rest[1][None], years))
+    share = -br / bn if bn * br < 0 else 0.0
+    z = br / se if se > 0 else 0.0
+    return {"node_per_year": bn, "rest_per_year": br, "rest_z": z, "share": share, "bound": min(1.0, share),
+            "moves": bool(share >= EXCHANGE_SHARE and abs(z) >= EXCHANGE_Z)}
+
+
+def profile_test(moved: np.ndarray, p_node: np.ndarray, p_rest: np.ndarray, seed: int = 0, draws: int = 4000) -> dict:
+    """Do the deaths a pool lost (or gained) look like the node's, or like the pool's own? ``moved`` are their counts
+    over cells (sex, age, place of occurrence, mechanism), ``p_node`` and ``p_rest`` the cell profiles of the node's
+    deaths and of the rest's in the base years. If the displaced deaths were the node's, their profile is the node's;
+    if the node and the rest changed independently it is the rest's. The log-likelihood ratio of the two profiles is
+    compared with its distribution under each (multinomial draws): ``supports`` (the rest's profile rejected, the node's
+    not: the displaced deaths are node-like, a ``tested`` recoding), ``excluded`` (the node's rejected, the rest's not:
+    the exchange is not a recoding) or ``open`` (both or neither rejected, or too few deaths)."""
+    n = int(round(float(moved.sum())))
+    if n < PROFILE_MIN:
+        return {"result": "open", "n": n, "reason": "too few displaced deaths"}
+    w = np.log(p_node) - np.log(p_rest)
+    llr = float((moved * w).sum())
+    rng = np.random.default_rng(seed)
+    under_rest = rng.multinomial(n, p_rest, draws) @ w
+    under_node = rng.multinomial(n, p_node, draws) @ w
+    p_r = float((np.sum(under_rest >= llr) + 1) / (draws + 1))      # the rest's profile gives a ratio this node-like
+    p_n = float((np.sum(under_node <= llr) + 1) / (draws + 1))      # the node's profile gives a ratio this rest-like
+    rej_rest, rej_node = p_r < PROFILE_ALPHA, p_n < PROFILE_ALPHA
+    result = "supports" if rej_rest and not rej_node else "excluded" if rej_node and not rej_rest else "open"
+    return {"result": result, "n": n, "llr": llr, "p_rest_profile": p_r, "p_node_profile": p_n}

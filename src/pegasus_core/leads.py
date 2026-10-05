@@ -53,7 +53,7 @@ class Lead:
     replications: dict[str, Any] = field(default_factory=dict)
     robustness: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
-    status: str = "open"           # open | replicated | explained | retired
+    status: str = "open"           # open | replicated | rescoped | explained | retired
     gate: str = "passed"           # "failed": the lens/estimand/scale failed its gate (tools.SURVEY_PLAN); an exploratory lead
     train_last: int | None = None  # a prospective lead (tier BP/BPA, ADR-0012): the last year of the fit it was read against
     purpose: str | None = None     # ... and which object: "expectation" (BP) or "alarm" (BPA)

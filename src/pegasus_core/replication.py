@@ -10,16 +10,19 @@ withdrawn). The independent units are
   later ones (BP, `Expectations.prospective`), and the same locus is tested on them, re-levelled to the state's
   course of each year so a shock that touches every place does not count (COVID-19 in 2020-21). A departure
   that persists or recurs replicates; a one-off event does not, by nature.
-* **other places** (`spatial_split`, `test_spatial`): for a claim about a predeclared unit (a state, a region)
-  the lens is run on one random half of its municipalities and tested on the other, the halves drawn by immediate
-  region and separated by a buffer of the graph's neighbours (ADR-0005: places that touch share their shocks).
+* **other places** (`jurisdiction`, ADR-0019): for a claim about a predeclared unit, the other *jurisdictions*: a state
+  claim must hold in other states (else its scope is one jurisdiction and it is not confirmed), a region claim in a random
+  half of its states and without its most influential one, a municipality claim not be carried by its state. ADR-0015
+  halved the unit's own municipalities, which share a coding regime, and so confirmed regimes as readily as mortality.
 * **another record system** (`corroborate.py`): the same place and years in S2iD, SINAN or SIH.
 
 The event sides survive for one thing: the *size* of an effect after selection. Given a cell's rate its sides
 are independent Poisson counts, so the effect read on side E is unbiased for that rate whatever side A selected
 (`honest_effect`). It includes the cell's own frailty; it is not evidence that the effect recurs.
 
-The simulations at the end (`simulate_*`) measure each tier's size and power on negative-binomial worlds.
+`audit` reads a unit claim against how deaths are recorded and grades every recording explanation it raises
+(`explain.GRADES`): only a ``tested`` one downgrades a claim. The simulations (`simulate_*`) measure each tier's and each
+test's size and power on negative-binomial worlds.
 """
 
 from __future__ import annotations
@@ -251,81 +254,516 @@ def test_prospective(sp: surprise.Surprise, estimand: str, locus: dict[str, Any]
             "years": [int(s.years[0]), int(s.years[-1])], "train": sp.extras.get("train")}
 
 
-# ---------------------------------------------------------------------- other places
-
-
-def spatial_split(unit: np.ndarray, region_of: dict[int, str], edges: np.ndarray, places: np.ndarray, seed_text: str
-                  ) -> tuple[np.ndarray, np.ndarray]:
-    """Two disjoint sets of a unit's places for selecting and for testing: the unit's immediate regions halved at
-    random (`control.spatial_halves`), then every place of either half that touches a place of the other removed
-    (``edges``: pairs of indices into ``places``). Places that touch share their shocks; with the buffer the halves
-    share what the graph's neighbourhoods share only through the unit as a whole, which is the claim."""
-    h1, h2 = control.spatial_halves(unit, region_of, f"spatial-halves-v1|{seed_text}")
-    index = {int(u): i for i, u in enumerate(places)}
-    side = np.zeros(len(places), dtype=np.int8)
-    side[[index[int(u)] for u in h1]] = 1
-    side[[index[int(u)] for u in h2]] = 2
-    a, b = edges[:, 0], edges[:, 1]
-    touch = np.zeros(len(places), dtype=bool)
-    cross = (side[a] > 0) & (side[b] > 0) & (side[a] != side[b])
-    touch[a[cross]] = True
-    touch[b[cross]] = True
-    keep = ~touch
-    return (np.array([u for u in h1 if keep[index[int(u)]]], dtype=h1.dtype),
-            np.array([u for u in h2 if keep[index[int(u)]]], dtype=h2.dtype))
-
-
-def test_trend_unit(s: surprise.Surprise, locus: dict[str, Any], direction: int) -> dict[str, Any]:
-    """A trend lead at an aggregate scale (region, state) against the national course on the surprise ``s``: the
-    places of ``locus`` as one NB series, `lenses.unit_trends`' estimator (vague prior, dispersion from a cubic
-    course), one-sided against the scale's minimum divergence delta (Student t on T - 4 df)."""
-    if direction == 0:
-        return {"tested": False, "reason": "no direction"}
-    rows = np.nonzero(np.isin(s.places, locus.get("places", [])))[0]
-    if rows.size == 0:
-        return {"tested": False, "reason": "locus outside the grid"}
-    x = (s.years - s.years.mean()) / max(float(s.years.std()), 1e-9)
-    delta = lenses._trend_delta(s, locus["scale"])
-    off = lenses._offset(s)[rows]
-    phi = s.phi[rows]
-    fin = np.isfinite(phi) & (phi > 0)
-    o = off.sum(0)
-    inv = np.where(fin, off ** 2 / np.where(fin, phi, 1.0), 0.0).sum(0)
-    phi_u = np.divide(o ** 2, inv, out=np.full(o.shape, np.inf), where=inv > 0)
-    y = s.y[rows].sum(0)
-    vague = lambda j: np.full(j, 1e-6)  # noqa: E731
-    _, b, sd, _ = surprise.refit_place(y[None], o[None], phi_u[None], np.stack([np.ones_like(x), x], 1), tau=vague(2))
-    fit, *_ = surprise.refit_place(y[None], o[None], phi_u[None], np.stack([x ** j for j in range(4)], 1), tau=vague(4))
-    var = fit + np.where(np.isfinite(phi_u), fit ** 2 / np.where(np.isfinite(phi_u), phi_u, 1.0), 0.0)
-    kappa = max(float(np.divide((y - fit[0]) ** 2, var[0], out=np.zeros_like(y), where=var[0] > 0).sum()
-                      / max(len(x) - 4, 1)), 1.0)
-    se = float(sd[0, 1]) * np.sqrt(kappa)
-    if not se > 0:
-        return {"tested": False, "reason": "no information"}
-    z = (direction * float(b[0, 1]) - delta) / se
-    return {"tested": True, "p": float(stats.t.sf(z, max(len(x) - 4, 1))), "effect": float(direction * b[0, 1] / delta),
-            "beta": float(b[0, 1]), "se": se, "dispersion": kappa, "observed": float(y.sum())}
-
-
-def test_spatial(s: surprise.Surprise, x: leads.Lead, select: np.ndarray, test: np.ndarray, alpha: float = 0.05
-                 ) -> dict[str, Any]:
-    """A claim about a unit (a state's or region's trend) on two disjoint sets of its places: the lens's statistic on
-    ``select`` must reach ``alpha`` (the claim is carried by that half), and the p-value reported is the same
-    statistic on ``test``, which took no part in it. Only a unit claim has places to split: a cluster or a
-    municipality was itself chosen among the places."""
-    _, direction = span_direction(x)
-    a = test_trend_unit(s, {**x.locus, "places": [int(u) for u in select]}, direction)
-    b = test_trend_unit(s, {**x.locus, "places": [int(u) for u in test]}, direction)
-    if not (a["tested"] and b["tested"]):
-        return {"tested": False, "reason": a.get("reason") or b.get("reason")}
-    return {"tested": True, "p": b["p"], "p_select": a["p"], "selected": bool(a["p"] < alpha),
-            "effect": b["effect"], "effect_select": a["effect"], "n_select": int(len(select)), "n_test": int(len(test))}
-
-
 def test_lead(sp: surprise.Surprise, x: leads.Lead, level: str = "state") -> dict[str, Any]:
     """A lead tested on the later years of ``sp``."""
     _, direction = span_direction(x)
     return test_prospective(sp, x.estimand, {"places": x.locus.get("places", [])}, direction, level)
+
+
+# ---------------------------------------------------------------------- a unit claim, read against how deaths are recorded (ADR-0019)
+#
+# A unit claim (a state's or region's trend against the national course) replicates in later years and in the unit's
+# other municipalities by the nature of a coding regime: a certifier's practice persists and serves the whole
+# jurisdiction. `audit` therefore reads a claim against five things the tiers above cannot see, on direct
+# standardisation (the year's observed national rate by sex x age, not the model's course), and **grades** every
+# recording explanation it raises (`explain.GRADES`): only a ``tested`` one downgrades the claim.
+
+CHAPTER_R = ("R00", "R99")
+INTENT = ("Y10", "Y34")              # events of undetermined intent
+WIDE_BLOCKS = (("V01", "V99"), ("W00", "W19"), ("W75", "W84"))   # blocks the ICD tree's parent holds too wide for siblings
+AGE_CUTS = (0, 15, 30, 45, 60, 75)   # coarse ages of the profile cells
+#: ICD-10 gives the intent chapters one mechanism list: an assault X85-Y09 and an event of undetermined intent
+#: Y10-Y34 are the same mechanism at the same position (X93-X95 firearm / Y22-Y24, X99 sharp object / Y28 ...).
+MECHANISMS = ((("X85", "X90"), ("Y10", "Y19")), (("X91", "X91"), ("Y20", "Y20")), (("X92", "X92"), ("Y21", "Y21")),
+              (("X93", "X95"), ("Y22", "Y24")), (("X96", "X96"), ("Y25", "Y25")), (("X97", "X97"), ("Y26", "Y26")),
+              (("X98", "X98"), ("Y27", "Y27")), (("X99", "X99"), ("Y28", "Y28")), (("Y00", "Y00"), ("Y29", "Y29")),
+              (("Y01", "Y01"), ("Y30", "Y30")), (("Y02", "Y02"), ("Y31", "Y31")), (("Y03", "Y03"), ("Y32", "Y32")),
+              (("Y04", "Y09"), ("Y33", "Y34")))
+PLACES = {"0": 0, "4": 2, "8": 3, "9": 3, "": 3}      # fourth character of an external-cause code: home, street, other; the rest -> 1
+
+
+def code_range(lo: str, hi: str, known) -> list[str]:
+    return [c for c in known if lo <= c <= hi]
+
+
+def node_codes(node: str, known) -> list[str]:
+    """The 3-character categories a field covers (a node is a category or a range ``A00-A09``)."""
+    if "-" in node:
+        lo, hi = node.split("-")
+        return code_range(lo, hi, known)
+    return [node] if node in set(known) else []
+
+
+def block_of(node: str, known, tree=None) -> list[str]:
+    """The ICD-10 block that holds the node's siblings: V, W00-W19 and W75-W84 by `WIDE_BLOCKS`, else the tree's
+    parent (``tree``: the ICD-10 code structure with a ``parent`` column indexed by code)."""
+    first = (node_codes(node, known) or [node])[0]
+    for lo, hi in WIDE_BLOCKS:
+        if lo <= first <= hi:
+            return code_range(lo, hi, known)
+    p = tree.loc[node, "parent"] if tree is not None and node in tree.index else None
+    return node_codes(p, known) if isinstance(p, str) and "-" in p else []
+
+
+class Strata:
+    """Deaths (or any event) by municipality, year, sex, age band and 4-character code, and the person-years by
+    municipality, year, sex and band: everything direct standardisation and the profile of a set of deaths need.
+    The expectation of a set of codes in a set of places is the year's national rate of each sex x age stratum, times the
+    places' person-years there (`series`); it moves with the nation's course and with nothing else."""
+
+    def __init__(self, events, pop, age_edges):
+        import pandas as pd
+
+        pop = pd.DataFrame(pop)
+        ev = pd.DataFrame(events)
+        self.places = np.sort(pop["u"].unique())
+        self.years = np.sort(pop["year"].unique())
+        sexes, bands = np.sort(pop["sex"].unique()), np.sort(pop["band"].unique())
+        self.sexes, self.bands = sexes, bands
+        U, T, S, B = len(self.places), len(self.years), len(sexes), len(bands)
+        self.shape = (U, T, S, B)
+        self.N = np.zeros(self.shape)
+        np.add.at(self.N, (np.searchsorted(self.places, pop["u"].to_numpy()), np.searchsorted(self.years, pop["year"].to_numpy()),
+                           np.searchsorted(sexes, pop["sex"].to_numpy()), np.searchsorted(bands, pop["band"].to_numpy())),
+                  pop["n"].to_numpy(float))
+        ev = ev[ev["u"].isin(self.places) & ev["year"].isin(self.years)]
+        self.u = np.searchsorted(self.places, ev["u"].to_numpy()).astype(np.int32)
+        self.t = np.searchsorted(self.years, ev["year"].to_numpy()).astype(np.int16)
+        self.s = np.searchsorted(sexes, ev["sex"].to_numpy()).astype(np.int8)
+        self.b = np.searchsorted(bands, ev["band"].to_numpy()).astype(np.int8)
+        self.y = ev["y"].to_numpy(float)
+        codes = ev["code"].astype(str)
+        self.c3s = np.array(sorted(codes.str[:3].unique()))
+        self.c3 = np.searchsorted(self.c3s, codes.str[:3].to_numpy()).astype(np.int16)
+        self.place = codes.str[3:4].map(PLACES).fillna(1).to_numpy().astype(np.int8)    # place of occurrence of an external cause
+        self.coarse_of_band = np.searchsorted(AGE_CUTS, bands, side="right") - 1
+        self.age = self.coarse_of_band[self.b]
+        self._rate: dict[tuple, np.ndarray] = {}
+
+    @classmethod
+    def from_gateway(cls, dataset: str, event: str, years: list[int], source: str = "popsvs", log=print) -> Strata:
+        """Events and person-years from the gateway: bands are the population source's own age edges."""
+        import duckdb
+        import pandas as pd
+
+        from . import gateway
+
+        edges = np.array(gateway.age_edges(source))
+        rows = []
+        for y in years:
+            con = duckdb.connect()
+            con.register("c", gateway.event_counts(dataset, event, y).counts)
+            rows.append(con.execute(f"""select u, year, sex, (select max(e) from unnest({edges.tolist()}) t(e)
+                where e <= least(greatest(age, 0), 120))::smallint band, code, sum(y)::int y from c group by all""").fetchdf())
+        con = duckdb.connect()
+        con.register("p", gateway.population(list(years), source=source))
+        pop = con.execute(f"""select u, year, sex, (select max(e) from unnest({edges.tolist()}) t(e)
+            where e <= greatest(age, 0))::smallint band, sum(n) n from p group by all""").fetchdf()
+        log(f"strata {dataset}.{event} {years[0]}-{years[-1]}: {sum(len(r) for r in rows)} event rows")
+        return cls(pd.concat(rows), pop, edges)
+
+    # ---- direct standardisation
+    def _mask(self, c3set) -> np.ndarray:
+        idx = np.searchsorted(self.c3s, sorted(c3set))
+        idx = idx[(idx < len(self.c3s))]
+        keep = np.isin(self.c3s[idx], list(c3set))
+        return np.isin(self.c3, idx[keep])
+
+    def national_rate(self, c3set) -> np.ndarray:
+        """The year's national rate by sex x band of the codes: [T, S, B]."""
+        key = tuple(sorted(c3set))
+        if key not in self._rate:
+            m = self._mask(c3set)
+            nat = np.zeros(self.shape[1:])
+            np.add.at(nat, (self.t[m], self.s[m], self.b[m]), self.y[m])
+            self._rate[key] = nat / np.maximum(self.N.sum(0), 1e-300)
+        return self._rate[key]
+
+    def series_groups(self, group: np.ndarray, c3set, n_groups: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """Observed and expected deaths [G, T] of the codes for groups of municipalities (``group``: a group index per
+        municipality of `places`, -1 for none), the expectation from the year's national rates of each stratum."""
+        G = int(group.max()) + 1 if n_groups is None else n_groups
+        rate = self.national_rate(c3set)
+        m = self._mask(c3set) & (group[self.u] >= 0)
+        T = self.shape[1]
+        Obs = np.bincount(group[self.u[m]].astype(np.int64) * T + self.t[m], weights=self.y[m], minlength=G * T).reshape(G, T)
+        E = np.zeros((G, T))
+        for g in range(G):
+            E[g] = (self.N[group == g].sum(0) * rate).sum((1, 2))
+        return Obs, E
+
+    def series_codes(self, places, codes) -> tuple[np.ndarray, np.ndarray]:
+        """Observed and expected deaths [C, T] of each 3-character category of ``codes`` in a set of places."""
+        sel = np.isin(self.places, places)
+        T = self.shape[1]
+        idx = np.searchsorted(self.c3s, codes)
+        pos = np.full(len(self.c3s), -1)
+        pos[idx] = np.arange(len(codes))
+        m = (pos[self.c3] >= 0) & sel[self.u]
+        Obs = np.bincount(pos[self.c3[m]].astype(np.int64) * T + self.t[m], weights=self.y[m], minlength=len(codes) * T).reshape(len(codes), T)
+        nat = np.zeros((len(codes), T, self.shape[2], self.shape[3]))
+        mn = pos[self.c3] >= 0
+        np.add.at(nat, (pos[self.c3[mn]], self.t[mn], self.s[mn], self.b[mn]), self.y[mn])
+        rate = nat / np.maximum(self.N.sum(0), 1e-300)[None]
+        E = (self.N[sel].sum(0)[None] * rate).sum((2, 3))
+        return Obs, E
+
+    def series(self, places, c3set) -> tuple[np.ndarray, np.ndarray]:
+        """Observed and expected deaths over the years of the codes in a set of places."""
+        group = np.where(np.isin(self.places, places), 0, -1)
+        Obs, E = self.series_groups(group, c3set, 1)
+        return Obs[0], E[0]
+
+    # ---- cells of a profile
+    def cells(self, places, c3set, dims: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
+        """Observed and expected deaths [T, C] by cell: sex, coarse age and, as ``dims`` asks, the place of occurrence
+        (the code's fourth character) and the mechanism (`MECHANISMS`). The expectation of a cell is the nation's rate
+        there times the places' person-years of the sex and coarse age."""
+        S, A = self.shape[2], len(AGE_CUTS)
+        P = 4 if "place" in dims else 1
+        M = len(MECHANISMS) + 1 if "mech" in dims else 1
+        mech_of = np.full(len(self.c3s), M - 1)
+        for i, (assault, undet) in enumerate(MECHANISMS):
+            for lo, hi in (assault, undet):
+                mech_of[(self.c3s >= lo) & (self.c3s <= hi)] = i
+        place_of = self.place.astype(np.int64) if "place" in dims else 0
+        cell = ((self.s.astype(np.int64) * A + self.age) * P + place_of) * M + (mech_of[self.c3] if "mech" in dims else 0)
+        C = S * A * P * M
+        m = self._mask(c3set)
+        T = self.shape[1]
+        nat = np.bincount(self.t[m].astype(np.int64) * C + cell[m], weights=self.y[m], minlength=T * C).reshape(T, C)
+        inside = m & np.isin(self.u, np.nonzero(np.isin(self.places, places))[0])
+        obs = np.bincount(self.t[inside].astype(np.int64) * C + cell[inside], weights=self.y[inside], minlength=T * C).reshape(T, C)
+        pop_nat = np.zeros((T, S, A))
+        pop_in = np.zeros((T, S, A))
+        sel = np.isin(self.places, places)
+        for b, a in enumerate(self.coarse_of_band):
+            pop_nat[:, :, a] += self.N[:, :, :, b].sum(0)
+            pop_in[:, :, a] += self.N[sel][:, :, :, b].sum(0)
+        s_of = np.repeat(np.arange(S), A * P * M)
+        a_of = np.tile(np.repeat(np.arange(A), P * M), S)
+        exp = pop_in[:, s_of, a_of] * nat / np.maximum(pop_nat[:, s_of, a_of], 1e-300)
+        return obs, exp
+
+
+def _delta(scale: str, years) -> float:
+    return lenses._trend_delta(types.SimpleNamespace(years=np.asarray(years)), scale)
+
+
+def jurisdiction(st: Strata, places, scale: str, c3set, direction: int, years, seed_text: str = "jurisdiction-v1",
+                 alpha: float = 0.05) -> dict[str, Any]:
+    """The other places of a claim, halved by the unit that sets the coding regime (ADR-0019). A coding regime is a
+    jurisdiction's practice: one certifier serves a state, so the state's own municipalities share it, and halving
+    them (ADR-0015's spatial tier) confirms the regime as readily as a mortality change. The independent places are
+    the other jurisdictions:
+
+    * **state** claim: the same divergence from the nation's course, on the same codes, in the other states (direct
+      standardisation, the lens's minimum divergence); it holds if more of them diverge the same way than chance
+      allows (binomial at ``alpha`` over the states with 30 or more events). It is then not one state's: the claim is
+      **re-scoped** to the states where it holds. If not, its scope is *one jurisdiction* and it gets no spatial
+      confirmation: a coding regime, a real local change and a model misfit cannot be told apart by that unit.
+    * **region** claim: the region's states halved at random (the claim must reach ``alpha`` on one half and replicate
+      on the other) and the claim without its most influential state (it must keep half its slope), else re-scoped to that state.
+    * **municipality** claim (read against its neighbours): the regime is its state's, so the state's other
+      municipalities must not carry the divergence (same direction, half the slope, ``alpha``), else re-scoped to the state.
+    """
+    yrs = np.asarray(years)
+    ok_years = np.isin(st.years, yrs)
+    state_of = (st.places // 10000).astype(int)
+    states = np.unique(state_of)
+    own = np.unique(np.asarray(places, int) // 10000)
+    dof = len(yrs) - 2
+
+    def beta_of(group, n=None):
+        Obs, E = st.series_groups(group, c3set, n)
+        Obs, E = Obs[:, ok_years], E[:, ok_years]
+        b, se = explain.loglinear(Obs, E, yrs)
+        return Obs, b, se
+
+    if scale == "state":
+        group = np.searchsorted(states, state_of)
+        Obs, b, se = beta_of(group)
+        d = _delta("state", yrs)
+        p = explain.slope_p(b, se, direction, d, dof)
+        others = np.array([s not in own for s in states]) & (Obs.sum(1) >= 30) & np.isfinite(p)
+        hit = others & (p < alpha) & (np.sign(b) == direction)
+        n, k = int(others.sum()), int(hit.sum())
+        pb = float(stats.binom.sf(k - 1, n, alpha)) if n else 1.0
+        multi = bool(k >= 2 and pb < alpha)
+        return {"unit": "state", "scope": "multi-state" if multi else "one jurisdiction", "ok": multi, "states_tested": n,
+                "states_holding": [int(s) for s in states[hit]], "p_binomial": pb}
+    if scale == "region":
+        mine = np.array([s for s in states if s in set(own.tolist()) or s in set((np.asarray(places, int) // 10000).tolist())])
+        if len(mine) < 4:
+            return {"unit": "region", "scope": "region", "ok": False, "reason": "fewer than four states to halve"}
+        rng = np.random.default_rng(config.seed(seed_text, *map(int, mine)))
+        order = rng.permutation(len(mine))
+        a, c = mine[order[: len(mine) // 2]], mine[order[len(mine) // 2:]]
+        d = _delta("region", yrs)
+        res = {}
+        for name, half in (("select", a), ("test", c)):
+            group = np.where(np.isin(state_of, half) & np.isin(st.places, places), 0, -1)
+            _, b, se = beta_of(group, 1)
+            res[name] = (float(b[0]), float(explain.slope_p(b, se, direction, d, dof)[0]))
+        full_group = np.where(np.isin(st.places, places), 0, -1)
+        _, bf, _ = beta_of(full_group, 1)
+        worst, drop = 1.0, None
+        for s in mine:
+            group = np.where(np.isin(st.places, places) & (state_of != s), 0, -1)
+            _, b, _ = beta_of(group, 1)
+            kept = float(direction * b[0] / max(direction * bf[0], 1e-12))
+            if kept < worst:
+                worst, drop = kept, int(s)
+        ok = bool(res["select"][1] < alpha and res["test"][1] < alpha and worst >= 0.5)
+        return {"unit": "region", "scope": "region" if ok else (f"state {drop}" if worst < 0.5 else "region (not replicated)"),
+                "ok": ok, "p_select": res["select"][1], "p_test": res["test"][1], "kept_without_top_state": worst, "top_state": drop}
+    # municipality: the state's other municipalities
+    st_of = np.unique(np.asarray(places, int) // 10000)
+    group = np.where(np.isin(state_of, st_of) & ~np.isin(st.places, places), 0, -1)
+    _, b, se = beta_of(group, 1)
+    _, bm, _ = beta_of(np.where(np.isin(st.places, places), 0, -1), 1)
+    p = float(explain.slope_p(b, se, direction, _delta("municipality", yrs), dof)[0])
+    carried = bool(p < alpha and direction * b[0] >= 0.5 * direction * bm[0])
+    return {"unit": "municipality", "scope": "state" if carried else "municipality", "ok": not carried, "p_state_rest": p,
+            "state_rest_beta": float(b[0]), "beta": float(bm[0])}
+
+
+def conserved_level(st: Strata, places, scale: str, node_set, codes, name: str, years, later_years=None,
+                    seed_text: str = "rescope-v1") -> dict[str, Any]:
+    """The claim lifted to the level where the total is conserved (the node and the pool that took its change: its ICD
+    block, R00-R99, undetermined intent), re-tested with the full statistics of a unit claim: the slope of the pooled
+    O/E on the observed national rate against the scale's minimum divergence (one-sided in the pooled direction, Student t),
+    its size over the period, the later years' observed over expected, and the other jurisdictions
+    (`jurisdiction`). The code-level shift stays reported beside it: a change of certification, informative on its own."""
+    yrs = np.asarray(years)
+    union = sorted(set(node_set) | set(codes))
+    ok_years = np.isin(st.years, yrs)
+    Obs, E = (a[ok_years] for a in st.series(places, union))
+    b, se = explain.loglinear(Obs, E, yrs)
+    d = int(np.sign(b[0])) or 1
+    p = float(explain.slope_p(b, se, d, _delta(scale, yrs), len(yrs) - 2)[0])
+    span = (yrs.max() - yrs.min()) / yrs.std()
+    node_o = st.series(places, list(node_set))[0][ok_years].sum()
+    out = {"level": name, "categories": len(union), "node_share_of_deaths": float(node_o / max(Obs.sum(), 1.0)), "beta": float(b[0]), "se": float(se[0]), "direction": d, "p": p,
+           "ratio_over_period": float(np.exp(b[0] * span)), "ok": bool(p < 0.05)}
+    if later_years is not None:
+        Ol, El = st.series(places, union)
+        late = np.isin(st.years, np.asarray(later_years))
+        out["obs_exp_later"] = float(Ol[late].sum() / max(El[late].sum(), 1e-300))
+    out["jurisdiction"] = jurisdiction(st, places, scale, union, d, yrs, seed_text)
+    return out
+
+
+def pool_exchange(node: tuple[np.ndarray, np.ndarray], Oc: np.ndarray, Ec: np.ndarray, years) -> tuple[dict[str, Any], np.ndarray]:
+    """Does a pool (rows ``Oc``, ``Ec``: its codes) move against the node? Two readings, either of which counts: the pool's
+    total (`explain.exchange`; a diffuse transfer) and the codes that move against the node (`explain.partners`; a transfer
+    between a few codes, whose signal the rest of a large pool only dilutes). Returns the record (``moves``, ``via``,
+    ``share``, ``bound``, ``pooled_beta``) and the mask of partner codes."""
+    Obs, E = node
+    whole = explain.exchange(node, (Oc.sum(0), Ec.sum(0)), years)
+    bn = whole["node_per_year"]
+    pick = explain.partners(bn, Oc, Ec, years)
+    part = explain.exchange(node, (Oc[pick].sum(0), Ec[pick].sum(0)), years) if pick.any() else None
+    use, via = (part, "partners") if part is not None and part["moves"] else (whole, "pool")
+    return {**use, "moves": bool(use["moves"]), "via": via, "pool_share": whole["share"], "pool_z": whole["rest_z"],
+            "pooled_beta": float(explain.loglinear(Obs + Oc.sum(0), E + Ec.sum(0), years)[0][0])}, pick
+
+
+def audit(st: Strata, places, node: str, scale: str, beta_claim: float, direction: int, train_years, tree=None,
+          seed_text: str = "audit-v1", later_years=None) -> dict[str, Any]:
+    """A unit claim read against how deaths are recorded, every explanation graded (`explain.GRADES`).
+
+    1. **National rate.** The slope of the node's Obs/E on the standardised years with the expectation from the year's
+       *observed* national rate of each sex x age stratum (direct standardisation) must itself reach the lens's minimum
+       divergence, in the claim's direction, with at least half the claim's size (`control.replicates`); the claim was
+       selected against the model's national course, which a code whose national rate moves fast misses. A claim that
+       fails is ``not_replicated``.
+    2. **All-cause slope**, the mandatory column: the unit's all-cause slope (direct) and the share of the claim's slope it
+       carries. A share of half or more is a completeness or denominator co-movement, graded ``bound``.
+    3. **Conservation** inside an ICD family: the node pooled with the rest of its ICD block, with R00-R99 and (an
+       external cause) with undetermined intent Y10-Y34, and with all of those. If a pool's rest moves the other way by at
+       least half the node's change in excess deaths (`explain.exchange`) the totals are conserved: the claim may be a
+       transfer between codes. That is a ``bound`` (at most that share, if every death the pool lost were the node's).
+       It becomes ``tested`` when the displaced deaths are compared with the node's and the pool's own deaths in sex, age,
+       place of occurrence and, between the intent chapters, mechanism (`explain.profile_test`): resembling the node's
+       and not the pool's, it supports the recoding; resembling the pool's and not the node's, it excludes it.
+    4. **Shape.** An abrupt one-year step against a gradual course (`explain.shape_test`): a step is classed
+       administrative (``consistent``: a level shift is what a change of practice looks like, and a real shock too).
+    5. **Jurisdiction** (`jurisdiction`): the unit that sets the regime, not the unit's own municipalities; its ``ok`` is
+       the spatial confirmation of ADR-0019.
+
+    6. **Re-scope** (`conserved_level`): where a pool took the change (not excluded by a test) the claim is lifted to the
+       level where the total is conserved and re-tested there with the full statistics of a unit claim; the code-level shift
+       stays reported beside it.
+
+    The verdict: ``not_replicated``; ``rescoped`` (a tested explanation accounts for at least half the claim at the code
+    level, and a conserved level stands: the family's epidemiology and the code's certification are both reported);
+    ``explained`` (nothing remains at any conserved level); ``open`` (explanations remain, none tested against);
+    ``survives`` (every explanation raised was excluded by a test, or none was raised). A lead is dropped only by
+    ``not_replicated`` or ``explained``."""
+    yrs = np.asarray(train_years)
+    known = list(st.c3s)
+    node_set = node_codes(node, known)
+    out: dict[str, Any] = {"node": node, "scale": scale, "years": [int(yrs[0]), int(yrs[-1])]}
+    ok_years = np.isin(st.years, yrs)
+    Obs, E = (a[ok_years] for a in st.series(places, node_set))
+    delta = _delta(scale, yrs)
+    b, se = explain.loglinear(Obs, E, yrs)
+    p = float(explain.slope_p(b, se, direction, delta, len(yrs) - 2)[0])
+    out["national"] = {"beta": float(b[0]), "se": float(se[0]), "p": p, "claim_beta": float(beta_claim),
+                       "attenuation": float(b[0] / beta_claim) if beta_claim else None,
+                       "ok": bool(control.replicates(float(beta_claim), float(b[0]), p))}
+    if later_years is not None:
+        Ol, El = st.series(places, node_set)
+        late = np.isin(st.years, np.asarray(later_years))
+        out["national"]["obs_exp_later"] = float(Ol[late].sum() / max(El[late].sum(), 1e-300))
+    Oa, Ea = (a[ok_years] for a in st.series(places, known))
+    ba, sea = explain.loglinear(Oa, Ea, yrs)
+    share = float(max(0.0, ba[0] / b[0])) if b[0] * ba[0] > 0 else 0.0
+    out["all_cause"] = {"beta": float(ba[0]), "se": float(sea[0]), "share_of_claim": share}
+    expl: list[dict[str, Any]] = []
+    if share >= 0.5:
+        expl.append({"kind": "completeness or denominator co-movement", "grade": explain.BOUND, "bound": min(1.0, share),
+                     "assumption": "the unit's all-cause drift applies to the node in proportion", "outcome": "open"})
+    sh = explain.shape_test(Obs, E, yrs)
+    out["shape"] = {"shape": str(sh["shape"][0]), "gap": float(sh["gap"][0]), "year": int(sh["year"][0]), "jump": float(sh["jump"][0])}
+    if out["shape"]["shape"] == "step":
+        expl.append({"kind": "administrative step", "grade": explain.CONSISTENT, "bound": None,
+                     "assumption": f"a level shift of x{out['shape']['jump']:.2g} between {out['shape']['year'] - 1} and "
+                                   f"{out['shape']['year']} is what a change of practice looks like; a real shock too", "outcome": "open"})
+    if node_set and CHAPTER_R[0] <= node_set[0] <= CHAPTER_R[1]:
+        expl.append({"kind": "certification (the claim's subject is the ill-defined chapter)", "grade": explain.CONSISTENT,
+                     "bound": None, "assumption": "a change in an R code is a change of what is certified as ill-defined", "outcome": "open"})
+    # conservation
+    block = [c for c in block_of(node, known, tree) if c not in node_set]
+    rest_r = [c for c in code_range(*CHAPTER_R, known) if c not in node_set]
+    external = bool(node_set) and "V" <= node_set[0][0] <= "Y" and not node_set[0].startswith("V")
+    rest_y = [c for c in code_range(*INTENT, known) if c not in node_set] if external else []
+    pools = {"block": block, "R00-R99": rest_r, "undetermined intent": rest_y}
+    pools = {k: v for k, v in pools.items() if v}
+    if len(pools) > 1:
+        pools["all"] = sorted(set().union(*pools.values()))
+    early, late_ = np.nonzero(ok_years)[0][:3], np.nonzero(ok_years)[0][-3:]
+    cons = {}
+    for name, rest in pools.items():
+        if name == "all" and any(v["moves"] for v in cons.values()):
+            continue                    # the union only looks for what no single pool showed
+        Oc, Ec = (a[:, ok_years] for a in st.series_codes(places, rest))
+        ex, pick = pool_exchange((Obs, E), Oc, Ec, yrs)
+        if ex["moves"]:
+            codes = [rest[i] for i in np.nonzero(pick)[0]] if ex["via"] == "partners" else rest
+            use = ex
+            ex["partners"] = {"codes": [rest[i] for i in np.nonzero(pick)[0]]}
+            external_pair = external and name in ("undetermined intent", "all", "block")
+            dims = (("place",) + (("mech",) if external_pair else ())) if external else ()
+            node_o, node_e = st.cells(places, node_set, dims)
+            rest_o, rest_e = st.cells(places, codes, dims)
+            d_node = (node_o - node_e)[late_].sum(0) - (node_o - node_e)[early].sum(0)
+            d_rest = (rest_o - rest_e)[late_].sum(0) - (rest_o - rest_e)[early].sum(0)
+            moved = np.maximum(0.0, -np.sign(d_node.sum()) * d_rest)
+            p_node = node_o[ok_years].sum(0) + 0.1
+            p_rest = rest_o[early].sum(0) + 0.1
+            pt = explain.profile_test(moved, p_node / p_node.sum(), p_rest / p_rest.sum(),
+                                      config.seed(seed_text, node, name) % (2 ** 31))
+            ex["profile"] = pt
+            grade = explain.TESTED if pt["result"] in ("supports", "excluded") else explain.BOUND
+            expl.append({"kind": f"transfer with {name}", "grade": grade, "bound": use["bound"],
+                         "assumption": "every death the pool lost (gained) was a death of the node's",
+                         "via": ex["via"], "outcome": {"supports": "supports", "excluded": "excluded"}.get(pt["result"], "open"),
+                         "profile": pt["result"]})
+        cons[name] = ex
+    out["conservation"] = cons
+    out["explanations"] = expl
+    out["jurisdiction"] = jurisdiction(st, places, scale, node_set, direction, yrs, seed_text)
+    # re-scope, never dissolve: where a pool took the change, the claim is lifted to the level where the total is conserved
+    lifted = [(name, pools[name]) for name, ex in cons.items() if ex["moves"]
+              and not any(e["kind"] == f"transfer with {name}" and e["outcome"] == "excluded" for e in expl)]
+    if len(lifted) > 1:
+        lifted.append(("all lifted pools", sorted(set().union(*(c for _, c in lifted)))))
+    out["rescope"] = [conserved_level(st, places, scale, node_set, c, f"node + {n}", yrs, later_years, seed_text) for n, c in lifted]
+    if not out["national"]["ok"]:
+        verdict = "not_replicated"
+    elif any(e["grade"] == explain.TESTED and e["outcome"] == "supports" and (e["bound"] or 1.0) >= 0.5 for e in expl):
+        verdict = "rescoped" if any(r["ok"] for r in out["rescope"]) else "explained"
+    elif any(e["outcome"] == "open" for e in expl):
+        verdict = "open"
+    else:
+        verdict = "survives"
+    out["verdict"] = verdict
+    return out
+
+
+# ---------------------------------------------------------------------- the artefact-aware tests on worlds
+
+
+def _series_world(rng, level, size, kind, n, years=10, effect=0.3):
+    """n series of ``years`` yearly counts around an expectation of ``level``: NB(size) frailty over a course ``kind``
+    (``null``, ``linear``: log-linear with ``effect`` per standard deviation of the years, ``accelerating``: a quadratic log
+    course with the same end-to-end change, ``step``: a one-year level shift of the same end-to-end change at a random year)."""
+    t = np.arange(years)
+    x = (t - t.mean()) / t.std()
+    total = effect * (x[-1] - x[0])
+    if kind == "null":
+        course = np.zeros(years)
+    elif kind == "linear":
+        course = effect * x
+    elif kind == "accelerating":
+        course = total * (t / (years - 1)) ** 2
+    else:
+        course = np.zeros(years)
+    mu = np.full((n, years), float(level)) * np.exp(course)[None, :]
+    if kind == "step":
+        k = rng.integers(3, years - 2, n)
+        mu = mu * np.exp(total * (t[None, :] >= k[:, None]))
+    return _world(rng, mu, size), np.full((n, years), float(level))
+
+
+def simulate_shape(level: float = 200.0, size: float = 50.0, effect: float = 0.3, n: int = 400,
+                   delta: float | None = None, seed_text: str = "shape-sim-v1") -> dict[str, dict[str, float]]:
+    """The shape test on worlds: for each course (null, linear, accelerating, step) the shares of series called step,
+    gradual and indeterminate. A gradual real trend must not be called a step (size), a step must (power)."""
+    rng = np.random.default_rng(config.seed(seed_text, level, size, effect))
+    yrs = np.arange(2010, 2020)
+    out = {}
+    for kind in ("null", "linear", "accelerating", "step"):
+        Obs, E = _series_world(rng, level, size, kind, n, effect=effect)
+        r = explain.shape_test(Obs, E, yrs, delta)["shape"]
+        out[kind] = {c: float(np.mean(r == c)) for c in ("step", "gradual", "indeterminate")}
+    return out
+
+
+def simulate_exchange(level: float = 200.0, rest_level: float = 3000.0, size: float = 50.0, effect: float = 0.3,
+                      codes: int = 10, n: int = 300, seed_text: str = "exchange-sim-v2") -> dict[str, float]:
+    """Conservation on worlds: a node with a real log-linear course among a pool of ``codes`` stable codes (a real
+    change: `pool_exchange` must not call a transfer, the size) and among a pool whose first two codes lose the node's
+    gain death for death (a transfer: it must, the power)."""
+    rng = np.random.default_rng(config.seed(seed_text, level, rest_level, size, effect, codes))
+    yrs = np.arange(2010, 2020)
+    Ob, E = _series_world(rng, level, size, "linear", n, effect=effect)
+    gain = Ob - E
+    false = found = 0
+    for i in range(n):
+        Rs, Re = _series_world(rng, rest_level / codes, size, "null", codes)
+        Rt = Rs.copy()
+        for c in range(min(2, codes)):
+            Rt[c] = np.maximum(rng.poisson(np.maximum(Re[c] - gain[i] / min(2, codes), 1.0)).astype(float), 0.0)
+        false += pool_exchange((Ob[i], E[i]), Rs, Re, yrs)[0]["moves"]
+        found += pool_exchange((Ob[i], E[i]), Rt, Re, yrs)[0]["moves"]
+    return {"false_transfer": false / n, "transfer_found": found / n}
+
+
+def simulate_profile(cells: int = 24, n: int = 200, concentration: float = 0.5, draws: int = 300,
+                     seed_text: str = "profile-sim-v1") -> dict[str, float]:
+    """`explain.profile_test` on worlds: random node and pool profiles over ``cells`` cells (Dirichlet of
+    ``concentration``); displaced deaths drawn from the node's profile (a recoding) or from the pool's (independent
+    changes). The shares called ``supports``, ``excluded`` and ``open`` for each."""
+    rng = np.random.default_rng(config.seed(seed_text, cells, n, concentration))
+    res = {"recoding": [], "independent": []}
+    for i in range(draws):
+        pn, pr = rng.dirichlet(np.full(cells, concentration)) * 0.98 + 0.02 / cells, rng.dirichlet(np.full(cells, concentration)) * 0.98 + 0.02 / cells
+        for kind, p in (("recoding", pn), ("independent", pr)):
+            res[kind].append(explain.profile_test(rng.multinomial(n, p).astype(float), pn, pr, i, 1000)["result"])
+    return {f"{k}_{r}": float(np.mean([x == r for x in v])) for k, v in res.items() for r in ("supports", "excluded", "open")}
 
 
 # ---------------------------------------------------------------------- size and power on negative-binomial worlds
@@ -411,57 +849,6 @@ def simulate_sizes(level: float, size: float, cells: int = 200000, alpha_sel: fl
             "side_E": float(ye[sel].mean() / (level / 2)), "realised": float(lam[sel].mean() / level)}
 
 
-def simulate_spatial(side: int = 14, size: float = 10.0, level: float = 200.0, shock: float = 0.0, range_: int = 0,
-                     trend: float = 0.0, buffer: bool = True, units: int = 300, select: float = 0.05, years: int = 14,
-                     slope_sd: float = 0.0, seed_text: str = "spatial-sim-v1") -> dict[str, float]:
-    """The other-places tier on worlds: a unit of ``side`` x ``side`` municipalities on a lattice (rook neighbours;
-    regions of 3 x 3), NB size ``size``, ``level`` events per cell-year, a log-linear course whose total change over
-    the period is ``trend`` times the scale's minimum divergence (0: the null), and a year-by-year shock of sd
-    ``shock`` (log scale) smooth over ``range_`` steps of the graph, so neighbours share it; ``slope_sd`` (in units of the divergence delta) adds a random log-linear slope per municipality that is smooth in the same way (neighbours share a trend). The unit is selected when its trend on
-    one random half of the regions (buffered or not) reaches ``select``; the share of the selected units that
-    replicate on the other half at 0.05 is reported."""
-    rng = np.random.default_rng(config.seed(seed_text, side, size, level, shock, range_, trend, buffer, slope_sd))
-    n = side * side
-    ij = np.stack(np.meshgrid(np.arange(side), np.arange(side), indexing="ij"), -1).reshape(-1, 2)
-    idx = np.arange(n).reshape(side, side)
-    edges = np.concatenate([np.stack([idx[:, :-1].ravel(), idx[:, 1:].ravel()], 1),
-                            np.stack([idx[:-1, :].ravel(), idx[1:, :].ravel()], 1)])
-    region = (ij[:, 0] // 3) * 100 + ij[:, 1] // 3
-    yrs = np.arange(2010, 2010 + years)
-    x = (yrs - yrs.mean()) / yrs.std()
-    delta = lenses._trend_delta(types.SimpleNamespace(years=yrs), "state")
-    A = np.zeros((n, n))
-    A[edges[:, 0], edges[:, 1]] = A[edges[:, 1], edges[:, 0]] = 1
-    smooth = (A + np.eye(n)) / (A.sum(1) + 1)[:, None]
-    smooth = np.linalg.matrix_power(smooth, range_) if range_ else np.eye(n)
-    scale_sd = np.sqrt((smooth ** 2).sum(1))
-    sel = hit = 0
-    for _ in range(units):
-        shocks = shock * (smooth @ rng.standard_normal((n, years))) / scale_sd[:, None] if shock else 0.0
-        slopes = (slope_sd * delta * (smooth @ rng.standard_normal(n)) / scale_sd)[:, None] * x[None, :] if slope_sd else 0.0
-        mu = np.broadcast_to(level * np.exp(trend * delta * x)[None, :], (n, years)) * np.exp(shocks + slopes)
-        y = _world(rng, mu, size)
-        s = types.SimpleNamespace(places=np.arange(n), years=yrs, y=y, phi=np.full((n, years), size),
-                                  extras={"offset": np.full((n, years), float(level))})
-        regs = sorted(set(region))
-        pick = set(rng.permutation(len(regs))[: (len(regs) + 1) // 2].tolist())
-        in1 = np.array([regs.index(r) in pick for r in region])
-        if buffer:
-            touch = np.zeros(n, dtype=bool)
-            cross = in1[edges[:, 0]] != in1[edges[:, 1]]
-            touch[edges[cross, 0]] = touch[edges[cross, 1]] = True
-        else:
-            touch = np.zeros(n, dtype=bool)
-        h1, h2 = np.nonzero(in1 & ~touch)[0], np.nonzero(~in1 & ~touch)[0]
-        d = 1 if trend >= 0 else -1
-        a = test_trend_unit(s, {"places": h1, "scale": "state"}, d)
-        if not a["tested"] or a["p"] >= select:
-            continue
-        sel += 1
-        hit += test_trend_unit(s, {"places": h2, "scale": "state"}, d)["p"] < 0.05
-    return {"selected": sel, "replicated": hit / sel if sel else float("nan")}
-
-
-__all__ = ["SideExpectations", "SideModel", "deal", "honest_effect", "load_base", "match", "prepare", "relevel",
-           "simulate_sizes", "simulate_spatial", "simulate_temporal", "span_direction", "spatial_split",
-           "test_lead", "test_prospective", "test_spatial", "test_trend_unit"]
+__all__ = ["SideExpectations", "SideModel", "Strata", "audit", "block_of", "conserved_level", "deal", "honest_effect", "jurisdiction", "load_base",
+           "match", "node_codes", "prepare", "relevel", "simulate_exchange", "simulate_profile", "simulate_shape",
+           "simulate_sizes", "simulate_temporal", "span_direction", "test_lead", "test_prospective"]

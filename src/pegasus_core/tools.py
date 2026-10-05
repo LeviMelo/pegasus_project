@@ -8,8 +8,8 @@ goes through the ledger; everything admitted becomes a lead.
 control across families (Benjamini–Bogomolov, §8.2), and the admitted findings written to the register.
 
 Replication is by units that took no part in the selection (`replication`, ARCHITECTURE §8.3): `train(last)` selects
-on the years up to ``last`` and `temporal_confirm` tests the later years; `spatial_confirm` tests a unit claim on
-places its selection did not use; `corroborate` asks an independent record system; `confirm` is the agents' only
+on the years up to ``last`` and `temporal_confirm` tests the later years; `spatial_confirm` reads a unit claim in other jurisdictions and against how deaths are recorded (ADR-0019);
+`corroborate` asks an independent record system; `confirm` is the agents' only
 route to a claim: one test on the reserved period, under online FDR (LOND) whose state is read back from the
 ledger. The event sides survive for sizes only: `honest_sizes`.
 """
@@ -376,9 +376,10 @@ class Session:
                     ev.facility = fac.tally(self.expectations.registry.chapter(node), block_codes, lead_codes, rows)
                 verdict = explain.triage(x.estimand, rows, span, direction, ev, st.get("observed"), st.get("expected"))
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
+                                                           "grade": verdict.grade or None, "bound": verdict.bound,
                                                            **verdict.evidence}}
-                if verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
-                    x.status = "explained"
+                if verdict.grade == explain.TESTED and verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
+                    x.status = "explained"      # only a tested explanation takes a lead out; bound and consistent stay attached
                 if replicate:
                     x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
                     x.replication = control.replication_tier(kinds_of(x))
@@ -584,30 +585,43 @@ class Session:
         t.register.add(selected)
         return selected
 
-    def spatial_confirm(self, register: list[leads.Lead], q: float = 0.05, log=print) -> list[leads.Lead]:
-        """The unit claims of ``register`` (a state's or region's trend against the national course): the lens's statistic
-        on one random half of the unit's municipalities must reach 0.05, and the same statistic on the other
-        half, separated from the first by a buffer of the graph's neighbours, is the p-value (`replication.test_spatial`);
-        Benjamini-Hochberg over the units selected on their first half. Written to ``lead.replications["spatial_unit"]``.
-        A cluster or a municipality was itself chosen among the places and has none to split: it stays untested."""
-        mine = [x for x in register if x.estimand == "trend_divergence" and x.locus.get("scale")
-                and leads.trend_reference(x) == "national" and x.fields and x.fields[0].startswith(f"{self.dataset}:")]
-        edges = self.edges()
-        region_of = None
-        by_node: dict[str, list[leads.Lead]] = {}
-        for x in mine:
-            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
-        tested: list[tuple[leads.Lead, dict[str, Any]]] = []
-        for node, group in sorted(by_node.items()):
-            s = self.surprise(node, "B2")
-            if region_of is None:
-                region_of = dict(zip(s.places.tolist(), gateway.regions(s.places, "ibge_immediate_region"), strict=True))
-            for x in group:
-                h1, h2 = replication.spatial_split(np.array(x.locus["places"]), region_of, edges, s.places, x.id)
-                tested.append((x, replication.test_spatial(s, x, h1, h2) if len(h1) and len(h2)
-                               else {"tested": False, "reason": "a half has no places"}))
-        self._record([(x, r) for x, r in tested], "spatial_unit", q, only=lambda r: r.get("selected"))
-        log(f"{len(mine)} unit claims, {sum(1 for _, r in tested if r.get('selected'))} selected on their first half")
+    def strata(self, source: str = "popsvs") -> replication.Strata:
+        """The session's events by municipality, year, sex, age band and 4-character code, with the person-years of
+        ``source`` (`replication.Strata`): what direct standardisation and the profile of a set of deaths read."""
+        if "_strata" not in self.__dict__:
+            self._strata = {}
+        if source not in self._strata:
+            self._strata[source] = replication.Strata.from_gateway(self.dataset, self.event, self.years, source)
+        return self._strata[source]
+
+    def spatial_confirm(self, register: list[leads.Lead], source: str = "popsvs", log=print) -> list[leads.Lead]:
+        """The unit claims of ``register`` (a region's or state's trend against the national course, or a municipality's
+        against its neighbours) read by `replication.audit` (ADR-0019): against the year's observed national rate, the
+        unit's all-cause slope, conservation inside an ICD family, the shape of the change, and the other *jurisdictions*
+        (`replication.jurisdiction`: a state claim must hold in other states, else it is one jurisdiction's and is not
+        confirmed). Written to ``lead.robustness["artefact"]`` (the record, every recording explanation graded:
+        ``explain.GRADES``), ``lead.replications["national"]`` and ``["spatial_unit"]`` (``ok``: the claim holds beyond its
+        jurisdiction). A lead is dropped (``explained``) only when a *tested* explanation accounts for at least half of it and nothing remains at the conserved level (``rescoped`` otherwise: both reported)."""
+        mine = [x for x in register if x.estimand == "trend_divergence" and x.locus.get("scale") and x.fields
+                and x.fields[0].startswith(f"{self.dataset}:")]
+        st = self.strata(source)
+        tree = gateway.code_structure("ICD10").to_pandas().set_index("code")
+        for i, x in enumerate(mine):
+            last = x.train_last or max(self.years)
+            span, direction = replication.span_direction(x)
+            rec = replication.audit(st, x.locus["places"], x.fields[0].split(":")[-1], x.locus["scale"],
+                                    x.provenance["stats"]["beta"], direction, [y for y in self.years if y <= last], tree,
+                                    seed_text=x.id, later_years=[y for y in self.years if y > last])
+            x.robustness = {**x.robustness, "artefact": rec}
+            x.replications = {**x.replications, "national": rec["national"],
+                              "spatial_unit": {"tested": True, **rec["jurisdiction"]}}
+            if rec["verdict"] == "explained":
+                x.status = "explained"          # nothing remains at any conserved level
+            elif rec["verdict"] == "rescoped":
+                x.status = "rescoped"           # the code-level shift is certification; the family-level claim stands (``robustness["artefact"]["rescope"]``)
+            x.replication = control.replication_tier(kinds_of(x))
+            if (i + 1) % 10 == 0:
+                log(f"{i + 1}/{len(mine)} unit claims")
         return mine
 
     @staticmethod
@@ -655,8 +669,9 @@ class Session:
         reg = self.expectations.registry
         done: list[tuple[leads.Lead, corroborate.Corroboration]] = []
         for x in register:
-            cls = x.robustness.get("triage", {}).get("class")
-            if not x.fields or not x.fields[0].startswith(f"{self.dataset}:") or (only_signals and cls != explain.SIGNAL):
+            tri = x.robustness.get("triage", {})
+            if not x.fields or not x.fields[0].startswith(f"{self.dataset}:") or (
+                    only_signals and (tri.get("grade") == explain.TESTED or ("grade" not in tri and tri.get("class") != explain.SIGNAL))):
                 continue
             node = x.fields[0].split(":")[-1]
             span, direction = replication.span_direction(x)
@@ -664,7 +679,7 @@ class Session:
             if rows.size == 0 or not span:
                 continue
             c = corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
-                                        f"corroborate|{x.id}", replicates)
+                                        f"corroborate|{x.id}", replicates, dataset=self.dataset)
             done.append((x, c))
             if len(done) % 200 == 0:
                 log(f"corroborated {len(done)}")
@@ -676,7 +691,7 @@ class Session:
                 span, direction = replication.span_direction(x)
                 rows = np.array([index[int(u)] for u in x.locus["places"] if int(u) in index], dtype=int)
                 done[i] = (x, corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
-                                                      f"corroborate-refine|{x.id}", refine_replicates))
+                                                      f"corroborate-refine|{x.id}", refine_replicates, dataset=self.dataset))
         for source in {c.source for _, c in done if c.tested}:
             group = [(x, c) for x, c in done if c.tested and c.source == source]
             ps = np.array([c.p for _, c in group])
@@ -747,11 +762,13 @@ class Session:
 
 def kinds_of(x: leads.Lead) -> set[str]:
     """The independent confirmations a lead holds (`control.KINDS`): ``temporal`` (it stands on the years after the fit's
-    last, `Session.temporal_confirm`), ``spatial`` (it stands on the places that did not select it,
-    `Session.spatial_confirm`), ``corroborated`` (an independent field, `Session.corroborate`). The in-sample splits of
+    last, `Session.temporal_confirm`), ``spatial`` (it stands in other jurisdictions than the one it is
+    about, `Session.spatial_confirm`, ADR-0019), ``corroborated`` (an independent field, `Session.corroborate`). The in-sample splits of
     `Session.triage` (``temporal``, ``spatial``) are descriptions, not confirmations: they share the selection."""
     r = x.replications
     kinds = set()
+    if (r.get("national") or {}).get("ok") is False:
+        return kinds            # a unit claim that does not stand against the year's observed national rate confirms nothing
     if (r.get("prospective") or {}).get("ok"):
         kinds.add("temporal")
     if (r.get("spatial_unit") or {}).get("ok"):
