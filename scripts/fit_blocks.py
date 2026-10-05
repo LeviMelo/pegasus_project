@@ -2,7 +2,7 @@
 
 Usage: python scripts/fit_blocks.py DATASET EVENT FIRST_YEAR LAST_YEAR GRAPH BLOCK [BLOCK ...]
 
-``PEGASUS_DEVICE=cuda`` fits the mean on the GPU. ``PEGASUS_SOURCE`` (JSON) chooses a
+``PEGASUS_FIT_COLD=1`` starts from nothing instead of a related stored fit. ``PEGASUS_DEVICE=cuda`` fits the mean on the GPU. ``PEGASUS_SOURCE`` (JSON) chooses a
 non-default reader, e.g. ``{"source": "mark", "mark": "PESO", "bounds": [200, 7000]}`` or
 ``{"source": "code_list", "column": "CODANOMAL"}``; block ``*`` is an event type without a tree. One summary line per block (``BLOCK <name> <json>``), so a detached run can be
 watched; a failed block is reported and the next one fitted.
@@ -31,7 +31,12 @@ def main(dataset: str, event: str, first: int, last: int, graph: str, blocks: li
             cls = monolith.MarkModel if source.get("source") == "mark" else monolith.Monolith
             model = cls(data, graphs.graph(data.places, graph), graph,
                                       device=os.environ.get("PEGASUS_DEVICE", "cpu"))
-            model.fit(outer=40, log=lambda line, b=block: print(f"  {b} {line}", flush=True))
+            # warm start from the best related stored fit and a mean fit that stops at one log-likelihood unit per outer
+            # (evaluation 2026-10-05 fit throughput); PEGASUS_FIT_ACCEL=1 adds the Anderson mix and the MAP-movement stop
+            fast = os.environ.get("PEGASUS_FIT_ACCEL") == "1"
+            model.fit(outer=40, warm=None if os.environ.get("PEGASUS_FIT_COLD") else "auto", mean_tol=1.0,
+                      accelerate=fast, move_tol=0.5 if fast else 0.0,
+                      log=lambda line, b=block: print(f"  {b} {line}", flush=True))
             model.save()
             print(f"BLOCK {block} {json.dumps(model.summary(), default=float)}", flush=True)
         except Exception as exc:  # noqa: BLE001 - reported, next block fitted

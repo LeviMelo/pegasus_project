@@ -78,7 +78,7 @@ def prepare(dataset: str, event: str, block: str, years: list[int], graph: str =
     the fit on all the events, scaled (`load_base`): its expectation then carries a little of side E's events."""
     full, sides = deal(dataset, event, block, years)
     model = _a_model(full, sides["A"], graph, device)
-    model.fit(outer=40, log=log)
+    model.fit(outer=40, warm="auto", mean_tol=1.0, log=log)    # side A starts from the fit on all the events
     model.save()
     return model
 
