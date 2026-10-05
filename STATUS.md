@@ -40,7 +40,7 @@
 | population account v1: Census 2000, migration trained on 2000→2010, scored on 2010→2022 | §3.1, §12 phase 2 | agent (pegasus_data modelled tier) |
 | SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
 | pegasus_data hygiene: label pack, SINAN dates, fields | §3.1 | agent |
-| race bridge, first measurement (linked infant pairs) | §12 phase 3 | agent |
+| race bridge: first measurement done (evaluation 2026-10-04: 63% agreement SINASC↔SIM, the direction reversing by region); now the bridge model | §2, §12 phase 3 | agent |
 | E_b positives against census context: 12/12 signs right, 2/12 admitted (evaluation 2026-10-04); now the E_b gate: MSR null against Dutilleul, δ_E calibrated on negatives | §7.5, §8.4, §10.5 | agent |
 | not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools | | next wave |
 
