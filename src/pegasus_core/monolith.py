@@ -18,8 +18,12 @@ cell is ever formed. φ is estimated afterwards by moments (§5.2).
 
 from __future__ import annotations
 
+import functools
+import hashlib
+import inspect
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -79,8 +83,83 @@ class BlockData:
         return self.years
 
 
+ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
+
+
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
-             source: str = "events", grain: str = "year", population: str | None = None, **source_args) -> BlockData:
+             source: str = "events", grain: str = "year", population: str | None = None, cache: bool = True,
+             **source_args) -> BlockData:
+    """One block's cells and populations, from the gateway, memoised in the store (kind ``blockdata``).
+
+    The 10.7 M cells of SIH chapter X monthly took 467 s to assemble, and every variant of a fit (train and
+    full, a rolling origin, a split, another exposure) re-read them. The entry is addressed by everything the
+    assembly reads: its arguments, the data version, the population's key *and its content hash*, the
+    assembly code (the hash of `_assemble`'s and `gateway`'s source, and `ASSEMBLY`), so a changed input or
+    a changed reader is a different address and a stale entry is never served. The confirmation reserve is
+    checked before the cache is read. ``cache=False`` assembles afresh and stores nothing."""
+    control.check_reserved(dataset, years)
+    if not cache:
+        return _assemble(dataset, event, block, years, profile, source, grain, population, **source_args)
+    ys = np.array(sorted(set(years)))
+    population = population or config.population_source()
+    pop = gateway.population(ys.tolist(), source=population)
+    h = hashlib.sha256()
+    for name in pop.column_names:
+        h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
+    key = {"what": "blockdata", "dataset": dataset, "event": event, "block": block, "years": ys.tolist(),
+           "profile": profile, "source": source, "grain": grain, "args": source_args, "data": config.data_version(),
+           **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code()}
+    arrays, meta = store.get_arrays("blockdata", key), store.manifest("blockdata", key)
+    if arrays is not None and meta is not None:
+        return _blockdata_from(arrays, meta)
+    data = _assemble(dataset, event, block, years, profile, source, grain, population, **source_args)
+    store.put_arrays("blockdata", key, *_blockdata_to(data))
+    return data
+
+
+@functools.cache
+def _assembly_code() -> str:
+    """The hash of the code a BlockData is a function of: the assembly and the gateway's readers."""
+    h = hashlib.sha256(str(ASSEMBLY).encode())
+    for fn in (_assemble, _index_of, age_band, _chapter):
+        h.update(inspect.getsource(fn).encode())
+    h.update(Path(gateway.__file__).read_bytes())
+    return h.hexdigest()[:16]
+
+
+def _blockdata_to(d: BlockData) -> tuple[dict[str, np.ndarray], dict]:
+    month = d.grain == "month"
+    arrays = {"years": d.years, "places": d.places, "leaf_group": d.leaf_group, "y": d.y,
+              "N": d.N[:, ::12] if month else d.N,       # the monthly grain repeats each year's twelfth 12 times
+              "e": d.e.astype(np.int32), "u": d.u.astype(np.int32), "t": d.t.astype(np.int32), "g": d.g.astype(np.int16)}
+    if d.S is not None:
+        arrays["S"] = d.S[:, ::12] if month else d.S
+    if d.n is not None:
+        arrays["n"], arrays["l2"] = d.n, d.l2
+    meta = {"dataset": d.dataset, "event": d.event, "block": d.block, "leaves": d.leaves, "groups": d.groups,
+            "unallocated": d.unallocated, "data_key": d.key, "grain": d.grain, "population": d.population}
+    return arrays, meta
+
+
+def _blockdata_from(a: dict[str, np.ndarray], m: dict) -> BlockData:
+    month = m["grain"] == "month"
+    N, S = a["N"], a.get("S")
+    if month:
+        N = np.repeat(N, 12, axis=1)
+        S = None if S is None else np.repeat(S, 12, axis=1)
+    d = BlockData(m["dataset"], m["event"], m["block"], a["years"], a["places"], m["leaves"], m["groups"],
+                  a["leaf_group"], N, a["e"].astype(np.int64), a["u"].astype(np.int64), a["t"].astype(np.int64),
+                  a["g"].astype(np.int64), a["y"], m["unallocated"], m["data_key"], S=S, population=m["population"])
+    if "n" in a:
+        d.n, d.l2 = a["n"], a["l2"]
+    if month:
+        d.grain = "month"
+        d.month_of_year = np.tile(np.arange(12), len(d.years))
+    return d
+
+
+def _assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
+              source: str = "events", grain: str = "year", population: str | None = None, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
@@ -299,6 +378,9 @@ class Monolith:
         self.grp = t(data.leaf_group)
         self.n_cells = float(nE * np.count_nonzero(data.N > 0))
         self.phi: float = float("inf")
+        self.forcing = 0.5               # the largest relative residual CG stops at (Eisenstat–Walker cap)
+        self.cg_iterations = 0           # conjugate-gradient iterations so far (the cost of the mean fit)
+        self.newton_log: list[tuple] = []   # per Newton step: objective, gradient norm, CG iterations, step length, decrease
         self.history: list[dict] = []
         self.trace_log: list[tuple] = []
         self.p_e = self.grp[self.e]
@@ -424,25 +506,102 @@ class Monolith:
 
     # ---- fitting ----------------------------------------------------------------
 
-    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print) -> Monolith:
+    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm: str | dict | None = None,
+            accelerate: bool = False, move_tol: float = 0.0, mean_tol: float = 0.0) -> Monolith:
+        """The outer loop: the mean at fixed τ's, then the Fellner–Schall update of every τ, until no τ moves
+        by more than ``tol`` (a log-ratio). ``warm`` ("auto", or a stored fit's key) starts from a related
+        fit (`warm_start`); ``accelerate`` mixes the last iterates of log τ by Anderson acceleration (`_Anderson`)
+        and ``move_tol`` also stops when two successive τ updates each moved the mean's MAP by less than that many
+        log-likelihood units (the refit's decrease of the penalised objective, ½ΔθᵀHΔθ: the total shift in
+        posterior standard deviations, squared and halved), however far the weakly identified τ's still wander
+        along their ridge. ``mean_tol`` ends each outer's Newton steps when one lowers the objective by less than
+        that many log-likelihood units (the parameters persist across outers, so the unfinished tail is carried
+        on; the last mean fit, after the loop, runs to the full tolerance). None of these changes what a
+        converged fit is (the fixed point of the same update); they change how many outers, and how much work
+        in each, reach it."""
         start = time.time()
         self._initialise()
-        changes = [np.inf]
+        self.warm_info = self.warm_start(warm) if warm else None
+        changes = [0.0] if self.warm_info else [np.inf]
+        accel = _Anderson() if accelerate else None
+        quiet = 0
+        self.converged, self.stop_reason = False, f"outer cap {outer}"
         for it in range(outer):
             # the mean need not be precise while the τ's still move: a few Newton steps until they settle
-            self._fit_mean(inner if max(changes) < 0.1 else 10)
-            changes = self._update_taus()
-            self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale,
+            t0 = time.time()
+            steps = self._fit_mean(inner if max(changes) < 0.1 else 10, loglik_tol=mean_tol)
+            t1 = time.time()
+            changes = self._update_taus(accel)
+            move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
+            quiet = quiet + 1 if move < move_tol and max(changes) < 0.5 and self.refit_converged else 0
+            self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale, "newton": steps,
+                                 "change": max(changes), "move": move, "cg": self.cg_iterations, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
             taus = " ".join(f"{k}={c.tau:.3g}" for k, c in self.components.items())
             log(f"outer {it}: objective {self.history[-1]['objective']:.1f}, max τ change {max(changes):.3f}, "
                 f"{time.time() - start:.0f}s | {taus}")
             if max(changes) < tol:
+                self.converged, self.stop_reason = True, f"max τ change {max(changes):.3f} < {tol}"
+                break
+            if move_tol and quiet >= 2:
+                self.converged, self.stop_reason = True, f"the MAP moved {move:.2g} < {move_tol} log-likelihood units twice"
                 break
         self._fit_mean(inner)
         self.phi = self._dispersion()
-        log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s")
+        log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
         return self
+
+    def warm_start(self, source: str | dict = "auto") -> dict | None:
+        """Overwrite the starting values with those of a related fitted block of the store: the same dataset,
+        event, block, graph, profile, source and grain, for other years, another exposure or a split
+        (``"auto"`` picks the best: the same exposure, then the most periods in common; a dict is a stored
+        fit's key). Parameters are carried where their shape agrees; the histories (h) by the periods the two
+        fits share, the rest held at the nearest carried value; every τ is carried. A start is only a start:
+        the fit runs to its own convergence, so the optimum does not depend on it beyond the tolerance. Returns
+        what was carried, or None when nothing relates."""
+        mine = self.key()
+        if isinstance(source, dict):
+            cand = store.manifest("monolith", source)
+        else:
+            family = _family(mine)
+            scored = []
+            for m in store.manifests("monolith"):
+                k = m["key"]
+                if k == mine or _family(k) != family or "taus" not in m:
+                    continue
+                span = lambda key: set(_periods_of(key))   # noqa: E731
+                shared = len(span(k) & span(mine))
+                if shared == 0:
+                    continue
+                scored.append((k.get("population", "popsvs") == mine.get("population", "popsvs"),
+                               k.get("split") == mine.get("split"), shared / max(len(span(k) | span(mine)), 1),
+                               k.get("through") == mine.get("through"), m))
+            cand = max(scored, key=lambda s: s[:4])[4] if scored else None
+        arrays = store.get_arrays("monolith", cand["key"]) if cand else None
+        if cand is None or arrays is None:
+            return None
+        carried, partial = [], []
+        grain = self.data.grain
+        my_first, theirs_first = _periods_of(mine)[0], _periods_of(cand["key"])[0]
+        shift = my_first - theirs_first                    # my period i is theirs i + shift (in years, or months)
+        if grain == "month":
+            shift *= 12
+        with torch.no_grad():
+            for name, q in self.params.items():
+                v = torch.as_tensor(arrays[name]) if name in arrays else None
+                if v is None:
+                    continue
+                if name.startswith("h_") and v.shape[0] == q.shape[0]:
+                    idx = np.clip(np.arange(q.shape[1]) + shift, 0, v.shape[1] - 1)
+                    q.copy_(v[:, torch.as_tensor(idx)])
+                    (carried if shift == 0 and v.shape == q.shape else partial).append(name)
+                elif tuple(v.shape) == tuple(q.shape):
+                    q.copy_(v)
+                    carried.append(name)
+        for name, tau in cand["taus"].items():
+            if name in self.components:
+                self.components[name].tau = float(tau)
+        return {"from": cand["key"], "carried": carried, "shifted": partial}
 
     def _initialise(self) -> None:
         """Closed-form marginal starting values: the block's rate, then log observed/expected
@@ -463,18 +622,21 @@ class Monolith:
             self.params["h_all"].copy_(torch.as_tensor(np.log(np.clip(by_t, 1e-6, None)))[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
 
-    def _fit_mean(self, iterations: int, tolerance: float = 1e-9) -> int:
+    def _fit_mean(self, iterations: int, tolerance: float = 1e-9, loglik_tol: float = 0.0) -> int:
         """MAP of the mean given the τ's: truncated Newton–CG (OQ-6). Each step solves H d = −g by
         conjugate gradients on exact Hessian–vector products (double backward through the
         factorised total), preconditioned by the diagonal curvature, to a forcing tolerance
         min(0.5, √‖g‖)·‖g‖ (Eisenstat–Walker); then an Armijo backtracking line search. Stops when
-        the objective's decrease falls below ``tolerance``. Returns the Newton steps taken.
+        the objective's decrease falls below ``tolerance`` (relative) or ``loglik_tol`` (log-likelihood units; one
+        unit is a shift of about a posterior standard deviation in total). Returns the Newton steps taken.
 
         It replaced L-BFGS, which used every iteration it was given and, from a start 14 units
         above the optimum (scaled objective, chapter IX), diverged to NaN; Newton–CG reached a gap
         of 1e-3 in one step (3 s) and 5e-6 in 40 s (evaluation 2026-10-04)."""
         params = list(self.params.values())
         steps = 0
+        first_f = last_f = None      # the objective before the first step and after the last accepted one
+        self.refit_converged = False  # True when a step ended the loop, False when the budget did
         for _ in range(iterations):
             steps += 1
             loss = self.objective()
@@ -482,8 +644,10 @@ class Monolith:
             g = torch.cat([q.reshape(-1) for q in grads]).detach()
             gnorm = float(g.norm())
             if gnorm < 1e-14:
+                self.refit_converged = True
                 break
-            curvature = torch.cat([(1.0 / v).reshape(-1) for v in self._preconditioner().values()]) ** 2
+            solve = self._precondition_operator()
+            cg_before = self.cg_iterations
 
             def hv(v: torch.Tensor, grads=grads) -> torch.Tensor:
                 parts, i = [], 0
@@ -495,27 +659,29 @@ class Monolith:
 
             x = torch.zeros_like(g)
             r = -g
-            z = r / curvature
+            z = solve(r)
             d = z.clone()
             rz = float(r @ z)
-            forcing = min(0.5, gnorm ** 0.5) * gnorm
+            forcing = min(self.forcing, gnorm ** 0.5) * gnorm
             for _ in range(50):
+                self.cg_iterations += 1
                 Hd = hv(d)
                 dHd = float(d @ Hd)
                 if dHd <= 0:          # negative curvature: stop at the current iterate (or descend)
                     if not x.any():
-                        x = -g / curvature
+                        x = solve(-g)
                     break
                 alpha = rz / dHd
                 x = x + alpha * d
                 r = r - alpha * Hd
                 if float(r.norm()) < forcing:
                     break
-                z = r / curvature
+                z = solve(r)
                 rz_new = float(r @ z)
                 d = z + (rz_new / rz) * d
                 rz = rz_new
             f0, slope, step = float(loss), float(g @ x), 1.0
+            first_f = f0 if first_f is None else first_f
             with torch.no_grad():
                 base = [q.detach().clone() for q in params]
                 for _ in range(30):
@@ -530,36 +696,50 @@ class Monolith:
                 else:
                     for q, b0 in zip(params, base, strict=True):
                         q.copy_(b0)
+                    self.refit_converged = True
                     break
-            if f0 - f1 < tolerance * max(1.0, abs(f0)):
+            last_f = f1
+            self.newton_log.append((f0, gnorm, self.cg_iterations - cg_before, step, f0 - f1))
+            if f0 - f1 < tolerance * max(1.0, abs(f0)) or (f0 - f1) * self._objective_norm() < loglik_tol:
+                self.refit_converged = True
                 break
+        # how far the mean moved the objective since the τ's last changed: ½ΔθᵀHΔθ per event, whose square root
+        # (×√2) is the RMS change of the fitted log-rates over the events
+        self.refit_decrement = 0.0 if last_f is None else first_f - last_f
         return steps
 
-    def _preconditioner(self) -> dict[str, torch.Tensor]:
-        """1/√(curvature) per raw parameter, in the units of the scaled objective."""
+    def _precondition_operator(self):
+        """r ↦ M⁻¹ r for the Newton–CG solves: the diagonal of the curvature, the Fisher diagonal plus τ·diag(Q)
+        per parameter, in the units of the scaled objective. A block-Jacobi version (sparse LU of diag(Fisher) + τQ
+        per effect and batch row, as in `laplace.Posterior`) was measured on SIM.DO XVI and was no better:
+        the ill-conditioning is the coupling between effects that explain the same cells, not the structure
+        inside one (evaluation 2026-10-05, fit throughput)."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
         names = ["b0", *self.components]
         grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in names])
         norm = self._objective_norm()
-        out = {}
+        parts = []
         for name, d in zip(names, grads, strict=True):
             curv = d.detach().reshape(self.params[name].shape).abs()
             if name in self.components:
                 c = self.components[name]
-                diag = torch.as_tensor(c.shape.Q.diagonal(), dtype=self.dtype, device=self.device)
-                curv = curv + c.tau * diag[None, :].expand_as(curv)
-            out[name] = 1.0 / torch.sqrt(curv / norm + 1e-12)
-        return out
+                curv = curv + c.tau * torch.as_tensor(c.shape.Q.diagonal(), dtype=self.dtype,
+                                                      device=self.device)[None, :].expand_as(curv)
+            parts.append((curv / norm + 1e-12).reshape(-1))
+        curvature = torch.cat(parts)
+        return lambda r: r / curvature
 
     def _objective_norm(self) -> float:
         """The divisor of the objective (events for counts)."""
         return self.scale
 
-    def _update_taus(self) -> list[float]:
-        """Fellner–Schall: τ ← (rank − τ·tr(H⁻¹Q)) / (xᵀQx), H ≈ D + τQ per batch row."""
+    def _update_taus(self, accel: _Anderson | None = None) -> list[float]:
+        """Fellner–Schall: τ ← (rank − τ·tr(H⁻¹Q)) / (xᵀQx), H ≈ D + τQ per batch row. With ``accel`` the next
+        log τ is the Anderson mix of the last iterates' updates, not the update itself; the reported change is
+        always the update's (the fixed-point residual), so convergence means the same thing."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
         grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in self.components])
-        changes = []
+        changes, proposals = [], {}
         for (name, c), d in zip(self.components.items(), grads, strict=True):
             if c.rank <= 0:
                 changes.append(0.0)  # the constraints leave this effect nothing (a single group or leaf)
@@ -572,10 +752,21 @@ class Monolith:
             new = (c.rank - c.tau * trace) / max(quad, 1e-12)
             new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
             new = float(np.clip(new, *TAU_BOUNDS))
-            # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability
-            changes.append(0.0 if min(new, c.tau) > SHRUNK else abs(np.log(new / c.tau)))
+            # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability. Nor is
+            # its hovering about SHRUNK: the update of an effect that small is ill-defined (xᵀQx -> 0) and cycled
+            # between 4.9e4 and 2.9e5 for 120 outers on SINAN-LEPT monthly (change 1.78 with the fit unchanged)
+            changes.append(0.0 if max(new, c.tau) > SHRUNK else abs(np.log(new / c.tau)))
             self.trace_log.append((name, c.rank, quad, trace, c.tau, new))
-            c.tau = new
+            proposals[name] = new
+        if accel is not None:
+            active = [k for k, new in proposals.items() if max(new, self.components[k].tau) <= SHRUNK]
+            if active:
+                u = np.log([self.components[k].tau for k in active])
+                g = np.log([proposals[k] for k in active])
+                for k, value in zip(active, accel.step(u, g), strict=True):
+                    proposals[k] = float(np.clip(np.exp(value), *TAU_BOUNDS))
+        for name, new in proposals.items():
+            self.components[name].tau = new
         return changes
 
     def nb_loglik(self, phi: float | np.ndarray, x: dict[str, torch.Tensor] | None = None,
@@ -713,7 +904,9 @@ class Monolith:
                 "leaves": len(d.leaves), "groups": len(d.groups), "places": len(d.places),
                 "events": float(d.y.sum()), "nonempty_cells": int(len(d.y)), "unallocated": d.unallocated,
                 "phi": self.phi, "dispersion_check": getattr(self, "dispersion_check", None), "taus": {k: c.tau for k, c in self.components.items()}, "spatial_share": bym,
-                "fit_seconds": self.history[-1]["seconds"] if self.history else None}
+                "fit_seconds": self.history[-1]["seconds"] if self.history else None,
+                "outers": len(self.history), "converged": getattr(self, "converged", None),
+                "stop_reason": getattr(self, "stop_reason", None)}
 
     # ---- persistence -------------------------------------------------------------
 
@@ -1011,6 +1204,50 @@ def heldout(model: Monolith, test: BlockData) -> dict:
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+class _Anderson:
+    """Anderson acceleration (depth ``m``) of the fixed-point iteration u ← g(u) on the vector of log τ.
+    With residuals f_k = g(u_k) − u_k it takes u_{k+1} = g_k − ΔG γ, γ = argmin ‖f_k − ΔF γ‖² + λ‖γ‖²
+    over the last differences of residuals and updates; a fixed point (f = 0) is left unchanged, so the
+    converged τ's are the plain iteration's. Safeguards: the step is limited to the plain damping
+    (×10 per component) and the history is dropped when the residual grows by more than half."""
+
+    def __init__(self, m: int = 4, ridge: float = 1e-8):
+        self.m, self.ridge = m, ridge
+        self.reset()
+
+    def reset(self) -> None:
+        self.F: list[np.ndarray] = []
+        self.G: list[np.ndarray] = []
+
+    def step(self, u: np.ndarray, g: np.ndarray) -> np.ndarray:
+        f = g - u
+        if len(self.F) and (len(f) != len(self.F[-1]) or np.linalg.norm(f) > 1.5 * np.linalg.norm(self.F[-1])):
+            self.reset()
+        self.F.append(f)
+        self.G.append(g)
+        self.F, self.G = self.F[-(self.m + 1):], self.G[-(self.m + 1):]
+        if len(self.F) < 2:
+            return g
+        dF = np.stack([b - a for a, b in zip(self.F[:-1], self.F[1:], strict=True)], axis=1)
+        dG = np.stack([b - a for a, b in zip(self.G[:-1], self.G[1:], strict=True)], axis=1)
+        scale = max(float(np.trace(dF.T @ dF)) / dF.shape[1], 1e-300)
+        gamma = np.linalg.solve(dF.T @ dF + self.ridge * scale * np.eye(dF.shape[1]), dF.T @ f)
+        nxt = g - dG @ gamma
+        return u + np.clip(nxt - u, -MAX_TAU_STEP, MAX_TAU_STEP)
+
+
+_FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split"}
+
+
+def _family(key: dict) -> dict:
+    """What makes two stored fits the same model of the same events: the key without its years, exposure and split."""
+    return {k: v for k, v in key.items() if k not in _FAMILY_DROP}
+
+
+def _periods_of(key: dict) -> list[int]:
+    return list(key["years"])
 
 
 def _within_groups(leaf_group: np.ndarray, n: int) -> structures.Shape:

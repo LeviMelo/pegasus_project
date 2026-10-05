@@ -236,7 +236,12 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - **The Newton step:** CG on exact Hessian–vector products (double backward through the factorised total), diagonal preconditioner, Eisenstat–Walker forcing, Armijo line search.
   - **The likelihood's linear part** Σ y·η comes from sufficient statistics computed once.
   - **L-BFGS was replaced** (open question 6 (resolved), evaluation 2026-10-04). It used every iteration it was given, and from a perturbed start it diverged. Chapter IX now fits in 229 s.
-- **Warm starts.** From the previous version's parameters on every data update.
+- **Fit throughput (ADR-0017).** Fits come in families (train and full, rolling origins, splits, another exposure), and each variant used to start from nothing.
+  - **Warm start.** `Monolith.fit(warm="auto")` starts from the best related stored fit (same dataset, event, block, graph, profile, source and grain; the same exposure, then the most years in common): parameters where shapes agree, histories shifted onto the shared periods, every τ. A start only changes where the iteration begins; the fit runs to its own convergence.
+  - **Anderson acceleration** (depth 4, on log τ) of the Fellner–Schall fixed point, which it leaves unchanged; the reported change stays the plain update's residual.
+  - **Mean fit.** Each outer's Newton steps stop at `mean_tol` = 1 log-likelihood unit (the parameters persist; the last fit runs to full tolerance). A block-Jacobi preconditioner was measured and is no better than the diagonal.
+  - **Stopping.** A τ at or above `SHRUNK` on either side of an update is stationary. Besides max τ change < 0.02, a fit (opt-in `move_tol`) stops when two successive τ updates each moved the mean's MAP by less than `move_tol` log-likelihood units (½ΔθᵀHΔθ, posterior standard deviations squared and halved): the weakly identified τ's (spatial s against v, BYM) drift along a ridge the fit does not feel. The summary records `converged` and `stop_reason`; a fit that reaches its outer cap says so.
+  - **BlockData** is memoised in the store (kind `blockdata`, §11.3).
 - **Uncertainty.** The Laplace approximation at the mode (`laplace.py`), never forming the Hessian: with the NB expected information w = φμ/(φ+μ), FᵀWF needs only the pairwise marginals of w per leaf (one pass over the slabs), and a Hessian–vector product is three small einsums and one vjp.
   - **Draws, not selected inversion or Hutchinson probes.** Perturb-and-MAP draws (Papandreou–Yuille) solved by CG with a block-Jacobi preconditioner per effect (sparse LU of diag(Σw) + τQ), tolerance 10⁻³: about 40–90 iterations per draw. Their per-cell variance has relative error √(2/S) whatever the correlation; against an exact dense inverse it sits at that floor (evaluation 2026-10-05, Laplace). The diagonal preconditioner capped at 1,000 iterations.
   - **Off by default** (`Expectations(laplace=0)`): it moves in-sample calibration by ≤ 0.01 KS.
@@ -682,6 +687,7 @@ pegasus_home/
   ledger/ledger.parquet                                             (append-only)
   harness/<run>/…                                                   (results behind evaluation entries)
   cache/                                                            (gateway aggregates, keyed by query and data version)
+  blockdata/<hash>/arrays.npz, manifest.json                        (an assembled BlockData; key = arguments, data version, population key and content hash, hash of the assembly and gateway source)
 ```
 
 **Every artefact's key** hashes (pegasus_data data versions, spec, code version). **A stale artefact is never served.**
