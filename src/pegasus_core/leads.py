@@ -158,15 +158,36 @@ def stories(register: list[Lead], max_subset: int = 1) -> list[Story]:
     for key, members in groups.items():
         fields_ = sorted({m.fields[0].split(":")[-1] for m in members})
         flags = []
-        signs: dict[str, set[int]] = {}
+        # substitution: sibling codes (one parent) moving in opposite directions at the same place,
+        # read from directional lenses only (trend, space–time, outbreak, change point)
+        moves: dict[str, dict[int, list[str]]] = {}
         for m in members:
-            block = m.family.split("|")[-1]
+            if m.estimand not in ("trend_divergence", "space_time", "outbreak", "change_point"):
+                continue
+            node = m.fields[0].split(":")[-1]
             size = np.log(max(m.effect, 1e-12)) if m.scale == "rate_ratio" else m.effect
-            if size != 0:
-                signs.setdefault(block, set()).add(int(np.sign(size)))
-        if any(len(v) > 1 for v in signs.values()):
-            flags.append("opposite movements within a block (possible substitution)")
+            if size == 0:
+                continue
+            moves.setdefault(_parent(node), {}).setdefault(int(np.sign(size)), []).append(node)
+        for parent, by_sign in moves.items():
+            if len(by_sign) == 2:
+                flags.append(f"substitution in {parent}: up {','.join(sorted(set(by_sign[1])))} / "
+                             f"down {','.join(sorted(set(by_sign[-1])))}")
         places = list(members[0].locus.get("places", []))
         out.append(Story(key, places, sorted(members, key=lambda m: -m.rank), sum(m.rank for m in members),
                          fields_, flags))
     return sorted(out, key=lambda st: -st.rank)
+
+
+def _parent(code: str) -> str:
+    """The node above a code in ICD-10 (its group for a category); the code itself if unknown."""
+    global _PARENTS
+    if _PARENTS is None:
+        from . import gateway
+
+        tree = gateway.code_structure("ICD10")
+        _PARENTS = dict(zip(tree.column("code").to_pylist(), tree.column("parent").to_pylist(), strict=True))
+    return _PARENTS.get(code) or code
+
+
+_PARENTS: dict[str, str | None] | None = None
