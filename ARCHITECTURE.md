@@ -620,12 +620,12 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 | diarrhoea admissions ↔ sewerage | E_b (census years) | national |
 | winter respiratory admissions | B2s outbreak | South, Southeast |
 | COVID-19 enters the record in 2020 (a new cause code; train ≤ 2019) | change point, **BP** (B2 absorbs a step older than the last years: in-sample, 1 of 5,285 places) | the 5,285 municipalities with ≥ 5 deaths, 2020–23 |
-| municipalities installed in 2013 (IBGE: Mojuí dos Campos, Pescaria Brava, Balneário Rincão, Paraíso das Águas, Pinto Bandeira) | trend divergence, B2 (births) | the five municipalities; births under the new code only from 2013 |
-| female homicide in Roraima (Atlas da Violência 2019, 2021: the highest rate of the UFs) | group disparity, B0 (X85–Y09) | Roraima's municipalities; female share above the national pattern's |
+| homicide divergence across UF borders (Atlas da Violência 2019, 2025 UF tables), declared before the run | trend divergence, B2 (X85–Y09) | 30 municipalities with a ratio ≥ 1.5 against their neighbours' UFs over 2010–23; **not recovered** (7 findings, none documented). The 2013 installed municipalities, seen before documented, are withdrawn |
+| women's and young men's share of homicide victims by UF (Atlas da Violência 2025 Tables 2.2, 4.3, 5.1), declared before the run | group disparity, B0 (X85–Y09) | municipalities of the UFs with a ratio ≥ 1.25 or ≤ 0.8 to Brazil's; **not recovered** (weighted recall 0.048 and 0.003; the B0 reference overstates women's share, 9.98% against 8.2%). Roraima's female homicide, seen before documented, is withdrawn |
 
 **Criterion for per-place lenses.** Cell-sparse outcomes cannot meet a place-level Jaccard 0.5 (the documented excess sits in a few places, the lens resolves others). For change point, trend divergence and group disparity the criterion is the **recall of the documented places weighted by their documented excess ≥ 0.5, with the effect's sign**; the Jaccard and precision are reported (`harness.recovery`). The pass of a positive is judged on the tier the lens runs at; a documented effect below the lens's minimum relevant effect (§8.4) is not a positive for it.
 
-**Marks have no declared positive.** The documented birth-weight effects in Brazil (COVID-19: preterm births +4% in odds, Brazil national; maternal age, secular trends) are below the 3% minimum on the mean log mark or absorbed by B2; a mark positive is planted (§10.3) until a space–time shift of ≥ 4% is documented.
+**Marks have no declared positive** (a search for a primary-source shift of 3% or more found none, evaluation 2026-10-05-lens-positives). The documented birth-weight effects in Brazil (COVID-19: preterm births +4% in odds, Brazil national; maternal age, secular trends) are below the 3% minimum on the mean log mark or absorbed by B2; a mark positive is planted (§10.3) until a space–time shift of ≥ 4% is documented.
 
 ### 10.2 Known negatives
 

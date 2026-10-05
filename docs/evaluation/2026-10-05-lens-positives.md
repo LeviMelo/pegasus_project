@@ -63,3 +63,24 @@ The gate requires positives declared before the lens runs (§10.5). Measured aga
 - the homicide divergence between the Northeast and the Southeast in the 2000s, from the full chapter XX fit, citing the Atlas da Violência tables;
 - group disparity from the Atlas tables;
 - a citable birth-weight shift for marks.
+
+## Declared before the run (second round, 2026-10-05)
+
+**Regime.** Positives written into `harness.POSITIVES` and committed (86d6895, with `scripts/declare_positives.py` and `scripts/atlas_uf.json`) before any lens ran on them; scored by `data/p3/score.py` (artefact `data/p3/score.json`) with `harness.recovery`, on the existing SIM.DO chapter XX 2010–2023 contiguity fit (no refit: a chapter XX block is hours under the queue). Sources are the Atlas da Violência UF tables, IPEA/FBSP: 2019 Table 2.1 for 2010–12 ([repositório](https://repositorio.ipea.gov.br/server/api/core/bitstreams/0bba5ec5-f166-4c0a-82d4-271b28c90df0/content)), 2025 Tables 2.1, 2.2, 4.3, 5.1 for 2013–23 ([handle 11058/17165](https://repositorio.ipea.gov.br/handle/11058/17165)). The loci follow from those tables, the contiguity graph and the population alone. Criterion: weighted recall of the documented municipalities ≥ 0.5 with the documented sign (weight: estimated deaths), the §10.1 criterion adopted after the fact; the original Jaccard 0.5 is reported.
+
+| lens | declared positive | result | verdict |
+|---|---|---|---|
+| trend divergence, B2 | a municipality's documented divergence is its UF's log-rate slope (2010–23) less its neighbours' UFs' mean; 30 municipalities with a ratio ≥ 1.5 over the period (16 up, 14 down). The first choice, a doubling, left 3 places and was widened before any run | 7 findings in the whole field (BA 2, MG 2, PB 2, PI 1); **none in the 30**. Weighted recall 0, Jaccard 0 | **fails** both criteria |
+| group disparity, B0 | women's share of homicide victims 2013–23 against Brazil's (7.9%), UFs with ratio ≥ 1.25 or ≤ 0.8: RR 1.66, SC 1.54, MS 1.43, SP 1.38, RS 1.27, RO 1.26; AP 0.64, SE 0.64, RN 0.78, AL 0.78 (1,943 municipalities) | 15 findings (BA 5, PA 4, RR 2, AM, CE, AL, SE 1 each); 4 in documented UFs, all with the right sign (RR 2, AL, SE). Weighted recall **0.048**, Jaccard 0.002, precision 1.0 | **fails** |
+| group disparity, B0 | men aged 15–29's share 2013–23 against Brazil's (49.2%): RO 0.71, RR 0.79, SP 0.75, MS 0.74; AP 1.27 (807 municipalities) | the same 15 findings; 2 in documented UFs (RR), right sign. Weighted recall **0.003**, Jaccard 0.002 | **fails** |
+| marks | none declared: no primary source gives a shift of mean log mark ≥ 3% at a place and time. Searched: drought and birth weight in Rio Grande do Norte (grams, under 1%), Zika (acts on the count of births), the Mariana and Brumadinho dams (low-weight odds, no mean shift), COVID-19 preterm births (about 0.1% of the mean). The only mark fitted is PESO | not run | **fails**: no positive |
+
+**Reading.**
+- Group disparity finds the places that are very different from the reference (Roraima, Bahia, Pará), not the documented UF-level departures. The reference is the model's B0 expectation, and **it overstates women's share**: the national expected share of women is 9.98% against 8.2% observed (2013–23), young men 48.2% against 48.9%. The lens divides the excess by a genomic-control factor of 1.83. São Paulo city, 8,843 deaths, sits at 0.92 of the reference for women while the state sits at 1.38 of Brazil's observed share. The sex pattern the Atlas documents is therefore partly a difference between the observed and the model's national pattern, and the lens is blind to departures from the observed one. A lead (re-level the B0 group pattern to the observed national group totals), not a change made here.
+- Trend divergence has no finding in the documented belts. The documented divergences are a ratio of 1.5 to 2 between neighbouring states over 13 years, in the range where the power curve is blind (below ×3); its 7 findings (BA, MG, PB, PI) were not scored against borders.
+- The §10.1 criterion of weighted recall stays confirmed by one declared positive only (change point at BP, 1.00); on the declared positives of this round it does not change a verdict (the Jaccard is also under 0.01).
+- The earlier passes of these two lenses (installed municipalities, Roraima female homicide) were seen before they were declared. They are withdrawn from the gate, as the review says, and not replaced by a pass.
+
+## E_w dengue (exploratory only)
+
+`data/p2/ew_dengue.py` (dengue against temperature and precipitation anomalies, lags 0 to 4; heavy label `ew-dengue`) was queued at 09:52 and had not been admitted when this section was written (`data/logs/p2_ew_dengue.log` holds the queue line only). It was **not declared in `harness.POSITIVES`** before it was queued; any result of it is exploratory and cannot gate E_w. E_w stays not gated.

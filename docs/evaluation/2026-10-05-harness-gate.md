@@ -107,3 +107,15 @@ Rows 1 of the gate for the four lenses that had no positive; rows 2 and 3 are th
 | marks | none documented (birth-weight effects ≤ 0.1% against the 3% floor) | NB 0/50 each lens; MSR 0/50 each | published | **FAIL**: no positive |
 | E_w | cold → respiratory admissions ρ −0.02 to −0.07 (sign right, controls ≈ 0), below δ 0.1; arbovirus → microcephaly not recovered | not run | not run | **not gated** |
 
+
+## Update 2: positives declared before the run (entry 2026-10-05-lens-positives, second round)
+
+The passes above for trend divergence and group disparity were seen before they were declared and are withdrawn (coordinator review). Positives declared in `harness.POSITIVES` (commit 86d6895) before the lens ran, from the Atlas da Violência UF tables:
+
+| lens / estimand | 1. positives | gate |
+|---|---|---|
+| change point | COVID-19 as a new cause, BP (declared beforehand): weighted recall 1.00 | **PASS at BP**, flagged (one positive) |
+| trend divergence | homicide divergence across UF borders (30 municipalities, ratio ≥ 1.5 over 2010–23): 7 findings, none documented; recall 0 | **FAIL**: declared positive not recovered |
+| group disparity | women's share by UF (10 UFs): weighted recall 0.048; young men's share (5 UFs): 0.003, Jaccard under 0.01 | **FAIL**: not recovered; the reference overstates women's share (9.98% against 8.2% observed) |
+| marks | no primary source for a shift of 3% or more | **FAIL**: no positive |
+| E_w | the dengue–climate run is queued, not declared: exploratory | **not gated** |
