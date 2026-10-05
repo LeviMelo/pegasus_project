@@ -3,7 +3,7 @@
     python scripts/heavy.py [--label NAME] -- <command ...>
 
 Several agents share one machine (31.6 GB RAM, of which about 20 GB is usable, and one 6 GB GPU).
-A job waits for one of PEGASUS_HEAVY_SLOTS machine-wide slots (default 3), then for free memory
+A job waits for one of PEGASUS_HEAVY_SLOTS machine-wide slots (default 4), then for free memory
 to reach PEGASUS_HEAVY_MIN_FREE_GB (default 4), and only then starts. The slot is held until the
 job exits, and is released if the job dies. It reuses pegasus_data's decode admission (OS file
 locks) with its own slot directory, so heavy-job slots and decode slots are separate pools. The
@@ -27,7 +27,7 @@ if not command:
 child_env = dict(os.environ)
 os.environ.update(
     PEGASUS_DECODE_SLOT_DIR=str(Path(tempfile.gettempdir()) / "pegasus_heavy_slots"),
-    PEGASUS_DECODE_SLOTS=os.environ.get("PEGASUS_HEAVY_SLOTS", "3"),
+    PEGASUS_DECODE_SLOTS=os.environ.get("PEGASUS_HEAVY_SLOTS", "4"),
     PEGASUS_MIN_FREE_GB=os.environ.get("PEGASUS_HEAVY_MIN_FREE_GB", "4"),
     PEGASUS_ADMISSION_WAIT=os.environ.get("PEGASUS_HEAVY_WAIT", "21600"),
 )
