@@ -20,7 +20,7 @@ import time
 import numpy as np
 from scipy import stats
 
-from pegasus_core import config, graphs, laplace, monolith, surprise
+from pegasus_core import config, graphs, laplace, monolith, prospective, surprise
 
 TARGETS = {
     "ix": ("SIM.DO", "death", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),
@@ -59,6 +59,17 @@ def _wrap(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration=True, var=N
 
 
 surprise._assemble = _wrap
+_orig_mix = prospective.mixture_pit
+bp_cap: list[dict] = []
+
+
+def _wrap_mix(y, comps, seed):
+    out = _orig_mix(y, comps, seed)
+    bp_cap.append({"y": y, "comps": comps})
+    return out
+
+
+prospective.mixture_pit = _wrap_mix
 
 
 def nb_nll(y: np.ndarray, mu: np.ndarray, phi: np.ndarray) -> np.ndarray:
@@ -69,8 +80,27 @@ def nb_nll(y: np.ndarray, mu: np.ndarray, phi: np.ndarray) -> np.ndarray:
     return np.where(np.isinf(phi), -stats.poisson.logpmf(y, mu), out)
 
 
+def score_bp(c: dict, common: np.ndarray | None = None) -> dict:
+    """BP: the mixture's KS (the Surprise's PIT) and the NB mixture's negative log score over ``common`` places."""
+    keep = np.ones(len(c["places"]), bool) if common is None else np.isin(c["places"], common)
+    cal = surprise.calibration(c["u"][keep], c["mu"][keep], c["macro"][keep])
+    y = c["y"]
+    p = 0.0
+    for w, mu, phi in c["comps"]:
+        mu = np.maximum(mu, 1e-6)
+        p = p + w * np.exp(np.where(np.isinf(phi), stats.poisson.logpmf(y, mu),
+                                    stats.nbinom.logpmf(y, np.where(np.isinf(phi), 1.0, phi), np.where(np.isinf(phi), 0.5, phi / (phi + mu)))))
+    nll = float(-np.log(np.maximum(p[keep], 1e-300)).sum())
+    reg = {MACRO.get(k, k): round(v, 4) for k, v in cal["ks_by_macroregion"].items()}
+    blk = {"ks": round(cal["ks"], 4), "regions": reg, "nll": nll}
+    return {"block_phi": blk, "field_phi": blk, "observed": float(y[keep].sum()), "expected": float(c["mu"][keep].sum()),
+            "cv_exposure": 0.0, "phi_block": float("nan")}
+
+
 def score(c: dict, common: np.ndarray | None = None) -> dict:
     """KS of the randomised PIT (block phi, then the field's place-year phi) and the NLL, over ``common`` places."""
+    if c.get("bp"):
+        return score_bp(c, common)
     y, mu, mu2, phi, macro = c["y"], c["mu"], c["mu2"], c["phi"], c["macro"]
     var = np.zeros_like(mu) if c["var"] is None else c["var"]
     cells = laplace.predictive_phi(mu, var, mu2, phi)
@@ -106,9 +136,18 @@ def evaluate(target: str, pops: list[str]) -> dict:
             for node in nodes:
                 for tier in os.environ.get("EXPOSURE_TIERS", "B0,B1,B2,BP").split(","):
                     cap.clear()
+                    bp_cap.clear()
                     t = time.time()
-                    s = ex.prospective(node, 2019) if tier == "BP" else ex.surprise(node, tier)
-                    c = cap[-1]
+                    try:
+                        s = ex.prospective(node, 2019) if tier == "BP" else ex.surprise(node, tier)
+                    except LookupError as err:      # a fit not stored (yet): recorded, the other tiers go on
+                        print(f"{target} {node} {tier} {name}: {err}", flush=True)
+                        continue
+                    if tier == "BP":
+                        c = {"bp": True, "places": s.places, "macro": ex.macroregions(s.places), "u": s.u, "mu": s.mu,
+                             **bp_cap[-1]}
+                    else:
+                        c = cap[-1]
                     res.setdefault(f"{node}|{tier}", {})[name] = {"_places": None, **score(c)}
                     keep[(node, tier, name)] = {**c, "z": s.z, "mu_s": s.mu}
                     print(f"{target} {node:8} {tier} {name:22} KS {res[f'{node}|{tier}'][name]['block_phi']['ks']:.3f}/"
