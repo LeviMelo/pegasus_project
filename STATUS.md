@@ -35,7 +35,11 @@
 
 | front | ARCHITECTURE | state |
 |---|---|---|
-| dengue monthly; B2s/BP surveillance; the seasonality positive | §6.1, §10.1 | agent |
+| dengue monthly: **done** (evaluation 2026-10-05). Seasonality calibrated (B2s KS 0.011); epidemics by BP: recall 0.78 (2015–16) and 0.92 (2019–23), precision 0.57 against a trough baseline; φ = 0.235 | §6.1, §10.1 | done |
+| SINAN positives: leptospirosis RS 2024, Chagas, schistosomiasis, arbovirus → microcephaly E_w; then an outbreak-robust BP | §10.1, ADR-0004 | agent |
+| general SIDRA interface: the compendium's ~100 tables, catalog detection, a normalised fact store; it replaces census.py | §3.1 | agent (pegasus_data) |
+| census coverage 2000/2010/2022: which tables are adjusted; what is the 2022 truth | §3.1 | agent (research) |
+| preliminary-file snapshots, scheduled daily | ADR-0004 | agent (pegasus_data) |
 | SIH blocks (fit, survey); the winter respiratory B2s positive | §10.1, §12 phase 1 | agent |
 | population account v1: Census 2000, migration trained on 2000→2010, scored on 2010→2022 | §3.1, §12 phase 2 | agent (pegasus_data modelled tier) |
 | SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
@@ -44,7 +48,7 @@
 | surveillance feasibility: **done** (ADR-0004 updated): weekly alarms feasible for arboviruses only; preliminary-file snapshots must start now | ADR-0004 | done |
 | race bridge: first measurement done (evaluation 2026-10-04: 63% agreement SINASC↔SIM, the direction reversing by region); now the bridge model | §2, §12 phase 3 | agent |
 | E_b positives against census context: 12/12 signs right, 2/12 admitted (evaluation 2026-10-04); now the E_b gate: MSR null against Dutilleul, δ_E calibrated on negatives | §7.5, §8.4, §10.5 | agent |
-| not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools | | next wave |
+| not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools; the institution lattice | | next wave |
 
 **Next:**
 1. **Held-out deviance** (fit 2010–2021, score 2022–2023). It serves two first measurements: contiguity against kNN, and tree pooling.
