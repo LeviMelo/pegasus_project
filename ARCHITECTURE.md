@@ -229,7 +229,10 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 
 ### 5.3 Optimisation and uncertainty
 
-- **Optimiser.** MAP by L-BFGS with automatic differentiation (PyTorch). Block coordinate descent over: main effects, interaction factors, variance parameters (re-estimated by their conditional modes).
+- **Optimiser.** The mean's MAP comes from truncated Newton–CG given the τ's. The τ's are then updated by Fellner–Schall, and the two alternate.
+  - **The Newton step:** CG on exact Hessian–vector products (double backward through the factorised total), diagonal preconditioner, Eisenstat–Walker forcing, Armijo line search.
+  - **The likelihood's linear part** Σ y·η comes from sufficient statistics computed once.
+  - **L-BFGS was replaced** (open question 6 (resolved), evaluation 2026-10-04). It used every iteration it was given, and from a perturbed start it diverged. Chapter IX now fits in 229 s.
 - **Warm starts.** From the previous version's parameters on every data update.
 - **Uncertainty.** The Laplace approximation at the mode, with Hessian–vector products. Marginal standard errors of linear predictors come by sparse selected inversion of the GMRF blocks and Hutchinson–Lanczos estimates for the dense low-rank part.
 - **Posterior predictive for a cell.** NB with μ inflated by `exp(Var(η_c)/2)`, and its variance augmented accordingly.

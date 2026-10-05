@@ -56,7 +56,8 @@ The empty cells hold 1.95 M of the 4.99 M expected events (§5.2 rewritten).
 **Pairs:**
 - **E_b over B0** (20 fields, 180 testable pairs, δ = 0.1): 29 pass BH.
   - Every relation found is positive among cardiovascular causes, e.g. I61–I67 at ρ = 0.41 with n_eff = 599.
-  - **The likely common cause is death-certification quality.** E_b|Z with the ill-defined share (block XVIII) is the estimand that tests it.
+  - ~~**The likely common cause is death-certification quality.**~~
+  - **Corrected 2026-10-04: E_b|Z with the ill-defined place effect (block XVIII) refutes that reading.** 20 of 180 pairs still pass, and the top ρ is unchanged (I61–I67: 0.406 → 0.405). See the SINASC/optimiser entry.
 - **E_w at lag 0 on B2:** 0 of 145.
 - **Distance classes:** equal-count classes made the first class 0–242 km. They are replaced by fixed classes from 15 to 3,000 km, under which r(<15 km) reaches 0.43 and n_eff falls by 10–30%.
 
