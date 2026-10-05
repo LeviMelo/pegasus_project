@@ -104,7 +104,7 @@ class Session:
     event: str
     years: list[int]
     graph: str = graphs.DEFAULT
-    supply: bool = False          # the facility-supply term in every expectation (ADR-0017)
+    supply: bool = False          # the facility-supply term in every expectation (ADR-0016)
     source: dict = field(default_factory=dict)   # the event reader: {"grain": "month"} for the monthly grain
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
@@ -156,7 +156,7 @@ class Session:
         return s
 
     def institutions(self, node: str) -> dict:
-        """The institution lattice of a field (E_i, ADR-0017): its facilities' steps against their catchment's expectation
+        """The institution lattice of a field (E_i, ADR-0016): its facilities' steps against their catchment's expectation
         (`facility.institution_lattice`), read on the B1 expectation without the supply term. Annual grain; SIH-RD, whose
         events all name a facility (SIM-DO's CODESTAB is empty for a death at home)."""
         su = self.expectations.surprise(node, "B1")

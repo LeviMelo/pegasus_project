@@ -172,7 +172,7 @@ class Facilities:
         return explain.FacilityTally(self.names[used], lead, block, total, outside)
 
 
-# ---------------------------------------------------------------------- the supply term (ARCHITECTURE §4.5, ADR-0017)
+# ---------------------------------------------------------------------- the supply term (ARCHITECTURE §4.5, ADR-0016)
 
 EPIDEMIC_PREFIXES = ("A", "B", "J", "U")   # ICD chapters I, X and XXII: epidemic-prone, never read as a facility's supply
 SUPPLY_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)  # exponents tried for each index

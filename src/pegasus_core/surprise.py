@@ -92,7 +92,7 @@ class Expectations:
         predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
         correlation ``exposure_rho`` between a place-year's cells (None: ignored)."""
         self.population, self.exposure_rho = population, exposure_rho
-        self.supply = supply        # fit the facility-supply term onto each loaded count block (facility.attach_supply, ADR-0017)
+        self.supply = supply        # fit the facility-supply term onto each loaded count block (facility.attach_supply, ADR-0016)
         self.supplies: dict = {}
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})

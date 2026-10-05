@@ -1,4 +1,4 @@
-# ADR-0017: Institutions, first stage: an opt-in supply term from independent evidence, and facility steps on a lattice of (facility, year) cells
+# ADR-0016: Institutions, first stage: an opt-in supply term from independent evidence, and facility steps on a lattice of (facility, year) cells
 
 **Date.** 2026-10-05. **Status.** Active. Constants provisional; the supply term is opt-in.
 
