@@ -1,0 +1,1376 @@
+{
+ "shape": {
+  "level=30 size=10 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.04,
+    "gradual": 0.0225,
+    "indeterminate": 0.9375
+   },
+   "linear": {
+    "step": 0.0575,
+    "gradual": 0.05,
+    "indeterminate": 0.8925
+   },
+   "accelerating": {
+    "step": 0.0775,
+    "gradual": 0.035,
+    "indeterminate": 0.8875
+   },
+   "step": {
+    "step": 0.0875,
+    "gradual": 0.0275,
+    "indeterminate": 0.885
+   }
+  },
+  "level=30 size=10 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.005,
+    "gradual": 0.0125,
+    "indeterminate": 0.9825
+   },
+   "linear": {
+    "step": 0.0075,
+    "gradual": 0.0075,
+    "indeterminate": 0.985
+   },
+   "accelerating": {
+    "step": 0.0175,
+    "gradual": 0.01,
+    "indeterminate": 0.9725
+   },
+   "step": {
+    "step": 0.0075,
+    "gradual": 0.0025,
+    "indeterminate": 0.99
+   }
+  },
+  "level=30 size=10 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.005,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "accelerating": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   },
+   "step": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   }
+  },
+  "level=30 size=10 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.0325,
+    "gradual": 0.03,
+    "indeterminate": 0.9375
+   },
+   "linear": {
+    "step": 0.1175,
+    "gradual": 0.11,
+    "indeterminate": 0.7725
+   },
+   "accelerating": {
+    "step": 0.11,
+    "gradual": 0.1675,
+    "indeterminate": 0.7225
+   },
+   "step": {
+    "step": 0.4375,
+    "gradual": 0.07,
+    "indeterminate": 0.4925
+   }
+  },
+  "level=30 size=10 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0125,
+    "indeterminate": 0.9875
+   },
+   "linear": {
+    "step": 0.0225,
+    "gradual": 0.035,
+    "indeterminate": 0.9425
+   },
+   "accelerating": {
+    "step": 0.03,
+    "gradual": 0.06,
+    "indeterminate": 0.91
+   },
+   "step": {
+    "step": 0.185,
+    "gradual": 0.03,
+    "indeterminate": 0.785
+   }
+  },
+  "level=30 size=10 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.005,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.01,
+    "indeterminate": 0.985
+   },
+   "accelerating": {
+    "step": 0.01,
+    "gradual": 0.02,
+    "indeterminate": 0.97
+   },
+   "step": {
+    "step": 0.0575,
+    "gradual": 0.01,
+    "indeterminate": 0.9325
+   }
+  },
+  "level=30 size=10 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.0375,
+    "gradual": 0.0225,
+    "indeterminate": 0.94
+   },
+   "linear": {
+    "step": 0.0475,
+    "gradual": 0.4575,
+    "indeterminate": 0.495
+   },
+   "accelerating": {
+    "step": 0.07,
+    "gradual": 0.635,
+    "indeterminate": 0.295
+   },
+   "step": {
+    "step": 0.83,
+    "gradual": 0.035,
+    "indeterminate": 0.135
+   }
+  },
+  "level=30 size=10 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.005,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.0175,
+    "gradual": 0.27,
+    "indeterminate": 0.7125
+   },
+   "accelerating": {
+    "step": 0.03,
+    "gradual": 0.47,
+    "indeterminate": 0.5
+   },
+   "step": {
+    "step": 0.66,
+    "gradual": 0.025,
+    "indeterminate": 0.315
+   }
+  },
+  "level=30 size=10 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.1475,
+    "indeterminate": 0.85
+   },
+   "accelerating": {
+    "step": 0.02,
+    "gradual": 0.3125,
+    "indeterminate": 0.6675
+   },
+   "step": {
+    "step": 0.4475,
+    "gradual": 0.0175,
+    "indeterminate": 0.535
+   }
+  },
+  "level=30 size=50 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.03,
+    "gradual": 0.0175,
+    "indeterminate": 0.9525
+   },
+   "linear": {
+    "step": 0.0725,
+    "gradual": 0.015,
+    "indeterminate": 0.9125
+   },
+   "accelerating": {
+    "step": 0.06,
+    "gradual": 0.03,
+    "indeterminate": 0.91
+   },
+   "step": {
+    "step": 0.1625,
+    "gradual": 0.0325,
+    "indeterminate": 0.805
+   }
+  },
+  "level=30 size=50 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.005,
+    "indeterminate": 0.9925
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.0,
+    "indeterminate": 0.995
+   },
+   "accelerating": {
+    "step": 0.005,
+    "gradual": 0.0,
+    "indeterminate": 0.995
+   },
+   "step": {
+    "step": 0.03,
+    "gradual": 0.0,
+    "indeterminate": 0.97
+   }
+  },
+  "level=30 size=50 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "step": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   }
+  },
+  "level=30 size=50 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.0225,
+    "gradual": 0.015,
+    "indeterminate": 0.9625
+   },
+   "linear": {
+    "step": 0.0725,
+    "gradual": 0.25,
+    "indeterminate": 0.6775
+   },
+   "accelerating": {
+    "step": 0.0875,
+    "gradual": 0.41,
+    "indeterminate": 0.5025
+   },
+   "step": {
+    "step": 0.7875,
+    "gradual": 0.0225,
+    "indeterminate": 0.19
+   }
+  },
+  "level=30 size=50 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0025,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.01,
+    "gradual": 0.0925,
+    "indeterminate": 0.8975
+   },
+   "accelerating": {
+    "step": 0.03,
+    "gradual": 0.21,
+    "indeterminate": 0.76
+   },
+   "step": {
+    "step": 0.6175,
+    "gradual": 0.005,
+    "indeterminate": 0.3775
+   }
+  },
+  "level=30 size=50 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.02,
+    "indeterminate": 0.9775
+   },
+   "accelerating": {
+    "step": 0.0075,
+    "gradual": 0.0625,
+    "indeterminate": 0.93
+   },
+   "step": {
+    "step": 0.3875,
+    "gradual": 0.0,
+    "indeterminate": 0.6125
+   }
+  },
+  "level=30 size=50 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.03,
+    "gradual": 0.0225,
+    "indeterminate": 0.9475
+   },
+   "linear": {
+    "step": 0.0075,
+    "gradual": 0.87,
+    "indeterminate": 0.1225
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.9525,
+    "indeterminate": 0.0475
+   },
+   "step": {
+    "step": 0.99,
+    "gradual": 0.0,
+    "indeterminate": 0.01
+   }
+  },
+  "level=30 size=50 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.005,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.7625,
+    "indeterminate": 0.235
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.905,
+    "indeterminate": 0.095
+   },
+   "step": {
+    "step": 0.985,
+    "gradual": 0.0,
+    "indeterminate": 0.015
+   }
+  },
+  "level=30 size=50 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.5275,
+    "indeterminate": 0.4725
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.8225,
+    "indeterminate": 0.1775
+   },
+   "step": {
+    "step": 0.935,
+    "gradual": 0.0,
+    "indeterminate": 0.065
+   }
+  },
+  "level=200 size=10 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.025,
+    "gradual": 0.015,
+    "indeterminate": 0.96
+   },
+   "linear": {
+    "step": 0.0725,
+    "gradual": 0.0225,
+    "indeterminate": 0.905
+   },
+   "accelerating": {
+    "step": 0.08,
+    "gradual": 0.04,
+    "indeterminate": 0.88
+   },
+   "step": {
+    "step": 0.1075,
+    "gradual": 0.035,
+    "indeterminate": 0.8575
+   }
+  },
+  "level=200 size=10 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.005,
+    "gradual": 0.005,
+    "indeterminate": 0.99
+   },
+   "linear": {
+    "step": 0.0175,
+    "gradual": 0.0075,
+    "indeterminate": 0.975
+   },
+   "accelerating": {
+    "step": 0.0125,
+    "gradual": 0.01,
+    "indeterminate": 0.9775
+   },
+   "step": {
+    "step": 0.015,
+    "gradual": 0.0125,
+    "indeterminate": 0.9725
+   }
+  },
+  "level=200 size=10 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.005,
+    "indeterminate": 0.9925
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "step": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   }
+  },
+  "level=200 size=10 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.0375,
+    "gradual": 0.0375,
+    "indeterminate": 0.925
+   },
+   "linear": {
+    "step": 0.1325,
+    "gradual": 0.1325,
+    "indeterminate": 0.735
+   },
+   "accelerating": {
+    "step": 0.1575,
+    "gradual": 0.15,
+    "indeterminate": 0.6925
+   },
+   "step": {
+    "step": 0.44,
+    "gradual": 0.0475,
+    "indeterminate": 0.5125
+   }
+  },
+  "level=200 size=10 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0075,
+    "indeterminate": 0.99
+   },
+   "linear": {
+    "step": 0.0225,
+    "gradual": 0.0375,
+    "indeterminate": 0.94
+   },
+   "accelerating": {
+    "step": 0.04,
+    "gradual": 0.0725,
+    "indeterminate": 0.8875
+   },
+   "step": {
+    "step": 0.2225,
+    "gradual": 0.015,
+    "indeterminate": 0.7625
+   }
+  },
+  "level=200 size=10 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.015,
+    "indeterminate": 0.9825
+   },
+   "accelerating": {
+    "step": 0.015,
+    "gradual": 0.025,
+    "indeterminate": 0.96
+   },
+   "step": {
+    "step": 0.07,
+    "gradual": 0.0025,
+    "indeterminate": 0.9275
+   }
+  },
+  "level=200 size=10 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.0375,
+    "gradual": 0.0375,
+    "indeterminate": 0.925
+   },
+   "linear": {
+    "step": 0.045,
+    "gradual": 0.5625,
+    "indeterminate": 0.3925
+   },
+   "accelerating": {
+    "step": 0.07,
+    "gradual": 0.6325,
+    "indeterminate": 0.2975
+   },
+   "step": {
+    "step": 0.82,
+    "gradual": 0.015,
+    "indeterminate": 0.165
+   }
+  },
+  "level=200 size=10 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.015,
+    "indeterminate": 0.9825
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.3725,
+    "indeterminate": 0.6225
+   },
+   "accelerating": {
+    "step": 0.025,
+    "gradual": 0.4775,
+    "indeterminate": 0.4975
+   },
+   "step": {
+    "step": 0.65,
+    "gradual": 0.005,
+    "indeterminate": 0.345
+   }
+  },
+  "level=200 size=10 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.0025,
+    "gradual": 0.1975,
+    "indeterminate": 0.8
+   },
+   "accelerating": {
+    "step": 0.0075,
+    "gradual": 0.3075,
+    "indeterminate": 0.685
+   },
+   "step": {
+    "step": 0.4675,
+    "gradual": 0.0,
+    "indeterminate": 0.5325
+   }
+  },
+  "level=200 size=50 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.0375,
+    "gradual": 0.03,
+    "indeterminate": 0.9325
+   },
+   "linear": {
+    "step": 0.12,
+    "gradual": 0.0575,
+    "indeterminate": 0.8225
+   },
+   "accelerating": {
+    "step": 0.1025,
+    "gradual": 0.085,
+    "indeterminate": 0.8125
+   },
+   "step": {
+    "step": 0.2825,
+    "gradual": 0.035,
+    "indeterminate": 0.6825
+   }
+  },
+  "level=200 size=50 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.005,
+    "gradual": 0.005,
+    "indeterminate": 0.99
+   },
+   "linear": {
+    "step": 0.015,
+    "gradual": 0.0125,
+    "indeterminate": 0.9725
+   },
+   "accelerating": {
+    "step": 0.02,
+    "gradual": 0.0225,
+    "indeterminate": 0.9575
+   },
+   "step": {
+    "step": 0.1,
+    "gradual": 0.0175,
+    "indeterminate": 0.8825
+   }
+  },
+  "level=200 size=50 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.0075,
+    "gradual": 0.0,
+    "indeterminate": 0.9925
+   },
+   "accelerating": {
+    "step": 0.005,
+    "gradual": 0.005,
+    "indeterminate": 0.99
+   },
+   "step": {
+    "step": 0.0325,
+    "gradual": 0.0025,
+    "indeterminate": 0.965
+   }
+  },
+  "level=200 size=50 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.0275,
+    "gradual": 0.03,
+    "indeterminate": 0.9425
+   },
+   "linear": {
+    "step": 0.04,
+    "gradual": 0.62,
+    "indeterminate": 0.34
+   },
+   "accelerating": {
+    "step": 0.03,
+    "gradual": 0.7125,
+    "indeterminate": 0.2575
+   },
+   "step": {
+    "step": 0.91,
+    "gradual": 0.0,
+    "indeterminate": 0.09
+   }
+  },
+  "level=200 size=50 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0125,
+    "indeterminate": 0.9875
+   },
+   "linear": {
+    "step": 0.0075,
+    "gradual": 0.38,
+    "indeterminate": 0.6125
+   },
+   "accelerating": {
+    "step": 0.0125,
+    "gradual": 0.4975,
+    "indeterminate": 0.49
+   },
+   "step": {
+    "step": 0.7975,
+    "gradual": 0.0,
+    "indeterminate": 0.2025
+   }
+  },
+  "level=200 size=50 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0075,
+    "gradual": 0.2,
+    "indeterminate": 0.7925
+   },
+   "accelerating": {
+    "step": 0.0075,
+    "gradual": 0.3025,
+    "indeterminate": 0.69
+   },
+   "step": {
+    "step": 0.6475,
+    "gradual": 0.0,
+    "indeterminate": 0.3525
+   }
+  },
+  "level=200 size=50 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.04,
+    "gradual": 0.0325,
+    "indeterminate": 0.9275
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.985,
+    "indeterminate": 0.015
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.9875,
+    "indeterminate": 0.0125
+   },
+   "step": {
+    "step": 0.995,
+    "gradual": 0.0,
+    "indeterminate": 0.005
+   }
+  },
+  "level=200 size=50 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0125,
+    "indeterminate": 0.9875
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.9575,
+    "indeterminate": 0.0425
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.975,
+    "indeterminate": 0.025
+   },
+   "step": {
+    "step": 0.9925,
+    "gradual": 0.0,
+    "indeterminate": 0.0075
+   }
+  },
+  "level=200 size=50 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.8875,
+    "indeterminate": 0.1125
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.9425,
+    "indeterminate": 0.0575
+   },
+   "step": {
+    "step": 0.97,
+    "gradual": 0.0,
+    "indeterminate": 0.03
+   }
+  },
+  "level=2000 size=10 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.0275,
+    "gradual": 0.025,
+    "indeterminate": 0.9475
+   },
+   "linear": {
+    "step": 0.0775,
+    "gradual": 0.04,
+    "indeterminate": 0.8825
+   },
+   "accelerating": {
+    "step": 0.0525,
+    "gradual": 0.045,
+    "indeterminate": 0.9025
+   },
+   "step": {
+    "step": 0.105,
+    "gradual": 0.0275,
+    "indeterminate": 0.8675
+   }
+  },
+  "level=2000 size=10 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.0075,
+    "gradual": 0.0125,
+    "indeterminate": 0.98
+   },
+   "linear": {
+    "step": 0.0125,
+    "gradual": 0.01,
+    "indeterminate": 0.9775
+   },
+   "accelerating": {
+    "step": 0.005,
+    "gradual": 0.0175,
+    "indeterminate": 0.9775
+   },
+   "step": {
+    "step": 0.025,
+    "gradual": 0.01,
+    "indeterminate": 0.965
+   }
+  },
+  "level=2000 size=10 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.005,
+    "indeterminate": 0.9925
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "accelerating": {
+    "step": 0.0025,
+    "gradual": 0.01,
+    "indeterminate": 0.9875
+   },
+   "step": {
+    "step": 0.0,
+    "gradual": 0.0,
+    "indeterminate": 1.0
+   }
+  },
+  "level=2000 size=10 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.04,
+    "gradual": 0.0375,
+    "indeterminate": 0.9225
+   },
+   "linear": {
+    "step": 0.1275,
+    "gradual": 0.115,
+    "indeterminate": 0.7575
+   },
+   "accelerating": {
+    "step": 0.125,
+    "gradual": 0.19,
+    "indeterminate": 0.685
+   },
+   "step": {
+    "step": 0.49,
+    "gradual": 0.0425,
+    "indeterminate": 0.4675
+   }
+  },
+  "level=2000 size=10 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.01,
+    "indeterminate": 0.9875
+   },
+   "linear": {
+    "step": 0.03,
+    "gradual": 0.0425,
+    "indeterminate": 0.9275
+   },
+   "accelerating": {
+    "step": 0.0475,
+    "gradual": 0.0775,
+    "indeterminate": 0.875
+   },
+   "step": {
+    "step": 0.2175,
+    "gradual": 0.01,
+    "indeterminate": 0.7725
+   }
+  },
+  "level=2000 size=10 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.0175,
+    "gradual": 0.02,
+    "indeterminate": 0.9625
+   },
+   "accelerating": {
+    "step": 0.01,
+    "gradual": 0.025,
+    "indeterminate": 0.965
+   },
+   "step": {
+    "step": 0.1,
+    "gradual": 0.0025,
+    "indeterminate": 0.8975
+   }
+  },
+  "level=2000 size=10 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.0325,
+    "gradual": 0.02,
+    "indeterminate": 0.9475
+   },
+   "linear": {
+    "step": 0.055,
+    "gradual": 0.5775,
+    "indeterminate": 0.3675
+   },
+   "accelerating": {
+    "step": 0.07,
+    "gradual": 0.6475,
+    "indeterminate": 0.2825
+   },
+   "step": {
+    "step": 0.8075,
+    "gradual": 0.02,
+    "indeterminate": 0.1725
+   }
+  },
+  "level=2000 size=10 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.005,
+    "indeterminate": 0.9925
+   },
+   "linear": {
+    "step": 0.02,
+    "gradual": 0.3775,
+    "indeterminate": 0.6025
+   },
+   "accelerating": {
+    "step": 0.02,
+    "gradual": 0.505,
+    "indeterminate": 0.475
+   },
+   "step": {
+    "step": 0.6375,
+    "gradual": 0.005,
+    "indeterminate": 0.3575
+   }
+  },
+  "level=2000 size=10 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.0025,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.2175,
+    "indeterminate": 0.7775
+   },
+   "accelerating": {
+    "step": 0.005,
+    "gradual": 0.3525,
+    "indeterminate": 0.6425
+   },
+   "step": {
+    "step": 0.48,
+    "gradual": 0.0,
+    "indeterminate": 0.52
+   }
+  },
+  "level=2000 size=50 effect=0.1 delta=3.0": {
+   "null": {
+    "step": 0.025,
+    "gradual": 0.0425,
+    "indeterminate": 0.9325
+   },
+   "linear": {
+    "step": 0.09,
+    "gradual": 0.0575,
+    "indeterminate": 0.8525
+   },
+   "accelerating": {
+    "step": 0.11,
+    "gradual": 0.095,
+    "indeterminate": 0.795
+   },
+   "step": {
+    "step": 0.2825,
+    "gradual": 0.06,
+    "indeterminate": 0.6575
+   }
+  },
+  "level=2000 size=50 effect=0.1 delta=6.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.01,
+    "indeterminate": 0.99
+   },
+   "linear": {
+    "step": 0.0175,
+    "gradual": 0.0175,
+    "indeterminate": 0.965
+   },
+   "accelerating": {
+    "step": 0.035,
+    "gradual": 0.025,
+    "indeterminate": 0.94
+   },
+   "step": {
+    "step": 0.1,
+    "gradual": 0.0225,
+    "indeterminate": 0.8775
+   }
+  },
+  "level=2000 size=50 effect=0.1 delta=10.0": {
+   "null": {
+    "step": 0.0,
+    "gradual": 0.005,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.0075,
+    "indeterminate": 0.9875
+   },
+   "accelerating": {
+    "step": 0.0075,
+    "gradual": 0.01,
+    "indeterminate": 0.9825
+   },
+   "step": {
+    "step": 0.0375,
+    "gradual": 0.005,
+    "indeterminate": 0.9575
+   }
+  },
+  "level=2000 size=50 effect=0.3 delta=3.0": {
+   "null": {
+    "step": 0.0425,
+    "gradual": 0.02,
+    "indeterminate": 0.9375
+   },
+   "linear": {
+    "step": 0.025,
+    "gradual": 0.6975,
+    "indeterminate": 0.2775
+   },
+   "accelerating": {
+    "step": 0.035,
+    "gradual": 0.755,
+    "indeterminate": 0.21
+   },
+   "step": {
+    "step": 0.935,
+    "gradual": 0.0,
+    "indeterminate": 0.065
+   }
+  },
+  "level=2000 size=50 effect=0.3 delta=6.0": {
+   "null": {
+    "step": 0.0075,
+    "gradual": 0.0,
+    "indeterminate": 0.9925
+   },
+   "linear": {
+    "step": 0.0125,
+    "gradual": 0.5375,
+    "indeterminate": 0.45
+   },
+   "accelerating": {
+    "step": 0.0175,
+    "gradual": 0.5875,
+    "indeterminate": 0.395
+   },
+   "step": {
+    "step": 0.8525,
+    "gradual": 0.0,
+    "indeterminate": 0.1475
+   }
+  },
+  "level=2000 size=50 effect=0.3 delta=10.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.005,
+    "gradual": 0.3325,
+    "indeterminate": 0.6625
+   },
+   "accelerating": {
+    "step": 0.005,
+    "gradual": 0.4,
+    "indeterminate": 0.595
+   },
+   "step": {
+    "step": 0.705,
+    "gradual": 0.0,
+    "indeterminate": 0.295
+   }
+  },
+  "level=2000 size=50 effect=0.6 delta=3.0": {
+   "null": {
+    "step": 0.03,
+    "gradual": 0.0225,
+    "indeterminate": 0.9475
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.9925,
+    "indeterminate": 0.0075
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.99,
+    "indeterminate": 0.01
+   },
+   "step": {
+    "step": 0.995,
+    "gradual": 0.0,
+    "indeterminate": 0.005
+   }
+  },
+  "level=2000 size=50 effect=0.6 delta=6.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0025,
+    "indeterminate": 0.995
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.975,
+    "indeterminate": 0.025
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.9725,
+    "indeterminate": 0.0275
+   },
+   "step": {
+    "step": 0.985,
+    "gradual": 0.0,
+    "indeterminate": 0.015
+   }
+  },
+  "level=2000 size=50 effect=0.6 delta=10.0": {
+   "null": {
+    "step": 0.0025,
+    "gradual": 0.0,
+    "indeterminate": 0.9975
+   },
+   "linear": {
+    "step": 0.0,
+    "gradual": 0.945,
+    "indeterminate": 0.055
+   },
+   "accelerating": {
+    "step": 0.0,
+    "gradual": 0.9425,
+    "indeterminate": 0.0575
+   },
+   "step": {
+    "step": 0.97,
+    "gradual": 0.0,
+    "indeterminate": 0.03
+   }
+  }
+ },
+ "exchange": {
+  "level=30 codes=3 effect=0.1": {
+   "false_transfer": 0.04,
+   "transfer_found": 0.01
+  },
+  "level=30 codes=3 effect=0.3": {
+   "false_transfer": 0.075,
+   "transfer_found": 0.015
+  },
+  "level=30 codes=3 effect=0.6": {
+   "false_transfer": 0.03,
+   "transfer_found": 0.07
+  },
+  "level=30 codes=10 effect=0.1": {
+   "false_transfer": 0.105,
+   "transfer_found": 0.11
+  },
+  "level=30 codes=10 effect=0.3": {
+   "false_transfer": 0.09,
+   "transfer_found": 0.1
+  },
+  "level=30 codes=10 effect=0.6": {
+   "false_transfer": 0.14,
+   "transfer_found": 0.275
+  },
+  "level=30 codes=60 effect=0.1": {
+   "false_transfer": 0.2,
+   "transfer_found": 0.21
+  },
+  "level=30 codes=60 effect=0.3": {
+   "false_transfer": 0.21,
+   "transfer_found": 0.355
+  },
+  "level=30 codes=60 effect=0.6": {
+   "false_transfer": 0.07,
+   "transfer_found": 0.77
+  },
+  "level=200 codes=3 effect=0.1": {
+   "false_transfer": 0.07,
+   "transfer_found": 0.03
+  },
+  "level=200 codes=3 effect=0.3": {
+   "false_transfer": 0.09,
+   "transfer_found": 0.595
+  },
+  "level=200 codes=3 effect=0.6": {
+   "false_transfer": 0.045,
+   "transfer_found": 0.95
+  },
+  "level=200 codes=10 effect=0.1": {
+   "false_transfer": 0.125,
+   "transfer_found": 0.235
+  },
+  "level=200 codes=10 effect=0.3": {
+   "false_transfer": 0.05,
+   "transfer_found": 0.79
+  },
+  "level=200 codes=10 effect=0.6": {
+   "false_transfer": 0.01,
+   "transfer_found": 1.0
+  },
+  "level=200 codes=60 effect=0.1": {
+   "false_transfer": 0.095,
+   "transfer_found": 0.27
+  },
+  "level=200 codes=60 effect=0.3": {
+   "false_transfer": 0.005,
+   "transfer_found": 0.835
+  },
+  "level=200 codes=60 effect=0.6": {
+   "false_transfer": 0.01,
+   "transfer_found": 0.965
+  },
+  "level=1000 codes=3 effect=0.1": {
+   "false_transfer": 0.085,
+   "transfer_found": 0.335
+  },
+  "level=1000 codes=3 effect=0.3": {
+   "false_transfer": 0.01,
+   "transfer_found": 0.965
+  },
+  "level=1000 codes=3 effect=0.6": {
+   "false_transfer": 0.0,
+   "transfer_found": 1.0
+  },
+  "level=1000 codes=10 effect=0.1": {
+   "false_transfer": 0.045,
+   "transfer_found": 0.405
+  },
+  "level=1000 codes=10 effect=0.3": {
+   "false_transfer": 0.0,
+   "transfer_found": 0.97
+  },
+  "level=1000 codes=10 effect=0.6": {
+   "false_transfer": 0.0,
+   "transfer_found": 1.0
+  },
+  "level=1000 codes=60 effect=0.1": {
+   "false_transfer": 0.005,
+   "transfer_found": 0.205
+  },
+  "level=1000 codes=60 effect=0.3": {
+   "false_transfer": 0.0,
+   "transfer_found": 0.695
+  },
+  "level=1000 codes=60 effect=0.6": {
+   "false_transfer": 0.0,
+   "transfer_found": 0.02
+  }
+ },
+ "profile": {
+  "cells=12 n=50": {
+   "recoding_supports": 0.9466666666666667,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.05333333333333334,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9466666666666667,
+   "independent_open": 0.05333333333333334
+  },
+  "cells=12 n=200": {
+   "recoding_supports": 0.9766666666666667,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.023333333333333334,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9566666666666667,
+   "independent_open": 0.043333333333333335
+  },
+  "cells=12 n=1000": {
+   "recoding_supports": 0.95,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.05,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9433333333333334,
+   "independent_open": 0.056666666666666664
+  },
+  "cells=24 n=50": {
+   "recoding_supports": 0.9533333333333334,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.04666666666666667,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.95,
+   "independent_open": 0.05
+  },
+  "cells=24 n=200": {
+   "recoding_supports": 0.9566666666666667,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.043333333333333335,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9666666666666667,
+   "independent_open": 0.03333333333333333
+  },
+  "cells=24 n=1000": {
+   "recoding_supports": 0.9333333333333333,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.06666666666666667,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9433333333333334,
+   "independent_open": 0.056666666666666664
+  },
+  "cells=200 n=50": {
+   "recoding_supports": 0.96,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.04,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9466666666666667,
+   "independent_open": 0.05333333333333334
+  },
+  "cells=200 n=200": {
+   "recoding_supports": 0.97,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.03,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.95,
+   "independent_open": 0.05
+  },
+  "cells=200 n=1000": {
+   "recoding_supports": 0.9366666666666666,
+   "recoding_excluded": 0.0,
+   "recoding_open": 0.06333333333333334,
+   "independent_supports": 0.0,
+   "independent_excluded": 0.9466666666666667,
+   "independent_open": 0.05333333333333334
+  }
+ }
+}

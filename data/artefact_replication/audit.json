@@ -1,0 +1,7325 @@
+[
+ {
+  "node": "I10",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.2522080258025637,
+   "se": 0.03814573380649407,
+   "p": 0.0004728515974056525,
+   "claim_beta": -0.2540312271658547,
+   "attenuation": 0.9928229242379691,
+   "ok": true,
+   "obs_exp_later": 0.37077072728564975
+  },
+  "all_cause": {
+   "beta": -0.02185874717405332,
+   "se": 0.006213147585091802,
+   "share_of_claim": 0.08666951459810018
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.7384030709420024,
+   "year": 2013,
+   "jump": 0.5849118386668263
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -28.804702711849124,
+    "rest_per_year": 25.369333925356333,
+    "rest_z": 4.420590715630161,
+    "share": 0.8807358360591718,
+    "bound": 0.8807358360591718,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.0057541344914007,
+    "pool_z": 3.386193390817953,
+    "pooled_beta": -0.00975771567782051,
+    "partners": {
+     "codes": [
+      "I11"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 525,
+     "llr": 9.300916798943792,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 1.0
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -28.804702711849124,
+    "rest_per_year": 29.022184282759646,
+    "rest_z": 42.08893427439019,
+    "share": 1.007550210571035,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -2.9547303975243637,
+    "pooled_beta": -0.16977056258114218,
+    "partners": {
+     "codes": [
+      "R64",
+      "R68",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 652,
+     "llr": -92.52591984642551,
+     "p_rest_profile": 0.07273181704573857,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 0.8807358360591718,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    12,
+    23,
+    50,
+    51
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 5,
+    "node_share_of_deaths": 0.26398934145413017,
+    "beta": -0.00975771567782051,
+    "se": 0.01709027667339474,
+    "direction": -1,
+    "p": 0.9889878836849733,
+    "ratio_over_period": 0.9698878769799151,
+    "ok": false,
+    "obs_exp_later": 1.1580306002510783,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      23
+     ],
+     "p_binomial": 0.7364799055342577
+    }
+   }
+  ],
+  "verdict": "explained",
+  "id": "306b4bdfff1c253b",
+  "uf": 32
+ },
+ {
+  "node": "I24",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.22965575396532126,
+   "se": 0.04847908203554811,
+   "p": 0.0038268085527463813,
+   "claim_beta": -0.41397880308195634,
+   "attenuation": 0.5547524468779523,
+   "ok": true,
+   "obs_exp_later": 0.45396950767249855
+  },
+  "all_cause": {
+   "beta": -0.018735075135316227,
+   "se": 0.0040235040090456035,
+   "share_of_claim": 0.08157894941376162
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -4.04281273232509,
+   "year": 2014,
+   "jump": 0.6669969138025553
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -7.045717796975788,
+    "rest_per_year": -51.996784671629634,
+    "rest_z": -3.653126784963502,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.653126784963502,
+    "pooled_beta": -0.04437967598585381
+   },
+   "R00-R99": {
+    "node_per_year": -7.045717796975788,
+    "rest_per_year": 19.00142338859261,
+    "rest_z": 4.164180942539317,
+    "share": 2.6968754548682794,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -6.296218354542814,
+    "pooled_beta": -0.12843420520604126,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 481,
+     "llr": -232.591254217386,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    51,
+    53
+   ],
+   "p_binomial": 0.35762414645469964
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "c5d26280e869d259",
+  "uf": 42
+ },
+ {
+  "node": "I60",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.16348851736359893,
+   "se": 0.028233058596113508,
+   "p": 0.002894949775943706,
+   "claim_beta": 0.2606440509425198,
+   "attenuation": 0.6272482213670524,
+   "ok": true,
+   "obs_exp_later": 1.2899753955284083
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.19671022074876893
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -12.57236736499922,
+   "year": 2014,
+   "jump": 1.3848088302747248
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 10.959017296449545,
+    "rest_per_year": 18.093590037034666,
+    "rest_z": 0.5954902825999319,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.5954902825999319,
+    "pooled_beta": 0.018355740506890292
+   },
+   "R00-R99": {
+    "node_per_year": 10.959017296449545,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 5.772658868656303,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 2.724125633101664,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.02559638625293186,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -397.5900792871623,
+     "p_rest_profile": 0.07773056735816046,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    22,
+    27
+   ],
+   "p_binomial": 0.3758734604758731
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "9ab079cf3b031383",
+  "uf": 23
+ },
+ {
+  "node": "I63",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.42005965337575557,
+   "se": 0.16982642559637276,
+   "p": 0.032853434272060784,
+   "claim_beta": 0.7807651451258282,
+   "attenuation": 0.5380102531447645,
+   "ok": true,
+   "obs_exp_later": 1.644955528986057
+  },
+  "all_cause": {
+   "beta": 0.04623496802334635,
+   "se": 0.009062522661136422,
+   "share_of_claim": 0.11006762409049513
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 3.7141245408110066,
+   "year": 2017,
+   "jump": 2.653813646499576
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 9.868632835237383,
+    "rest_per_year": 0.9137871679786947,
+    "rest_z": 0.08439745199517988,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.08439745199517988,
+    "pooled_beta": 0.01989981992284119
+   },
+   "R00-R99": {
+    "node_per_year": 9.868632835237383,
+    "rest_per_year": 32.12883003568891,
+    "rest_z": 3.2848698757194454,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 3.2848698757194454,
+    "pooled_beta": 0.1513641723584436
+   },
+   "all": {
+    "node_per_year": 9.868632835237383,
+    "rest_per_year": 33.042617203667625,
+    "rest_z": 2.977339329858285,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 2.977339329858285,
+    "pooled_beta": 0.05023911588550047
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 25,
+   "states_holding": [
+    12,
+    14,
+    15,
+    17,
+    23,
+    32,
+    42,
+    43,
+    50,
+    51,
+    52,
+    53
+   ],
+   "p_binomial": 6.87652808983906e-10
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "656af7a526b5271c",
+  "uf": 24
+ },
+ {
+  "node": "I63",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.7842406727904084,
+   "se": 0.20810024465221855,
+   "p": 0.004105448571164365,
+   "claim_beta": 0.91979886379124,
+   "attenuation": 0.8526219194900003,
+   "ok": true,
+   "obs_exp_later": 3.1408308270113063
+  },
+  "all_cause": {
+   "beta": -0.02185874717405332,
+   "se": 0.006213147585091802,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.5982472021896862,
+   "year": 2018,
+   "jump": 4.757450937815463
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 26.85964900637633,
+    "rest_per_year": -43.476775108512996,
+    "rest_z": -9.061299754657238,
+    "share": 1.6186650502466302,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.7574640241806467,
+    "pool_z": -8.13610684177302,
+    "pooled_beta": -0.030457384056024956,
+    "partners": {
+     "codes": [
+      "I64",
+      "I67"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 867,
+     "llr": -12.492303333471995,
+     "p_rest_profile": 0.9715071232191952,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 26.85964900637633,
+    "rest_per_year": -35.41413956545718,
+    "rest_z": -16.93903070639525,
+    "share": 1.3184885460361027,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.24369995751078113,
+    "pool_z": -2.9547303975243637,
+    "pooled_beta": 0.24163060402496117,
+    "partners": {
+     "codes": [
+      "R57",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 738,
+     "llr": 37.13652132159547,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 25,
+   "states_holding": [
+    12,
+    14,
+    15,
+    17,
+    23,
+    24,
+    42,
+    43,
+    50,
+    51,
+    52,
+    53
+   ],
+   "p_binomial": 6.87652808983906e-10
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.3552168815943728,
+    "beta": 0.24163060402496117,
+    "se": 0.10495292222206204,
+    "direction": 1,
+    "p": 0.05930824350467008,
+    "ratio_over_period": 2.132137088811911,
+    "ok": false,
+    "obs_exp_later": 0.5361681284018182,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      14,
+      17,
+      24,
+      28,
+      43,
+      50,
+      53
+     ],
+     "p_binomial": 0.00022096355868236864
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "9a9c6fc81b9db335",
+  "uf": 32
+ },
+ {
+  "node": "I63",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.09053389980637065,
+   "se": 0.022208977499802725,
+   "p": 0.9999233637990245,
+   "claim_beta": 0.2516089798188237,
+   "attenuation": -0.35981982785972694,
+   "ok": false,
+   "obs_exp_later": 2.063233798569383
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.2991237502465919
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 0.9822448196803963,
+   "year": 2017,
+   "jump": 0.8224642322213181
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 11.61512865487738,
+    "rest_per_year": -34.34743286786137,
+    "rest_z": -14.208204556290468,
+    "share": 2.9571289211194687,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 4.4394199411897235,
+    "pool_z": -3.993354981870874,
+    "pooled_beta": -0.01955774978934767,
+    "partners": {
+     "codes": [
+      "I67"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 760,
+     "llr": 3.444918204801592,
+     "p_rest_profile": 0.0034991252186953262,
+     "p_node_profile": 0.20619845038740314
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 11.61512865487738,
+    "rest_per_year": -144.6396061203885,
+    "rest_z": -11.038801663380708,
+    "share": 12.452690832628186,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 15.454838223585014,
+    "pool_z": -6.3110112556793805,
+    "pooled_beta": -0.1497552609912189,
+    "partners": {
+     "codes": [
+      "R09",
+      "R54",
+      "R64",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 3228,
+     "llr": 294.17378428504287,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 25,
+   "states_holding": [
+    12,
+    14,
+    15,
+    17,
+    23,
+    24,
+    32,
+    42,
+    43,
+    50,
+    51,
+    52,
+    53
+   ],
+   "p_binomial": 3.5911394023356684e-11
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.08918296892980437,
+    "beta": -0.019557749789348145,
+    "se": 0.006567597210508601,
+    "direction": -1,
+    "p": 0.999815358680985,
+    "ratio_over_period": 0.9405577672250348,
+    "ok": false,
+    "obs_exp_later": 1.110286911816715,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.18661583224641318,
+    "beta": -0.14975526099121858,
+    "se": 0.022850710153515415,
+    "direction": -1,
+    "p": 0.0019549852819357016,
+    "ratio_over_period": 0.6254756952111966,
+    "ok": true,
+    "obs_exp_later": 0.634457748030432,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      11,
+      26,
+      27,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 96,
+    "node_share_of_deaths": 0.06421986672651314,
+    "beta": -0.07192974960716433,
+    "se": 0.010543421235660344,
+    "direction": -1,
+    "p": 0.11433374536296932,
+    "ratio_over_period": 0.798209232574007,
+    "ok": false,
+    "obs_exp_later": 0.8082350610105825,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "bbbff6a98b6b1228",
+  "uf": 41
+ },
+ {
+  "node": "I64",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.15496329293530456,
+   "se": 0.014286907607066954,
+   "p": 7.077994877740063e-05,
+   "claim_beta": -0.2461560585952419,
+   "attenuation": 0.6295327192824168,
+   "ok": true,
+   "obs_exp_later": 0.3805243683456668
+  },
+  "all_cause": {
+   "beta": -0.02185874717405332,
+   "se": 0.006213147585091802,
+   "share_of_claim": 0.14105758054056777
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -24.90675919742556,
+   "year": 2015,
+   "jump": 0.7669211256005682
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -32.20092422123482,
+    "rest_per_year": 26.85964900637633,
+    "rest_z": 11.252320602825124,
+    "share": 0.8341266487209643,
+    "bound": 0.8341266487209643,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.36817907198350247,
+    "pool_z": 1.5415692479659209,
+    "pooled_beta": -0.030457384056024956,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 528,
+     "llr": 57.93477418813959,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.6605848537865534
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -32.20092422123482,
+    "rest_per_year": 29.022184282759646,
+    "rest_z": 42.08893427439019,
+    "share": 0.9012842017627878,
+    "bound": 0.9012842017627878,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -2.9547303975243637,
+    "pooled_beta": -0.17240258051189356,
+    "partners": {
+     "codes": [
+      "R64",
+      "R68",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 652,
+     "llr": -97.53543904608745,
+     "p_rest_profile": 0.026243439140214948,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 0.8341266487209643,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 0.9012842017627878,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    11,
+    14,
+    17,
+    51
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.33262946204122673,
+    "beta": -0.030457384056024956,
+    "se": 0.011651420732459008,
+    "direction": -1,
+    "p": 0.9777234862656784,
+    "ratio_over_period": 0.9089773519930041,
+    "ok": false,
+    "obs_exp_later": 0.9593471269326912,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.7504537205081669,
+    "beta": -0.1724025805118935,
+    "se": 0.010748597646095225,
+    "direction": -1,
+    "p": 2.692160606589405e-06,
+    "ratio_over_period": 0.5826282956609609,
+    "ok": true,
+    "obs_exp_later": 0.23431476295144216,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      11,
+      27,
+      41,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 96,
+    "node_share_of_deaths": 0.29950203712086915,
+    "beta": -0.031056068409187263,
+    "se": 0.009421051331022218,
+    "direction": -1,
+    "p": 0.9897406164182705,
+    "ratio_over_period": 0.9072737849912303,
+    "ok": false,
+    "obs_exp_later": 0.606752324177474,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "rescoped",
+  "id": "e7002bfa8e24b0d3",
+  "uf": 32
+ },
+ {
+  "node": "I64",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.030219010361734817,
+   "se": 0.028418985715066725,
+   "p": 0.8230587321637007,
+   "claim_beta": -0.1282202467314892,
+   "attenuation": 0.23568048831646354,
+   "ok": false,
+   "obs_exp_later": 0.6229805022878006
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.21815346615894596
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.12997373782184027,
+   "year": 2018,
+   "jump": 0.8278556827143024
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -17.026369919047806,
+    "rest_per_year": 121.66856278795714,
+    "rest_z": 12.172846756885924,
+    "share": 7.145889779584997,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -4.494342344837574,
+    "pooled_beta": -0.028734814951338485,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 2608,
+     "llr": 43.86197305289975,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.9975006248437891
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -17.026369919047806,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 6.1932753675664935,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 7.697010763028047,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.040910723606378735,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 2450,
+     "llr": -539.5219489943526,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    11,
+    14,
+    17,
+    32,
+    51
+   ],
+   "p_binomial": 0.008511230581506787
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.32588781857791543,
+    "beta": -0.028734814951338287,
+    "se": 0.005683617704703876,
+    "direction": -1,
+    "p": 0.9995795813810903,
+    "ratio_over_period": 0.9138968164760992,
+    "ok": false,
+    "obs_exp_later": 1.0386783656203809,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "7068d697e582000d",
+  "uf": 43
+ },
+ {
+  "node": "I67",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.41664445676969963,
+   "se": 0.163115631537159,
+   "p": 0.02960896480377838,
+   "claim_beta": -0.4554350792439527,
+   "attenuation": 0.9148273283238356,
+   "ok": true,
+   "obs_exp_later": 0.17569318493518973
+  },
+  "all_cause": {
+   "beta": 0.008074804996580242,
+   "se": 0.006105331433542248,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 3.3086111079317195,
+   "year": 2016,
+   "jump": 0.2677542505618045
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -5.884779988507946,
+    "rest_per_year": 14.458189530605678,
+    "rest_z": 5.866183285591236,
+    "share": 2.45687851692676,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.8834306048000102,
+    "pool_z": 1.8896452652666536,
+    "pooled_beta": -0.004966167411991609,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 310,
+     "llr": 10.082221048098127,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.07423144213946513
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -5.884779988507946,
+    "rest_per_year": 11.213982476734305,
+    "rest_z": 10.953403224179588,
+    "share": 1.9055907780126797,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -0.11527152605449695,
+    "pooled_beta": -0.07812791215555161,
+    "partners": {
+     "codes": [
+      "R68",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 240,
+     "llr": 69.5365852874501,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.0007498125468632841
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    41,
+    42,
+    43,
+    51
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.0636788893918817,
+    "beta": -0.004966167411991581,
+    "se": 0.012285125551798903,
+    "direction": -1,
+    "p": 0.9987475533292505,
+    "ratio_over_period": 0.9845594683762601,
+    "ok": false,
+    "obs_exp_later": 1.1267081451568037,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.18011096884336322,
+    "beta": -0.07812791215555177,
+    "se": 0.08160874961857512,
+    "direction": -1,
+    "p": 0.40655374974138087,
+    "ratio_over_period": 0.7828565318106615,
+    "ok": false,
+    "obs_exp_later": 0.4084828568928728,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      27,
+      41,
+      42,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 96,
+    "node_share_of_deaths": 0.04936827328029948,
+    "beta": -0.0006454965591953776,
+    "se": 0.020325472226661836,
+    "direction": -1,
+    "p": 0.9889416142153402,
+    "ratio_over_period": 0.9979794465688464,
+    "ok": false,
+    "obs_exp_later": 0.8156895046638312,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "explained",
+  "id": "b6c42536a3f9bf6c",
+  "uf": 17
+ },
+ {
+  "node": "I67",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.21003421910596892,
+   "se": 0.03403551736731246,
+   "p": 0.0010535046071399614,
+   "claim_beta": -0.22111521521953584,
+   "attenuation": 0.9498858723830241,
+   "ok": true,
+   "obs_exp_later": 0.6687331432313974
+  },
+  "all_cause": {
+   "beta": -0.018735075135316227,
+   "se": 0.0040235040090456035,
+   "share_of_claim": 0.08920010851119355
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -10.03534989078261,
+   "year": 2017,
+   "jump": 0.6184256682779801
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -33.24929372992714,
+    "rest_per_year": 21.060981564597196,
+    "rest_z": 4.204974157820248,
+    "share": 0.6334264341272475,
+    "bound": 0.6334264341272475,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.07864277230446212,
+    "pool_z": 0.11445874338021676,
+    "pooled_beta": -0.026056809448558996,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 485,
+     "llr": 16.107639608888725,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.8540364908772807
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -33.24929372992714,
+    "rest_per_year": 19.00142338859261,
+    "rest_z": 4.164180942539317,
+    "share": 0.5714835191067456,
+    "bound": 0.5714835191067456,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -6.296218354542814,
+    "pooled_beta": -0.13962231709898593,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 481,
+     "llr": -86.7137124025864,
+     "p_rest_profile": 0.9980004998750313,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 0.6334264341272475,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 0.5714835191067456,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    17,
+    41,
+    43,
+    51
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.16281635749258672,
+    "beta": -0.026056809448558767,
+    "se": 0.011841866921769747,
+    "direction": -1,
+    "p": 0.9867374486138316,
+    "ratio_over_period": 0.9215978245212555,
+    "ok": false,
+    "obs_exp_later": 0.8831457400745144,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "explained",
+  "id": "8bfb2b1bf25f0368",
+  "uf": 42
+ },
+ {
+  "node": "I67",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.43875962079020464,
+   "se": 0.12434695897956821,
+   "p": 0.007784511103451077,
+   "claim_beta": -0.5760092448512442,
+   "attenuation": 0.7617232270352109,
+   "ok": true,
+   "obs_exp_later": 0.14637399449842156
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.015025042282680198
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 5.8665817002290135,
+   "year": 2018,
+   "jump": 0.07935406035208992
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -185.4316168352705,
+    "rest_per_year": 121.66856278795714,
+    "rest_z": 12.172846756885924,
+    "share": 0.6561370971383067,
+    "bound": 0.6561370971383067,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.5836631336814387,
+    "pool_z": 2.944493933547355,
+    "pooled_beta": -0.028734814951338485,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 2608,
+     "llr": 48.520867886631045,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 1.0
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -185.4316168352705,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 0.5686678421856736,
+    "bound": 0.5686678421856736,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.7067411413374508,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": -0.033683134729472895,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 2450,
+     "llr": -350.48668368106075,
+     "p_rest_profile": 0.8407898025493626,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 0.6561370971383067,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 0.5686678421856736,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    17,
+    41,
+    42,
+    51
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.17164492506364998,
+    "beta": -0.028734814951338287,
+    "se": 0.005683617704703876,
+    "direction": -1,
+    "p": 0.9995795813810903,
+    "ratio_over_period": 0.9138968164760992,
+    "ok": false,
+    "obs_exp_later": 1.0386783656203809,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "explained",
+  "id": "d33f748b97b279ac",
+  "uf": 43
+ },
+ {
+  "node": "I69",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.2624952006612012,
+   "se": 0.028496090668678628,
+   "p": 4.7616153266115205e-05,
+   "claim_beta": 0.3113910374161999,
+   "attenuation": 0.8429760947498134,
+   "ok": true,
+   "obs_exp_later": 1.0821826354612827
+  },
+  "all_cause": {
+   "beta": 0.045998479005173544,
+   "se": 0.00931806815511728,
+   "share_of_claim": 0.17523550483706987
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.6708375777727992,
+   "year": 2015,
+   "jump": 1.6971151632290191
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 30.523300410359766,
+    "rest_per_year": -15.881470537475058,
+    "rest_z": -13.218352988173413,
+    "share": 0.5203064650271176,
+    "bound": 0.5203064650271176,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.06395568074090587,
+    "pool_z": -0.32159624780014395,
+    "pooled_beta": 0.02472926503941959,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 357,
+     "llr": 4.0223873701126855,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.0024993751562109472
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 30.523300410359766,
+    "rest_per_year": 13.55258877531094,
+    "rest_z": 1.9320197863158401,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 1.9320197863158401,
+    "pooled_beta": 0.05362712143151687
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 0.5203064650271176,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    14,
+    15,
+    16,
+    22
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.10329928176953673,
+    "beta": 0.024729265039419517,
+    "se": 0.011137994028216504,
+    "direction": 1,
+    "p": 0.9915145632100985,
+    "ratio_over_period": 1.080567779603875,
+    "ok": false,
+    "obs_exp_later": 1.308227129191994,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      14
+     ],
+     "p_binomial": 0.7364799055342577
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "e440aa3313234e26",
+  "uf": 21
+ },
+ {
+  "node": "I69",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.19390589087392443,
+   "se": 0.032334848081905294,
+   "p": 0.0015037761048907233,
+   "claim_beta": 0.2494568780108324,
+   "attenuation": 0.7773122650300477,
+   "ok": true,
+   "obs_exp_later": 1.4127236005047743
+  },
+  "all_cause": {
+   "beta": 0.023011618026936367,
+   "se": 0.007447676213218909,
+   "share_of_claim": 0.11867415643343336
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -2.226632609436473,
+   "year": 2015,
+   "jump": 1.4942114543827845
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 17.961945136850815,
+    "rest_per_year": -11.163227606611398,
+    "rest_z": -29.28132323163533,
+    "share": 0.6214932470598001,
+    "bound": 0.6214932470598001,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.7390711689483447,
+    "pool_z": -1.697577449719641,
+    "pooled_beta": 0.005944368508993269,
+    "partners": {
+     "codes": [
+      "I63"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 242,
+     "llr": 28.31559330281393,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 17.961945136850815,
+    "rest_per_year": -16.834613918728646,
+    "rest_z": -4.873970880402307,
+    "share": 0.937237798605156,
+    "bound": 0.937237798605156,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": 2.17867767967992,
+    "pooled_beta": 0.09548445496915298,
+    "partners": {
+     "codes": [
+      "R96",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 339,
+     "llr": -42.43222000250208,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 0.6214932470598001,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 0.937237798605156,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    14,
+    15,
+    16,
+    21
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 8,
+    "node_share_of_deaths": 0.13025611620795108,
+    "beta": 0.005944368508993367,
+    "se": 0.009182779186447715,
+    "direction": 1,
+    "p": 0.9997699469647798,
+    "ratio_over_period": 1.0188006185423153,
+    "ok": false,
+    "obs_exp_later": 1.2738428468121117,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      14
+     ],
+     "p_binomial": 0.7364799055342577
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.25252431681333953,
+    "beta": 0.09548445496915306,
+    "se": 0.02312373312623662,
+    "direction": 1,
+    "p": 0.07270764695121928,
+    "ratio_over_period": 1.348766919139121,
+    "ok": false,
+    "obs_exp_later": 0.9789014348508801,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      50,
+      53
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 96,
+    "node_share_of_deaths": 0.09400972514398041,
+    "beta": 0.024416225760951697,
+    "se": 0.013762073047219617,
+    "direction": 1,
+    "p": 0.9801517217291068,
+    "ratio_over_period": 1.0795083956137521,
+    "ok": false,
+    "obs_exp_later": 1.0964233228011178,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "94d8a09b26d14e56",
+  "uf": 22
+ },
+ {
+  "node": "I70",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.22643162266426659,
+   "se": 0.054146841033810914,
+   "p": 0.007253404459908289,
+   "claim_beta": -0.3765559622544498,
+   "attenuation": 0.6013226329191945,
+   "ok": true,
+   "obs_exp_later": 0.39325680435227445
+  },
+  "all_cause": {
+   "beta": -0.011571130213488233,
+   "se": 0.0028253706234044594,
+   "share_of_claim": 0.05110209465152716
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 4.576602347366201,
+   "year": 2017,
+   "jump": 0.5343297064780201
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -5.939964864261787,
+    "rest_per_year": -32.182286921610824,
+    "rest_z": -4.5483055649927335,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -4.5483055649927335,
+    "pooled_beta": -0.07524230233210012
+   },
+   "R00-R99": {
+    "node_per_year": -5.939964864261787,
+    "rest_per_year": -148.17403708205563,
+    "rest_z": -3.4474083018272474,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.4474083018272474,
+    "pooled_beta": -0.037396625085570484
+   },
+   "all": {
+    "node_per_year": -5.939964864261787,
+    "rest_per_year": -180.35632400366646,
+    "rest_z": -4.620666846751153,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -4.620666846751153,
+    "pooled_beta": -0.044240949041929954
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 21,
+   "states_holding": [
+    33,
+    41,
+    43
+   ],
+   "p_binomial": 0.08491751385187897
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "8272b6a5d5a922fc",
+  "uf": 31
+ },
+ {
+  "node": "I73",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.3178382613799162,
+   "se": 0.04406543409299038,
+   "p": 0.00018242673626228553,
+   "claim_beta": 0.3975937513198172,
+   "attenuation": 0.7994045689220424,
+   "ok": true,
+   "obs_exp_later": 1.2881832357682128
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.10118310552309932
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -6.199752168811849,
+   "year": 2015,
+   "jump": 1.832224457337235
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 9.115706976079295,
+    "rest_per_year": 18.062516669256134,
+    "rest_z": 9.146548540796656,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 9.146548540796656,
+    "pooled_beta": 0.23073797348357766
+   },
+   "R00-R99": {
+    "node_per_year": 9.115706976079295,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 6.939962918303111,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 3.274978014234385,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.0294333712447331,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -948.9628116945373,
+     "p_rest_profile": 0.8555361159710072,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 23,
+   "states_holding": [
+    11,
+    17,
+    21,
+    22,
+    24,
+    26
+   ],
+   "p_binomial": 0.0007535097264103605
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "f160f045a0381c50",
+  "uf": 23
+ },
+ {
+  "node": "I73",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.2048496433581019,
+   "se": 0.031820275246131305,
+   "p": 0.0008673417873572622,
+   "claim_beta": 0.28158013046465524,
+   "attenuation": 0.7275003496165197,
+   "ok": true,
+   "obs_exp_later": 1.8264684936834803
+  },
+  "all_cause": {
+   "beta": 0.012135598772147668,
+   "se": 0.008792274390896266,
+   "share_of_claim": 0.059241493288485624
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -6.445309960208901,
+   "year": 2014,
+   "jump": 1.5477416199682523
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 10.433458462658374,
+    "rest_per_year": 10.14403587295821,
+    "rest_z": 3.1130623861837994,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 3.1130623861837994,
+    "pooled_beta": 0.0880899894515813
+   },
+   "R00-R99": {
+    "node_per_year": 10.433458462658374,
+    "rest_per_year": -61.65254437653637,
+    "rest_z": -7.8043165206777365,
+    "share": 5.909118687460392,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 7.21497360297428,
+    "pool_z": -6.878634096926743,
+    "pooled_beta": -0.07825110708320898,
+    "partners": {
+     "codes": [
+      "R57",
+      "R96",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1363,
+     "llr": -1075.8023444867222,
+     "p_rest_profile": 0.46213446638340416,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 23,
+   "states_holding": [
+    11,
+    17,
+    21,
+    22,
+    23,
+    24
+   ],
+   "p_binomial": 0.0007535097264103605
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "2f6a57ebec2e94aa",
+  "uf": 26
+ },
+ {
+  "node": "J60-J70",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.29621517137456865,
+   "se": 0.02999532080104466,
+   "p": 2.3142631465412803e-05,
+   "claim_beta": 0.29766347053694775,
+   "attenuation": 0.9951344410526205,
+   "ok": true,
+   "obs_exp_later": 1.5647001468395167
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.10856926129491135
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -7.827267958939051,
+   "year": 2017,
+   "jump": 1.7175691827092352
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": 22.807232561792414,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 2.773798540296706,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.3089593334035132,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.011780981036265487,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -242.16422367090962,
+     "p_rest_profile": 0.5256185953511622,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    21,
+    24
+   ],
+   "p_binomial": 0.3758734604758731
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "afee322d3dafc443",
+  "uf": 23
+ },
+ {
+  "node": "J60-J70",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.2159571827148937,
+   "se": 0.021166813758617533,
+   "p": 3.619557658973157e-05,
+   "claim_beta": -0.21256944802308253,
+   "attenuation": 1.015937072440642,
+   "ok": true,
+   "obs_exp_later": 0.49325923063690424
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.03052633754260818
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -18.157050689999803,
+   "year": 2015,
+   "jump": 0.6719983678421018
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": -22.97666886454375,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 4.589394487093671,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 5.703705497729479,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.06988056113090339,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 2450,
+     "llr": -94.96916759375472,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    13,
+    42
+   ],
+   "p_binomial": 0.3758734604758731
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 99,
+    "node_share_of_deaths": 0.05501121185531832,
+    "beta": 0.06988056113090339,
+    "se": 0.016539967053403885,
+    "direction": 1,
+    "p": 0.24981456124263562,
+    "ratio_over_period": 1.244785961936368,
+    "ok": false,
+    "obs_exp_later": 0.839259144478543,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      50,
+      53
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "f5cb71b0a8de690d",
+  "uf": 43
+ },
+ {
+  "node": "J69",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.3302698561299688,
+   "se": 0.0318104436574508,
+   "p": 1.3450522783732713e-05,
+   "claim_beta": 0.3522149630487984,
+   "attenuation": 0.9376939959368246,
+   "ok": true,
+   "obs_exp_later": 1.6210817403347109
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.09737450071079705
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -10.350071483492744,
+   "year": 2017,
+   "jump": 1.8003623257617816
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 22.389308989693657,
+    "rest_per_year": 0.41792357209874836,
+    "rest_z": 0.7265115416358487,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.7265115416358487,
+    "pooled_beta": 0.29621517137456865
+   },
+   "R00-R99": {
+    "node_per_year": 22.389308989693657,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 2.825574849908438,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.3333926448826583,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.012444956172229878,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -281.62945985430497,
+     "p_rest_profile": 0.41864533866533366,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 24,
+   "states_holding": [
+    21,
+    22,
+    24
+   ],
+   "p_binomial": 0.11594458835933902
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "647e94a31255ef26",
+  "uf": 23
+ },
+ {
+  "node": "J81",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.36170689606407314,
+   "se": 0.0666151928668697,
+   "p": 0.0009294319548330867,
+   "claim_beta": -0.4183900835062023,
+   "attenuation": 0.8645207195947107,
+   "ok": true,
+   "obs_exp_later": 0.5687433116325731
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.0182257566168652
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -4.971320792412519,
+   "year": 2015,
+   "jump": 0.4834140360198101
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -23.93329205216086,
+    "rest_per_year": 2.4482260550136123,
+    "rest_z": 1.402198490154986,
+    "share": 0.1022937441985784,
+    "bound": 0.1022937441985784,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.1022937441985784,
+    "pool_z": 1.402198490154986,
+    "pooled_beta": -0.14778993073004562
+   },
+   "R00-R99": {
+    "node_per_year": -23.93329205216086,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 4.405954566922741,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 5.47572612395275,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.06752301201202125,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 2450,
+     "llr": -176.9333099547852,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    27,
+    31,
+    52
+   ],
+   "p_binomial": 0.127106495660932
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.049124442046402116,
+    "beta": 0.06752301201202136,
+    "se": 0.016738151346393997,
+    "direction": 1,
+    "p": 0.29612270151504333,
+    "ratio_over_period": 1.2356244351112218,
+    "ok": false,
+    "obs_exp_later": 0.8665666126980404,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      33,
+      50,
+      53
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "faf87a73c444dd9b",
+  "uf": 43
+ },
+ {
+  "node": "R00-R09",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.4300821799499803,
+   "se": 0.06706869122882878,
+   "p": 0.00027207943333631333,
+   "claim_beta": -0.4287447338256522,
+   "attenuation": 1.0031194461851325,
+   "ok": true,
+   "obs_exp_later": 0.3331442683464271
+  },
+  "all_cause": {
+   "beta": -0.01138674802583213,
+   "se": 0.007446766196771946,
+   "share_of_claim": 0.02647574941876559
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.937344845904249,
+   "year": 2012,
+   "jump": 0.4021236983036494
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": -17.860706419934026,
+    "rest_per_year": 12.762431941338042,
+    "rest_z": 4.410425539273245,
+    "share": 0.7145535927455877,
+    "bound": 0.7145535927455877,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -3.904009209053987,
+    "pooled_beta": -0.3223650021446181,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 303,
+     "llr": 18.561862932198082,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.9880029992501874
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 0.7145535927455877,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    15,
+    32,
+    41
+   ],
+   "p_binomial": 0.13863237820062044
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 88,
+    "node_share_of_deaths": 0.12213668794592565,
+    "beta": -0.3223650021446181,
+    "se": 0.07036059892683733,
+    "direction": -1,
+    "p": 0.002793517100593901,
+    "ratio_over_period": 0.3641833640334709,
+    "ok": true,
+    "obs_exp_later": 0.2780356486427078,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      32,
+      41
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "rescoped",
+  "id": "22b920ba94484979",
+  "uf": 52
+ },
+ {
+  "node": "R50-R69",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.2529490790305764,
+   "se": 0.04535607258424895,
+   "p": 0.0013183901397970717,
+   "claim_beta": -0.2551775532865619,
+   "attenuation": 0.9912669659721874,
+   "ok": true,
+   "obs_exp_later": 0.5127194750554118
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.10706043974667828
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -7.601413785632775,
+   "year": 2017,
+   "jump": 0.5212972956431503
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": -43.10063659996959,
+    "rest_per_year": -136.40929770728695,
+    "rest_z": -4.020176686591592,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -4.020176686591592,
+    "pooled_beta": -0.22036083138143742
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    11,
+    12,
+    52
+   ],
+   "p_binomial": 0.13863237820062044
+  },
+  "rescope": [],
+  "verdict": "open",
+  "id": "4675df9a875413df",
+  "uf": 41
+ },
+ {
+  "node": "R54",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.3030706925684063,
+   "se": 0.057767086168114004,
+   "p": 0.001420350578782102,
+   "claim_beta": -0.2991915930162907,
+   "attenuation": 1.0129652692209983,
+   "ok": true,
+   "obs_exp_later": 0.6307825596357374
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.08935486108878163
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -5.296837242399286,
+   "year": 2017,
+   "jump": 0.4467019626965096
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -30.699379392827954,
+    "rest_per_year": -12.401257207141628,
+    "rest_z": -5.258157508043382,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -5.258157508043382,
+    "pooled_beta": -0.2529490790305764
+   },
+   "R00-R99": {
+    "node_per_year": -30.699379392827954,
+    "rest_per_year": -148.81055491442862,
+    "rest_z": -4.24338695852304,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -4.24338695852304,
+    "pooled_beta": -0.22036083138143722
+   },
+   "all": {
+    "node_per_year": -30.699379392827954,
+    "rest_per_year": -148.81055491442862,
+    "rest_z": -4.24338695852304,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -4.24338695852304,
+    "pooled_beta": -0.22036083138143722
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    11,
+    13,
+    52
+   ],
+   "p_binomial": 0.127106495660932
+  },
+  "rescope": [],
+  "verdict": "open",
+  "id": "2105d17b5b98b024",
+  "uf": 41
+ },
+ {
+  "node": "R57",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.21293733121097255,
+   "se": 0.03807161835510379,
+   "p": 0.00180484752777794,
+   "claim_beta": 0.4737834665525935,
+   "attenuation": 0.4494401899677411,
+   "ok": false,
+   "obs_exp_later": 3.6472841825242583
+  },
+  "all_cause": {
+   "beta": 0.0013264595691992336,
+   "se": 0.00570269541867701,
+   "share_of_claim": 0.006229342509627931
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -3.6555900957414087,
+   "year": 2018,
+   "jump": 1.5165499729087832
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 29.166782600290738,
+    "rest_per_year": -6.941282839075374,
+    "rest_z": -0.6296784890050103,
+    "share": 0.2379858942345661,
+    "bound": 0.2379858942345661,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.2379858942345661,
+    "pool_z": -0.6296784890050103,
+    "pooled_beta": 0.08052993786659134
+   },
+   "R00-R99": {
+    "node_per_year": 29.166782600290738,
+    "rest_per_year": 369.01017812841116,
+    "rest_z": 14.408997251429598,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 14.408997251429598,
+    "pooled_beta": 0.13807337867016264
+   },
+   "all": {
+    "node_per_year": 29.166782600290738,
+    "rest_per_year": 369.01017812841116,
+    "rest_z": 14.408997251429598,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 14.408997251429598,
+    "pooled_beta": 0.13807337867016264
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 23,
+   "states_holding": [
+    29
+   ],
+   "p_binomial": 0.6926431322749761
+  },
+  "rescope": [],
+  "verdict": "not_replicated",
+  "id": "c19de86d42b7c517",
+  "uf": 33
+ },
+ {
+  "node": "R68",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.1260879337909204,
+   "se": 0.07029639057694037,
+   "p": 0.18118372640197436,
+   "claim_beta": -0.31191947560807187,
+   "attenuation": 0.40423232164364886,
+   "ok": false,
+   "obs_exp_later": 0.5565040377334288
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.9115212835861902,
+   "year": 2018,
+   "jump": 0.5177261902746446
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -5.7604637705462585,
+    "rest_per_year": 2.6187820349648545,
+    "rest_z": 0.6311251915008338,
+    "share": 0.4546130553506664,
+    "bound": 0.4546130553506664,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.4546130553506664,
+    "pool_z": 0.6311251915008338,
+    "pooled_beta": -0.0454673480606707
+   },
+   "R00-R99": {
+    "node_per_year": -5.7604637705462585,
+    "rest_per_year": 27.489075885319338,
+    "rest_z": 3.7525123594348533,
+    "share": 4.77202478485731,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -0.910367813868437,
+    "pooled_beta": -0.04155146282928799,
+    "partners": {
+     "codes": [
+      "R64",
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 436,
+     "llr": -25.904762029334996,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    11,
+    12,
+    41,
+    43,
+    52
+   ],
+   "p_binomial": 0.005974550586488712
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 88,
+    "node_share_of_deaths": 0.046937182988685135,
+    "beta": -0.04155146282928766,
+    "se": 0.08807743480138895,
+    "direction": -1,
+    "p": 0.5725504228828084,
+    "ratio_over_period": 0.8779222326904627,
+    "ok": false,
+    "obs_exp_later": 0.5387609970079194,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      32,
+      41,
+      52
+     ],
+     "p_binomial": 0.008511230581506787
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "9ecb315c1cdddecb",
+  "uf": 23
+ },
+ {
+  "node": "R68",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.34608689930415415,
+   "se": 0.11096737399566405,
+   "p": 0.0159456286927305,
+   "claim_beta": -0.4942866727319589,
+   "attenuation": 0.7001744501653389,
+   "ok": true,
+   "obs_exp_later": 0.2441985268931475
+  },
+  "all_cause": {
+   "beta": -0.01138674802583213,
+   "se": 0.007446766196771946,
+   "share_of_claim": 0.032901413051827276
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 0.18792509835984658,
+   "year": 2012,
+   "jump": 0.44757030225661976
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -2.5121348038531277,
+    "rest_per_year": -9.383610421306908,
+    "rest_z": -3.1696397971436374,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.1696397971436374,
+    "pooled_beta": -0.276452084317549
+   },
+   "R00-R99": {
+    "node_per_year": -2.5121348038531277,
+    "rest_per_year": 12.762431941338042,
+    "rest_z": 4.410425539273245,
+    "share": 5.080313334206009,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -4.6184477911755755,
+    "pooled_beta": -0.32236500214461794,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 303,
+     "llr": -85.2695977785671,
+     "p_rest_profile": 0.11072231942014496,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    11,
+    12,
+    41,
+    43
+   ],
+   "p_binomial": 0.029782496908445998
+  },
+  "rescope": [],
+  "verdict": "open",
+  "id": "182c682607329e82",
+  "uf": 52
+ },
+ {
+  "node": "R96",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.4667408294202658,
+   "se": 0.09074799114010668,
+   "p": 0.0009983036499416587,
+   "claim_beta": 0.5859642647150815,
+   "attenuation": 0.7965346310789333,
+   "ok": true,
+   "obs_exp_later": 2.3111084495709306
+  },
+  "all_cause": {
+   "beta": 0.045998479005173544,
+   "se": 0.00931806815511728,
+   "share_of_claim": 0.09855250731397937
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -11.797706515218342,
+   "year": 2017,
+   "jump": 2.463426001513404
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 8.434765198030135,
+    "rest_per_year": 13.06487965541835,
+    "rest_z": 1.553204123496138,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 1.553204123496138,
+    "pooled_beta": 0.04679743857448439
+   },
+   "R00-R99": {
+    "node_per_year": 8.434765198030135,
+    "rest_per_year": -11.670025916189687,
+    "rest_z": -5.135998526644194,
+    "share": 1.3835626294511574,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": 0.6993175599087781,
+    "pooled_beta": 0.015559373672976466,
+    "partners": {
+     "codes": [
+      "R09"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 238,
+     "llr": -40.20917419444068,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    13,
+    28,
+    29,
+    33,
+    51,
+    53
+   ],
+   "p_binomial": 0.0009623513608134945
+  },
+  "rescope": [],
+  "verdict": "open",
+  "id": "e24e7adafa029fb2",
+  "uf": 21
+ },
+ {
+  "node": "R98",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.06470931438016142,
+   "se": 0.18202932450127482,
+   "p": 0.4861464858611893,
+   "claim_beta": -0.5784744624554822,
+   "attenuation": 0.11186200702013059,
+   "ok": false,
+   "obs_exp_later": 0.22343374686787845
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -9.67749285835384,
+   "year": 2017,
+   "jump": 0.34189826843067495
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 1.1493652785450594,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 55.04139508041278,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 32.354398618473176,
+    "pool_z": -2.2172854070379664,
+    "pooled_beta": -0.05869822980169583,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -170.40848658553148,
+     "p_rest_profile": 0.9457635591102225,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 1.1493652785450594,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 55.04139508041278,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 26.974109787493756,
+    "pool_z": -1.7726739933685,
+    "pooled_beta": -0.041551462829287886,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -170.40848658553148,
+     "p_rest_profile": 0.9402649337665584,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    12,
+    27,
+    32,
+    52
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [],
+  "verdict": "not_replicated",
+  "id": "37f66267d6084861",
+  "uf": 23
+ },
+ {
+  "node": "R98",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.016723331080549932,
+   "se": 0.07429734631885766,
+   "p": 0.7039668035426017,
+   "claim_beta": -0.34127704602294756,
+   "attenuation": 0.049002214697514264,
+   "ok": false,
+   "obs_exp_later": 1.258245074200701
+  },
+  "all_cause": {
+   "beta": 0.0203014409119931,
+   "se": 0.0029528468964275458,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.7301717203096075,
+   "year": 2018,
+   "jump": 0.5377673843873974
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -409.2794030404566,
+    "rest_per_year": 528.9724641682966,
+    "rest_z": 17.932196057271938,
+    "share": 1.2924482889651023,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.3265081834965702,
+    "pool_z": 17.838638922409302,
+    "pooled_beta": 0.05080359195698094,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 11038,
+     "llr": 896.1038397906746,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -409.2794030404566,
+    "rest_per_year": 572.5749791684319,
+    "rest_z": 17.48493366802713,
+    "share": 1.3989831272106157,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.4827031170600646,
+    "pool_z": 19.84735693591685,
+    "pooled_beta": 0.06801681014449881,
+    "partners": {
+     "codes": [
+      "R09",
+      "R10",
+      "R64",
+      "R68",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 11949,
+     "llr": 570.4877921567892,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "certification (the claim's subject is the ill-defined chapter)",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a change in an R code is a change of what is certified as ill-defined",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    12,
+    27,
+    32,
+    52
+   ],
+   "p_binomial": 0.03874139618998774
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 4,
+    "node_share_of_deaths": 0.5375055573362008,
+    "beta": 0.05080359195698094,
+    "se": 0.02287159893004482,
+    "direction": 1,
+    "p": 0.622438859546784,
+    "ratio_over_period": 1.1725582070388307,
+    "ok": false,
+    "obs_exp_later": 1.860468452256632,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      43,
+      50,
+      53
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 88,
+    "node_share_of_deaths": 0.47546186208158037,
+    "beta": 0.0680168101444989,
+    "se": 0.02127748391364456,
+    "direction": 1,
+    "p": 0.32819143258751515,
+    "ratio_over_period": 1.2375377545958959,
+    "ok": false,
+    "obs_exp_later": 1.7657987187070916,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      50,
+      53
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 88,
+    "node_share_of_deaths": 0.47546186208158037,
+    "beta": 0.0680168101444989,
+    "se": 0.02127748391364456,
+    "direction": 1,
+    "p": 0.32819143258751515,
+    "ratio_over_period": 1.2375377545958959,
+    "ok": false,
+    "obs_exp_later": 1.7657987187070916,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      50,
+      53
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "c2af56b01d4cc947",
+  "uf": 29
+ },
+ {
+  "node": "V09",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.13290539682127492,
+   "se": 0.055657358638964156,
+   "p": 0.10814357959308789,
+   "claim_beta": -0.3990110951726676,
+   "attenuation": 0.3330869703354028,
+   "ok": false,
+   "obs_exp_later": 0.7272576600730627
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -1.4553584985894055,
+   "year": 2016,
+   "jump": 0.6691730400714072
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -23.27368536609905,
+    "rest_per_year": 29.31570187090207,
+    "rest_z": 9.394147046184356,
+    "share": 1.2596072091618096,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.7539904606867026,
+    "pool_z": 1.6380240047866936,
+    "pooled_beta": 0.01637129538457334,
+    "partners": {
+     "codes": [
+      "V02",
+      "V04",
+      "V14",
+      "V22",
+      "V24",
+      "V28",
+      "V48"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 608,
+     "llr": -0.3362139778797335,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -23.27368536609905,
+    "rest_per_year": 27.489075885319338,
+    "rest_z": 3.7525123594348533,
+    "share": 1.1811226049038421,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.06139156583869211,
+    "partners": {
+     "codes": [
+      "R64",
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 436,
+     "llr": -333.34463574851725,
+     "p_rest_profile": 0.8852786803299175,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    15,
+    27,
+    53
+   ],
+   "p_binomial": 0.127106495660932
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.13287727087391837,
+    "beta": 0.01637129538457325,
+    "se": 0.019512297225597417,
+    "direction": 1,
+    "p": 0.9677637633955889,
+    "ratio_over_period": 1.0526363017701073,
+    "ok": false,
+    "obs_exp_later": 1.2361579037070756,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "435a9bd5ac59cd5d",
+  "uf": 23
+ },
+ {
+  "node": "V22",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.3214465446740436,
+   "se": 0.05354690384315033,
+   "p": 0.0005846269551613362,
+   "claim_beta": 0.41266982854657375,
+   "attenuation": 0.7789436552853422,
+   "ok": true,
+   "obs_exp_later": 2.4937197215411775
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.1000473107374464
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -9.635028727531688,
+   "year": 2012,
+   "jump": 2.4319719443880397
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 7.092050762464035,
+    "rest_per_year": -74.40604745412269,
+    "rest_z": -7.45718638684134,
+    "share": 10.491471359445168,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.8073191812642055,
+    "pool_z": -1.0511769376101716,
+    "pooled_beta": 0.016371295384573294,
+    "partners": {
+     "codes": [
+      "V09",
+      "V29",
+      "V89"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 1543,
+     "llr": -54.596023803370784,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 7.092050762464035,
+    "rest_per_year": -63.26266838810729,
+    "rest_z": -5.058187443698886,
+    "share": 8.92022216238728,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 4.209465065996007,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.03235495835730459,
+    "partners": {
+     "codes": [
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1266,
+     "llr": -3159.2930398767335,
+     "p_rest_profile": 0.9962509372656836,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 24,
+   "states_holding": [
+    27
+   ],
+   "p_binomial": 0.7080109756612274
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.02826983192135188,
+    "beta": 0.01637129538457325,
+    "se": 0.019512297225597417,
+    "direction": 1,
+    "p": 0.9677637633955889,
+    "ratio_over_period": 1.0526363017701073,
+    "ok": false,
+    "obs_exp_later": 1.2361579037070756,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "ed3538bb6bf3672a",
+  "uf": 23
+ },
+ {
+  "node": "V29",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.17899477295828817,
+   "se": 0.01646007929555111,
+   "p": 4.0376596898424474e-05,
+   "claim_beta": 0.1373060403448173,
+   "attenuation": 1.3036190724659873,
+   "ok": true,
+   "obs_exp_later": 1.6031084042881405
+  },
+  "all_cause": {
+   "beta": 0.0203014409119931,
+   "se": 0.0029528468964275458,
+   "share_of_claim": 0.1134191830100202
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -25.873336664158092,
+   "year": 2014,
+   "jump": 1.3758694191358665
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 20.63742824703334,
+    "rest_per_year": 32.89488775392595,
+    "rest_z": 1.6920027388148893,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 1.6920027388148893,
+    "pooled_beta": 0.049158902744038856
+   },
+   "R00-R99": {
+    "node_per_year": 20.63742824703334,
+    "rest_per_year": -409.2794030404566,
+    "rest_z": -10.368908849142047,
+    "share": 19.831899505176526,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": 4.1426693659662845,
+    "pooled_beta": 0.07231824723815694,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 9042,
+     "llr": -25303.031485880783,
+     "p_rest_profile": 0.730817295676081,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    15
+   ],
+   "p_binomial": 0.7226104268781659
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "9029fe77130c4bf2",
+  "uf": 29
+ },
+ {
+  "node": "V29",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.41776109236933023,
+   "se": 0.04225662263875093,
+   "p": 1.3965122539557709e-05,
+   "claim_beta": -0.43316390559594825,
+   "attenuation": 0.964441143346358,
+   "ok": true,
+   "obs_exp_later": 0.25421703098633597
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.06482374766147303
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -20.181458840543023,
+   "year": 2014,
+   "jump": 0.5043794039539309
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -12.108090755832105,
+    "rest_per_year": -42.90344929660466,
+    "rest_z": -2.495254517194777,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -2.495254517194777,
+    "pooled_beta": -0.02928970231312752
+   },
+   "R00-R99": {
+    "node_per_year": -12.108090755832105,
+    "rest_per_year": -179.50993430725651,
+    "rest_z": -6.3110112556793805,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -6.3110112556793805,
+    "pooled_beta": -0.22771936439231358
+   },
+   "all": {
+    "node_per_year": -12.108090755832105,
+    "rest_per_year": -222.41338360386118,
+    "rest_z": -3.8005578851630846,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.8005578851630846,
+    "pooled_beta": -0.13389199339330055
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    23,
+    32
+   ],
+   "p_binomial": 0.35762414645469964
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "21226eb9f5aea1e0",
+  "uf": 41
+ },
+ {
+  "node": "V49",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.2739474394888027,
+   "se": 0.04763301644055213,
+   "p": 0.0009626281437175943,
+   "claim_beta": -0.4490581688977296,
+   "attenuation": 0.610048894470045,
+   "ok": true,
+   "obs_exp_later": 0.4167142024127929
+  },
+  "all_cause": {
+   "beta": 0.045998479005173544,
+   "se": 0.00931806815511728,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -13.55716385675406,
+   "year": 2016,
+   "jump": 0.5614452547509236
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -4.608202777221538,
+    "rest_per_year": 9.404816844792656,
+    "rest_z": 6.461046073357157,
+    "share": 2.040886067618574,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 6.774605276428043,
+    "pool_z": 1.9381240991799253,
+    "pooled_beta": 0.07206831022097833,
+    "partners": {
+     "codes": [
+      "V09",
+      "V22"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 194,
+     "llr": 9.73544274412266,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.6865783554111472
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -4.608202777221538,
+    "rest_per_year": 8.434765198030135,
+    "rest_z": 7.112446165610397,
+    "share": 1.8303806507220972,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 2.940970575839615,
+    "pool_z": 1.9320197863158401,
+    "pooled_beta": 0.005639866438510417,
+    "partners": {
+     "codes": [
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 178,
+     "llr": -165.99852653697207,
+     "p_rest_profile": 0.6680829792551862,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 24,
+   "states_holding": [
+    32,
+    41,
+    53
+   ],
+   "p_binomial": 0.11594458835933902
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.05591917137955137,
+    "beta": 0.07206831022097833,
+    "se": 0.02213659508375909,
+    "direction": 1,
+    "p": 0.2740355579699944,
+    "ratio_over_period": 1.2533483940806527,
+    "ok": false,
+    "obs_exp_later": 1.3318988052275764,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "explained",
+  "id": "7d6dd0d36b7a5ff0",
+  "uf": 21
+ },
+ {
+  "node": "V49",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.2545080634689464,
+   "se": 0.08244641714528776,
+   "p": 0.022231110455922937,
+   "claim_beta": -0.44474498574287097,
+   "attenuation": 0.5722561729253314,
+   "ok": true,
+   "obs_exp_later": 0.4051396420270233
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.10640464300194967
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 0.2733032124494236,
+   "year": 2017,
+   "jump": 0.484668861867925
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -12.938333566478104,
+    "rest_per_year": -42.07320648595867,
+    "rest_z": -3.2630087702169095,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.2630087702169095,
+    "pooled_beta": -0.02928970231312756
+   },
+   "R00-R99": {
+    "node_per_year": -12.938333566478104,
+    "rest_per_year": -179.50993430725651,
+    "rest_z": -6.3110112556793805,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -6.3110112556793805,
+    "pooled_beta": -0.22580161818355207
+   },
+   "all": {
+    "node_per_year": -12.938333566478104,
+    "rest_per_year": -221.5831407932152,
+    "rest_z": -3.893021202698426,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.893021202698426,
+    "pooled_beta": -0.13389199339330055
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 24,
+   "states_holding": [
+    21,
+    32,
+    53
+   ],
+   "p_binomial": 0.11594458835933902
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "efc31b3c06a3a5e8",
+  "uf": 41
+ },
+ {
+  "node": "V87",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.6169402924889061,
+   "se": 0.0591303648167736,
+   "p": 6.46638611195602e-06,
+   "claim_beta": -0.6002565240161352,
+   "attenuation": 1.0277943975704669,
+   "ok": true,
+   "obs_exp_later": 0.3309269139832032
+  },
+  "all_cause": {
+   "beta": -0.008827734273142103,
+   "se": 0.002066800477915518,
+   "share_of_claim": 0.014308895659138432
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -15.471560908232682,
+   "year": 2015,
+   "jump": 0.3346046894977398
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -11.827405541167533,
+    "rest_per_year": 126.5938026518712,
+    "rest_z": 13.862044485250115,
+    "share": 10.703429607722287,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -0.1745430356741532,
+    "pooled_beta": -0.05242110695109181,
+    "partners": {
+     "codes": [
+      "V09",
+      "V49",
+      "V89"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 2781,
+     "llr": -35.391604316624836,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -11.827405541167533,
+    "rest_per_year": 185.97577331352045,
+    "rest_z": 7.421143583956429,
+    "share": 15.72413938679928,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9184181705562904,
+    "pooled_beta": -0.019630469000542595,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 4078,
+     "llr": -7902.91941242542,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 18,
+   "states_holding": [
+    25,
+    33,
+    42
+   ],
+   "p_binomial": 0.05812892908522134
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.013068323757182114,
+    "beta": -0.05242110695109181,
+    "se": 0.012111447839599436,
+    "direction": -1,
+    "p": 0.6766096188930552,
+    "ratio_over_period": 0.8485246176637549,
+    "ok": false,
+    "obs_exp_later": 0.6805622957009511,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      16,
+      53
+     ],
+     "p_binomial": 0.3758734604758731
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "490e7b44ff2aab35",
+  "uf": 35
+ },
+ {
+  "node": "V89",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.29729706938603884,
+   "se": 0.03601695309410585,
+   "p": 8.134050673784993e-05,
+   "claim_beta": -0.5158026457111667,
+   "attenuation": 0.5763775580796765,
+   "ok": true,
+   "obs_exp_later": 0.5785937751192253
+  },
+  "all_cause": {
+   "beta": -0.027080839634530788,
+   "se": 0.0036543277982513485,
+   "share_of_claim": 0.09109016678319976
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -51.97365773171542,
+   "year": 2016,
+   "jump": 0.5648024706771286
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -38.887793819649794,
+    "rest_per_year": -16.12374623278695,
+    "rest_z": -1.201884833599515,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -1.201884833599515,
+    "pooled_beta": -0.02928970231312768
+   },
+   "R00-R99": {
+    "node_per_year": -38.887793819649794,
+    "rest_per_year": -179.50993430725651,
+    "rest_z": -6.3110112556793805,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -6.3110112556793805,
+    "pooled_beta": -0.240538987901277
+   },
+   "all": {
+    "node_per_year": -38.887793819649794,
+    "rest_per_year": -195.63368054004349,
+    "rest_z": -3.709434118047837,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.709434118047837,
+    "pooled_beta": -0.13389199339330055
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    11,
+    13,
+    16,
+    31,
+    42,
+    43,
+    52
+   ],
+   "p_binomial": 0.00022096355868236864
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "06c623a2c6155168",
+  "uf": 41
+ },
+ {
+  "node": "V89",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.3679139866862868,
+   "se": 0.06565128087897983,
+   "p": 0.0007532488036442846,
+   "claim_beta": -0.5805243268562682,
+   "attenuation": 0.6337615318873251,
+   "ok": true,
+   "obs_exp_later": 0.584429964078747
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.017918269195693153
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -4.371208687500415,
+   "year": 2016,
+   "jump": 0.4489791312894734
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -35.5859014169366,
+    "rest_per_year": 33.12276792085684,
+    "rest_z": 14.798337669571437,
+    "share": 0.9307834451846295,
+    "bound": 0.9307834451846295,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.7944418977981784,
+    "pool_z": 14.410035811064475,
+    "pooled_beta": 0.024792044770122867,
+    "partners": {
+     "codes": [
+      "V03",
+      "V09",
+      "V49",
+      "V54"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 730,
+     "llr": 14.30862852334895,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -35.5859014169366,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 2.963224007823698,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 3.6826986897635683,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.05278202825032662,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 2450,
+     "llr": -2483.309680888856,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 0.9307834451846295,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    11,
+    13,
+    16,
+    31,
+    41,
+    42,
+    52
+   ],
+   "p_binomial": 0.00022096355868236864
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.1854297958154777,
+    "beta": 0.024792044770122756,
+    "se": 0.01651385028636039,
+    "direction": 1,
+    "p": 0.9611042860366371,
+    "ratio_over_period": 1.0807803631825463,
+    "ok": false,
+    "obs_exp_later": 0.9027135837148459,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.08664515065136988,
+    "beta": 0.052782028250326796,
+    "se": 0.014010933974592315,
+    "direction": 1,
+    "p": 0.6451259978369626,
+    "ratio_over_period": 1.1798497402277721,
+    "ok": false,
+    "obs_exp_later": 0.8600897706895712,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      24,
+      28,
+      33,
+      50,
+      53
+     ],
+     "p_binomial": 0.008511230581506787
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 185,
+    "node_share_of_deaths": 0.06275807937753813,
+    "beta": 0.06555136026441744,
+    "se": 0.012682604898186364,
+    "direction": 1,
+    "p": 0.28871420262286396,
+    "ratio_over_period": 1.2280143170735518,
+    "ok": false,
+    "obs_exp_later": 0.8816031791269264,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "09ae87fd54356877",
+  "uf": 43
+ },
+ {
+  "node": "V99",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.21328395933963806,
+   "se": 0.0446745666573528,
+   "p": 0.004210737396108023,
+   "claim_beta": -0.2959106890999532,
+   "attenuation": 0.7207713921668935,
+   "ok": true,
+   "obs_exp_later": 0.6882668722531443
+  },
+  "all_cause": {
+   "beta": -0.011571130213488233,
+   "se": 0.0028253706234044594,
+   "share_of_claim": 0.05425222904392032
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 2.2362221412618752,
+   "year": 2016,
+   "jump": 0.6086007749226541
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -12.639477701260308,
+    "rest_per_year": 27.95024363448801,
+    "rest_z": 8.10797786033243,
+    "share": 2.211344827302558,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.7861482744788164,
+    "pool_z": 0.4092848423221033,
+    "pooled_beta": -0.007305182152522231,
+    "partners": {
+     "codes": [
+      "V09",
+      "V43"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 555,
+     "llr": 16.202436867404845,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -12.639477701260308,
+    "rest_per_year": -148.17403708205563,
+    "rest_z": -3.4474083018272474,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.4474083018272474,
+    "pooled_beta": -0.0388326924443834
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 17,
+   "states_holding": [
+    21,
+    25,
+    35,
+    41
+   ],
+   "p_binomial": 0.008800604947685557
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 97,
+    "node_share_of_deaths": 0.036022476419827414,
+    "beta": -0.0073051821525223415,
+    "se": 0.009277038623393115,
+    "direction": -1,
+    "p": 0.9997078828442045,
+    "ratio_over_period": 0.9773699477657488,
+    "ok": false,
+    "obs_exp_later": 0.8774836113129967,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      16,
+      53
+     ],
+     "p_binomial": 0.3758734604758731
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "90f1774a97267d25",
+  "uf": 31
+ },
+ {
+  "node": "V99",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.5264838305360738,
+   "se": 0.04822048354799162,
+   "p": 5.2782412810360165e-06,
+   "claim_beta": -0.6236794284169302,
+   "attenuation": 0.8441577620612475,
+   "ok": true,
+   "obs_exp_later": 0.22861303553220905
+  },
+  "all_cause": {
+   "beta": -0.008827734273142103,
+   "se": 0.002066800477915518,
+   "share_of_claim": 0.016767341675343703
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -27.522263717047586,
+   "year": 2016,
+   "jump": 0.32712160400833445
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -22.52798336432252,
+    "rest_per_year": 126.5938026518712,
+    "rest_z": 13.862044485250115,
+    "share": 5.619402349717522,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.16202266190228617,
+    "pool_z": 0.08451665902408564,
+    "pooled_beta": -0.05242110695109181,
+    "partners": {
+     "codes": [
+      "V09",
+      "V49",
+      "V89"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 2781,
+     "llr": -53.14817510632258,
+     "p_rest_profile": 0.8702824293926519,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -22.52798336432252,
+    "rest_per_year": 185.97577331352045,
+    "rest_z": 7.421143583956429,
+    "share": 8.25532273821054,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9184181705562904,
+    "pooled_beta": -0.021577050461538284,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 4078,
+     "llr": -6699.344851159436,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 17,
+   "states_holding": [
+    21,
+    25,
+    31,
+    41
+   ],
+   "p_binomial": 0.008800604947685557
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "b2cfece19fb66d16",
+  "uf": 35
+ },
+ {
+  "node": "W01",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.865030450831231,
+   "se": 0.2508124341878421,
+   "p": 0.006147934075245867,
+   "claim_beta": 1.12032930970268,
+   "attenuation": 0.7721215925885203,
+   "ok": true,
+   "obs_exp_later": 2.5082390164039423
+  },
+  "all_cause": {
+   "beta": 0.00010187688789588594,
+   "se": 0.007138432509880492,
+   "share_of_claim": 0.00011777260303147676
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -9.300583221638382,
+   "year": 2017,
+   "jump": 4.977941067537925
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 5.893897834771283,
+    "rest_per_year": 0.01636294794875005,
+    "rest_z": 0.008272830417574335,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.008272830417574335,
+    "pooled_beta": 0.10529801022632626
+   },
+   "R00-R99": {
+    "node_per_year": 5.893897834771283,
+    "rest_per_year": -65.1442562402273,
+    "rest_z": -13.04863776529362,
+    "share": 11.052830922162613,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 11.437711184934598,
+    "pool_z": -18.1529781206286,
+    "pooled_beta": -0.15532742708709388,
+    "partners": {
+     "codes": [
+      "R98",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1413,
+     "llr": -489.897746626496,
+     "p_rest_profile": 0.9990002499375156,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 5.893897834771283,
+    "rest_per_year": -5.510895738596189,
+    "rest_z": -20.20789398279385,
+    "share": 0.9350171810044691,
+    "bound": 0.9350171810044691,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.8693115501750764,
+    "pool_z": -6.858136883790041,
+    "pooled_beta": 0.4682862736430668,
+    "partners": {
+     "codes": [
+      "Y15",
+      "Y24",
+      "Y34"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 107,
+     "llr": -326.6607528962572,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 0.9350171810044691,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    11,
+    12,
+    14,
+    15,
+    21,
+    22,
+    29,
+    51
+   ],
+   "p_binomial": 1.3927697809787756e-05
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "8655daff1ef16eb4",
+  "uf": 27
+ },
+ {
+  "node": "W18",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.24390398186271606,
+   "se": 0.07970504314382482,
+   "p": 0.024078628781503426,
+   "claim_beta": 0.5158781383994238,
+   "attenuation": 0.47279379316103326,
+   "ok": false,
+   "obs_exp_later": 0.9443564852731887
+  },
+  "all_cause": {
+   "beta": 0.04623496802334635,
+   "se": 0.009062522661136422,
+   "share_of_claim": 0.18956216979421922
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 2.05019981786001,
+   "year": 2017,
+   "jump": 1.693038172492425
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -0.1683976694646221,
+    "rest_per_year": 0.7169408771547596,
+    "rest_z": 3.8604194133159075,
+    "share": 4.257427548932787,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9918223882197654,
+    "pooled_beta": 0.10159465789280682,
+    "partners": {
+     "codes": [
+      "W13"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 17,
+     "reason": "too few displaced deaths"
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -0.1683976694646221,
+    "rest_per_year": 29.50923603238823,
+    "rest_z": 65.48742184928031,
+    "share": 175.23541819910812,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 190.79141735057507,
+    "pool_z": 3.2848698757194454,
+    "pooled_beta": 0.1117482172284371,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 616,
+     "llr": -271.48887928184547,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -0.1683976694646221,
+    "rest_per_year": -3.2718545125301235,
+    "rest_z": -1.0751558333795037,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -1.0751558333795037,
+    "pooled_beta": -0.024076888620983648
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    23,
+    25,
+    31,
+    43,
+    52
+   ],
+   "p_binomial": 0.005974550586488712
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 20,
+    "node_share_of_deaths": 0.4594594594594595,
+    "beta": 0.10159465789280682,
+    "se": 0.06649647674188981,
+    "direction": 1,
+    "p": 0.2660996084376991,
+    "ratio_over_period": 1.3748387867776757,
+    "ok": false,
+    "obs_exp_later": 0.6908838387624858,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      14,
+      25,
+      26,
+      43,
+      52
+     ],
+     "p_binomial": 0.008511230581506787
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.06499575191163977,
+    "beta": 0.11174821722843686,
+    "se": 0.04126520371634869,
+    "direction": 1,
+    "p": 0.11523086679191757,
+    "ratio_over_period": 1.4192827222556283,
+    "ok": false,
+    "obs_exp_later": 0.616742671153219,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      43,
+      50,
+      53
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 108,
+    "node_share_of_deaths": 0.060378847671665355,
+    "beta": 0.10051075856875134,
+    "se": 0.03644979352545024,
+    "direction": 1,
+    "p": 0.13952371161095017,
+    "ratio_over_period": 1.3701773588829589,
+    "ok": false,
+    "obs_exp_later": 0.6041784500508762,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      43,
+      50,
+      53
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "eeab28eb292ba1d6",
+  "uf": 24
+ },
+ {
+  "node": "W18",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.016166960137459337,
+   "se": 0.039786256806461105,
+   "p": 0.9507074562344249,
+   "claim_beta": 0.2534520608344063,
+   "attenuation": -0.06378705339477224,
+   "ok": false,
+   "obs_exp_later": 0.7102324034960346
+  },
+  "all_cause": {
+   "beta": 0.012135598772147668,
+   "se": 0.008792274390896266,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 0.786594805893334,
+   "year": 2013,
+   "jump": 0.9062383711422992
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -12.654258179811283,
+    "rest_per_year": 45.68295963856249,
+    "rest_z": 7.2252690894579485,
+    "share": 3.610085948099707,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 3.6184505288819473,
+    "pool_z": 6.130763151566802,
+    "pooled_beta": 0.2293791691780704,
+    "partners": {
+     "codes": [
+      "W10",
+      "W19"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 949,
+     "llr": 91.96186851037241,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -12.654258179811283,
+    "rest_per_year": 15.330602748684969,
+    "rest_z": 3.8506059643870696,
+    "share": 1.2114975473744918,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -6.878634096926743,
+    "pooled_beta": -0.10248526773946731,
+    "partners": {
+     "codes": [
+      "R09",
+      "R54",
+      "R64"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 331,
+     "llr": -221.56362704957266,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -12.654258179811283,
+    "rest_per_year": 9.968435430422444,
+    "rest_z": 0.6661594559873878,
+    "share": 0.787753441472071,
+    "bound": 0.787753441472071,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.787753441472071,
+    "pool_z": 0.6661594559873878,
+    "pooled_beta": -0.02359808095913569
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    23,
+    24,
+    25,
+    31,
+    43,
+    52
+   ],
+   "p_binomial": 0.0009623513608134945
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 20,
+    "node_share_of_deaths": 0.16449348044132397,
+    "beta": 0.2293791691780704,
+    "se": 0.03788266781285224,
+    "direction": 1,
+    "p": 0.0009762112533727934,
+    "ratio_over_period": 2.0518384286226765,
+    "ok": true,
+    "obs_exp_later": 1.0694580892859777,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      14,
+      25,
+      43,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.03166267665456792,
+    "beta": -0.10248526773946731,
+    "se": 0.023731275588739,
+    "direction": -1,
+    "p": 0.04945506659211488,
+    "ratio_over_period": 0.7253310459757875,
+    "ok": true,
+    "obs_exp_later": 0.9197363442945219,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      41
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 108,
+    "node_share_of_deaths": 0.027276053620729802,
+    "beta": -0.042830773916324304,
+    "se": 0.015838564078773123,
+    "direction": -1,
+    "p": 0.8196591514185874,
+    "ratio_over_period": 0.874410046082688,
+    "ok": false,
+    "obs_exp_later": 0.9613929854809008,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      41,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "b6cfeac8400ac5e2",
+  "uf": 26
+ },
+ {
+  "node": "W19",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.4396568366228347,
+   "se": 0.05908999274394091,
+   "p": 9.855309184376879e-05,
+   "claim_beta": 0.4688402310438544,
+   "attenuation": 0.9377540738002709,
+   "ok": true,
+   "obs_exp_later": 2.6583456918347803
+  },
+  "all_cause": {
+   "beta": 0.012135598772147668,
+   "se": 0.008792274390896266,
+   "share_of_claim": 0.027602433901325517
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -3.639030966343096,
+   "year": 2016,
+   "jump": 2.2793070891761733
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 43.9754135687836,
+    "rest_per_year": -10.840864545248042,
+    "rest_z": -4.594070254160804,
+    "share": 0.2465210367673163,
+    "bound": 0.2465210367673163,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.2465210367673163,
+    "pool_z": -4.594070254160804,
+    "pooled_beta": 0.2293791691780704
+   },
+   "R00-R99": {
+    "node_per_year": 43.9754135687836,
+    "rest_per_year": -61.65254437653637,
+    "rest_z": -7.8043165206777365,
+    "share": 1.4019775909578043,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.711800328564619,
+    "pool_z": -6.878634096926743,
+    "pooled_beta": -0.03887804205375485,
+    "partners": {
+     "codes": [
+      "R57",
+      "R96",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 1387,
+     "llr": -1115.5171848001692,
+     "p_rest_profile": 0.0012496875781054736,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 43.9754135687836,
+    "rest_per_year": 9.968435430422444,
+    "rest_z": 0.6661594559873878,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.6661594559873878,
+    "pooled_beta": 0.11756863331718195
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    21,
+    42,
+    43
+   ],
+   "p_binomial": 0.127106495660932
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.10871805807299996,
+    "beta": -0.0388780420537546,
+    "se": 0.017644792443247924,
+    "direction": -1,
+    "p": 0.8471606839290707,
+    "ratio_over_period": 0.8853073804630872,
+    "ok": false,
+    "obs_exp_later": 1.0042146623569235,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      27,
+      32,
+      41,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "562942374a3209c7",
+  "uf": 26
+ },
+ {
+  "node": "W19",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.29569882953283516,
+   "se": 0.041126016095937114,
+   "p": 0.00020839092087943827,
+   "claim_beta": 0.3462041809181074,
+   "attenuation": 0.8541168646452049,
+   "ok": true,
+   "obs_exp_later": 1.8410561712596074
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -9.781848970567687,
+   "year": 2015,
+   "jump": 1.657869081061302
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 33.20895866897344,
+    "rest_per_year": 6.643618829139825,
+    "rest_z": 1.5085757905523673,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 1.5085757905523673,
+    "pooled_beta": 0.14475299118880364
+   },
+   "R00-R99": {
+    "node_per_year": 33.20895866897344,
+    "rest_per_year": -36.059580143696316,
+    "rest_z": -8.101602588103725,
+    "share": 1.0858389298844882,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.10443373033818662,
+    "partners": {
+     "codes": [
+      "R57",
+      "R64",
+      "R68",
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 729,
+     "llr": -312.09091201602877,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 33.20895866897344,
+    "rest_per_year": -48.51015647909394,
+    "rest_z": -9.355557996254197,
+    "share": 1.460755122213939,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.791374044499012,
+    "pool_z": -5.793243524544965,
+    "pooled_beta": -0.08224672072651715,
+    "partners": {
+     "codes": [
+      "Y24",
+      "Y28",
+      "Y29",
+      "Y34"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1025,
+     "llr": -6872.722273180434,
+     "p_rest_profile": 0.9910022494376406,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 25,
+   "states_holding": [
+    21,
+    26,
+    42
+   ],
+   "p_binomial": 0.127106495660932
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "6e8a2562aa49ce47",
+  "uf": 43
+ },
+ {
+  "node": "W78",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 0.3947716690543511,
+   "se": 0.1302730529526019,
+   "p": 0.01621486217691443,
+   "claim_beta": 0.8201098128426146,
+   "attenuation": 0.48136440129403846,
+   "ok": false,
+   "obs_exp_later": 1.0331819834784044
+  },
+  "all_cause": {
+   "beta": -0.018735075135316227,
+   "se": 0.0040235040090456035,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "step",
+   "gap": 8.784283427016153,
+   "year": 2017,
+   "jump": 2.460165418897062
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 0.4131434238486167,
+    "rest_per_year": -2.932627864006514,
+    "rest_z": -11.897977635674621,
+    "share": 7.098328799930464,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 5.879073109712249,
+    "pool_z": -3.8180557493068235,
+    "pooled_beta": 0.10143314412089752,
+    "partners": {
+     "codes": [
+      "W84"
+     ]
+    },
+    "profile": {
+     "result": "supports",
+     "n": 60,
+     "llr": 85.06164560182216,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.9540114971257185
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 0.4131434238486167,
+    "rest_per_year": -72.00369446609189,
+    "rest_z": -7.755794066083538,
+    "share": 174.2825622040528,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 140.66260351580854,
+    "pool_z": -6.296218354542814,
+    "pooled_beta": -0.1121759145844236,
+    "partners": {
+     "codes": [
+      "R09",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 1460,
+     "llr": -1343.8844053752025,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 0.4131434238486167,
+    "rest_per_year": -16.64840381129692,
+    "rest_z": -12.60391129147033,
+    "share": 40.29691107318024,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 29.258012407521868,
+    "pool_z": -5.617441717926847,
+    "pooled_beta": 0.1297252312564208,
+    "partners": {
+     "codes": [
+      "Y24",
+      "Y28",
+      "Y29",
+      "Y34"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 330,
+     "llr": -1038.6242675720005,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "administrative step",
+    "grade": "consistent",
+    "bound": null,
+    "assumption": "a level shift of x2.5 between 2016 and 2017 is what a change of practice looks like; a real shock too",
+    "outcome": "open"
+   },
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "supports",
+    "profile": "supports"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 20,
+   "states_holding": [
+    15,
+    21,
+    25
+   ],
+   "p_binomial": 0.07548367378849626
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 9,
+    "node_share_of_deaths": 0.3333333333333333,
+    "beta": 0.10143314412089759,
+    "se": 0.056223509758933206,
+    "direction": 1,
+    "p": 0.23194102725792928,
+    "ratio_over_period": 1.3741431749146893,
+    "ok": false,
+    "obs_exp_later": 0.7041024385575356,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 25,
+     "states_holding": [
+      14,
+      15,
+      21,
+      25
+     ],
+     "p_binomial": 0.034090601480990655
+    }
+   },
+   {
+    "level": "node + R00-R99",
+    "categories": 89,
+    "node_share_of_deaths": 0.013214176596394745,
+    "beta": -0.11217591458442346,
+    "se": 0.03919394454565158,
+    "direction": -1,
+    "p": 0.1028328055623811,
+    "ratio_over_period": 0.7036376445490999,
+    "ok": false,
+    "obs_exp_later": 0.4517319589194696,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      41,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 97,
+    "node_share_of_deaths": 0.012873939574341419,
+    "beta": -0.1110969277118376,
+    "se": 0.03831335893265751,
+    "direction": -1,
+    "p": 0.10231488536288066,
+    "ratio_over_period": 0.7060205955980392,
+    "ok": false,
+    "obs_exp_later": 0.4539513687964073,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      15,
+      27,
+      41,
+      52
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "5dd741580e6d4017",
+  "uf": 42
+ },
+ {
+  "node": "X93",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 2.1369897719615487,
+   "se": 0.15940953063768512,
+   "p": 5.674084449699048e-07,
+   "claim_beta": 2.1254218706510466,
+   "attenuation": 1.0054426377512333,
+   "ok": true,
+   "obs_exp_later": 2.074552313935542
+  },
+  "all_cause": {
+   "beta": -0.007380668762415205,
+   "se": 0.00625074820124356,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -89.05626975975713,
+   "year": 2018,
+   "jump": 12.517828059317091
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 8.152395388245482,
+    "rest_per_year": -25.76422436724557,
+    "rest_z": -7.262711421771143,
+    "share": 3.1603256638403083,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 3.5135015396093148,
+    "pool_z": -5.6925124929065065,
+    "pooled_beta": -0.09880293645227423,
+    "partners": {
+     "codes": [
+      "X95"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 594,
+     "llr": -246.66664787026764,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": 8.152395388245482,
+    "rest_per_year": 28.41827664896264,
+    "rest_z": 5.734096309849092,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 5.734096309849092,
+    "pooled_beta": 0.31185544466722465
+   },
+   "undetermined intent": {
+    "node_per_year": 8.152395388245482,
+    "rest_per_year": -2.4322681702555258,
+    "rest_z": -0.8885519377365593,
+    "share": 0.2983501234204719,
+    "bound": 0.2983501234204719,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.2983501234204719,
+    "pool_z": -0.8885519377365593,
+    "pooled_beta": 0.2623913709025418
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 24,
+   "states_holding": [
+    13,
+    15,
+    21,
+    51
+   ],
+   "p_binomial": 0.029782496908445998
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "d5fb4ef0b39f3789",
+  "uf": 50
+ },
+ {
+  "node": "X95",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.24869081445882285,
+   "se": 0.031293933318598345,
+   "p": 0.00014673153704359695,
+   "claim_beta": -0.23394763327258147,
+   "attenuation": 1.0630191508245075,
+   "ok": true,
+   "obs_exp_later": 0.21710219221073676
+  },
+  "all_cause": {
+   "beta": -0.008827734273142103,
+   "se": 0.002066800477915518,
+   "share_of_claim": 0.0354968248117735
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -3.3091229743080275,
+   "year": 2016,
+   "jump": 0.6088447148905604
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -219.24342235058367,
+    "rest_per_year": -80.85571789642746,
+    "rest_z": -7.455934137307547,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -7.455934137307547,
+    "pooled_beta": -0.19201418748494775
+   },
+   "R00-R99": {
+    "node_per_year": -219.24342235058367,
+    "rest_per_year": 185.97577331352045,
+    "rest_z": 7.421143583956429,
+    "share": 0.8482615866857515,
+    "bound": 0.8482615866857515,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9184181705562904,
+    "pooled_beta": -0.05473894595841419,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 4078,
+     "llr": -18088.170517480085,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -219.24342235058367,
+    "rest_per_year": 74.95254414650496,
+    "rest_z": 2.6853361610580593,
+    "share": 0.3418690665512932,
+    "bound": 0.3418690665512932,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.3418690665512932,
+    "pool_z": 2.6853361610580593,
+    "pooled_beta": -0.04693352459458365
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 0.8482615866857515,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 26,
+   "states_holding": [
+    25,
+    27,
+    32,
+    41,
+    50
+   ],
+   "p_binomial": 0.008511230581506787
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "df123697e2ba22c0",
+  "uf": 35
+ },
+ {
+  "node": "Y00",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.181063530725096,
+   "se": 0.03608090993834614,
+   "p": 0.004641678876802398,
+   "claim_beta": -0.24026442162823194,
+   "attenuation": 0.7536010929044702,
+   "ok": true,
+   "obs_exp_later": 0.6445118988479026
+  },
+  "all_cause": {
+   "beta": -0.008827734273142103,
+   "se": 0.002066800477915518,
+   "share_of_claim": 0.04875489966306368
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -0.28650800987454084,
+   "year": 2015,
+   "jump": 0.6817416494232349
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -33.75207044292034,
+    "rest_per_year": -266.3470698040909,
+    "rest_z": -10.233680065389544,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -10.233680065389544,
+    "pooled_beta": -0.19201418748494767
+   },
+   "R00-R99": {
+    "node_per_year": -33.75207044292034,
+    "rest_per_year": 185.97577331352045,
+    "rest_z": 7.421143583956429,
+    "share": 5.510055260995989,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9184181705562904,
+    "pooled_beta": -0.02310050734929804,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 4078,
+     "llr": -8948.575220801133,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -33.75207044292034,
+    "rest_per_year": 69.58427179366832,
+    "rest_z": 7.022168953132904,
+    "share": 2.0616297276146494,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 2.220679892016124,
+    "pool_z": 2.6853361610580593,
+    "pooled_beta": 0.027155075619330987,
+    "partners": {
+     "codes": [
+      "Y19",
+      "Y24",
+      "Y29"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 1546,
+     "llr": -3579.089638456381,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    26,
+    32,
+    41
+   ],
+   "p_binomial": 0.13863237820062044
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "d59f03443d6f2462",
+  "uf": 35
+ },
+ {
+  "node": "Y10-Y34",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.4150292112825934,
+   "se": 0.052553542020348995,
+   "p": 6.961280917416166e-05,
+   "claim_beta": -0.4204622373747467,
+   "attenuation": 0.9870784446040252,
+   "ok": true,
+   "obs_exp_later": 0.3074820356789634
+  },
+  "all_cause": {
+   "beta": -0.006592381854305554,
+   "se": 0.004572694711295828,
+   "share_of_claim": 0.015884139417398264
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -10.354967369618784,
+   "year": 2017,
+   "jump": 0.40293551222760304
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": -59.48966660443949,
+    "rest_per_year": 105.44899741871389,
+    "rest_z": 21.587005288239794,
+    "share": 1.7725598988454345,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 2.2029397709286878,
+    "pool_z": 9.693435614967813,
+    "pooled_beta": 0.04349449903935481,
+    "partners": {
+     "codes": [
+      "R09",
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 2492,
+     "llr": -1060.623273468839,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 26,
+   "states_holding": [
+    13,
+    21,
+    51
+   ],
+   "p_binomial": 0.13863237820062044
+  },
+  "rescope": [
+   {
+    "level": "node + R00-R99",
+    "categories": 113,
+    "node_share_of_deaths": 0.0723531522909439,
+    "beta": 0.04349449903935487,
+    "se": 0.015970171823196246,
+    "direction": 1,
+    "p": 0.8077546804866929,
+    "ratio_over_period": 1.1460091103038725,
+    "ok": false,
+    "obs_exp_later": 0.7988816473120842,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [
+      28,
+      50,
+      53
+     ],
+     "p_binomial": 0.13863237820062044
+    }
+   }
+  ],
+  "verdict": "open",
+  "id": "7b74961c8ee1b5d7",
+  "uf": 43
+ },
+ {
+  "node": "Y21",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.18665721610266983,
+   "se": 0.04636465029448127,
+   "p": 0.012131930273412219,
+   "claim_beta": -0.4890427421899789,
+   "attenuation": 0.38167873684578457,
+   "ok": false,
+   "obs_exp_later": 0.968814653771313
+  },
+  "all_cause": {
+   "beta": -0.011571130213488233,
+   "se": 0.0028253706234044594,
+   "share_of_claim": 0.061991336070948325
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": -2.5927625939549843,
+   "year": 2017,
+   "jump": 0.5989821497404846
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -6.70360967098528,
+    "rest_per_year": -20.678761156344343,
+    "rest_z": -0.9667499320894362,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -0.9667499320894362,
+    "pooled_beta": -0.07402847617843376
+   },
+   "R00-R99": {
+    "node_per_year": -6.70360967098528,
+    "rest_per_year": -148.17403708205563,
+    "rest_z": -3.4474083018272474,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.4474083018272474,
+    "pooled_beta": -0.03744354635312277
+   },
+   "undetermined intent": {
+    "node_per_year": -6.70360967098528,
+    "rest_per_year": -20.678761156344343,
+    "rest_z": -0.9667499320894362,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -0.9667499320894362,
+    "pooled_beta": -0.07402847617843376
+   },
+   "all": {
+    "node_per_year": -6.70360967098528,
+    "rest_per_year": -168.85279823839994,
+    "rest_z": -3.216974379652875,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -3.216974379652875,
+    "pooled_beta": -0.04142034868209225
+   }
+  },
+  "explanations": [],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 19,
+   "states_holding": [
+    22,
+    43
+   ],
+   "p_binomial": 0.24529279492938452
+  },
+  "rescope": [],
+  "verdict": "not_replicated",
+  "id": "a3cd8cc356ef6f16",
+  "uf": 31
+ },
+ {
+  "node": "Y21",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.11350547857366411,
+   "se": 0.0406177514782231,
+   "p": 0.1051633201253721,
+   "claim_beta": -0.41829174472936037,
+   "attenuation": 0.27135481396388417,
+   "ok": false,
+   "obs_exp_later": 0.7396771972058082
+  },
+  "all_cause": {
+   "beta": -0.008827734273142103,
+   "se": 0.002066800477915518,
+   "share_of_claim": 0.07777364039228271
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 1.6533849246391783,
+   "year": 2016,
+   "jump": 0.7476089453660734
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -5.791676154190706,
+    "rest_per_year": 69.58427179366832,
+    "rest_z": 7.022168953132904,
+    "share": 12.014530844118235,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 13.941425271554813,
+    "pool_z": 2.994211774301643,
+    "pooled_beta": 0.06082629117137578,
+    "partners": {
+     "codes": [
+      "Y19",
+      "Y24",
+      "Y29"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 1546,
+     "llr": -8825.442489943378,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -5.791676154190706,
+    "rest_per_year": 185.97577331352045,
+    "rest_z": 7.421143583956429,
+    "share": 32.11087228676507,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.9184181705562904,
+    "pooled_beta": -0.0183923264771723,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 4078,
+     "llr": -8724.07038344619,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -5.791676154190706,
+    "rest_per_year": 69.58427179366832,
+    "rest_z": 7.022168953132904,
+    "share": 12.014530844118235,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 13.941425271554813,
+    "pool_z": 2.994211774301643,
+    "pooled_beta": 0.06082629117137578,
+    "partners": {
+     "codes": [
+      "Y19",
+      "Y24",
+      "Y29"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 1546,
+     "llr": -8825.442489943378,
+     "p_rest_profile": 0.00024993751562109475,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 19,
+   "states_holding": [
+    22,
+    31,
+    43
+   ],
+   "p_binomial": 0.06654635162318637
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 25,
+    "node_share_of_deaths": 0.04908551470312089,
+    "beta": 0.06082629117137584,
+    "se": 0.047018179528849624,
+    "direction": 1,
+    "p": 0.4783022488720555,
+    "ratio_over_period": 1.2099668558532328,
+    "ok": false,
+    "obs_exp_later": 1.447503677992716,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + undetermined intent",
+    "categories": 25,
+    "node_share_of_deaths": 0.04908551470312089,
+    "beta": 0.06082629117137584,
+    "se": 0.047018179528849624,
+    "direction": 1,
+    "p": 0.4783022488720555,
+    "ratio_over_period": 1.2099668558532328,
+    "ok": false,
+    "obs_exp_later": 1.447503677992716,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 25,
+    "node_share_of_deaths": 0.04908551470312089,
+    "beta": 0.06082629117137584,
+    "se": 0.047018179528849624,
+    "direction": 1,
+    "p": 0.4783022488720555,
+    "ratio_over_period": 1.2099668558532328,
+    "ok": false,
+    "obs_exp_later": 1.447503677992716,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "one jurisdiction",
+     "ok": false,
+     "states_tested": 26,
+     "states_holding": [],
+     "p_binomial": 1.0
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "17def6aeb0a6ce44",
+  "uf": 35
+ },
+ {
+  "node": "Y21",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.23884463314041524,
+   "se": 0.11895855160024048,
+   "p": 0.08366446758074056,
+   "claim_beta": -0.5328505054005978,
+   "attenuation": 0.44823947940304854,
+   "ok": false,
+   "obs_exp_later": 0.31613626706447795
+  },
+  "all_cause": {
+   "beta": -0.01138674802583213,
+   "se": 0.007446766196771946,
+   "share_of_claim": 0.047674288830002444
+  },
+  "shape": {
+   "shape": "indeterminate",
+   "gap": 0.9808350939102324,
+   "year": 2017,
+   "jump": 0.4406134223733483
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -0.4262201828302632,
+    "rest_per_year": 0.5183942253089574,
+    "rest_z": 3.311930253204937,
+    "share": 1.2162592157570382,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -7.494383150242101,
+    "pooled_beta": -0.06416777916632176,
+    "partners": {
+     "codes": [
+      "Y11"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 13,
+     "reason": "too few displaced deaths"
+    }
+   },
+   "R00-R99": {
+    "node_per_year": -0.4262201828302632,
+    "rest_per_year": 12.762431941338042,
+    "rest_z": 4.410425539273245,
+    "share": 29.943283906901517,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -4.64270830470583,
+    "pooled_beta": -0.3217808564794653,
+    "partners": {
+     "codes": [
+      "R98"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 303,
+     "llr": -490.90202121002187,
+     "p_rest_profile": 0.2504373906523369,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -0.4262201828302632,
+    "rest_per_year": 0.5183942253089574,
+    "rest_z": 3.311930253204937,
+    "share": 1.2162592157570382,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -7.494383150242101,
+    "pooled_beta": -0.06416777916632176,
+    "partners": {
+     "codes": [
+      "Y11"
+     ]
+    },
+    "profile": {
+     "result": "open",
+     "n": 13,
+     "reason": "too few displaced deaths"
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with block",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   },
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "bound",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "open",
+    "profile": "open"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 19,
+   "states_holding": [
+    22,
+    31,
+    43
+   ],
+   "p_binomial": 0.06654635162318637
+  },
+  "rescope": [
+   {
+    "level": "node + block",
+    "categories": 25,
+    "node_share_of_deaths": 0.08461538461538462,
+    "beta": -0.06416777916632142,
+    "se": 0.04628592487835344,
+    "direction": -1,
+    "p": 0.4501851849888472,
+    "ratio_over_period": 0.8178607586787924,
+    "ok": false,
+    "obs_exp_later": 0.5880357425460585,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      13,
+      21,
+      43,
+      51
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + undetermined intent",
+    "categories": 25,
+    "node_share_of_deaths": 0.08461538461538462,
+    "beta": -0.06416777916632142,
+    "se": 0.04628592487835344,
+    "direction": -1,
+    "p": 0.4501851849888472,
+    "ratio_over_period": 0.8178607586787924,
+    "ok": false,
+    "obs_exp_later": 0.5880357425460585,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      13,
+      21,
+      43,
+      51
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   },
+   {
+    "level": "node + all lifted pools",
+    "categories": 25,
+    "node_share_of_deaths": 0.08461538461538462,
+    "beta": -0.06416777916632142,
+    "se": 0.04628592487835344,
+    "direction": -1,
+    "p": 0.4501851849888472,
+    "ratio_over_period": 0.8178607586787924,
+    "ok": false,
+    "obs_exp_later": 0.5880357425460585,
+    "jurisdiction": {
+     "unit": "state",
+     "scope": "multi-state",
+     "ok": true,
+     "states_tested": 26,
+     "states_holding": [
+      13,
+      21,
+      43,
+      51
+     ],
+     "p_binomial": 0.03874139618998774
+    }
+   }
+  ],
+  "verdict": "not_replicated",
+  "id": "ee2ab66858415022",
+  "uf": 52
+ },
+ {
+  "node": "Y35",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 2.1734032363666023,
+   "se": 0.27634892177010395,
+   "p": 2.996913434114776e-05,
+   "claim_beta": 2.0912161605250548,
+   "attenuation": 1.0393010906251376,
+   "ok": true,
+   "obs_exp_later": 2.039080021859154
+  },
+  "all_cause": {
+   "beta": -0.01138674802583213,
+   "se": 0.007446766196771946,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -42.283048792429746,
+   "year": 2017,
+   "jump": 16.690610918733817
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": 7.17700085692896,
+    "rest_per_year": 0.0,
+    "rest_z": 0.0,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": 0.0,
+    "pooled_beta": 2.1734032363666023
+   },
+   "R00-R99": {
+    "node_per_year": 7.17700085692896,
+    "rest_per_year": -122.51036500581588,
+    "rest_z": -5.709053743945828,
+    "share": 17.069855145348008,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 16.919646322594655,
+    "pool_z": -4.64270830470583,
+    "pooled_beta": -0.28675109048025477,
+    "partners": {
+     "codes": [
+      "R09",
+      "R57",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 2587,
+     "llr": -13411.512800075267,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 7.17700085692896,
+    "rest_per_year": -10.595079022508841,
+    "rest_z": -16.66074759208625,
+    "share": 1.4762543900604295,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.9043265278350079,
+    "pool_z": -5.69482099756993,
+    "pooled_beta": 0.10914279701855117,
+    "partners": {
+     "codes": [
+      "Y20",
+      "Y24",
+      "Y28",
+      "Y29"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 240,
+     "llr": -879.6874878331989,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 13,
+   "states_holding": [
+    15,
+    16,
+    17,
+    29,
+    31,
+    50
+   ],
+   "p_binomial": 1.974971368320312e-05
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "485cafef809dc566",
+  "uf": 52
+ },
+ {
+  "node": "Y35-Y36",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": 2.1734032363666023,
+   "se": 0.27634892177010395,
+   "p": 2.996913434114776e-05,
+   "claim_beta": 2.091320009516264,
+   "attenuation": 1.0392494818950855,
+   "ok": true,
+   "obs_exp_later": 2.0388749228278984
+  },
+  "all_cause": {
+   "beta": -0.01138674802583213,
+   "se": 0.007446766196771946,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -42.283048792429746,
+   "year": 2017,
+   "jump": 16.690610918733817
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": 7.17700085692896,
+    "rest_per_year": -122.51036500581588,
+    "rest_z": -5.709053743945828,
+    "share": 17.069855145348008,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 16.919646322594655,
+    "pool_z": -4.64270830470583,
+    "pooled_beta": -0.28675109048025477,
+    "partners": {
+     "codes": [
+      "R09",
+      "R57",
+      "R99"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 2587,
+     "llr": -13411.512800075267,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": 7.17700085692896,
+    "rest_per_year": -10.595079022508841,
+    "rest_z": -16.66074759208625,
+    "share": 1.4762543900604295,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 1.9043265278350079,
+    "pool_z": -5.69482099756993,
+    "pooled_beta": 0.10914279701855117,
+    "partners": {
+     "codes": [
+      "Y20",
+      "Y24",
+      "Y28",
+      "Y29"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 240,
+     "llr": -879.6874878331989,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   },
+   {
+    "kind": "transfer with undetermined intent",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "multi-state",
+   "ok": true,
+   "states_tested": 13,
+   "states_holding": [
+    15,
+    16,
+    17,
+    29,
+    31,
+    50
+   ],
+   "p_binomial": 1.974971368320312e-05
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "a50adff4c5baf4ed",
+  "uf": 52
+ },
+ {
+  "node": "Y40-Y84",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -0.9342538706175355,
+   "se": 0.09933698157532139,
+   "p": 1.0754230877135202e-05,
+   "claim_beta": -0.93713155985956,
+   "attenuation": 0.9969292579982519,
+   "ok": true,
+   "obs_exp_later": 0.476788809986781
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -14.708522867736026,
+   "year": 2015,
+   "jump": 0.17412187421301067
+  },
+  "conservation": {
+   "R00-R99": {
+    "node_per_year": -20.897227901013697,
+    "rest_per_year": 27.489075885319338,
+    "rest_z": 3.7525123594348533,
+    "share": 1.3154412640532995,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.061742092123663224,
+    "partners": {
+     "codes": [
+      "R64",
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 439,
+     "llr": -1061.9527004701135,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -20.897227901013697,
+    "rest_per_year": 17.06505893482189,
+    "rest_z": 1.388456005331676,
+    "share": 0.8166183101249562,
+    "bound": 0.8166183101249562,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.8166183101249562,
+    "pool_z": 1.388456005331676,
+    "pooled_beta": -0.032684154662781496
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 23,
+   "states_holding": [
+    11,
+    12
+   ],
+   "p_binomial": 0.32057955555520995
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "e37a9261bff7912e",
+  "uf": 23
+ },
+ {
+  "node": "Y83",
+  "scale": "state",
+  "years": [
+   2010,
+   2019
+  ],
+  "national": {
+   "beta": -1.0322996833612856,
+   "se": 0.112956168208933,
+   "p": 1.2668307209557468e-05,
+   "claim_beta": -1.0383632274876533,
+   "attenuation": 0.994160478755552,
+   "ok": true,
+   "obs_exp_later": 0.4831220227412582
+  },
+  "all_cause": {
+   "beta": 0.03215986234048249,
+   "se": 0.01103190203597503,
+   "share_of_claim": 0.0
+  },
+  "shape": {
+   "shape": "gradual",
+   "gap": -11.566699446186083,
+   "year": 2015,
+   "jump": 0.1341254227291069
+  },
+  "conservation": {
+   "block": {
+    "node_per_year": -20.424878325562673,
+    "rest_per_year": -0.4723495754510206,
+    "rest_z": -1.1660384088755942,
+    "share": 0.0,
+    "bound": 0.0,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.0,
+    "pool_z": -1.1660384088755942,
+    "pooled_beta": -0.9342538706175355
+   },
+   "R00-R99": {
+    "node_per_year": -20.424878325562673,
+    "rest_per_year": 27.489075885319338,
+    "rest_z": 3.7525123594348533,
+    "share": 1.3458624059912023,
+    "bound": 1.0,
+    "moves": true,
+    "via": "partners",
+    "pool_share": 0.0,
+    "pool_z": -1.1884325232499846,
+    "pooled_beta": -0.061483908810487854,
+    "partners": {
+     "codes": [
+      "R64",
+      "R96"
+     ]
+    },
+    "profile": {
+     "result": "excluded",
+     "n": 439,
+     "llr": -1405.9342245729283,
+     "p_rest_profile": 1.0,
+     "p_node_profile": 0.00024993751562109475
+    }
+   },
+   "undetermined intent": {
+    "node_per_year": -20.424878325562673,
+    "rest_per_year": 17.06505893482189,
+    "rest_z": 1.388456005331676,
+    "share": 0.8355035786658365,
+    "bound": 0.8355035786658365,
+    "moves": false,
+    "via": "pool",
+    "pool_share": 0.8355035786658365,
+    "pool_z": 1.388456005331676,
+    "pooled_beta": -0.031998037129977425
+   }
+  },
+  "explanations": [
+   {
+    "kind": "transfer with R00-R99",
+    "grade": "tested",
+    "bound": 1.0,
+    "assumption": "every death the pool lost (gained) was a death of the node's",
+    "via": "partners",
+    "outcome": "excluded",
+    "profile": "excluded"
+   }
+  ],
+  "jurisdiction": {
+   "unit": "state",
+   "scope": "one jurisdiction",
+   "ok": false,
+   "states_tested": 21,
+   "states_holding": [
+    11,
+    12
+   ],
+   "p_binomial": 0.2830281551829153
+  },
+  "rescope": [],
+  "verdict": "survives",
+  "id": "79a6740e52e770e3",
+  "uf": 23
+ }
+]
