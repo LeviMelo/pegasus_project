@@ -79,6 +79,7 @@
     - race with a reclassification term between censuses, hold-out validated;
     - intervals on every cell.
     The old engine's tensor (140.7M rows, municipality × year × single age × sex × race) is the floor to match.
+    Also: a FORECAST to at least 2030, with intervals calibrated by horizon on pseudo-forecasts (base 2000 → h = 1…10; base 2010 → 2022), and a BACKCAST before 2000 (Census 1991, Contagem 1996; 1996 held out). Cells flagged census / intercensal / backcast / forecast.
 | | queue |
 
 **Next:**
