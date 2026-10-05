@@ -71,6 +71,8 @@
 19. Laplace follow-ups: an MCMC/INLA reference; a refit at the full-Hessian Fellner–Schall τ's (spatial τ about 5× lower on IX).
 21. Rebuild pegasus_data's registration/system completeness on population-account-2 (pegasus_data decision 0148 notes its births shortfall came from v1).
 22. Population account: horizons of 1–3 years from a census untested; the 2022 urban share is 2010's.
+23. Positives declared before running, for trend divergence (homicide NE↑ / SE↓ 2000s, full chapter XX fit, Atlas da Violência tables), group disparity (Atlas tables), marks (a citable birth-weight shift); E_w's dengue–climate run. The coordinator's review of 2026-10-05: only change point passes, at BP.
+24. Race in the groups g: births by the mother's declared race; infant deaths through `race_confusion_infant`; adult deaths kept as recorded race (the infant matrix does not transport: pegasus_data decision 0149). After the exposure and BP fronts land.
 | | queue |
 
 **Next:**

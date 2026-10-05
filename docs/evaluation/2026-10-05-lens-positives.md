@@ -44,3 +44,22 @@ The sign is right in every pooled row except the South at lag 2, the controls ar
 - **B2 cannot show a step older than the last years** (COVID-19, São Paulo 2018, Roraima 2018): the change-point lens is a BP lens, as the outbreak lens is. B2's place trend is fitted in-sample.
 - **The trend-divergence lens finds boundary artefacts** and is blind to regional divergence; it belongs to the observation family as much as to the epidemiological one.
 - **Group disparity** reads a place's departure from the national sex-age pattern, needs two groups with 5 expected events, and found a documented sex pattern, not an age pattern.
+
+## Coordinator review (2026-10-05)
+
+The gate requires positives declared before the lens runs (§10.5). Measured against that rule, this entry's gate table stands as follows.
+
+| lens | gate | reason |
+|---|---|---|
+| change point | **passes, at BP** | COVID-19 as a new cause code in 2020 was specified before the run |
+| trend divergence | **does not pass** | the positive (municipalities installed in 2013, whose births rise from zero) was documented after its hits were seen, and is trivial by construction |
+| group disparity | **does not pass** | Roraima female homicide was sourced through a press report, not the Atlas da Violência tables, and recovered in 2 of 14 places |
+| marks | fails | no citable shift was found |
+| E_w | not gated | the dengue–climate run is pending |
+
+**The §10.1 criterion change** (excess-weighted recall ≥ 0.5 in place of a place-level Jaccard ≥ 0.5 for per-place lenses) is accepted, flagged. Its reason holds: a Jaccard of 0.5 cannot be met by sparse outcomes. It was adopted after seeing results, however, so it is confirmed only when a positive declared beforehand passes under it.
+
+**Next.** Positives declared before running:
+- the homicide divergence between the Northeast and the Southeast in the 2000s, from the full chapter XX fit, citing the Atlas da Violência tables;
+- group disparity from the Atlas tables;
+- a citable birth-weight shift for marks.
