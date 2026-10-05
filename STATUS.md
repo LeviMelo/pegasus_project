@@ -93,7 +93,7 @@
 22. Population account: horizons of 1–3 years from a census untested; the 2022 urban share is 2010's.
 23. Positives declared before running, for trend divergence (homicide NE↑ / SE↓ 2000s, full chapter XX fit, Atlas da Violência tables), group disparity (Atlas tables), marks (a citable birth-weight shift); E_w's dengue–climate run. The coordinator's review of 2026-10-05: only change point passes, at BP.
 24. Race in the groups g: births by the mother's declared race; infant deaths through `race_confusion_infant`; adult deaths kept as recorded race (the infant matrix does not transport: pegasus_data decision 0149). After the exposure and BP fronts land.
-25. **Population account v3: the complete tensor (agent running; pegasus_data decision 0151).** The author's terms:
+25. **Population account v3: the complete tensor. DONE** (pegasus_data decision 0151, account-3 to -5: 1991–2030, all 5,570 municipalities, single ages, race from 2000, intervals; forecast calibrated to 8–12 years; backcast validated on the Contagem 1996 (median 0.028–0.030, 80% coverage 0.83)). Original terms: The author's terms:
     - all 5,570 municipalities every year 2000–2023 (11 missing in v2), including municipal 2000–2009, with post-2000 municipalities backcast through the lineage and flagged;
     - single-year ages (at least 0 / 1–4);
     - race with a reclassification term between censuses, hold-out validated;
