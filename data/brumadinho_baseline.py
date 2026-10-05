@@ -16,6 +16,9 @@ PRIMARY = [310900]
 SECONDARY = [int(m["code6"]) for m in json.load(open("data/brumadinho_locus.json", encoding="utf-8"))["municipalities"]]
 
 
+_RAW: dict = {}
+
+
 def facility_records(places: list[int], codes: list[str], files: range, lo: int, hi: int) -> list[dict]:
     """(facility, hospital municipality, year-month, count) of residents of ``places`` with a principal diagnosis in ``codes``."""
     import pegasus_data as pg
@@ -29,7 +32,10 @@ def facility_records(places: list[int], codes: list[str], files: range, lo: int,
     when = gateway._when(DATASET)
     rows = []
     for year in files:
-        raw = gateway._records(DATASET, EVENT, year, [strata["residence"], when, fcol, mcol, cls])
+        key = (year, strata["residence"], when, fcol, mcol, cls)
+        if key not in _RAW:       # the same year is read by every place/code job: read it once
+            _RAW[key] = gateway._records(DATASET, EVENT, year, list(key[1:]))
+        raw = _RAW[key]
         con = duckdb.connect()
         con.register("r", raw)
         con.register("loc", pa.table({"u": pa.array(places, pa.int32())}))
