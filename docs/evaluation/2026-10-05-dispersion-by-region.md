@@ -19,3 +19,5 @@
 - **BP** (ten fields, block φ is the shipped behaviour; a field φ_extra is a diagnostic): IX to 2019 .126 / .195 → .086 / .163 with regions (one value .155); dengue to 2018 .162 / .264 under the block's φ, .290 / .500 with one value, .224 / .326 by region; to 2014 .132 / .229, .207 / .300, .180 / .254. None calibrates: BP's miscalibration is level, as the Laplace entry found.
 
 **Verdict.** Dispersion by macro-region (and state) holds beyond dengue and IX: 12 more fields calibrate at B1 than with the block's φ and 2 more than with one φ_extra; the worst-region KS falls by a quarter at B1. It does not repair dengue B1 in the Southeast or BP, which stay as OQ 6's remainder. Adopted: ADR-0006.
+
+**Correction (BP level, 2026-10-05).** "BP's miscalibration is level" and "BP unaffected" above hold for dispersion estimated on BP's own cells. Applying the *training fit's* φ_extra to BP, with a damped place course and regimes, lowers the mean KS from .121 to .060 (annual) and .169 to .056 (dengue): `2026-10-05-bp-level.md`, ADR-0007.

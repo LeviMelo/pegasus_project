@@ -4,8 +4,7 @@ Usage: python scripts/measure_laplace.py MODE [DRAWS] [DEVICE]
 
 MODE   ix       chapter IX deaths 2010-2023, knn6, tiers B0/B1/B2 for five fields (in-sample)
        dengue   dengue probable cases by month 2010-2023, tiers B0/B1/B2/B2s (in-sample)
-       bp-dengue18 | bp-dengue14   the prospective tier trained to 2018 / 2014
-       bp-ix19  chapter IX, contiguity, trained to 2019, tested 2020-2023
+       (the prospective tier BP: scripts/measure_bp_level.py)
 
 For every field and tier, the same cells are scored under the MAP's predictive (draws = 0) and under
 the Laplace predictive, each with the block's phi and then with the field's own place-year component:
@@ -71,24 +70,18 @@ def ladder(c: dict) -> dict:
 
 def run(make_ex, fields_tiers, label: str) -> dict:
     res = {}
-    bp = any(t == "BP" for _, t in fields_tiers)
-    variants = [("map", 0, True, "plugin")]
+    variants = [("map", 0, "plugin")]
     if S:
-        variants += [("laplace", S, False, "plugin"), ("laplace-postmean", S, False, "posterior")]
-    if bp and S:
-        variants += [("laplace+forecast", S, True, "plugin"), ("laplace+forecast-postmean", S, True, "posterior")]
+        variants += [("laplace", S, "plugin"), ("laplace-postmean", S, "posterior")]
     shared: dict = {}                       # the draws are made once and re-centred by variant
-    for name, draws, forecast, center in variants:
-        ex = make_ex(draws, forecast, center)
+    for name, draws, center in variants:
+        ex = make_ex(draws, center)
         if draws:
             ex._posteriors = shared
         for node, tier in fields_tiers:
             captured.clear()
             t = time.time()
-            if tier == "BP":
-                ex.prospective(node, make_ex.train_last)
-            else:
-                ex.surprise(node, tier)
+            ex.surprise(node, tier)
             secs = time.time() - t
             r = ladder(captured[-1])
             r["seconds"] = round(secs, 1)
@@ -111,33 +104,16 @@ out: dict = {"draws": S, "device": device}
 if mode == "ix":
     nodes = ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"]
 
-    def make(draws, forecast=True, center="plugin"):
-        return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="knn6", laplace=draws, device=device, forecast=forecast, center=center)
+    def make(draws, center="plugin"):
+        return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="knn6", laplace=draws, device=device, center=center)
 
     out = run(make, [(n, t) for n in nodes for t in ("B0", "B1", "B2")], "IX")
 elif mode == "dengue":
-    def make(draws, forecast=True, center="plugin"):
+    def make(draws, center="plugin"):
         return surprise.Expectations("SINAN-DENG", "probable_case", range(2010, 2024), source={"grain": "month"},
-                                     laplace=draws, device=device, forecast=forecast, center=center)
+                                     laplace=draws, device=device, center=center)
 
     out = run(make, [("*", t) for t in ("B0", "B1", "B2", "B2s")], "dengue")
-elif mode in ("bp-dengue18", "bp-dengue14"):
-    last = 2018 if mode.endswith("18") else 2014
-
-    def make(draws, forecast=True, center="plugin"):
-        yrs = range(2010, 2024) if last == 2018 else range(2010, 2017)
-        return surprise.Expectations("SINAN-DENG", "probable_case", yrs, source={"grain": "month"},
-                                     laplace=draws, device=device, forecast=forecast, center=center)
-
-    make.train_last = last
-    out = run(make, [("*", "BP")], mode)
-elif mode == "bp-ix19":
-    def make(draws, forecast=True, center="plugin"):
-        return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="contiguity", laplace=draws,
-                                     device=device, forecast=forecast, center=center)
-
-    make.train_last = 2019
-    out = run(make, [(n, "BP") for n in ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"]], mode)
 out["draws"], out["device"] = S, device
 with open(f"data/logs/laplace_{mode}{'' if S else '_map'}.json", "w", encoding="utf-8") as fh:
     json.dump(out, fh, indent=1, default=float, ensure_ascii=False)

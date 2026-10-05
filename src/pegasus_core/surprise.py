@@ -16,10 +16,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pyarrow as pa
-import torch
 from scipy import optimize, special, stats
 
-from . import config, fields, gateway, laplace, monolith, store
+from . import config, fields, gateway, laplace, monolith, prospective, store
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True}
@@ -68,21 +67,29 @@ class Surprise:
                          "flags": self.flags.ravel().astype(np.int8)})
 
 
+EXPOSURE_RHO = 0.0   # correlation of log N between the sex-age cells of a place-year (monolith.exposure_variance)
+
+
 class Expectations:
     """The fitted monolith of one event type, read field by field and tier by tier."""
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
                  structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
-                 center: str = "plugin", forecast: bool = True):
+                 center: str = "plugin", population: str | None = None,
+                 exposure_rho: float | None = EXPOSURE_RHO):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
         "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
         MAP's predictive, NB(mu, phi)); with draws, a cell's predictive integrates mu over the Laplace
         posterior (ARCHITECTURE 5.3, `laplace.py`), centred on the MAP's expectation (``center="plugin"``) or
-        on the posterior mean (``"posterior"``)."""
+        on the posterior mean (``"posterior"``). ``population`` names the exposure (``gateway.population``:
+        popsvs, account-2; None: the configured default). When it carries intervals (the account) the
+        predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
+        correlation ``exposure_rho`` between a place-year's cells (None: ignored)."""
+        self.population, self.exposure_rho = population, exposure_rho
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})
-        self.laplace, self.device, self.forecast, self.center = int(laplace), device, forecast, center
+        self.laplace, self.device, self.center = int(laplace), device, center
         self._posteriors: dict = {}
         classifier = self.source.get("column") or self.source.get("classifier")
         self.registry = fields.Registry(dataset, event, structure, classifier=classifier)
@@ -93,8 +100,18 @@ class Expectations:
         if block not in self._models:
             cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
             self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
-                                           device=self.device, **self.source)
+                                           device=self.device, **self._reader())
         return self._models[block]
+
+    def _reader(self) -> dict:
+        """The reader arguments of ``monolith.assemble``: the event source and the population."""
+        return {**self.source, **({} if self.population is None else {"population": self.population})}
+
+    def _exposure(self, m: monolith.Monolith, leaves: np.ndarray, spatial: bool, x=None) -> np.ndarray | None:
+        """Var(mu) from the population's uncertainty, None where it has none or is switched off."""
+        if self.exposure_rho is None or m.data.S is None:
+            return None
+        return m.exposure_variance(leaves, spatial, self.exposure_rho, x)
 
     def posterior(self, key, model: monolith.Monolith) -> laplace.Posterior:
         """The Laplace posterior of a fitted block, drawn once per Expectations (``key`` names the fit)."""
@@ -106,36 +123,64 @@ class Expectations:
     def field(self, node: str) -> fields.Field:
         return self.registry.field(node)
 
-    def prospective(self, node: str | fields.Field, train_last: int, history: str = "auto") -> Surprise:
+    def prospective(self, node: str | fields.Field, train_last: int, history: str = "auto",
+                    course: bool | None = None) -> Surprise:
         """Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
-        extrapolated (`monolith.extrapolate`). Surveillance needs it: a fit over the whole period
+        extrapolated (`monolith.extrapolate_members`). Surveillance needs it: a fit over the whole period
         learns an epidemic as normal (COVID-19 in SIM: B34 deaths 2020 observed 213,152 against
         212,821 expected at B1, evaluation 2026-10-04). Calibration is recorded, never flagged:
-        departing from the past is what this tier exists to show."""
+        departing from the past is what this tier exists to show.
+
+        The predictive of a cell is a mixture of NBs over the history's regimes (`prospective.py`): the
+        expectation of each member carries the place's own damped course (``course``: None, the annual
+        grain), the block's φ and the training fit's own place-year component φ_extra, with the Laplace
+        draws' and the exposure's variance when present."""
         f = node if isinstance(node, fields.Field) else self.field(node)
         train = [y for y in self.years if y <= train_last]
         test = [y for y in self.years if y > train_last]
         cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
         if cls is monolith.MarkModel:
             raise NotImplementedError("the prospective tier is for counts")
-        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self.source)
-        tm, x = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test, **self.source),
-                                     history)
+        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader())
+        regime = monolith.regime_history(model, history)
+        point = "level36" if regime == "climatology" else regime
+        tm, x_point = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test,
+                                                                    **self._reader()), point)
         leaves = np.array([tm.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in tm.data.leaves])
-        mu, mu2 = tm.expected(leaves, spatial=True, x=x)
-        var = None
+        li = np.array([model.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in model.data.leaves])
+        macro = self.macroregions(tm.data.places)
+        extra = prospective.insample_extra(model, li, _dispersion_levels(tm.data.places, macro),
+                                           self._exposure(model, li, True))
+        T = tm.N.shape[1]
+        shift, cvar = (0.0, 0.0)
+        if (model.data.grain != "month") if course is None else course:
+            shift, cvar = prospective.course(model, li, T)
+        mu_point, _ = tm.expected(leaves, spatial=True, x=x_point)
+        rel = np.expm1(cvar) + 0.0 * mu_point                      # relative Var(mu), added to each member's 1/φ
         if self.laplace:
             post = self.posterior(("BP", f.block, train_last), model)
-            fv = laplace.forecast_variance(model, tm) if self.forecast else None
-            gen = torch.Generator(device=model.device)
-            gen.manual_seed(config.seed("laplace", "forecast", model.key()))
-            mom = post.moments(leaves, True, x_fn=lambda xd: (tm, monolith.extrapolate_effects(
-                model, tm, xd, history,
-                increments=None if fv is None else laplace.forecast_increments(model, tm, fv, gen))))
-            mu, mu2, var = _recentre(mom, mu, self.center)
+            mom = post.moments(leaves, True, x_fn=lambda xd: (tm, monolith.extrapolate_effects(model, tm, xd, point)))
+            rel = rel + mom["var"] / np.maximum(mom["mean"], 1e-300) ** 2
+        ev = self._exposure(tm, leaves, True, x_point)
+        if ev is not None:
+            rel = rel + ev / np.maximum(mu_point, 1e-300) ** 2
+        comps, mean = [], 0.0
+        for w, x in monolith.extrapolate_members(model, tm, regime, model.effects()):
+            mu, mu2 = tm.expected(leaves, spatial=True, x=x)
+            mu, mu2 = mu * np.exp(shift), mu2 * np.exp(2 * shift)
+            cells = laplace.predictive_phi(mu, rel * mu ** 2, mu2, model.phi)
+            comps.append((w, mu, 1.0 / (1.0 / cells + 1.0 / extra)))
+            mean = mean + w * mu
         y = tm.observed(leaves)
-        out = _assemble(f, "BP", tm, y, mu, mu2, model.phi, self.macroregions(tm.data.places), flag_calibration=False,
-                        var=var)
+        u, z, phi = prospective.mixture_pit(y, comps, config.seed(f.id, "BP", "pit", tm.key()))
+        cal = calibration(u, mean, macro)
+        cal.update({"phi_source": "training fit", "regimes": len(comps), "phi": float(np.median(extra))})
+        pop = tm.data.N.sum(axis=2)
+        flags = np.zeros(y.shape, dtype=np.int8)
+        flags[(pop <= 0) & (y > 0)] |= DENOMINATOR
+        flags[mean < 1e-6] |= NO_INFORMATION
+        w_info = np.where(np.isinf(phi), mean, mean / (1 + mean / phi))
+        out = Surprise(f, "BP", tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
         return out
 
@@ -174,6 +219,7 @@ class Expectations:
                 store.put_table("surprise", key, out.table(), {"calibration": out.calibration})
             return out
         mu, mu2 = m.expected(leaves, spatial=SPATIAL[tier])
+        mu_first = mu
         if tier == "B0":
             # dropping centred log-scale place effects drops E[exp(s + v)] > 1 too: re-level B0 to
             # the national total of each year, so B0 says how a place differs from Brazil
@@ -199,6 +245,11 @@ class Expectations:
         eta_var = extras.pop("eta_var", None)
         if mom is not None:
             mu, mu2, var = _predictive(mom, mu, mu_point, eta_var, self.center)
+        ev = self._exposure(m, leaves, SPATIAL[tier])
+        if ev is not None:
+            # the exposure's variance moves with the tier's mean (B0 re-levelled, B2 refit): by the square of the ratio
+            ev = ev * np.divide(mu, mu_first, out=np.ones_like(mu), where=mu_first > 0) ** 2
+            var = ev if var is None else var + ev
         out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places), var=var)
         out.extras = extras
         if cache:
@@ -479,9 +530,12 @@ def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float)
 
 
 def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
-                outer: int = 20, tau: np.ndarray | None = None, variance: bool = False) -> tuple:
+                outer: int = 20, tau: np.ndarray | None = None, variance: bool = False,
+                X_new: np.ndarray | None = None) -> tuple:
     """Per place u, log μ'_ut = log μ_ut + X_t·b_u with b_u ~ N(0, diag(1/τ)): exact p×p Newton per
-    place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ)."""
+    place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ);
+    with ``variance`` also Var(X_t·b_u) per cell, and with ``X_new`` (the design at later periods) the
+    course's forecast X_new·b_u and its variance X_new H⁻¹ X_newᵀ, both [places, periods]."""
     live = mu.sum(axis=1) > 0
     U, k = mu.shape[0], X.shape[1]
     pois = np.isinf(phi_agg)
@@ -514,7 +568,10 @@ def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarra
     Hinv = np.linalg.inv(H)
     sd = np.sqrt(np.clip(np.einsum("uii->ui", Hinv), 0, None))
     if variance:   # Var(X_t . b_u): the refit's own contribution to the uncertainty of log mu'
-        return mu * np.exp(b @ X.T), b, sd, tau, np.einsum("ti,uij,tj->ut", X, Hinv, X)
+        out = (mu * np.exp(b @ X.T), b, sd, tau, np.einsum("ti,uij,tj->ut", X, Hinv, X))
+        if X_new is not None:
+            out += (b @ X_new.T, np.einsum("ti,uij,tj->ut", X_new, Hinv, X_new))
+        return out
     return mu * np.exp(b @ X.T), b, sd, tau
 
 

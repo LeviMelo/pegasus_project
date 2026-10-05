@@ -370,59 +370,6 @@ def predictive_phi(mean: np.ndarray, var: np.ndarray, mu2: np.ndarray, phi: floa
     return np.divide(1.0, inv, out=np.full(mean.shape, np.inf), where=inv > 0)
 
 
-# ---------------------------------------------------------------------- the forecast of the history
-
-
-def forecast_variance(model: monolith.Monolith, tm: monolith.Monolith, window: int = 36) -> dict[str, np.ndarray]:
-    """The variance, per test period, of the history's forecast error beyond the parameters' own
-    uncertainty (which the draws carry): what the future history adds to the departure.
-
-    Annual grain, linear extrapolation: the RW2 prior's own forecast. With innovations
-    N(0, 1/(tau s)) in the second difference (s the scale of Q), h(T+k) - [h(T) + k (h(T) - h(T-1))]
-    has variance k(k+1)(2k+1)/6 / (tau s), per effect row.
-
-    Monthly grain, flat level: the RW2 forecast is meaningless (the history is nearly free,
-    tau ~ 0.002, and a 60-month horizon would carry a variance of ~700), so the error of holding h at
-    its last ``window`` months' mean (36: the monthly default of ``monolith.extrapolate``) is measured
-    on the fitted history itself: V(k) = mean over origins t of [h(t+k) - mean(h(t-window+1..t))]^2,
-    made non-decreasing in k. A descriptive statistic of how far
-    the level of this series has moved in k months, not a model."""
-    T = tm.N.shape[1]
-    out: dict[str, np.ndarray] = {}
-    if model.data.grain == "month":
-        with torch.no_grad():
-            h = (model.effects()["h_all"][0]).cpu().numpy()
-        w = window
-        lvl = np.array([h[t - w + 1:t + 1].mean() for t in range(w - 1, len(h))])
-        v = np.full(T, np.nan)
-        for k in range(1, T + 1):
-            origins = np.arange(w - 1, len(h) - k)
-            if len(origins) >= 6:
-                v[k - 1] = np.mean((h[origins + k] - lvl[origins - (w - 1)]) ** 2)
-        valid = np.nonzero(np.isfinite(v))[0]
-        v[len(valid):] = v[valid[-1]] if len(valid) else 0.0
-        out["h_all"] = np.maximum.accumulate(np.nan_to_num(v))
-        out["h_grp"] = np.zeros(T)
-        return out
-    k = (tm.data.years - model.data.years[-1]).astype(float)
-    for name in ("h_all", "h_grp"):
-        c = model.components[name]
-        scale = float(np.median(c.shape.Q.diagonal())) / 6.0            # an RW2 interior row of Q is (1, -4, 6, -4, 1)
-        out[name] = k * (k + 1) * (2 * k + 1) / 6.0 / (c.tau * scale)
-    return out
-
-
-def forecast_increments(model: monolith.Monolith, tm: monolith.Monolith, variance: dict[str, np.ndarray],
-                        gen: torch.Generator) -> dict[str, torch.Tensor]:
-    """One draw of the history's forecast error (marginally right per period; periods independent)."""
-    K, T = len(model.data.groups), tm.N.shape[1]
-    kw = {"dtype": model.dtype, "device": model.device}
-    sd = lambda name: torch.as_tensor(np.sqrt(variance[name]), **kw)  # noqa: E731
-    inc_all = (torch.randn((1, T), generator=gen, **kw) * sd("h_all")[None, :])
-    inc_grp = torch.randn((K, T), generator=gen, **kw) * sd("h_grp")[None, :]
-    return {"h_all": inc_all, "h_grp": inc_grp - inc_grp.mean(dim=0, keepdim=True)}
-
-
 # ---------------------------------------------------------------------- helpers
 
 

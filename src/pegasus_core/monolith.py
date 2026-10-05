@@ -37,8 +37,8 @@ MAX_TAU_STEP = np.log(10.0)  # Fellner–Schall updates are damped to ×10 per o
 SHRUNK = 1e5                 # a τ above this leaves its effect at a negligible size (sd < 0.003)
 
 
-def age_band(age: np.ndarray) -> np.ndarray:
-    return np.searchsorted(AGE_EDGES, age, side="right") - 1
+def age_band(age: np.ndarray, edges: list[int] | None = None) -> np.ndarray:
+    return np.searchsorted(AGE_EDGES if edges is None else edges, age, side="right") - 1
 
 
 # ---------------------------------------------------------------------- data
@@ -56,7 +56,7 @@ class BlockData:
     leaves: list[str]
     groups: list[str]
     leaf_group: np.ndarray            # index into groups, per leaf
-    N: np.ndarray                     # [U, T, G] person-years, G = 2 sexes × 18 bands
+    N: np.ndarray                     # [U, T, G] person-years, G = 2 sexes × bands (18 for POPSVS, 17 for the account)
     e: np.ndarray                     # non-empty cells: leaf, place, year, group, count
     u: np.ndarray
     t: np.ndarray
@@ -68,6 +68,8 @@ class BlockData:
     l2: np.ndarray | None = None      # marks: Σ (log m)² per cell
     grain: str = "year"               # "year" | "month": the time axis t indexes years or months
     month_of_year: np.ndarray | None = None   # monthly grain: t -> 0..11
+    S: np.ndarray | None = None       # [U, T, G] sd of log N where the population carries uncertainty (the account)
+    population: str = "popsvs"
 
     def periods(self) -> np.ndarray:
         """The time axis as period codes: the years, or YYYYMM at the monthly grain."""
@@ -77,7 +79,7 @@ class BlockData:
 
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
-             source: str = "events", grain: str = "year", **source_args) -> BlockData:
+             source: str = "events", grain: str = "year", population: str | None = None, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
@@ -92,20 +94,27 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
                      ``classifier=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
     """
     years = np.array(sorted(set(years)))
-    pop = gateway.population(years.tolist())
+    population = population or config.population_source()
+    edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
+    nB = len(edges)
+    pop = gateway.population(years.tolist(), source=population)
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
     uidx = {int(c): i for i, c in enumerate(places)}
     tidx = {int(y): i for i, y in enumerate(years)}
-    N = np.zeros((len(places), len(years), 2 * N_BANDS))
+    N = np.zeros((len(places), len(years), 2 * nB))
     pu = np.array([uidx[int(c)] for c in pop.column("u").to_numpy()])
     pt = np.array([tidx[int(y)] for y in pop.column("year").to_numpy()])
-    pg = (pop.column("sex").to_numpy().astype(int) - 1) * N_BANDS + age_band(pop.column("age").to_numpy())
+    pg = (pop.column("sex").to_numpy().astype(int) - 1) * nB + age_band(pop.column("age").to_numpy(), edges)
     np.add.at(N, (pu, pt, pg), pop.column("n").to_numpy())
+    S = None
+    if "s" in pop.column_names:
+        S = np.zeros_like(N)
+        S[pu, pt, pg] = pop.column("s").to_numpy()
 
     strata = gateway._strata(dataset)
     if strata["sex"] is None:
         # the subject has one sex by definition (a mother): the other sex is not exposed
-        N[:, :, (2 - strata["implied_sex"]) * N_BANDS:(3 - strata["implied_sex"]) * N_BANDS] = 0.0
+        N[:, :, (2 - strata["implied_sex"]) * nB:(3 - strata["implied_sex"]) * nB] = 0.0
 
     if block == "*":
         # an event type without a classifier tree: one leaf, every event in it
@@ -130,6 +139,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         readers["events"] = gateway.monthly_counts
         # person-months: each month carries a twelfth of the year's person-years
         N = np.repeat(N, 12, axis=1) / 12.0
+        S = None if S is None else np.repeat(S, 12, axis=1)
     T = N.shape[1]
 
     parts, unallocated = [], {}
@@ -158,28 +168,38 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
                                dtype=np.int64),
                       np.array([uidx[int(x)] for x in sub.column("u").to_numpy()], dtype=np.int64),
                       time_index.astype(np.int64),
-                      ((sub.column("sex").to_numpy().astype(np.int64) - 1) * N_BANDS
-                       + age_band(sub.column("age").to_numpy())).astype(np.int64),
+                      ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
+                       + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64),
                       *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
     e, u, t, g, *vals = (np.concatenate(z) for z in zip(*parts, strict=True))
     if len(e) == 0:
         raise LookupError(f"{dataset} {event}: block {block} has no events in {years[0]}–{years[-1]} "
                           f"(unallocated: {unallocated})")
     # several subcategories share a category, several ages a band: sum them into one cell
-    flat = ((e * len(places) + u) * T + t) * (2 * N_BANDS) + g
+    flat = ((e * len(places) + u) * T + t) * (2 * nB) + g
     uniq, inv = np.unique(flat, return_inverse=True)
     sums = {v: np.bincount(inv, weights=x) for v, x in zip(values, vals, strict=True)}
-    g = uniq % (2 * N_BANDS)
-    rest = uniq // (2 * N_BANDS)
+    g = uniq % (2 * nB)
+    rest = uniq // (2 * nB)
     t, rest = rest % T, rest // T
     u, e = rest % len(places), rest // len(places)
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
-           "data": config.data_version(), **({} if profile == "group" else {"profile": profile}),
+           "data": config.data_version(), **gateway.population_key(population),
+           **({} if profile == "group" else {"profile": profile}),
            **({} if source == "events" else {"source": source, **source_args}),
            **({} if grain == "year" else {"grain": grain})}
     y = sums["l1"] / sums["n"] if source == "mark" else sums["y"]
+    live = N[u, t, g] > 0
+    if not live.all():
+        # events in a cell the population holds nobody in (the account's interval-free zeros: 1 death in 14 years of IX):
+        # no rate exists there, so they are counted as unallocated, never given a guessed denominator
+        w = (sums["n"] if source == "mark" else y)[~live]
+        unallocated["no population in the cell"] = unallocated.get("no population in the cell", 0) + int(w.sum())
+        e, u, t, g, y = e[live], u[live], t[live], g[live], y[live]
+        sums = {v: x[live] for v, x in sums.items()}
     data = BlockData(dataset, event, block, years, places, categories, groups,
-                     np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key)
+                     np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key,
+                     S=S, population=population)
     if source == "mark":
         data.n, data.l2 = sums["n"], sums["l2"]
     if grain == "month":
@@ -229,7 +249,8 @@ class Monolith:
         nU, nT, nG = data.N.shape
         nE, nGrp = len(data.leaves), len(data.groups)
         icar = _cached_icar(graph[0], graph[1], nU)
-        rw_age = structures.random_walk(N_BANDS, order=2)
+        self.nB = nG // 2                      # age bands per sex (the population source's)
+        rw_age = structures.random_walk(self.nB, order=2)
         rw_t = structures.random_walk(nT, order=2 if nT >= 4 else 1)
         self.components = {
             "th_grp": Component("th_grp", structures.iid(nGrp), 1),
@@ -315,13 +336,13 @@ class Monolith:
             if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
                 v = v - v.mean(dim=0, keepdim=True)
             elif name == "f_grp":
-                v = (v.reshape(-1, 2, N_BANDS) - v.reshape(-1, 2, N_BANDS).mean(dim=0, keepdim=True)).reshape(v.shape)
+                v = (v.reshape(-1, 2, self.nB) - v.reshape(-1, 2, self.nB).mean(dim=0, keepdim=True)).reshape(v.shape)
             elif name == "v_cat":
                 v = _centre(v.T.contiguous(), self.grp).T
             out[name] = v
         nGrp = len(self.data.groups)
-        out["f_all"] = out["f_all"].reshape(1, 2 * N_BANDS)
-        out["f_grp"] = out["f_grp"].reshape(nGrp, 2 * N_BANDS)
+        out["f_all"] = out["f_all"].reshape(1, 2 * self.nB)
+        out["f_grp"] = out["f_grp"].reshape(nGrp, 2 * self.nB)
         return out
 
     def _place_time(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
@@ -627,10 +648,11 @@ class Monolith:
             mu2 = (w2[:, :, None] * torch.exp(2 * lin) * M2).sum(0)
         return mu.cpu().numpy(), mu2.cpu().numpy()
 
-    def expected_by_group(self, leaves: np.ndarray, spatial: bool = True) -> np.ndarray:
+    def expected_by_group(self, leaves: np.ndarray, spatial: bool = True,
+                          x: dict[str, torch.Tensor] | None = None) -> np.ndarray:
         """μ[u,t,g] summed over the leaves (g = sex × age band)."""
         with torch.no_grad():
-            x = self.effects()
+            x = self.effects() if x is None else x
             lp = self._leaf_place(x, spatial)
             sel = torch.as_tensor(leaves, device=self.device)
             K, U = len(self.data.groups), self.N.shape[0]
@@ -641,6 +663,18 @@ class Monolith:
             prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]
             mu = torch.einsum("ku,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
         return mu.cpu().numpy()
+
+    def exposure_variance(self, leaves: np.ndarray, spatial: bool = True, rho: float = 0.0,
+                          x: dict[str, torch.Tensor] | None = None) -> np.ndarray:
+        """Var(μ[u,t]) from the uncertainty of the population (ARCHITECTURE §3.1, §4.1, P8): the cells'
+        log N_g ~ N(log N̂_g, s_g²) with ``data.S`` from the population's intervals, μ = Σ_g μ_g, so
+        Var(μ) = Σ_g μ_g² (e^{s_g²} − 1) + ρ [(Σ_g μ_g s_g)² − Σ_g μ_g² s_g²]: ρ = 0 independent cells,
+        ρ = 1 the log errors of a place-year's sex-age cells fully shared (first order). Zero where the
+        population carries no uncertainty (POPSVS)."""
+        if self.data.S is None:
+            return np.zeros(self.data.N.shape[:2])
+        mu_g, S = self.expected_by_group(leaves, spatial, x), self.data.S
+        return (mu_g ** 2 * np.expm1(S ** 2)).sum(2) + rho * ((mu_g * S).sum(2) ** 2 - (mu_g ** 2 * S ** 2).sum(2))
 
     def observed(self, leaves: np.ndarray) -> np.ndarray:
         nU, nT, _ = self.data.N.shape
@@ -845,11 +879,9 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
 
 
 def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.Tensor],
-                        history: str = "auto", increments: dict[str, torch.Tensor] | None = None
-                        ) -> dict[str, torch.Tensor]:
+                        history: str = "auto") -> dict[str, torch.Tensor]:
     """The effects (the fitted ones, or a posterior draw's) with their histories h carried over the
-    test periods of ``tm`` (see `extrapolate`); ``increments`` adds a draw of the history's forecast
-    error (`laplace.forecast_increments`)."""
+    test periods of ``tm`` (see `extrapolate`)."""
     monthly = model.data.grain == "month"
     if history == "auto":
         history = "level36" if monthly else "linear"
@@ -862,21 +894,57 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
         else:
             last = float(model.data.years[-1])
             steps = torch.as_tensor(test.years.astype(float) - last, dtype=model.dtype, device=model.device)
-        if history == "linear":
+        if history == "linear" or (not monthly and history in ("level", "damped8", "damped5")):
+            # annual grain: the RW2's forecast mean (linear), or its last slope damped by d per year
+            # (damped8: d = 0.8; damped5: d = 0.5), or flat at the last value
+            d = {"linear": 1.0, "level": 0.0, "damped8": 0.8, "damped5": 0.5}[history]
+            reach = steps if d == 1.0 else (torch.zeros_like(steps) if d == 0.0
+                                            else d * (1 - d ** steps) / (1 - d))
             for name in ("h_all", "h_grp"):
                 h = x[name]
                 slope = h[:, -1:] - h[:, -2:-1]
-                x[name] = h[:, -1:] + slope * steps[None, :]
+                x[name] = h[:, -1:] + slope * reach[None, :]
         else:
             H = (x["h_all"] + x["h_grp"]).cpu().numpy()                      # [groups, T]
             level = np.array([_baseline_level(row, history) for row in H])
             level = torch.as_tensor(level, dtype=model.dtype, device=model.device)[:, None]
             x["h_all"] = level.mean(dim=0, keepdim=True) + 0.0 * steps[None, :]
             x["h_grp"] = (level - level.mean(dim=0, keepdim=True)) + 0.0 * steps[None, :]
-        if increments is not None:
-            for name in ("h_all", "h_grp"):
-                x[name] = x[name] + increments[name]
     return x
+
+
+def regime_history(model: Monolith, history: str = "auto") -> str:
+    """BP's default history: ``climatology`` at the monthly grain, ``damped5`` at the annual one."""
+    return history if history != "auto" else ("climatology" if model.data.grain == "month" else "damped5")
+
+
+def extrapolate_members(model: Monolith, tm: Monolith, history: str = "auto",
+                        effects: dict[str, torch.Tensor] | None = None) -> list[tuple[float, dict[str, torch.Tensor]]]:
+    """The regimes of the later periods: [(weight, effects)] whose mixture is BP's predictive of the history.
+    ``auto`` (`regime_history`) is at the annual grain one member whose h carries the RW2's last slope damped
+    by 0.5 per year (``damped5``), and at the monthly grain the ``climatology``: every year of the fit is a
+    member, its twelve months of h (national and group) standing for the same months of a later year, equal
+    weights. An epidemic series has no level to extrapolate and its epidemic years are normal ones. Rolling
+    origins (evaluation 2026-10-05, BP level): annual, 7 fields at 2014, 2016, 2019, damped5 + place course
+    held-out log score -1.37 M against -1.52 M for the linear forecast with the block's φ; monthly dengue at
+    2014 and 2018, climatology -1.39 M against -4.68 M for level36 (obs/expected 1.2 against 2.2). Any other
+    ``history`` is one member, `extrapolate_effects`."""
+    monthly = model.data.grain == "month"
+    history = regime_history(model, history)
+    x0 = model.effects() if effects is None else effects
+    if history != "climatology":
+        return [(1.0, extrapolate_effects(model, tm, x0, history))]
+    if not monthly:
+        raise ValueError("the climatology of a fit's years is a monthly-grain regime")
+    T, years = tm.data.N.shape[1], model.data.N.shape[1] // 12
+    base = extrapolate_effects(model, tm, x0, "level36")
+    members = []
+    for j in range(years):
+        idx = torch.as_tensor([12 * j + t % 12 for t in range(T)], device=model.device)
+        x = dict(base)
+        x["h_all"], x["h_grp"] = x0["h_all"][:, idx], x0["h_grp"][:, idx]
+        members.append((1.0 / years, x))
+    return members
 
 
 def _baseline_level(h: np.ndarray, kind: str) -> float:

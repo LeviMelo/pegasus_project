@@ -47,14 +47,6 @@ TARGETS = {
     "lept-notif": (lambda: surprise.Expectations("SINAN-LEPT", "notification", range(2010, 2024), source=MONTHLY),
                    ["*"], ("B0", "B1", "B2", "B2s")),
 }
-BP = {
-    "bp-ix19": (lambda: surprise.Expectations("SIM.DO", "death", range(2010, 2024), "contiguity"),
-                ["IX", "X", "I", "XVIII", "I20-I25", "I60-I69", "I64", "I10-I15"], 2019),
-    "bp-dengue18": (lambda: surprise.Expectations("SINAN-DENG", "probable_case", range(2010, 2024), source=MONTHLY),
-                    ["*"], 2018),
-    "bp-dengue14": (lambda: surprise.Expectations("SINAN-DENG", "probable_case", range(2010, 2017), source=MONTHLY),
-                    ["*"], 2014),
-}
 # fits for the held-out check of the block's φ by macro-region: (dataset, event, block, train_last, test_last, source)
 HELDOUT = {
     "ho-ix19": ("SIM.DO", "death", "IX", 2019, 2023, {}),
@@ -153,17 +145,7 @@ def main(names: list[str]) -> None:
                                                          if isinstance(v, dict) and "ks" in v}) if "error" not in res[f"{node}/{tier}"]
                           else res[f"{node}/{tier}"], flush=True)
         else:
-            make, nodes, last = BP[name]
-            ex = make()
-            for node in nodes:
-                try:
-                    cap.clear()
-                    ex.prospective(node, last)
-                    res[f"{node}/BP"] = evaluate("BP")
-                except Exception as e:  # noqa: BLE001
-                    res[f"{node}/BP"] = {"error": f"{type(e).__name__}: {e}"}
-                print(name, node, "BP", json.dumps({k: (v["ks"], v["worst"]) for k, v in res[f"{node}/BP"].items()
-                                                    if isinstance(v, dict) and "ks" in v}), flush=True)
+            raise SystemExit(f"unknown target {name!r} (BP: scripts/measure_bp_level.py)")
         with open(f"data/logs/dispersion_{name}.json", "w", encoding="utf-8") as fh:
             json.dump(res, fh, indent=1, ensure_ascii=False)
 
