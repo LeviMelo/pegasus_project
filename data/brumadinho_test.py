@@ -76,17 +76,14 @@ def summarise(s: surprise.Surprise) -> dict:
 
 
 def facility_excess(E: float) -> dict:
-    rows_w = base.facility_records([PRIMARY], ["J20", "J21", "J22"], range(2019, 2022), W0, W1)
+    rows_w = base.facility_records([PRIMARY], ["J20", "J21", "J22"], range(2019, 2021), W0, W1)
     rows_b = base.facility_records([PRIMARY], ["J20", "J21", "J22"], range(2016, 2020), 201601, 201812)
     fac, mov = {}, {}
-    for r in rows_b + rows_w:
-        mov.setdefault(r["fac"], {}).setdefault(r["mov"], 0)
-        mov[r["fac"]][r["mov"]] += r["y"]
-        f = fac.setdefault(r["fac"], {"window": 0, "base": 0})
-        if r in rows_w:
-            f["window"] += r["y"]
-        else:
-            f["base"] += r["y"]
+    for rows, key in ((rows_b, "base"), (rows_w, "window")):
+        for r in rows:
+            mov.setdefault(r["fac"], {}).setdefault(r["mov"], 0)
+            mov[r["fac"]][r["mov"]] += r["y"]
+            fac.setdefault(r["fac"], {"window": 0, "base": 0})[key] += r["y"]
     btot = sum(f["base"] for f in fac.values())
     out = []
     for k, f in fac.items():
