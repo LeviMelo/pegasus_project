@@ -20,4 +20,4 @@
 
 **Verdict.** Dispersion by macro-region (and state) holds beyond dengue and IX: 12 more fields calibrate at B1 than with the block's φ and 2 more than with one φ_extra; the worst-region KS falls by a quarter at B1. It does not repair dengue B1 in the Southeast or BP, which stay as OQ 6's remainder. Adopted: ADR-0006.
 
-**Correction (BP level, 2026-10-05).** "BP's miscalibration is level" and "BP unaffected" above hold for dispersion estimated on BP's own cells. Applying the *training fit's* φ_extra to BP, with a damped place course and regimes, lowers the mean KS from .121 to .060 (annual) and .169 to .056 (dengue): `2026-10-05-bp-level.md`, ADR-0007.
+**Correction (BP level, 2026-10-05).** "BP's miscalibration is level" and "BP unaffected" above hold for dispersion estimated on BP's own cells. Applying the *training fit's* φ_extra to BP, with a damped place course and regimes, lowers the mean KS from .121 to .060 (annual) and .169 to .056 (dengue): `2026-10-05-bp-level.md`, ADR-0009.

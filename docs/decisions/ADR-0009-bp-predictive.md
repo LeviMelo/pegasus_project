@@ -1,4 +1,4 @@
-# ADR-0007: BP's predictive is a mixture over the history's regimes, with the training fit's place-year component and the place's damped course
+# ADR-0009: BP's predictive is a mixture over the history's regimes, with the training fit's place-year component and the place's damped course
 
 **Date.** 2026-10-05. **Status.** Active.
 

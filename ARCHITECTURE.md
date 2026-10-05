@@ -309,7 +309,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - **Measured on COVID-19 in SIM** (B34.2): 213,152 deaths observed in 2020 against 212,821 expected at B1. The space–time lens found nothing at B1.
 - **BP's handling of calibration and new categories:**
   - its calibration is recorded but never flagged;
-  - **its predictive is a mixture of NBs** (`prospective.py`, ADR-0007), the cell's φ_agg combined with the *training fit's* φ_extra (estimated on the fit's own B1 cells, so no departure leaks into it);
+  - **its predictive is a mixture of NBs** (`prospective.py`, ADR-0009), the cell's φ_agg combined with the *training fit's* φ_extra (estimated on the fit's own B1 cells, so no departure leaks into it);
   - **annual grain:** h is the RW2's last slope damped by 0.5 per year, and each place carries its own B2 trend over the fit, damped by 0.5, with the coefficients' posterior variance;
   - **monthly grain:** the regimes are the fit's own years (each year's twelve months of h, equal weights), the epidemic years of the history being normal ones;
   - a category without a past has no expectation in BP, so the excess is read at its group or chapter.
