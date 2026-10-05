@@ -31,3 +31,11 @@
 - ES (4): Baixo Guandu, Colatina, Linhares, Marilândia.
 
 Whole municipalities, not exposed neighbourhoods; Ipatinga, Governador Valadares and Colatina are large and mostly not reached by the tailings, which dilutes any effect (a stated limitation, fixed with the locus).
+
+## Operational definitions (fixed before the result was read; `data/rio_doce_bp.py`, `data/rio_doce_test.py`)
+
+- **Expectation.** BP (ADR-0009, monthly: the mixture over the fit's years) trained on months 2010-01..2015-10. BP trains on whole years, so the training assembly is truncated to 70 months (own store key `through: 201510`; admissions of those months read from files 2010-2016, since late filing puts October 2015 into 2016 files); the test assembly reads files 2015-2017 so December 2016 is not cut by filing lag. Chapter X and chapter XI (digestive) monthly blocks are fitted on that basis; nodes J30-J31 (J30+J31 leaves), J31, J00-J06, J20-J22, J40-J47 and XI are read from them.
+- **Test.** O/E over the 41 locus municipalities (residence) x 2015-11..2016-12, E the sum of BP's means; minimum-effect p = `explain.tail_p(O, 1.2 mu, phi)`. The verdict is on J30-J31; J31 alone and the secondary groups are reported beside it.
+- **Spread.** The excess is the signed O-E. A municipality or facility holds its signed O_i-E_i over the total; it counts as carrying the excess when it holds at least 5%. Facility expected = E x its share of the locus outcome's admissions in 2013-11..2015-10 (CNES column). Criterion 2: at least 3 municipalities and 2 facilities carrying, and no facility above 50%.
+- **Negative control.** Chapter XI at the same places and months: "no excess" is ratio < 1.2 or p >= 0.05.
+- `explain.facility_concentration` / `facility.py` were not committed when the test ran; shares are computed directly.
