@@ -41,7 +41,7 @@ class Surprise:
     field: fields.Field
     tier: str
     places: np.ndarray
-    years: np.ndarray
+    years: np.ndarray        # the time axis: years, or YYYYMM period codes at the monthly grain
     y: np.ndarray            # [U, T]
     mu: np.ndarray           # [U, T]
     phi: np.ndarray          # [U, T] aggregate dispersion (inf: Poisson)
@@ -55,7 +55,7 @@ class Surprise:
     def table(self) -> pa.Table:
         U, T = self.y.shape
         return pa.table({"u": np.repeat(self.places, T).astype(np.int32),
-                         "year": np.tile(self.years, U).astype(np.int16),
+                         "year": np.tile(self.years, U).astype(np.int32),
                          "y": self.y.ravel(), "mu": self.mu.ravel(), "phi": self.phi.ravel(),
                          "pit": self.u.ravel(), "z": self.z.ravel(), "w": self.w.ravel(),
                          "flags": self.flags.ravel().astype(np.int8)})
@@ -188,7 +188,7 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
         phi_agg = cells
         u, z = randomised_pit(y, mu, phi_agg, seed)
     w = np.where(np.isinf(phi_agg), mu, mu / (1 + mu / phi_agg))
-    return Surprise(f, tier, m.data.places, m.data.years, y, mu, phi_agg, u, z, w, flags, cal)
+    return Surprise(f, tier, m.data.places, m.data.periods(), y, mu, phi_agg, u, z, w, flags, cal)
 
 
 def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np.ndarray,

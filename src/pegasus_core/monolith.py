@@ -69,6 +69,12 @@ class BlockData:
     grain: str = "year"               # "year" | "month": the time axis t indexes years or months
     month_of_year: np.ndarray | None = None   # monthly grain: t -> 0..11
 
+    def periods(self) -> np.ndarray:
+        """The time axis as period codes: the years, or YYYYMM at the monthly grain."""
+        if self.grain == "month":
+            return (np.repeat(self.years, 12) * 100 + np.tile(np.arange(1, 13), len(self.years))).astype(np.int64)
+        return self.years
+
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
              source: str = "events", grain: str = "year", **source_args) -> BlockData:
@@ -791,22 +797,36 @@ class MarkModel(Monolith):
 # ---------------------------------------------------------------------- model choice
 
 
-def extrapolate(model: Monolith, test: BlockData) -> tuple[Monolith, dict[str, torch.Tensor]]:
-    """A fit carried to later years: every effect as fitted, the histories h extrapolated as the
-    RW2's forecast mean (linear from the last two fitted years). Returns a model over the test
-    data (for its exposure and cells) and the forecast effects."""
+def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tuple[Monolith, dict[str, torch.Tensor]]:
+    """A fit carried to later periods: every effect as fitted, the histories h extrapolated.
+    ``history`` is ``linear`` (the RW2's forecast mean, linear from the last two fitted periods),
+    ``level`` (flat at the mean of the last twelve months) or ``auto``: linear at the annual grain,
+    level at the monthly. At the monthly grain h is free to follow epidemic waves (τ_h ≈ 0.002 on
+    dengue), so the last two months' slope is noise that a 60-month horizon multiplies
+    (evaluation 2026-10-04, dengue monthly). Returns a model over the test data (for its exposure
+    and cells) and the forecast effects."""
     if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
             or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
+    monthly = model.data.grain == "month"
+    if history == "auto":
+        history = "level" if monthly else "linear"
     tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
     with torch.no_grad():
         x = {k: v.detach().clone() for k, v in model.effects().items()}
-        last = float(model.data.years[-1])
-        steps = torch.as_tensor(test.years.astype(float) - last, dtype=model.dtype, device=model.device)
+        if monthly:
+            # months after the last fitted month; the cyclic season repeats as fitted
+            steps = torch.arange(1, test.N.shape[1] + 1, dtype=model.dtype, device=model.device)
+        else:
+            last = float(model.data.years[-1])
+            steps = torch.as_tensor(test.years.astype(float) - last, dtype=model.dtype, device=model.device)
         for name in ("h_all", "h_grp"):
             h = x[name]
-            slope = h[:, -1:] - h[:, -2:-1]
-            x[name] = h[:, -1:] + slope * steps[None, :]
+            if history == "level":
+                x[name] = h[:, -12:].mean(dim=1, keepdim=True) + 0.0 * steps[None, :]
+            else:
+                slope = h[:, -1:] - h[:, -2:-1]
+                x[name] = h[:, -1:] + slope * steps[None, :]
     tm.phi = model.phi
     return tm, x
 
