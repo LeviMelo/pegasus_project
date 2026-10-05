@@ -29,10 +29,11 @@
 
 ## Monthly convergence
 
-- **SINAN-LEPT case monthly (41,498 cells), legacy, 150 outers:** objective flat at 217,336.1 and the MAP moving 0.31 units per outer from outer 30, yet "max τ change" 1.78 to the end. The fit had converged; **v_all hovered about `SHRUNK` (1e5) and cycled between 4.9e4 and 2.9e5**, where the update (x'Qx → 0) is ill-defined, and `min(new, τ) > SHRUNK` counted it as movement each time. The test is now `max(new, τ) > SHRUNK` (a τ that small has shrunk its effect, sd < 0.003).
+- **SINAN-LEPT case monthly (41,498 cells), legacy, 150 outers:** objective flat at 217,336.1 and the MAP moving 0.31 units per outer from outer 30, yet "max τ change" 1.78 to the end. The fit had converged; **v_all (the place iid effect, sd 0.004-0.014) cycled with period 4 between 4.9e3 and 8.2e4**, where its Fellner-Schall update (x'Qx → 0) is ill-defined. A first fix (counting a τ as stationary when either side of an update exceeds `SHRUNK`) did not stop the cycle (it stays below 1e5 on most steps) and was reverted; the fit-level criterion (`move_tol`) is what ends it.
 - **SIH X monthly 2010-2023 (existing log, 40 outers, 9,263 s, not converged):** slow τ's, not noise. s_all climbs from 3 to 7,100 and is still moving 0.05-0.1 per outer; from outer 18 the BYM pair s_grp / v_grp swaps (s_grp 160 to 25, v_grp 34 to 4.5e4): the block-diagonal Fellner-Schall update sees each of two effects that explain the same place deviation as alone, a positive feedback that runs into the same shrunk boundary. The objective is flat to 1e-6 relative from outer 16 to 28. The full-Hessian update (`laplace.py`) would couple them but moves the fixed point (spatial τ about 5x lower), so it is not used here; open.
 - **Anderson on log τ** converges a synthetic Fellner-Schall-like map in 8 iterations against 136 (`check_anderson.py`), and with noisy inner solves it can wander (SINAN-LEPT, first try, outers 9-29: objective jumping 217,4xx to 218,9xx); it is therefore opt-in, with the MAP-movement stop as the criterion that ends a ridge drift.
-- Pending at the time of writing: `lept_N` (the `SHRUNK` fix alone), `lept_E` (all options), `sihX_E` (SIH X monthly 2010-2023, GPU, warm start from the 2010-2014 monthly fit, all options): see the last section.
+- **The movement stop is not yet sound on the cycle.** SINAN-LEPT with `mean_tol` 1 and `move_tol` 0.5 (and the gate "max τ change < 0.5", since removed) still ran 150 outers: the cycling v_all moves the MAP by 0.3 to 2.9 log-likelihood units per outer (out of 2e5), so two consecutive outers under 0.5 are rare. A threshold of about 3 would end it at once, at a cost of up to 3 units of unresolved MAP (a few posterior standard deviations in total over 10^4 parameters); that threshold is not validated and `move_tol` stays opt-in. The cycle itself (a damping or freeze of a τ whose effect is below 0.01) is the clean fix and is **not done**.
+- **Not finished when this entry was written** (outputs land in `data/perf/out/`): `lept_M2` (the gate removed), `sihX_M` (SIH X monthly 2010-2023, GPU, warm start from the 2010-2014 monthly fit, `mean_tol` 1, `move_tol` 0.5). Its first outers, 145-160 s each, reached objective 37,227,532 at outer 2, below the legacy fit's final 37,229,757 at outer 39 (different τ's, so only indicative); the earlier run with the Anderson mix (`sihX_E`, killed at the 30-minute background limit after 6 outers) was at 37,227,555 at outer 4 with max τ change 0.16. The legacy fit took 9,263 s for 40 outers.
 
 ## BlockData cache
 
@@ -43,7 +44,4 @@
 Per fit, from the measured ratios (XVI: 36 to 5-7 outers, CG 5.9k to 2.1k) and not from the multiplicity yet run:
 - a variant of a stored fit (train to full, exposure, split, rolling origin) costs about a third of a cold one: 0.35 of the CG work, 5-7 outers instead of 30-40;
 - the 3.5-6 minute births block, the 11-28 minute IX annual and the refits of XX behave as XVI: a second and later variant at 0.3-0.4 of the first;
-- the SIH X monthly: the legacy 40 outers (2.6 h) become the warm run in the last section.
-
-## Last section: monthly runs with the new code
-(filled in below when they finished)
+- the SIH X monthly: a warm start from the 2010-2014 monthly fit begins at the legacy fit's final objective by outer 2 (about 5 min); whether it then stops before the 40-outer cap depends on `sihX_M` (above), so no saving is claimed for it yet.

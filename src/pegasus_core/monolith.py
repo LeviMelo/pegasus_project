@@ -533,7 +533,7 @@ class Monolith:
             t1 = time.time()
             changes = self._update_taus(accel)
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
-            quiet = quiet + 1 if move < move_tol and max(changes) < 0.5 and self.refit_converged else 0
+            quiet = quiet + 1 if move < move_tol and self.refit_converged else 0
             self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale, "newton": steps,
                                  "change": max(changes), "move": move, "cg": self.cg_iterations, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
@@ -752,14 +752,12 @@ class Monolith:
             new = (c.rank - c.tau * trace) / max(quad, 1e-12)
             new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
             new = float(np.clip(new, *TAU_BOUNDS))
-            # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability. Nor is
-            # its hovering about SHRUNK: the update of an effect that small is ill-defined (xᵀQx -> 0) and cycled
-            # between 4.9e4 and 2.9e5 for 120 outers on SINAN-LEPT monthly (change 1.78 with the fit unchanged)
-            changes.append(0.0 if max(new, c.tau) > SHRUNK else abs(np.log(new / c.tau)))
+            # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability
+            changes.append(0.0 if min(new, c.tau) > SHRUNK else abs(np.log(new / c.tau)))
             self.trace_log.append((name, c.rank, quad, trace, c.tau, new))
             proposals[name] = new
         if accel is not None:
-            active = [k for k, new in proposals.items() if max(new, self.components[k].tau) <= SHRUNK]
+            active = [k for k, new in proposals.items() if min(new, self.components[k].tau) <= SHRUNK]
             if active:
                 u = np.log([self.components[k].tau for k in active])
                 g = np.log([proposals[k] for k in active])
