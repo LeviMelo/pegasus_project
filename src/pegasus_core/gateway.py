@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import duckdb
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from . import config, store
 
@@ -74,7 +75,8 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset)
     key = {"what": "event_counts", "dataset": dataset, "event": event, "year": year, "classifier": column,
-           "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1}
+           "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1,
+           **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -91,7 +93,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     sex = _sex_sql(strata, dataset, raw)
     code = f'upper(trim("{column}"))' if column else "'*'"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT
-            TRY_CAST(left(CAST("{strata['residence']}" AS VARCHAR), 6) AS INTEGER) AS u,
+            {_residence_sql(strata['residence'])} AS u,
             {sex} AS sex,
             CAST(least(floor(TRY_CAST("{strata['age']}" AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age,
             {code} AS code, CAST(events AS INTEGER) AS y
@@ -107,6 +109,21 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.count_events({dataset}, {event})", "by": by})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
+
+
+def _residence_sql(column: str) -> str:
+    """The residence municipality (6 digits) of a record. The Federal District has one municipality,
+    Brasília (530010): SIH-RD writes DF residents' administrative-region codes (530020 … 530180) in
+    MUNIC_RES up to 2017, 141,325 admissions in 2017 against 11,297 under 530010 itself, and TabNet
+    counts all 152,622 under 530010 (measured 2026-10-05). Any 53xxxx is therefore Brasília."""
+    x = f'CAST("{column}" AS VARCHAR)'
+    return f"CASE WHEN left({x}, 2) = '53' THEN 530010 ELSE TRY_CAST(left({x}, 6) AS INTEGER) END"
+
+
+def _df_key(dataset: str, year: int) -> dict:
+    """Cache-key part for the DF residence rule: only SIH years before 2018 differ (later years
+    hold no administrative-region codes), so only those caches are rebuilt."""
+    return {"df_residence": 1} if dataset.startswith("SIH") and year < 2018 else {}
 
 
 def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Table:
@@ -144,15 +161,18 @@ def _when(dataset: str) -> str:
 
 
 def _date_sql(column: str) -> str:
-    """An event date from raw text in the two forms SINAN writes (2026-10-04): ISO 'YYYY-MM-DD'
-    (families whose dates pegasus_data types) and eight digits YYYYMMDD (families where it leaves
-    them raw). The eight-digit reading is accepted only when it gives a valid date in 1990–2035;
-    read as DDMMYYYY such strings give years like 1702, so the two cannot be confused. Anything
-    else is NULL, and its event unallocated as 'date'."""
+    """An event date from raw text in the forms the systems write: ISO 'YYYY-MM-DD' (dates
+    pegasus_data types), eight digits YYYYMMDD (SINAN families left raw) and eight digits DDMMYYYY
+    (SINASC DTNASC, SIM DTOBITO). Each eight-digit reading is accepted only when it gives a valid
+    date in 1990–2035, which no string satisfies under both readings (one of them puts the year
+    outside the window or the month above 12). Anything else is NULL, and its event unallocated as
+    'date'. Interim: date typing belongs in pegasus_data."""
     x = f'trim(CAST("{column}" AS VARCHAR))'
     return (f"CASE WHEN regexp_full_match({x}, '[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') THEN TRY_CAST({x} AS DATE) "
             f"WHEN regexp_full_match({x}, '[0-9]{{8}}') AND TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) "
-            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) END")
+            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) "
+            f"WHEN regexp_full_match({x}, '[0-9]{{8}}') AND TRY_CAST(TRY_STRPTIME({x}, '%d%m%Y') AS DATE) "
+            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%d%m%Y') AS DATE) END")
 
 
 def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
@@ -171,7 +191,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         spec_class = primary[0] if primary else None
     when = _when(dataset)
     key = {"what": "monthly_counts", "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
-           "when": when, "data": config.data_version(), "dates": 2}
+           "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -205,7 +225,7 @@ def _sex_sql(strata: dict, dataset: str, table: pa.Table) -> str:
     labelled neither (ignored, blank, undecoded) is unallocated."""
     if strata["sex"] is None:
         return str(strata["implied_sex"])
-    codes = sorted({str(c) for c in table.column(strata["sex"]).to_pylist() if c is not None})
+    codes = sorted({str(c) for c in pc.unique(table.column(strata["sex"])).to_pylist() if c is not None})
     mapping = _sex_codes(dataset, strata["sex"], tuple(codes))
     col = f'CAST("{strata["sex"]}" AS VARCHAR)'
     male = ", ".join(f"'{c}'" for c, v in mapping.items() if v == 1) or "NULL"
@@ -233,7 +253,7 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
 
 
 def _cells_sql(strata: dict, dataset: str, table: pa.Table) -> str:
-    return (f'TRY_CAST(left(CAST("{strata["residence"]}" AS VARCHAR), 6) AS INTEGER) AS u, '
+    return (f'{_residence_sql(strata["residence"])} AS u, '
             f'{_sex_sql(strata, dataset, table)} AS sex, '
             f'CAST(least(floor(TRY_CAST(CAST("{strata["age"]}" AS VARCHAR) AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age')
 
