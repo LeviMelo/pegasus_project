@@ -22,6 +22,7 @@ label's own words.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -118,7 +119,7 @@ def decompose(N0: np.ndarray, r0: np.ndarray, N1: np.ndarray, r1: np.ndarray) ->
 
 # ---------------------------------------------------------------------- triage
 
-SUBSTITUTION, SYSTEM, NOISE, SIGNAL = "substitution", "system", "noise", "signal"
+SUBSTITUTION, SYSTEM, NOISE, SIGNAL, FACILITY = "substitution", "system", "noise", "signal", "facility"
 THETA = 1.2               # the lenses' minimum rate ratio (§8.4)
 DRIFT = 3.0               # a code whose national level moves by more than this over the period is being introduced or retired
 SURGE = 5.0               # a place's peak year against its median: the expectation may have learned a surge
@@ -130,7 +131,27 @@ ABSORB = 0.75            # the share of the lead's change a sibling (or the ill-
 SIGNIFICANT = 3.0         # z of a sibling's (or the ill-defined chapter's) opposite move, Poisson
 MIN_EXCESS = 10.0         # events above (or below) the expectation under which a lead is noise
 MIN_SPREAD = 0.3          # group disparity: sd of the groups' log SIR under which the lead sits near the minimum effect (0.2)
+FAC_K = 3                 # a lead is one institution's when at most this many facilities carry its change ...
+FAC_SHARE = 0.7           # ... this share of it
+FAC_SOLE = 0.85           # the facilities hold this share of the place's block events in the base years: they are the place
+FAC_P = 1e-3              # one-sided binomial p of that share against the facilities' own share of the place's events
+FAC_VOLUME = 1.6          # the facilities' volume (without the lead's events) moving by more than this: opened, closed, entered or left the data
+FAC_CATCH = 30            # events of the lead's codes among the facilities' other residents, under which they say nothing
+FAC_STEP = 3.0            # z of the lead-code share's step among those other residents
 RESIDUAL_WORDS = ("não especificad", "sem outra especifica", "inespecífic", "mal definid", "outras ", "outros ")
+
+
+@dataclass
+class FacilityTally:
+    """One lead's events by recording institution, on the evidence grid's years. Rows are the facilities that
+    recorded any event of the block for residents of the lead's places (name '' = the record names none)."""
+
+    names: np.ndarray        # [F] facility codes
+    lead: np.ndarray         # [F, T] events of the lead's field, residents of the lead's places
+    block: np.ndarray        # [F, T] events of the lead's block (chapter), the same residents
+    total: np.ndarray        # [F, T] events of any cause, the same residents
+    outside: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]   # rows -> ([k, T] lead, [k, T] block) of the
+    #                                                                  same facilities' residents of every other place
 
 
 @dataclass
@@ -146,6 +167,7 @@ class Evidence:
     chapter: str = ""
     residual: bool = False          # the field's label is a residual category ("outros", "não especificad")
     group_spread: tuple[float, str] | None = None   # sd of the groups' log SIR and the groups furthest from the mean
+    facility: FacilityTally | None = None           # the lead's events by the institution that recorded them
 
 
 @dataclass
@@ -194,13 +216,19 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
            observed: float | None = None, expected: float | None = None) -> Triage:
     """Classify one lead. ``rows`` index its places in the evidence arrays, ``span`` its years (first, last),
     ``direction`` is +1 for an excess or a rise, -1 for a deficit or a fall (0: a pattern). Order of reading:
-    denominator, substitution, certification, recording, residual coding, noise; what is left is a signal."""
+    denominator, substitution, certification, recording, residual coding, noise, one institution; what is left is a
+    signal. The facility read is filled for every lead that has a tally, whatever its class (``info["facility"]``)."""
     win, base = _window(ev.years, span, estimand)
     windowed = bool(span) and estimand != "trend_divergence"
     n_w, n_b = _contrast(ev.y, rows, win, base)
     d_node, _ = _moves(ev.y, rows, win, base)
     info: dict = {"node_window": round(n_w, 2), "node_base": round(n_b, 2)}
     nat = ev.y.sum(0)
+
+    fac = None
+    if ev.facility is not None and direction != 0 and estimand != "group_disparity":
+        fac = facility_read(ev.facility, win, base, direction)
+        info["facility"] = {**fac["evidence"], "one_institution": fac["facility"]}
 
     # 1. denominator: person-years missing, a year without a single death where the person-years would give dozens
     #    (a municipality not yet created or not reporting), or the crude death rate breaking beyond the nation's
@@ -283,7 +311,81 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
             return Triage(NOISE, f"small count: {abs(observed - expected):.0f} events from the expectation", info)
     elif estimand == "trend_divergence" and ev.y[rows].sum() < 100:
         return Triage(NOISE, f"small count: {ev.y[rows].sum():.0f} events in the place over the period", info)
+    # 7. one institution: the change is carried by one (or a few) recording facilities whose own behaviour steps
+    if fac is not None and fac["facility"]:
+        return Triage(FACILITY, fac["reason"], info)
     return Triage(SIGNAL, "no recording or denominator explanation found in the data", info)
+
+
+def facility_read(t: FacilityTally, win: np.ndarray, base: np.ndarray, direction: int) -> dict:
+    """Is the lead's change one institution's? (ARCHITECTURE §7.7.) The change in the lead's events, facility by
+    facility (window against base years, in the lead's direction); the smallest set of at most ``FAC_K`` facilities
+    carrying ``FAC_SHARE`` of it, against those facilities' share of the block's events in the base years (a
+    binomial tail, unless they are the whole place); then the mechanism, from the facilities' own behaviour:
+
+      catchment  the same facilities' residents of *other* places show the same step in the lead-code share of
+                 the block (a hospital codes alike for everyone it serves; a real change among these residents
+                 does not reach the others), or
+      volume     the facilities' volume without the lead's events stepped (opened, closed, entered or left the data).
+
+    ``facility`` is true when the change is concentrated and a mechanism is found; ``evidence`` is always filled."""
+    real = t.names != ""
+    mean = lambda a, m: a[:, m].mean(1) if m.any() else np.zeros(a.shape[0])           # noqa: E731
+    d = direction * (mean(t.lead, win) - mean(t.lead, base))
+    gain = float(np.maximum(d, 0.0).sum())                  # per year, over every row including "names none"
+    pos = np.where(real, np.maximum(d, 0.0), 0.0)
+    excess = gain * int(win.sum())
+    ev: dict = {"facilities": int(real.sum()), "excess": round(excess, 1)}
+    out = {"facility": False, "reason": "", "evidence": ev}
+    if excess < MIN_EXCESS or not real.any():
+        return out
+    order = np.argsort(-pos)
+    block_b = mean(t.block, base)
+    ref_all = float(block_b.sum())
+
+    def ref(top: np.ndarray) -> float:
+        return float(block_b[top].sum() / ref_all) if ref_all > 0 else 0.0
+
+    ev["named_share"] = round(float(pos.sum() / gain), 3)
+    k = next((k for k in range(1, FAC_K + 1) if pos[order[:k]].sum() / gain >= FAC_SHARE), None)
+    top = order[:k or 1]
+    ev.update(top=[str(t.names[i]) for i in top], k=len(top), share=round(float(pos[top].sum() / gain), 3),
+              ref_share=round(ref(top), 3))
+    if k is None:
+        return out                                          # spread over more than FAC_K institutions
+    n = int(round(excess))
+    ev["sole_provider"] = ev["ref_share"] >= FAC_SOLE
+    if not ev["sole_provider"]:
+        ev["p_concentration"] = float(stats.binom.sf(int(round(ev["share"] * n)) - 1, n, min(max(ev["ref_share"], 1e-9), 1 - 1e-9)))
+        if ev["p_concentration"] >= FAC_P:
+            return out                                      # as much as the facilities' size would carry anyway
+    # the facilities' own behaviour: volume without the lead's events, and the lead-code share of the block
+    rest = (t.total - t.lead)[top]
+    vol_w, vol_b = rest[:, win].sum(0).mean(), rest[:, base].sum(0).mean()
+    ev["volume"] = [round(float(vol_b), 1), round(float(vol_w), 1)]
+    ratio = (vol_w + 1) / (vol_b + 1)
+    stepped = ratio >= FAC_VOLUME or ratio <= 1 / FAC_VOLUME
+    a_w, b_w, a_b, b_b = (x[top][:, m].sum() for x, m in ((t.lead, win), (t.block, win), (t.lead, base), (t.block, base)))
+    log_in = float(np.log((a_w + 0.5) / (b_w + 1) * (b_b + 1) / (a_b + 0.5)))
+    ev["mix_inside"] = [round(float(a_b / max(b_b, 1)), 4), round(float(a_w / max(b_w, 1)), 4)]
+    ev["inside_log_ratio"] = round(log_in, 2)
+    out_lead, out_block = t.outside(top)
+    o_w, ob_w, o_b, ob_b = (x[:, m].sum() for x, m in ((out_lead, win), (out_block, win), (out_lead, base), (out_block, base)))
+    ev["outside_events"] = [int(o_b), int(o_w)]
+    catch = None
+    if o_w + o_b >= FAC_CATCH and ob_w > 0 and ob_b > 0:
+        log_out = float(np.log((o_w + 0.5) / (ob_w + 1) * (ob_b + 1) / (o_b + 0.5)))
+        z = log_out / float(np.sqrt(1 / (o_w + 0.5) + 1 / (o_b + 0.5)))
+        ev["mix_outside"] = [round(float(o_b / max(ob_b, 1)), 4), round(float(o_w / max(ob_w, 1)), 4)]
+        ev["outside_log_ratio"], ev["outside_z"] = round(log_out, 2), round(z, 1)
+        catch = bool(direction * z >= FAC_STEP and direction * log_out >= 0.5 * direction * log_in)
+    if catch:
+        out.update(facility=True, reason="one institution: the same facilities show the same step among residents of other places")
+    elif stepped:
+        out.update(facility=True, reason="one institution: its volume stepped (opened, closed, or entered or left the data)")
+    elif catch is False:
+        ev["place_specific"] = True                         # the others it serves do not move: the change belongs to the residents
+    return out
 
 
 def residual_label(label: str) -> bool:

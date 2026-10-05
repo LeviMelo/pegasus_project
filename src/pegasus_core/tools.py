@@ -30,6 +30,7 @@ from . import (
     config,
     control,
     corroborate,
+    facility,
     fields,
     gateway,
     graphs,
@@ -293,9 +294,11 @@ class Session:
     # ---- triage and replication (§7.7, §8.3) ---------------------------------------------
 
     def triage(self, register: list[leads.Lead] | None = None, replicate: bool = True, write: bool = True,
-               log=print) -> list[leads.Lead]:
+               log=print, facility: bool = True) -> list[leads.Lead]:
         """Classify every open lead of the session's dataset by the data's own evidence (substitution, system
-        artefact, noise, signal; `explain.triage`) and run the replication of §8.3 on the same arrays. The
+        artefact, noise, one institution's behaviour, signal; `explain.triage`) and run the replication of §8.3
+        on the same arrays. ``facility`` reads each lead's events by recording institution (`facility`; SIH-RD
+        names every admission's facility, SIM.DO only the deaths certified in one). The
         verdict goes to ``lead.robustness["triage"]``, the tier to ``lead.replication``; leads read as
         artefacts are marked `explained`. With ``write`` the new states are appended to the register."""
         mine = [x for x in (register if register is not None else self.register.current())
@@ -304,8 +307,12 @@ class Session:
         for x in mine:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
         edges = self.edges() if replicate else None
+        fac = self._facilities() if facility else None
         for i, (node, group) in enumerate(sorted(by_node.items())):
             ev = self._evidence(node)
+            if fac is not None:
+                block_codes = self._data(self.expectations.registry.chapter(node)).leaves
+                lead_codes = [block_codes[j] for j in self._leaves(node)[1]]
             index = {int(p): j for j, p in enumerate(self._grid_places)}
             s = self.surprise(node, "B1") if replicate else None
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
@@ -315,6 +322,8 @@ class Session:
                 st = x.provenance.get("stats", {})
                 if x.estimand == "group_disparity":
                     ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
+                if fac is not None and rows.size:
+                    ev.facility = fac.tally(self.expectations.registry.chapter(node), block_codes, lead_codes, rows)
                 verdict = explain.triage(x.estimand, rows, span, direction, ev, st.get("observed"), st.get("expected"))
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
                                                            **verdict.evidence}}
@@ -327,6 +336,16 @@ class Session:
         if write:
             self.register.add(mine)
         return mine
+
+    def _facilities(self) -> facility.Facilities | None:
+        """The facility cube of the session's years on the evidence grid (None: the dataset names no facility)."""
+        if "_fac" not in self.__dict__:
+            self._prepare_grid()
+            try:
+                self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
+            except LookupError:
+                self._fac = None
+        return self._fac
 
     def _prepare_grid(self) -> None:
         """Every fitted block's observed counts (all causes, the ill-defined chapter) on one grid."""
