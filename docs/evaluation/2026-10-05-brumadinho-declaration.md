@@ -18,3 +18,9 @@
 3. the negative control shows no excess.
 
 **Honesty notes.** A pass is an association in time and place. Admissions measure care-seeking and recording as much as exposure. The disaster also caused injury and displacement, which may change admissions for many reasons.
+
+## Secondary places (fixed 2026-10-05, before any SIH data were read)
+
+**Source.** Governo de Minas Gerais, Agência Minas, 2021-10-18, "Governo de Minas e instituições de justiça abrem Consulta Popular…": "Os 26 municípios considerados atingidos são: Abaeté, Betim, Biquinhas, Brumadinho, Caetanópolis, Curvelo, Esmeraldas, Felixlândia, Florestal, Fortuna de Minas, Igarapé, Juatuba, Maravilhas, Mário Campos, Mateus Leme, Morada Novas de Minas, Paineiras, Papagaios, Pará de Minas, Paraopeba, Pequi, Pompéu, São Gonçalo do Abaeté, São Joaquim de Bicas, São José da Varginha e Três Marias." These are the municipalities of the Termo de Medidas de Reparação of 2021-02-04 (Anexos I.3 and I.4; the Agência Minas piece of 2022-12-29 repeats the count of 26). Original URL `https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf`: on 2026-10-05 the host answers 503/302 to `/comunicado` (a temporary electoral-period notice, not a withdrawal of the document), so the text was read from the Wayback Machine copy of the same PDF (`https://web.archive.org/web/2024/https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf`).
+
+**Secondary places, by residence, 25 municipalities** (the 26 minus Brumadinho), codes in `data/brumadinho_locus.json` (built by `data/brumadinho_locus.py`; the source writes "Morada Novas de Minas", read as Morada Nova de Minas): the list is the official set of affected municipalities of the Paraopeba basin including the Três Marias reservoir area, wider than the river's immediate downstream stretch. Whole municipalities; each is analysed separately from the primary place (O/E per municipality and pooled, reported beside, never in place of, the primary verdict).
