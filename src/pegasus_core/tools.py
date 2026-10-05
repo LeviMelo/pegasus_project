@@ -470,8 +470,8 @@ class Session:
         """This session over one side of the events (`replication`): A explores and selects, with its own register
         and ledger (its tests are not the all-data denominator); B and R are read to test and to confirm."""
         out = Session(self.dataset, self.event, self.years, self.graph,
-                      ledger=control.Ledger(config.home() / "ledger_A") if side == "A" else self.ledger,
-                      register=leads.Register(config.home() / "leads_A") if side == "A" else self.register)
+                      ledger=control.Ledger(home / "ledger_A") if side == "A" else self.ledger,
+                      register=leads.Register(home / "leads_A") if side == "A" else self.register)
         out.expectations = replication.SideExpectations(out.expectations, side)
         return out
 
@@ -485,9 +485,12 @@ class Session:
         selected = a.register.current()
         edges = self.edges()
         by_node: dict[str, list[leads.Lead]] = {}
+    split_home = None      # (a Path) where side A keeps its register and ledger (default: the home)
+
         for x in selected:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
         tested: list[tuple[leads.Lead, dict[str, Any]]] = []
+        home = self.split_home or config.home()
         for i, (node, group) in enumerate(sorted(by_node.items())):
             surprises: dict[str, tuple[surprise.Surprise, surprise.Surprise]] = {}
             cache: dict[str, Any] = {}

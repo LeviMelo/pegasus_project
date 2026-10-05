@@ -54,6 +54,7 @@
 | front | ARCHITECTURE | state |
 |---|---|---|
 | dengue monthly: **done** (evaluation 2026-10-05). Seasonality calibrated (B2s KS 0.011); epidemics by BP: recall 0.78 (2015–16) and 0.92 (2019–23), precision 0.57 against a trough baseline; φ = 0.235 | §6.1, §10.1 | done |
+| replication (ADR-0007): code and null checks done, including the B-side test of region/state national-trend leads (conditional on A); the survey on side A, the re-tiering of the 7,496 leads and the 15 signals are running or queued (handoff `data/handoffs/replication.md`) | §8.3 | agent |
 | SINAN positives: leptospirosis RS 2024, Chagas, schistosomiasis, arbovirus → microcephaly E_w; then an outbreak-robust BP | §10.1, ADR-0004 | agent |
 | general SIDRA interface: the compendium's ~100 tables, catalog detection, a normalised fact store; it replaces census.py | §3.1 | agent (pegasus_data) |
 | census coverage 2000/2010/2022: which tables are adjusted; what is the 2022 truth | §3.1 | agent (research) |

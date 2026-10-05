@@ -208,10 +208,60 @@ def test_locus(s: surprise.Surprise, estimand: str, locus: dict[str, Any], direc
     return {"tested": True, "p": p, "effect": float((Y + 0.5) / (M + 0.5)), "observed": Y, "expected": M}
 
 
+def test_trend_unit(s: surprise.Surprise, locus: dict[str, Any], direction: int,
+                    given: surprise.Surprise | None = None, ratio: float | None = None) -> dict[str, Any]:
+    """The B-side test of a trend lead at an aggregate scale (region, state): the unit's trend against the national
+    course, `lenses.unit_trends`' estimator (one NB series of the unit's places, vague prior, dispersion from a
+    cubic course) on this side's events over the same place set, one-sided against the lens's own minimum
+    divergence delta (Student t on T - 4 df). Conditional on side A as the cells are (`conditional_p`): the
+    boundary course mu0_t = offset_t * exp(direction * delta * x_t) of every cell is turned into the cell's
+    expectation given A's count (negative binomial of size phi + y_A, mean ratio * (phi + y_A) mu0 / (phi + mu0)),
+    the unit's yearly expectation is their sum (moment-matched dispersion) and the side's own slope is taken
+    around it: what it asks is whether this side's course diverges beyond what A's counts and the model's own
+    heterogeneity predict at the boundary. Without ``given`` the test is marginal (the cells' own boundary)."""
+    if direction == 0:
+        return {"tested": False, "reason": "no direction"}
+    rows = np.nonzero(np.isin(s.places, locus.get("places", [])))[0]
+    if rows.size == 0:
+        return {"tested": False, "reason": "locus outside the grid"}
+    x = (s.years - s.years.mean()) / max(float(s.years.std()), 1e-9)
+    delta = lenses._trend_delta(s, locus["scale"])
+    ref = given if given is not None else s
+    mu0 = lenses._offset(ref)[rows] * np.exp(direction * delta * x)[None, :]
+    phi = ref.phi[rows]
+    fin = np.isfinite(phi) & (phi > 0)
+    k = np.where(fin, phi, 1.0)
+    if given is None:
+        m, n = mu0, np.where(fin, k, np.inf)
+    else:
+        n = np.where(fin, k + given.y[rows], np.inf)
+        m = ratio * np.where(fin, (k + given.y[rows]) * mu0 / (k + mu0), mu0)
+    o = m.sum(0)
+    inv = np.where(fin, m ** 2 / np.where(fin, n, 1.0), 0.0).sum(0)
+    phi_u = np.divide(o ** 2, inv, out=np.full(o.shape, np.inf), where=inv > 0)
+    y = s.y[rows].sum(0)
+    vague = lambda j: np.full(j, 1e-6)  # noqa: E731
+    _, b, sd, _ = surprise.refit_place(y[None], o[None], phi_u[None], np.stack([np.ones_like(x), x], 1), tau=vague(2))
+    fit, *_ = surprise.refit_place(y[None], o[None], phi_u[None], np.stack([x ** j for j in range(4)], 1), tau=vague(4))
+    var = fit + np.where(np.isfinite(phi_u), fit ** 2 / np.where(np.isfinite(phi_u), phi_u, 1.0), 0.0)
+    kappa = max(float(np.divide((y - fit[0]) ** 2, var[0], out=np.zeros_like(y), where=var[0] > 0).sum()
+                      / max(len(x) - 4, 1)), 1.0)
+    se = float(sd[0, 1]) * np.sqrt(kappa)
+    if not se > 0:
+        return {"tested": False, "reason": "no information"}
+    z = direction * float(b[0, 1]) / se
+    return {"tested": True, "p": float(stats.t.sf(z, max(len(x) - 4, 1))), "effect": float(direction * b[0, 1] / delta),
+            "beta": float(b[0, 1]), "se": se, "dispersion": kappa, "observed": float(y.sum())}
+
+
 def test_lead(s: surprise.Surprise, x: leads.Lead, edges: np.ndarray | None = None, cache: dict | None = None,
               given: surprise.Surprise | None = None, ratio: float | None = None) -> dict[str, Any]:
-    if x.estimand == "trend_divergence" and (leads.trend_reference(x) != "neighbours" or x.locus.get("scale")):
-        return {"tested": False, "reason": "the trend test reads a municipality's contrast with its neighbours"}
+    if x.estimand == "trend_divergence" and x.locus.get("scale"):
+        if leads.trend_reference(x) != "national":
+            return {"tested": False, "reason": "the neighbours contrast at an aggregate scale is not tested"}
+        return test_trend_unit(s, x.locus, span_direction(x)[1], given, ratio)
+    if x.estimand == "trend_divergence" and leads.trend_reference(x) != "neighbours":
+        return {"tested": False, "reason": "the municipality's national-course trend is gated off"}
     return test_locus(s, x.estimand, x.locus, span_direction(x)[1], edges, cache, given, ratio)
 
 
@@ -263,4 +313,4 @@ def control_inflation(mu: np.ndarray, size: np.ndarray, alpha_a: float = 0.001, 
 
 
 __all__ = ["SideExpectations", "SideModel", "conditional_p", "control_inflation", "deal", "load_base", "match", "prepare",
-           "test_lead", "test_locus"]
+           "test_lead", "test_locus", "test_trend_unit"]

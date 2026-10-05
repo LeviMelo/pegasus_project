@@ -200,7 +200,7 @@ class Fields:
             for a, b, d, v in zip(*(r.column(c).to_pylist() for c in ("u", "year", "dead", "y")), strict=True):
                 i = self._index.get(int(a))
                 if i is not None:
-                    (dead if d else alive)[i, ti[int(b)]] += v
+                    (dead if d else alive)[i, ti[int(b)]] += float(v)
             self._cache[key] = (alive, dead)
         return self._cache[key]
 
