@@ -13,3 +13,4 @@ The index of measurements: harness runs, budgets, comparisons. One file per entr
 |---|---|---|
 | 2026-10-04 | [Chapter IX, the first fit read end to end](docs/evaluation/2026-10-04-chapter-ix-first-fit.md): φ by ML (5.98, not 0.013), calibration B0/B1/B2, lenses, pairs | SIM.DO 2010–2023, knn6, pegasus_data 0.1.0a1 |
 | 2026-10-04 | [SINASC through the model; the optimiser; the change-point null; São Borja examined](docs/evaluation/2026-10-04-sinasc-lenses-optimiser.md) | SIM and SINASC 2010–2023, contiguity, pegasus_data 70b56fc |
+| 2026-10-04 | [E_b known positives against census context](docs/evaluation/2026-10-04-eb-census-positives.md): 12/12 signs, 2/12 admitted at δ 0.1 (Dutilleul n_eff 24–211); the E_b gate not passed | SIM, SINASC, Census 2022, 5,570 municipalities, 00936a9 |
