@@ -31,6 +31,19 @@
 
 **pegasus_data is developed from this session too** (since 2026-10-04): branch `pegasus-core-fixes` (ICD-10 COVID categories, border lengths, `logmoments`, pegasus_data's ADR on GBD).
 
+**Fronts (2026-10-04).** Development runs as parallel fronts. Each front is owned end to end by one agent: code, live validation, evaluation entry. This file is where the fronts are coordinated.
+
+| front | ARCHITECTURE | state |
+|---|---|---|
+| dengue monthly; B2s/BP surveillance; the seasonality positive | §6.1, §10.1 | agent |
+| SIH blocks (fit, survey); the winter respiratory B2s positive | §10.1, §12 phase 1 | agent |
+| population account v1: Census 2000, migration trained on 2000→2010, scored on 2010→2022 | §3.1, §12 phase 2 | agent (pegasus_data modelled tier) |
+| SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
+| pegasus_data hygiene: label pack, SINAN dates, fields | §3.1 | agent |
+| race bridge, first measurement (linked infant pairs) | §12 phase 3 | agent |
+| E_b positives: infant mortality and diarrhoea against census context | §7.5, §10.1 | agent |
+| not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools | | next wave |
+
 **Next:**
 1. **Held-out deviance** (fit 2010–2021, score 2022–2023). It serves two first measurements: contiguity against kNN, and tree pooling.
 2. **The first survey across the fitted chapters**, and E_b|Z with the ill-defined share.

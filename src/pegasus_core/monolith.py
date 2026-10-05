@@ -66,10 +66,12 @@ class BlockData:
     key: dict = field(default_factory=dict)
     n: np.ndarray | None = None       # marks: events per cell (y is then the mean of log m)
     l2: np.ndarray | None = None      # marks: Σ (log m)² per cell
+    grain: str = "year"               # "year" | "month": the time axis t indexes years or months
+    month_of_year: np.ndarray | None = None   # monthly grain: t -> 0..11
 
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
-             source: str = "events", **source_args) -> BlockData:
+             source: str = "events", grain: str = "year", **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
@@ -116,6 +118,13 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     values = ("n", "l1", "l2") if source == "mark" else ("y",)
     weight = "n" if source == "mark" else "y"
     readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments}
+    if grain == "month":
+        if source != "events":
+            raise NotImplementedError("the monthly grain reads event counts")
+        readers["events"] = gateway.monthly_counts
+        # person-months: each month carries a twelfth of the year's person-years
+        N = np.repeat(N, 12, axis=1) / 12.0
+    T = N.shape[1]
 
     parts, unallocated = [], {}
     for year in years:
@@ -129,11 +138,20 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         for r in ec.unallocated.to_pylist():
             if block == "*" or _chapter(str(r["code"] or "")[:3], parent_of) == block:
                 unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
+        if grain == "month":
+            # the event's own (year, month), which may fall outside the publication year
+            ym = (tab.column("year").to_numpy().astype(np.int64) - int(years[0])) * 12 \
+                + tab.column("month").to_numpy().astype(np.int64) - 1
+            inside = (ym >= 0) & (ym < T)
+            unallocated["date outside the period"] = unallocated.get("date outside the period", 0) + int(
+                tab.column(weight).to_numpy()[in_block & ~inside].sum())
+            in_block = in_block & inside
         sub = tab.filter(pa.array(in_block))
+        time_index = (ym[in_block] if grain == "month" else np.full(sub.num_rows, tidx[int(year)], dtype=np.int64))
         parts.append((np.array([eidx[c if block == "*" else c[:3]] for c in sub.column("code").to_pylist()],
                                dtype=np.int64),
                       np.array([uidx[int(x)] for x in sub.column("u").to_numpy()], dtype=np.int64),
-                      np.full(sub.num_rows, tidx[int(year)], dtype=np.int64),
+                      time_index.astype(np.int64),
                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * N_BANDS
                        + age_band(sub.column("age").to_numpy())).astype(np.int64),
                       *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
@@ -142,21 +160,25 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         raise LookupError(f"{dataset} {event}: block {block} has no events in {years[0]}–{years[-1]} "
                           f"(unallocated: {unallocated})")
     # several subcategories share a category, several ages a band: sum them into one cell
-    flat = ((e * len(places) + u) * len(years) + t) * (2 * N_BANDS) + g
+    flat = ((e * len(places) + u) * T + t) * (2 * N_BANDS) + g
     uniq, inv = np.unique(flat, return_inverse=True)
     sums = {v: np.bincount(inv, weights=x) for v, x in zip(values, vals, strict=True)}
     g = uniq % (2 * N_BANDS)
     rest = uniq // (2 * N_BANDS)
-    t, rest = rest % len(years), rest // len(years)
+    t, rest = rest % T, rest // T
     u, e = rest % len(places), rest // len(places)
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
            "data": config.data_version(), **({} if profile == "group" else {"profile": profile}),
-           **({} if source == "events" else {"source": source, **source_args})}
+           **({} if source == "events" else {"source": source, **source_args}),
+           **({} if grain == "year" else {"grain": grain})}
     y = sums["l1"] / sums["n"] if source == "mark" else sums["y"]
     data = BlockData(dataset, event, block, years, places, categories, groups,
                      np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key)
     if source == "mark":
         data.n, data.l2 = sums["n"], sums["l2"]
+    if grain == "month":
+        data.grain = "month"
+        data.month_of_year = np.tile(np.arange(12), len(years))
     return data
 
 
@@ -216,6 +238,10 @@ class Monolith:
             "v_grp": Component("v_grp", structures.iid(nU), nGrp, free=(nGrp - 1) / nGrp),
             "v_cat": Component("v_cat", structures.iid(nU), nE, free=(nE - nGrp) / nE),
         }
+        if data.grain == "month":
+            season = structures.random_walk(12, order=2, cyclic=True)
+            self.components["c_all"] = Component("c_all", season, 1)
+            self.components["c_grp"] = Component("c_grp", season, nGrp, free=(nGrp - 1) / nGrp)
         self.params = {"b0": torch.zeros(1, dtype=self.dtype, device=self.device, requires_grad=True)}
         for c in self.components.values():
             self.params[c.name] = torch.zeros((c.batch, c.shape.Q.shape[0]), dtype=self.dtype,
@@ -235,6 +261,8 @@ class Monolith:
         self.history: list[dict] = []
         self.trace_log: list[tuple] = []
         self.p_e = self.grp[self.e]
+        self.moy = torch.as_tensor(data.month_of_year if data.grain == "month" else np.zeros(nT, dtype=np.int64),
+                                   dtype=torch.int64, device=self.device)
         self.scale = float(data.y.sum())
         self._sufficient_statistics()
 
@@ -262,6 +290,10 @@ class Monolith:
             "s_grp": acc((nGrp, nU), pe, d.u), "v_grp": acc((nGrp, nU), pe, d.u),
             "v_cat": acc((nE, nU), d.e, d.u),
         }
+        if d.grain == "month":
+            moy = d.month_of_year[d.t]
+            self.Y["c_all"] = acc((1, 12), zero, moy)
+            self.Y["c_grp"] = acc((nGrp, 12), pe, moy)
         self.y_offset = float(np.sum(y * np.log(d.N[d.u, d.t, d.g])))   # Σ y log N, constant
 
     # ---- effects (centred) -------------------------------------------------
@@ -271,7 +303,7 @@ class Monolith:
         for name in self.components:
             v = _centre(self.params[name], self._labels[name])
             # group deviations sum to zero across groups; a leaf's place effect within its group
-            if name in ("h_grp", "s_grp", "v_grp"):
+            if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
                 v = v - v.mean(dim=0, keepdim=True)
             elif name == "f_grp":
                 v = (v.reshape(-1, 2, N_BANDS) - v.reshape(-1, 2, N_BANDS).mean(dim=0, keepdim=True)).reshape(v.shape)
@@ -286,10 +318,17 @@ class Monolith:
     def _place_time(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         """[groups, U, T] of exp(h + g) · M: the factor every leaf of a group shares."""
         M = torch.einsum("utg,kg->kut", self.N, torch.exp(x["f_all"] + x["f_grp"]))
-        lin = (x["h_all"][0][None, None, :] + x["h_grp"][:, None, :])
+        lin = self._time(x)[:, None, :]
         if spatial:
             lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
         return torch.exp(lin) * M
+
+    def _time(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """[groups, T]: history (h), plus season (c) at monthly grain, by group."""
+        lin = x["h_all"][0][None, :] + x["h_grp"]
+        if "c_all" in x:
+            lin = lin + x["c_all"][0][self.moy][None, :] + x["c_grp"][:, self.moy]
+        return lin
 
     def _leaf_place(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         """[E, U] exp(b0 + θ_grp + θ_cat + v_cat): the leaf's level and its own place deviation."""
@@ -303,7 +342,7 @@ class Monolith:
     def eta_nnz(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         p = self.p_e
         eta = (x["b0"][0] + x["th_grp"][0][p] + x["th_cat"][0][self.e] + x["f_all"][0][self.g] + x["f_grp"][p, self.g]
-               + x["h_all"][0][self.tt] + x["h_grp"][p, self.tt] + self.logN_nnz)
+               + self._time(x)[p, self.tt] + self.logN_nnz)
         if spatial:
             eta = (eta + x["s_all"][0][self.u] + x["v_all"][0][self.u] + x["s_grp"][p, self.u] + x["v_grp"][p, self.u]
                    + x["v_cat"][self.e, self.u])
@@ -507,7 +546,7 @@ class Monolith:
             x = self.effects()
             mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
             lp = self._leaf_place(x)                                              # [E, U]
-            lin = (x["h_all"][0][None, None, :] + x["h_grp"][:, None, :]
+            lin = (self._time(x)[:, None, :]
                    + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None])
             base = torch.exp(lin)                                                 # [K, U, T]
             prof = torch.exp(x["f_all"] + x["f_grp"])                             # [K, G]
@@ -552,7 +591,7 @@ class Monolith:
             w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
             mu = (w[:, :, None] * pt).sum(0)
             M2 = torch.einsum("utg,kg->kut", self.N ** 2, torch.exp(2 * (x["f_all"] + x["f_grp"])))
-            lin = x["h_all"][0][None, None, :] + x["h_grp"][:, None, :]
+            lin = self._time(x)[:, None, :]
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)
@@ -567,7 +606,7 @@ class Monolith:
             sel = torch.as_tensor(leaves, device=self.device)
             K, U = len(self.data.groups), self.N.shape[0]
             w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
-            lin = x["h_all"][0][None, None, :] + x["h_grp"][:, None, :]
+            lin = self._time(x)[:, None, :]
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]

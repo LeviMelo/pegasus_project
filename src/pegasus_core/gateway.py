@@ -121,10 +121,82 @@ def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Tabl
         warnings.simplefilter("ignore")
         table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes",
                          root=config.data_root(), max_download=8 * 1024**3)
-    if status.get("column"):
+    if status.get("column") and status.get("values"):
         table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
                                       value_set=pa.array([str(v) for v in status["values"]])))
+    if status.get("column") and status.get("excluded"):
+        col = pc.cast(table[status["column"]], pa.string())
+        table = table.filter(pc.invert(pc.fill_null(pc.is_in(col, value_set=pa.array(
+            [str(v) for v in status["excluded"]])), False)))
     return table
+
+
+def _when(dataset: str) -> str:
+    """The event's date column from the roles: onset where declared (the epidemic curve's time),
+    else the event's own date, start, or birth date."""
+    import pegasus_data as pg
+
+    rows = {r["property"]: r["column"] for r in pg.roles(dataset) if r.get("model") == "when" and r.get("kind") == "date"}
+    for prop in ("onset", "date", "start", "birth_date"):
+        if prop in rows:
+            return rows[prop]
+    raise LookupError(f"{dataset}: no event date among its roles")
+
+
+def _date_sql(column: str) -> str:
+    """An event date from raw text in the two forms SINAN writes (2026-10-04): ISO 'YYYY-MM-DD'
+    (families whose dates pegasus_data types) and eight digits YYYYMMDD (families where it leaves
+    them raw). The eight-digit reading is accepted only when it gives a valid date in 1990–2035;
+    read as DDMMYYYY such strings give years like 1702, so the two cannot be confused. Anything
+    else is NULL, and its event unallocated as 'date'."""
+    x = f'trim(CAST("{column}" AS VARCHAR))'
+    return (f"CASE WHEN regexp_full_match({x}, '[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') THEN TRY_CAST({x} AS DATE) "
+            f"WHEN regexp_full_match({x}, '[0-9]{{8}}') AND TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) "
+            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) END")
+
+
+def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
+                   places: pa.Array | None = None) -> EventCounts:
+    """Events of one publication year by (u, year, month of the event's date, sex, age, code).
+    The month and year come from the event's date (`_when`), so a file's events may fall in the
+    year before it (onset in December, notified in January); a missing or unparsable date is
+    unallocated with that reason."""
+    strata = _strata(dataset)
+    spec_class = classifier
+    if spec_class is None:
+        import pegasus_data as pg
+
+        spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+        primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
+        spec_class = primary[0] if primary else None
+    when = _when(dataset)
+    key = {"what": "monthly_counts", "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
+           "when": when, "data": config.data_version(), "dates": 2}
+    cached = store.get_table("gateway", key)
+    cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
+    if cached is not None and cached_un is not None:
+        return EventCounts(cached, cached_un, key)
+    cols = [strata["residence"], strata["age"], when] + ([strata["sex"]] if strata["sex"] else []) +         ([spec_class] if spec_class else [])
+    raw = _records(dataset, event, year, cols)
+    con = duckdb.connect()
+    con.register("r", raw)
+    valid = places if places is not None else population([year]).column("u").unique()
+    con.register("v", pa.table({"u": valid}))
+    code = f'upper(trim(CAST("{spec_class}" AS VARCHAR)))' if spec_class else "'*'"
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
+            {_date_sql(when)} AS d FROM r""")
+    reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
+                     WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
+                     WHEN code IS NULL OR code = '' THEN 'code' WHEN d IS NULL THEN 'date' END"""
+    counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST(year(d) AS SMALLINT) AS year,
+            CAST(month(d) AS TINYINT) AS month, CAST(sex AS TINYINT) AS sex, age, code,
+            CAST(count(*) AS INTEGER) AS y
+        FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, year, month""").fetch_arrow_table()
+    unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
+            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}) by month of {when}"})
+    store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
+    return EventCounts(counts, unallocated, key)
 
 
 def _sex_sql(strata: dict, dataset: str, table: pa.Table) -> str:
@@ -335,3 +407,27 @@ def field_overlap(dataset: str, event: str, a: dict[str, list[str]], b: dict[str
         result = pg.field_overlap(dataset, event, a, b, period=period, root=config.data_root())
     store.put_table("gateway", key, pa.table({"x": [0]}), {"overlap": result})
     return result
+
+
+def context_field(name: str, years: list[int] | None = None) -> pa.Table:
+    """A context field (IBGE/SIDRA, INMET, S2iD, ANS, INEP: pegasus_data's `curation/fields.yml`)
+    as (u, year, value, status, unit), u 6-digit. Built in PegaSUS's own data root
+    (`pegasus-data fields --root`); a field not built raises, never an empty table."""
+    import pegasus_data as pg
+
+    key = {"what": "context_field", "name": name, "years": sorted(years) if years else None,
+           "data": config.data_version()}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    settings = pg.load_settings(root=config.data_root())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = pg.load_field(name, years=years, settings=settings)
+    con = duckdb.connect()
+    con.register("r", raw)
+    table = con.execute("""SELECT CAST(left(CAST(municipality AS VARCHAR), 6) AS INTEGER) AS u,
+            CAST(year AS SMALLINT) AS year, CAST(value AS DOUBLE) AS value,
+            CAST(status AS VARCHAR) AS status, CAST(unit AS VARCHAR) AS unit FROM r ORDER BY u, year""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name})"})
+    return table

@@ -124,9 +124,9 @@ class Expectations:
         f = node if isinstance(node, fields.Field) else self.field(node)
         if tier not in TIERS:
             raise KeyError(tier)
-        if tier == "B2s":
-            raise NotImplementedError("B2s needs a sub-annual grain; the monolith is annual (ARCHITECTURE §12)")
         m = self.model(f.block)
+        if tier == "B2s" and m.data.grain != "month":
+            raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
         key = {**m.key(), "field": f.id, "tier": tier, "surprise": 1}
         if cache:
             hit = store.get_table("surprise", key)
@@ -150,7 +150,10 @@ class Expectations:
         y = m.observed(leaves)
         extras: dict = {}
         if tier == "B2":
-            mu, extras = refit_place_trend(y, mu, mu2, m.phi, m.data.years)
+            axis = m.data.years if m.data.grain == "year" else np.arange(y.shape[1], dtype=float)
+            mu, extras = refit_place_trend(y, mu, mu2, m.phi, axis)
+        elif tier == "B2s":
+            mu, extras = refit_place_season(y, mu, mu2, m.phi, m.data.month_of_year)
         out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places))
         out.extras = extras
         if cache:
@@ -330,6 +333,19 @@ def refit_place_trend(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float
     s = (years - years.mean()) / max(years.std(), 1e-9)
     mu_new, b, sd, tau = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.stack([np.ones_like(s), s], axis=1))
     return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau}
+
+
+def refit_place_season(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float, month_of_year: np.ndarray
+                       ) -> tuple[np.ndarray, dict]:
+    """B2s: B2 at monthly grain plus each place's own annual harmonic (sin, cos of the month), so a
+    place's seasonal amplitude and phase depart from its group's season by a shrunk amount."""
+    T = len(month_of_year)
+    s = (np.arange(T) - (T - 1) / 2) / max(np.arange(T).std(), 1e-9)
+    angle = 2 * np.pi * month_of_year / 12
+    X = np.stack([np.ones(T), s, np.sin(angle), np.cos(angle)], axis=1)
+    mu_new, b, sd, tau = refit_place(y, mu, aggregate_phi(mu, mu2, phi), X)
+    return mu_new, {"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
+                    "season_sin": b[:, 2], "season_cos": b[:, 3], "tau": tau}
 
 
 def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float) -> tuple[np.ndarray, np.ndarray]:

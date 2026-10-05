@@ -719,7 +719,7 @@ Every random draw is seeded from (object, cell, purpose).
 | 4.2, 5.4 | the low-rank interaction ψωτ | not yet built | main effects and tiers first; patterns across blocks (CP-APR) read the interaction meanwhile |
 | 5.3 | Laplace uncertainty; the predictive inflated by Var(η) | MAP only; the predictive is NB(μ̂, φ) | the B2 per-place refit carries its own posterior sd; full Laplace is OQ-2 |
 | 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged | the exact trace per effect is affordable, the cross-effect terms are not |
-| 6.1 | B2s | raises: the monolith is annual | O1: annual first, then monthly |
+| 6.1 | B2s on every field | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual | monthly first for the dense families (dengue, SIH) |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
