@@ -49,8 +49,9 @@ def explain_away(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, x: np.ndarray, 
                  region: np.ndarray | None = None, iterations: int = 50) -> Explanation:
     """Arrays over cells (any shape, flattened together). ``lead`` marks the lead's cells,
     ``region`` the cells the coefficient is estimated on (default: everything given)."""
+    shape = np.shape(mu)
     y, mu, x = (np.asarray(a, dtype=float).ravel() for a in (y, mu, x))
-    phi = np.broadcast_to(np.asarray(phi, dtype=float), np.shape(mu)).ravel()
+    phi = np.broadcast_to(np.asarray(phi, dtype=float), shape).ravel()
     S = np.asarray(lead, dtype=bool).ravel()
     fit = np.ones_like(S) if region is None else np.asarray(region, dtype=bool).ravel()
     fit &= np.isfinite(x) & (mu > 0)
