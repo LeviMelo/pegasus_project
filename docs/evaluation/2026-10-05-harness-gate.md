@@ -75,7 +75,7 @@ Recovery of a planted locus by a finding on its place (and year), pooled over fi
 | lens / estimand | 1. positives | 2. false leads ≤ q | 3. power curve | gate |
 |---|---|---|---|---|
 | outbreak | dengue epidemics at **BP** (29/37 state-years 2015–16, 59/64 2019–23, precision 0.57; not at B2s); COVID-19 at BP | NB 2/350; MSR 0/250 IX; shift `_ns` 0/160 | published | **PASS** (positives at BP) |
-| change point | none declared in §10.1 | NB 0/300; MSR 1/250; shift `_ns` 28/160 (I26–I28) | published | **FAIL**: no positive |
+| change point | none declared in §10.1 (see the update below) | NB 0/300; MSR 1/250; shift `_ns` 28/160 (I26–I28) | published | **FAIL**: no positive |
 | space–time | microcephaly (Northeast 2015–16, RR 4.4–5.7), COVID-19 Amazonas, leptospirosis RS 2024 (18 municipalities, RR 63; Jaccard as written fails) | NB 0/350; MSR IX 0/250, PESO 0/50; **Q02 50/50 (negative contaminated by the Zika block)** | published; low (0 at θ ≤ 2) | **PASS**, flagged: the Q02 negative |
 | spatial cluster | Chagas (B57), schistosomiasis (B65): precision 1.0, Jaccard 0.07–0.16; kept at θ0 1.5 | NB 1/300; MSR 84/250 at θ0 1.2, 6/150 at 1.5 (worst family 5/30) | published | **FAIL**: negatives (family rule needs θ0 2.0, which loses Chagas) |
 | trend divergence | none declared | NB 0/300; MSR 0/250; shift `_ns` 18/160 | published; blind below ×3 | **FAIL**: no positive |
@@ -94,3 +94,16 @@ Recovery of a planted locus by a finding on its place (and year), pooled over fi
 - **Positives for change point, trend divergence, group disparity and marks** are absent from §10.1; each lens stays out of production until one is declared and recovered.
 - **A null for the B0 scan that carries the field's spatial spectrum** (the maximum statistic under MSR worlds) would replace the θ0 patch for the spatial cluster.
 - **The admission reference effect** needs a locus the scanner can reach (§8.4).
+
+## Update: positives declared for the ungated lenses (entry 2026-10-05-lens-positives)
+
+Rows 1 of the gate for the four lenses that had no positive; rows 2 and 3 are the measurements above. A per-place positive is recovered when the recall of the documented places, weighted by their documented excess, is ≥ 0.5 with the sign (the Jaccard is reported).
+
+| lens / estimand | 1. positives | 2. false leads ≤ q | 3. power | gate |
+|---|---|---|---|---|
+| change point | COVID-19 as a new cause, **BP** (train ≤ 2019): weighted recall 1.00, Jaccard 0.95 (5,562 findings, 5,285 documented places). **B2 in-sample: 1/5,285**; São Paulo's undetermined-cause deaths 2018 and Roraima's births 2018–19 not recovered at B2 | NB 0/300; MSR 1/250; shift `_ns` 28/160 (I26–I28) | published | **PASS at BP**, flagged: one positive, trivially large; B2 is blind to a step older than the last years |
+| trend divergence | municipalities installed in 2013, births: 4 of 5 (8.0–13.3 sd, all up), precision 4/13; not found on chapter IX deaths (too few) | NB 0/300; MSR 0/250; shift `_ns` 18/160 | published; blind below ×3 | **PASS**, flagged: a boundary artefact, seen before it was documented |
+| group disparity | female homicide in Roraima: 2 of 14 testable places, female share ×2.1 and ×4.3 of the national pattern; Rio Grande do Sul elderly suicide not found (×1.28, below sd 0.2) | NB 1/250; MSR 3/250 | published | **PASS**, flagged: a sex pattern only; sparse places untestable (`min_expected`) |
+| marks | none documented (birth-weight effects ≤ 0.1% against the 3% floor) | NB 0/50 each lens; MSR 0/50 each | published | **FAIL**: no positive |
+| E_w | cold → respiratory admissions ρ −0.02 to −0.07 (sign right, controls ≈ 0), below δ 0.1; arbovirus → microcephaly not recovered | not run | not run | **not gated** |
+

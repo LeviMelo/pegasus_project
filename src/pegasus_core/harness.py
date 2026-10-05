@@ -67,7 +67,45 @@ POSITIVES: tuple[Positive, ...] = (
              grain="month"),
     Positive("Winter respiratory admissions", "SIH.RD", "admission", "J00-J99", "outbreak", "B2s",
              "ibge_macroregion:3,4", (2010, 2024), grain="month"),
+    # lenses that had no declared positive (evaluation 2026-10-05-lens-positives); criterion "recovery" below
+    Positive("Violent deaths of undetermined cause, São Paulo 2018", "SIM.DO", "death", "Y10-Y34", "change_point", "B2",
+             "uf:35", (2010, 2019), criterion="excess-weighted recall ≥ 0.5, window start within 1 year, sign up",
+             note="Atlas da Violência 2020 ch.1: Brazil 12,310 (+25.6%); São Paulo 4,255 (+62.5%), information not "
+                  "reaching the health secretariat (Cerqueira, Brasil de Fato 2020-08-30). Fitted 2010–2019 so the "
+                  "shift is recent: a persistent step older than ~3 years is absorbed by B2's trend"),
+    Positive("Violent deaths of undetermined cause, Rio de Janeiro, Acre, Rondônia 2019", "SIM.DO", "death", "Y10-Y34",
+             "change_point", "B2", "uf:33,12,11", (2010, 2019),
+             criterion="excess-weighted recall ≥ 0.5, window start within 1 year, sign up",
+             note="Atlas da Violência 2021: 2018→2019 +232% (RJ), +185% (AC), +178% (RO), Brazil 12,310→16,648"),
+    Positive("Municipalities installed in 2013", "SINASC-DN", "birth", "*", "trend_divergence", "B2",
+             "mun:150475,421265,422000,500627,431454", (2010, 2023),
+             criterion="recall ≥ 0.5 of the documented municipalities, sign up",
+             note="IBGE: Mojuí dos Campos PA, Pescaria Brava SC, Balneário Rincão SC, Pinto Bandeira RS, Paraíso das "
+                  "Águas MS installed in 2013 (5,570 municipalities); births are recorded under the new code only "
+                  "from 2013, the parent's before. A boundary (recording) divergence, an observation-lens positive"),
+    Positive("Female homicide, Roraima", "SIM.DO", "death", "X85-Y09", "group_disparity", "B0", "uf:14", (2010, 2023),
+             criterion="a finding in the locus; locus female share above the national pattern's",
+             note="Atlas da Violência 2019 and 2021: Roraima has the highest female homicide rate of the UFs. The "
+                  "national pattern (young men) is the lens's reference, so the young-male excess itself cannot be "
+                  "a positive"),
+    Positive("Cold months and respiratory admissions", "SIH-RD+INMET", "hospitalisation", "X", "E_w", "B2s",
+             "municipalities with a station", (2010, 2023), grain="month",
+             criterion="ρ(cold anomaly → admissions) < −δ at lag 0–1, absent in the 5-year-shifted control",
+             note="Requia et al., Environ Res 2023;231:116231, low temperature and respiratory admissions in Brazil, "
+                  "RR 1.07 (1.01–1.14)"),
 )
+
+
+def recovery(found: set, documented: set, weight: dict | None = None) -> dict[str, float]:
+    """Locus recovery (§10.1): Jaccard, precision and recall over a set of units, and the recall weighted by the
+    documented excess (``weight``: unit → events), the figure the criterion uses for sparse per-place lenses."""
+    hit = found & documented
+    w = weight or dict.fromkeys(documented, 1.0)
+    total = sum(w.get(u, 0.0) for u in documented)
+    return {"jaccard": len(hit) / len(found | documented) if found | documented else 0.0,
+            "precision": len(hit) / len(found) if found else 0.0,
+            "recall": len(hit) / len(documented) if documented else 0.0,
+            "weighted_recall": sum(w.get(u, 0.0) for u in hit) / total if total else 0.0}
 
 
 # ---------------------------------------------------------------------- planted signals
