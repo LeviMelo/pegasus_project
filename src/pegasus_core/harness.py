@@ -88,6 +88,24 @@ POSITIVES: tuple[Positive, ...] = (
              note="Atlas da Violência 2019 and 2021: Roraima has the highest female homicide rate of the UFs. The "
                   "national pattern (young men) is the lens's reference, so the young-male excess itself cannot be "
                   "a positive"),
+    # declared BEFORE the lens ran (commit order is the evidence; loci derived by scripts/declare_positives.py from the
+    # Atlas da Violência UF tables alone). Pass: weighted recall (weight: estimated deaths) >= 0.5 with the sign; Jaccard reported
+    Positive("Homicide trend divergence across UF borders", "SIM.DO", "death", "X85-Y09", "trend_divergence", "B2",
+             "declare_positives:trend_divergence (30 municipalities)", (2010, 2023),
+             criterion="excess-weighted recall >= 0.5 of the documented municipalities, sign of d_u",
+             note="Atlas da Violência 2019 Table 2.1 (2010-12) and 2025 Table 2.1 (2013-23), IPEA/FBSP: UF rates; "
+                  "a municipality's documented divergence is its UF's log-rate slope less its contiguity neighbours' UFs' mean; "
+                  "documented where |d| >= ln 1.5/13 per year"),
+    Positive("Women's share of homicide victims, by UF", "SIM.DO", "death", "X85-Y09", "group_disparity", "B0",
+             "declare_positives:group_women (UFs RO RR AP RN AL SE SP SC RS MS)", (2013, 2023),
+             criterion="excess-weighted recall >= 0.5; sign of (observed / expected female share - 1) as documented",
+             note="Atlas da Violência 2025 Tables 5.1 / 2.2: women's share of homicides 2013-2023 as a ratio to Brazil's "
+                  "(7.9%), documented where >= 1.25 or <= 0.8"),
+    Positive("Young men's share of homicide victims, by UF", "SIM.DO", "death", "X85-Y09", "group_disparity", "B0",
+             "declare_positives:group_young_men (UFs RO RR AP SP MS)", (2013, 2023),
+             criterion="excess-weighted recall >= 0.5; sign of (observed / expected male 15-29 share - 1) as documented",
+             note="Atlas da Violência 2025 Tables 4.3 / 2.2: men aged 15-29 share of homicides 2013-2023 as a ratio to "
+                  "Brazil's (49.2%), documented where >= 1.25 or <= 0.8"),
     Positive("Cold months and respiratory admissions", "SIH-RD+INMET", "hospitalisation", "X", "E_w", "B2s",
              "municipalities with a station", (2010, 2023), grain="month",
              criterion="ρ(cold anomaly → admissions) < −δ at lag 0–1, absent in the 5-year-shifted control",
