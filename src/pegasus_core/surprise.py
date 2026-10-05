@@ -85,7 +85,7 @@ class Expectations:
     def field(self, node: str) -> fields.Field:
         return self.registry.field(node)
 
-    def prospective(self, node: str | fields.Field, train_last: int) -> Surprise:
+    def prospective(self, node: str | fields.Field, train_last: int, history: str = "auto") -> Surprise:
         """Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
         extrapolated (`monolith.extrapolate`). Surveillance needs it: a fit over the whole period
         learns an epidemic as normal (COVID-19 in SIM: B34 deaths 2020 observed 213,152 against
@@ -98,7 +98,8 @@ class Expectations:
         if cls is monolith.MarkModel:
             raise NotImplementedError("the prospective tier is for counts")
         model = cls.load(self.dataset, self.event, f.block, train, self.graph, **self.source)
-        tm, x = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test, **self.source))
+        tm, x = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test, **self.source),
+                                    history)
         leaves = np.array([tm.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in tm.data.leaves])
         mu, mu2 = tm.expected(leaves, spatial=True, x=x)
         y = tm.observed(leaves)

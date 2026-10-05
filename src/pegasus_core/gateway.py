@@ -176,11 +176,13 @@ def _date_sql(column: str) -> str:
 
 
 def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                   places: pa.Array | None = None) -> EventCounts:
+                   places: pa.Array | None = None, code_list: bool = False) -> EventCounts:
     """Events of one publication year by (u, year, month of the event's date, sex, age, code).
     The month and year come from the event's date (`_when`), so a file's events may fall in the
     year before it (onset in December, notified in January); a missing or unparsable date is
-    unallocated with that reason."""
+    unallocated with that reason. ``code_list``: the classifier column holds several codes
+    concatenated (SINASC's CODANOMAL, "Q02Q690"); an event counts once under each distinct
+    category it carries (as `code_list_counts`), and events carrying none are not counted."""
     strata = _strata(dataset)
     spec_class = classifier
     if spec_class is None:
@@ -191,7 +193,8 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         spec_class = primary[0] if primary else None
     when = _when(dataset)
     key = {"what": "monthly_counts", "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
-           "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year)}
+           "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year),
+           **({"code_list": True} if code_list else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -203,8 +206,13 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{spec_class}" AS VARCHAR)))' if spec_class else "'*'"
+    where = ""
+    if code_list:
+        code = (f"""unnest(list_distinct(list_transform(regexp_extract_all(upper(CAST("{spec_class}" AS VARCHAR)),
+                '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3))))""")
+        where = f""" WHERE "{spec_class}" IS NOT NULL AND trim(CAST("{spec_class}" AS VARCHAR)) <> ''"""
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            {_date_sql(when)} AS d FROM r""")
+            {_date_sql(when)} AS d FROM r{where}""")
     reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN code IS NULL OR code = '' THEN 'code' WHEN d IS NULL THEN 'date' END"""
