@@ -203,3 +203,25 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 
 if __name__ == "__main__":
     app()
+
+
+@app.command("map")
+def dependency_map(years: str = typer.Option("2015-2019", help="first-last year of the health fields"),
+                   negatives: int = typer.Option(0, help="worlds of Moran-randomised surrogates for the false-edge rate"),
+                   health_only: bool = typer.Option(False, help="negatives keep the real context fields"),
+                   top: int = 20) -> None:
+    """Dependency map (§7.6): SIM and SIH chapters, SINASC indicators and context fields, every testable pair in
+    two layers (marginal E_b, conditional on the contexts), controlled over the whole map."""
+    import numpy as np
+
+    from . import tools
+
+    r = tools.dependency_map(_years(years), negatives, health_only)
+    console.print_json(json.dumps(r["summary"], default=float))
+    e = r["edges"].to_pylist()
+    e = [x for x in e if x["admitted"] or x.get("admitted_c")]
+    e.sort(key=lambda x: -abs(x["rho"]) if np.isfinite(x["rho"]) else 0)
+    t = Table("x", "y", "rho", "n_eff", "rho|Z", "status")
+    for x in e[:top]:
+        t.add_row(x["x"], x["y"], f"{x['rho']:+.3f}", f"{x['n_eff']:.0f}", f"{x['rho_c']:+.3f}", x["status"] or "-")
+    console.print(t)

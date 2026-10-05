@@ -453,10 +453,14 @@ This is the same Gram form, so n_eff comes for every pair at once.
 
 ### 7.6 Dependency maps (phase 3)
 
-For one estimand and support class:
-- a sparse + low-rank Gaussian graphical model on the weighted correlation matrix of calibrated surprises (Chandrasekaran, Parrilo & Willsky 2012);
-- penalties chosen by stability across the replication halves (StARS);
-- **edges reported only if they also pass §7.5's pair test.**
+A map is a graph over many fields at once, built from the §7.5 pair test (`scans/maps.py`, inputs in `scans/map_inputs.py`, `pegasus-core map`). Fields are place effects (shrunk Poisson intercepts over the indirectly standardised expectation) of SIM chapters, SIH chapters (admissions that did not end in death: the in-hospital deaths are SIM records, §8.5), SINASC indicators and context fields (census, SIDRA, CNES, ANS, INEP).
+- **Marginal layer:** E_b for every testable pair at δ_E.
+- **Conditional layer:** E_b|Z for every testable pair, Z the other declared context fields, n_eff − dim(Z). Present in both layers is direct; marginal only, explained by the context; conditional only, suppressed by it.
+- **Overlap:** a pair whose measured overlap exceeds 0.05, or is unknown, is not tested (§8.5). SINASC indicators share births, so their pairs are measured from records and mostly excluded.
+- **Error control over the whole map, per layer:** families (estimand, field group × field group); TreeBH family → pair with Simes at each node, Benjamini–Yekutieli over the layer as the stricter alternative.
+- **Negatives (`harness.map_negatives`):** the map rerun on Moran-randomised surrogates of every field, generated on another graph than the one that tests, optionally with the contexts kept real; every edge found is false. `harness.map_delta` calibrates δ on them.
+
+The sparse + low-rank graphical model with StARS penalties is not built (§13).
 
 ### 7.7 On demand
 
@@ -640,7 +644,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |
 | `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
-| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `explain` (§7.7), `cohort` (§7.8); maps (§7.6) in phase 3 | surprise, monolith, fields |
+| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps` and `map_inputs` (§7.6), `explain` (§7.7), `cohort` (§7.8) | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
 | `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |

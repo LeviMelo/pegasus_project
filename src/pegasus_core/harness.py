@@ -30,7 +30,7 @@ import pyarrow as pa
 from scipy import special, stats
 
 from . import config, store, surprise
-from .scans import pairs, subset
+from .scans import maps, pairs, subset
 
 Q = 0.05
 
@@ -384,6 +384,50 @@ def pair_power(mu: np.ndarray, signal_sd: float, template_outcome: np.ndarray, t
             seen.append(float(R[0, 1]))
         out[rho] = {"power": float(np.mean(hits)), "mean_observed_rho": float(np.mean(seen))}
     return out
+
+
+def map_negatives(inp: maps.MapInputs, test_basis: pairs.MoranBasis, gen_basis: pairs.MoranBasis, worlds: int = 20,
+                  health_only: bool = False, q: float = Q, seed: tuple = ("map-negatives",), **kw) -> dict[str, Any]:
+    """The false-edge rate of a dependency map (§7.6, §10.2): the whole map rerun on worlds in which every field is
+    replaced by its Moran-randomised surrogate (each field its own signs, its spectrum, sd and missingness kept), so
+    every edge found is false. ``health_only`` keeps the real contexts (their mutual dependence is then a true
+    structure the conditional layer must not mistake for the health fields'). The surrogates come from ``gen_basis``,
+    another graph than the one that tests. Returns the admitted edges per world and layer and, for δ calibration,
+    each world's (ρ̂, n_eff) by family."""
+    rng = np.random.default_rng(config.seed(*seed, "health" if health_only else "all"))
+    fields = [i for i, g in enumerate(inp.groups) if not (health_only and g == "context")]
+    rows, raw = [], []
+    for w in range(worlds):
+        B = inp.B.copy()
+        sub = B[:, fields]
+        miss = ~np.isfinite(sub)
+        B[:, fields] = np.where(miss, np.nan, gen_basis.randomise(np.where(miss, 0.0, sub), rng))
+        world = maps.MapInputs(inp.places, inp.names, inp.groups, inp.labels, B, inp.SD, inp.overlap, inp.meta)
+        m = maps.dependency_map(world, test_basis, None, f"negatives-{w}", q, **kw)
+        rows.append({"world": w, "tested": m.tested["marginal"], **{f"{lay}:{k}": v for lay, d in m.controlled.items()
+                                                                  for k, v in d.items()}})
+        e = m.edges
+        raw.append({k: e.column(k).to_numpy() for k in ("rho", "n_eff", "rho_c", "n_eff_c") if k in e.column_names}
+                   | {"family": np.array(e.column("family").to_pylist())})
+    return {"worlds": rows, "raw": raw, "health_only": health_only, "q": q}
+
+
+def map_delta(negatives: dict[str, Any], layer: str = "marginal", grid: tuple[float, ...] = DELTA_GRID) -> dict[str, Any]:
+    """The map's δ_E on its own negatives: the smallest δ at which no family's share of tests with p ≤ q exceeds q
+    (pooled over worlds; the layer's n_eff already net of Z)."""
+    r, n = ("rho", "n_eff") if layer == "marginal" else ("rho_c", "n_eff_c")
+    q = negatives["q"]
+    fams = sorted({f for w in negatives["raw"] for f in set(w["family"])})
+    rates = {}
+    for d in grid:
+        rates[d] = {}
+        for f in fams:
+            ps = np.concatenate([pairs.minimum_effect_p(w[r][w["family"] == f], w[n][w["family"] == f], d)
+                                 for w in negatives["raw"]])
+            ps = ps[np.isfinite(ps)]
+            rates[d][f] = float(np.mean(ps <= q)) if len(ps) else float("nan")
+    ok = [d for d in grid if max(v for v in rates[d].values() if np.isfinite(v)) <= q]
+    return {"delta": min(ok) if ok else None, "rate_by_delta_and_family": rates}
 
 
 def shifted(z: np.ndarray, k: int) -> np.ndarray:

@@ -854,3 +854,31 @@ def gate_status(lens: str | None = None) -> dict[str, Any]:
                      "declared_positives": [p.name for p in harness.POSITIVES if p.lens == name],
                      "positive_recovery": "not stored: docs/evaluation/2026-10-05-harness-gate.md"}
     return out
+
+
+def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only: bool = False,
+                   ledger: control.Ledger | None = None) -> dict[str, Any]:
+    """A dependency map (§7.6) of SIM chapters, SIH chapters (admissions that did not end in death), SINASC indicators
+    and the context fields over ``years``: the inputs from the store (built through the gateway on first use), the
+    marginal and conditional layers controlled over the whole map, and with ``worlds`` > 0 the false-edge rate on that
+    many worlds of Moran-randomised surrogates (``health_only``: contexts kept real). Returns the summary and the edges."""
+    from . import harness, store
+    from .scans import map_inputs, maps, pairs
+
+    years = years or map_inputs.YEARS
+    key = {"what": "map_inputs", "years": years, "v": 1}
+    inp = maps.MapInputs.load(key)
+    if inp is None:
+        inp = map_inputs.build(years)
+        inp.save(key)
+    basis, gen = pairs.MoranBasis(inp.places), pairs.MoranBasis(inp.places, "knn8")
+    dm = maps.dependency_map(inp, basis, ledger or control.Ledger(), tag="-".join(map(str, (years[0], years[-1]))))
+    out: dict[str, Any] = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
+                           "admitted": dm.controlled, "seconds": dm.seconds, "left_out": inp.meta.get("left_out", {})}
+    if worlds:
+        neg = harness.map_negatives(inp, basis, gen, worlds, health_only)
+        out["negatives"] = {"worlds": neg["worlds"], "delta_marginal": harness.map_delta(neg, "marginal"),
+                            "delta_conditional": harness.map_delta(neg, "conditional")}
+        harness.record("depmap", {"years": years, "worlds": worlds, "health_only": health_only}, out["negatives"])
+    store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
+    return {"summary": out, "edges": dm.edges, "inputs": inp}

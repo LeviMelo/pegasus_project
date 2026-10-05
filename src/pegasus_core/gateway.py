@@ -143,7 +143,7 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
 
 
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                 places: pa.Array | None = None) -> EventCounts:
+                 places: pa.Array | None = None, survivors_only: bool = False) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
 
     The columns come from pegasus_data's roles (the subject's residence, sex and age as
@@ -151,7 +151,8 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     without one (births, a notifiable disease) has the single code ``*``. A subject without a
     sex stratum takes the sex its entity implies (a mother: 2), or fails. ``places`` is the
     set of valid municipalities (the population's); a residence outside it is unallocated,
-    never guessed.
+    never guessed. ``survivors_only`` (SIH): the admissions that did not end in death (MORTE = 0); the in-hospital
+    deaths are SIM records (ARCHITECTURE §8.5), so these share no event with a SIM field.
     """
     import pegasus_data as pg
 
@@ -161,7 +162,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     strata = _strata(dataset)
     key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": column,
            "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1,
-           **_df_key(dataset, year)}
+           **_df_key(dataset, year), **({"survivors": 1} if survivors_only else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -182,7 +183,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
             {sex} AS sex,
             CAST(least(floor(TRY_CAST("{strata['age']}" AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age,
             {code} AS code, CAST(events AS INTEGER) AS y
-        FROM r""")
+        FROM r {alive}""")
     reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN code IS NULL OR code = '' THEN 'code' END"""
@@ -211,6 +212,12 @@ def _df_key(dataset: str, year: int) -> dict:
     return {"df_residence": 1} if dataset.startswith("SIH") and year < 2018 else {}
 
 
+    alive = ""
+    if survivors_only:
+        if not dataset.startswith("SIH"):
+            raise ValueError("survivors_only is the SIH admissions that did not end in death")
+        by = by + ["MORTE"]
+        alive = "WHERE coalesce(TRY_CAST(CAST(\"MORTE\" AS VARCHAR) AS INTEGER), 0) = 0"
 def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Table:
     """Raw-coded records of one event type for one year (the event type's status applied)."""
     import pegasus_data as pg
@@ -544,3 +551,62 @@ def context_field(name: str, years: list[int] | None = None) -> pa.Table:
             CAST(status AS VARCHAR) AS status, CAST(unit AS VARCHAR) AS unit FROM r ORDER BY u, year""").fetch_arrow_table()
     store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name})"})
     return table
+
+
+def context_sum(name: str, year: int, where: dict[str, str] | None = None) -> pa.Table:
+    """A context field whose rows are strata (ANS beneficiaries by sex × age × coverage, INEP enrolments by margin):
+    (u, value) summed over the rows with ``where`` (column = value) for one year, u 6-digit."""
+    import pegasus_data as pg
+
+    key = {"what": "context_sum", "name": name, "year": year, "where": where or {}, "data": config.data_version()}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = pg.load_field(name, years=[year], settings=pg.load_settings(root=config.data_root()))
+    con = duckdb.connect()
+    con.register("r", raw)
+    cond = " AND ".join(f"CAST(\"{c}\" AS VARCHAR) = '{v}'" for c, v in (where or {}).items()) or "true"
+    table = con.execute(f"""SELECT CAST(left(CAST(municipality AS VARCHAR), 6) AS INTEGER) AS u, sum(CAST(value AS DOUBLE)) AS value
+                            FROM r WHERE {cond} AND year = {year} GROUP BY 1 ORDER BY 1""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name}) summed"})
+    return table
+
+
+def indicator_counts(dataset: str, event: str, year: int, indicators: dict[str, str], places: pa.Array
+                     ) -> tuple[pa.Table, dict[tuple[str, str], int]]:
+    """Events of a year that satisfy each named SQL predicate over the raw columns (SINASC: weight < 2500 g, a
+    caesarean), per residence: a table (u, name, y) with the name '*' for all events, and the records satisfying
+    both predicates of every pair (the measured overlap, §8.5). Predicates are written over the columns as
+    TRY_CAST numbers (``PESO``, ``SEMAGESTAC``) or text; an event with a null predicate is not counted for it."""
+    import re
+
+    strata = _strata(dataset)
+    cols = sorted({c for sql in indicators.values() for c in re.findall(r"[A-Z][A-Z0-9_]{2,}", sql)} | {strata["residence"]})
+    key = {"what": "indicator_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+           "indicators": indicators, "data": config.data_version()}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        meta = store.manifest("gateway", key) or {}
+        return cached, {tuple(k.split("|")): v for k, v in meta.get("overlap", {}).items()}
+    raw = _records(dataset, event, year, cols)
+    con = duckdb.connect()
+    con.register("r", raw)
+    con.register("v", pa.table({"u": places}))
+    num = {c: f'TRY_CAST(CAST("{c}" AS VARCHAR) AS DOUBLE)' for c in cols}
+    exprs = {n: re.sub(r"[A-Z][A-Z0-9_]{2,}", lambda m: num[m.group(0)], sql) for n, sql in indicators.items()}
+    sel = ", ".join(f"coalesce(({e}), false) AS \"i_{n}\"" for n, e in exprs.items())
+    con.execute(f"CREATE TEMP TABLE e AS SELECT {_residence_sql(strata['residence'])} AS u, {sel} FROM r")
+    parts = ["SELECT u, '*' AS name, count(*) AS y FROM e GROUP BY u"] + [
+        f"SELECT u, '{n}' AS name, count(*) AS y FROM e WHERE \"i_{n}\" GROUP BY u" for n in indicators]
+    table = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, name, CAST(sum(y) AS INTEGER) AS y
+                            FROM ({' UNION ALL '.join(parts)}) WHERE u IN (SELECT u FROM v) GROUP BY ALL
+                            ORDER BY name, u""").fetch_arrow_table()
+    names = list(indicators)
+    overlap = {}
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            overlap[(a, b)] = int(con.execute(f'SELECT count(*) FROM e WHERE "i_{a}" AND "i_{b}"').fetchone()[0])
+    store.put_table("gateway", key, table, {"overlap": {"|".join(k): v for k, v in overlap.items()}})
+    return table, overlap
