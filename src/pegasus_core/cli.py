@@ -201,9 +201,6 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
     mcp_server.main((["--allow-confirm"] if allow_confirm else []) + (["--ledger", ledger] if ledger else []))
 
 
-if __name__ == "__main__":
-    app()
-
 
 @app.command("map")
 def dependency_map(years: str = typer.Option("2015-2019", help="first-last year of the health fields"),
@@ -225,3 +222,7 @@ def dependency_map(years: str = typer.Option("2015-2019", help="first-last year 
     for x in e[:top]:
         t.add_row(x["x"], x["y"], f"{x['rho']:+.3f}", f"{x['n_eff']:.0f}", f"{x['rho_c']:+.3f}", x["status"] or "-")
     console.print(t)
+
+
+if __name__ == "__main__":
+    app()

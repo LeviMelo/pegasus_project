@@ -28,6 +28,8 @@ import pyarrow as pa
 from .. import control, store
 from . import pairs
 
+DELTA_Z = 0.1   # the conditional layer's minimum effect, calibrated on the map's own negatives (evaluation 2026-10-05, dependency map): 0.05 admits false edges
+
 MAX_OVERLAP = 0.05
 GROUPS = ("SIM", "SIH", "SINASC", "context")
 
@@ -164,7 +166,7 @@ def dependency_map(inp: MapInputs, basis: pairs.MoranBasis, ledger: control.Ledg
     before they run (a map's negatives pass None: they are the harness's, not claims)."""
     t0 = time.time()
     delta = pairs.MIN_EFFECT["E_b"] if delta is None else delta
-    delta_z = pairs.MIN_EFFECT["E_b|Z"] if delta_z is None else delta_z
+    delta_z = DELTA_Z if delta_z is None else delta_z
     F = len(inp.names)
     ii, jj = _index_pairs(testable(inp))
     excluded = F * (F - 1) // 2 - len(ii)
