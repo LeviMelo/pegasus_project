@@ -77,7 +77,7 @@ Leads are statistical objects, not conclusions.
 | **event type** | (dataset, grain, kind, classifiers with role, status, consolidation) |
 | **structure** | a shape over a variable's values: tree (parent table), list (membership table), ordinal, cyclic, with validity windows and crosswalks |
 | **graph** | a proximity graph over places or institutions: edges (from, to, weight, kind, vintage) |
-| **population** | person-years N by place × year × age × sex (× race), with uncertainty; the SUS-dependent variant; completeness by system, place and year |
+| **population** | person-years N by place × year × age × sex (× race), with uncertainty; the SUS-dependent variant; completeness by system, place and year. Two sources behind `gateway.population(source=)`: `popsvs` (IBGE's projection as the MoH distributes it, modelled, single years of age, no uncertainty) and `account-2` (pegasus_data's `population-account-2`, municipality × sex × five-year band × year 2010–2023, 80 % intervals read as σ of log N; ADR-0007). The source fixes the age bands (18 for POPSVS, 17 for the account, whose 0–4 holds ages 0 and 1–4); the cache keys carry the source and the model version |
 | **aggregates** | sparse non-empty cells of counts per event type and lattice; mark accumulator states (n, Σm, Σm², Σlog m, Σ(log m)², histogram on declared bins) |
 | **records and linked persons** | for cohort scans and agents |
 
@@ -134,7 +134,7 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
 
 | symbol | meaning | source |
 |---|---|---|
-| **N^{(v)}_c** | person-years of population variant v: all residents (SIM, SINASC, SINAN) or SUS-dependent (SIH, SIA) | pegasus_data. Phase 1: POPSVS with the variant's correction where available. |
+| **N^{(v)}_c** | person-years of population variant v: all residents (SIM, SINASC, SINAN) or SUS-dependent (SIH, SIA) | pegasus_data, source `popsvs` or `account-2` (§3.1). With the account, log N_c ~ N(log N̂_c, s_c²) and Var(Σ_g μ_g) = Σ μ_g²(e^{s²}−1) + ρ[(Σ μ_g s_g)² − Σ μ_g² s_g²] enters the predictive's variance beside Var(η) (`Monolith.exposure_variance`, `surprise.py`) |
 | **κ_{s,u,t}** | completeness of system s (1 where unmodelled) | pegasus_data modelled tier |
 | **groups with race** | the expected *recorded* count by recorded race k is `μ^{rec}_{e,(u,t,a,s,k)} = Σ_j C_σ(k|j) · μ_{e,(u,t,a,s,j)}`, with C_σ the setting's confusion matrix | pegasus_data modelled tier |
 
@@ -297,7 +297,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 | **B1** | B0 + g (graph terms) | departures from the region |
 | **B2** | B1 + a place-level random intercept and slope per field: `α_{u} + β_{u}(t − t̄)`, shrunk to the region | departures from a place's own course |
 | **B2s** | B2 + season (sub-annual grains) | out-of-season events |
-| **BP** | prospective: the years after t₀ against the fit on years ≤ t₀, histories extrapolated (the RW2 forecast mean), every place and category effect as learned before t₀ | departures from the past: epidemics, new practices |
+| **BP** | prospective: the years after t₀ against the fit on years ≤ t₀, every place and category effect as learned before t₀; the history h carried forward and each place's own course (annual), or the fit's years as regimes (monthly); a mixture predictive | departures from the past: epidemics, new practices |
 
 - **Tiers are computed from one fit:** B0 and B1 by dropping terms, B2 by a cheap per-field refit of `(α_u, β_u)` with the rest as offset.
 - **B0 is re-levelled to the national total of each year.** Dropping centred log-scale place effects also drops E[exp(s + v)] > 1. Without the re-levelling, B0 fell 11% short on chapter IX.
@@ -308,7 +308,10 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - A category that exists only during the epidemic gets its place effects from the epidemic itself.
   - **Measured on COVID-19 in SIM** (B34.2): 213,152 deaths observed in 2020 against 212,821 expected at B1. The space–time lens found nothing at B1.
 - **BP's handling of calibration and new categories:**
-  - its calibration is recorded but never flagged, and its dispersion is the block's;
+  - its calibration is recorded but never flagged;
+  - **its predictive is a mixture of NBs** (`prospective.py`, ADR-0007), the cell's φ_agg combined with the *training fit's* φ_extra (estimated on the fit's own B1 cells, so no departure leaks into it);
+  - **annual grain:** h is the RW2's last slope damped by 0.5 per year, and each place carries its own B2 trend over the fit, damped by 0.5, with the coefficients' posterior variance;
+  - **monthly grain:** the regimes are the fit's own years (each year's twelve months of h, equal weights), the epidemic years of the history being normal ones;
   - a category without a past has no expectation in BP, so the excess is read at its group or chapter.
 
 ### 6.2 Calibration
@@ -329,7 +332,7 @@ u_c = F(y_c − 1) + V_c · p(y_c),   V_c ~ U(0,1) seeded by (field, cell)
 **A miscalibrated field** gets a field-level **place-year variance component**: Var(Y_ut) = μ + μ²/φ_agg + μ²/φ_extra, with φ_extra by maximum likelihood on the field's aggregate cells.
 - **It varies by group of places, in a hierarchy:** the field's value, then one per macro-region, then one per state (`surprise.DISPERSION_LEVELS`).
   - Each group's log(1/φ_extra) is estimated by maximum likelihood on its own cells, then shrunk toward its parent's by the between-group variance τ² that the groups show (random-effects moment estimate on the observed information, so a group with little information keeps its parent's value).
-  - The PIT, the weights and the surprises carry the place's own value; BP keeps the block's φ (its calibration is recorded, never flagged).
+  - The PIT, the weights and the surprises carry the place's own value; BP carries the value of the training fit (§6.1).
 - **Why it is needed:** cells within a place-year share variation that the expectation does not model, and summing them adds it coherently. The independent-cell φ_agg misses it.
 - **What was measured** on chapter IX B1 (2026-10-04): a U-shaped PIT, with both tails at about 0.13 against 0.10. The component flattened it, bringing KS from 0.035 to 0.010.
 
@@ -484,22 +487,31 @@ A **family** is (lens or estimand, tier, field family or pair of field families,
 - **Within a family:** Benjamini–Hochberg at q = 0.05. Benjamini–Yekutieli where p-values within a family are not positively dependent.
 - **Across families:** Benjamini–Bogomolov selective inference. Families are selected by their Simes p-value at level q; then within each selected family BH at `q · |selected| / |families|`.
 - **Down code trees:** TreeBH (Bogomolov et al. 2021) when a lens tests the nodes of a classifier tree.
-- **Agents.** Exploratory tests are logged but carry no claim. Claims pass through `confirm` (§9.3), whose stream is controlled by online FDR (LOND).
+- **Agents.** Exploratory tests are logged but carry no claim. Claims pass through `confirm` (§9.3) on the reserve (§8.3), whose stream is controlled by online FDR (LOND).
 
 ### 8.3 Splits and replication
 
+A lead is selected on data and must be confirmed on data that took no part in the selection. Splits of the **period** or of the **places** do not do that for the leads that matter most (a one-off event cannot recur in the other half of the period, and a cluster of places selected on all the data is homogeneous by construction), so the primary split is of the **events**.
+
 | split | definition |
 |---|---|
-| **temporal halves** | the period split at its midpoint year |
-| **spatial halves** | IBGE immediate geographic regions (510) randomly halved within each state, fixed seed. **Half B is the agents' confirmation reserve.** |
-| **systems** | the same estimand through another system |
+| **event sides** | every cell's events dealt, by a fixed seed, to **A** (50%), **B** (30%) and **R** (20%): multinomial thinning, stratified by cell. A negative binomial thinned keeps its size, so a side's expectation is the whole's times its fraction. |
+| temporal halves | the period split at its midpoint year (recurrence) |
+| spatial halves | IBGE immediate geographic regions (510) randomly halved within each state, fixed seed: a **homogeneity** check of a subset's places, reported and not tiered |
+| independent field | the same place and years in another field (§8.3.2) |
+
+**Honest sample splitting.** Side A is refitted alone (`split-fit`): the expectation, the dispersions, the scans, the selection and the error control (§8.2) of the survey on A use A's events only. Each lead selected on A is tested **once** at its fixed locus on side B, at the lens's own minimum effect, and the tests are controlled by Benjamini–Hochberg over everything A selected. B and R read A's fit (expected counts times the fractions' ratio) and their own events. **The test on B is conditional on A's count:** the sides share each cell's rate, and under a negative binomial the extra-Poisson part of that rate is in the null and is seen in both sides; a marginal test on B called 28–100% of null cells "replicated" wherever the expected count exceeds the size (n = 10, μ ≥ 20), against 0.04–0.06 for the conditional (`replication.conditional_p`; evaluation 2026-10-05-replication). What it asks is whether B exceeds what A's count and the model's own heterogeneity predict.
+
+**Corroboration (§8.3.2).** The place set and years of a lead, in a field that shares none of its records: SIM deaths against S2iD (disasters), SINAN (notifications) or SIH (admissions that did not end in death: the in-hospital deaths are the SIM records, §8.5, and their share is recorded). **The null is the corroborating field's own:** the same statistic (places with a registered disaster; the log ratio of the window's count to the places' median year) on random place sets of the same size, in the same states, in the same population quintile, over the same years; p = (1 + #{null ≥ observed}) / (1 + B), B = 4,999. BH within each source. A deficit is not corroborated by a field. The rules (which field for which codes) are data (`corroborate.RULES`).
 
 | tier | requirement |
 |---|---|
 | R0 | passes §8.2 on all data |
-| R1 | same sign and ≥ half the effect in the other temporal half (p < 0.05, one-sided) |
-| R2 | the same in the other spatial half |
-| R3 | the same through another system |
+| R1 | selected on A, standing on B (honest split): required for every tier below |
+| R2 | R1 and recurrence: the same sign, ≥ half the effect, p < 0.05 one-sided in the temporal half the window does not touch (a trend: in both halves) |
+| R3 | R1 and corroboration by an independent field. Recurrence and corroboration do not require each other: a one-off event reaches R3 without R2. |
+
+**The confirmation reserve is side R.** It holds a fifth of every cell's events, which no scan, refit or exploration has read. A claim (`confirm`, `confirm_many`) is one fixed locus tested on R, and its p-value enters one LOND stream (§8.2) whose state, tests and rejections so far, is read back from the ledger (`control.Reserve`, split `event:R`); the order of the claims is fixed before R is read. The survey spends B; only claims spend R; agents explore on A.
 
 ### 8.4 Admission and minimum effects (calibrated, not set)
 
@@ -582,7 +594,8 @@ Lead
 | `explain_away(lead, candidate)`, `decompose(field, periods, scope)` | §7.7 |
 | `fields(query)`, `field(id)` | the registry |
 | `cohort(...)`, `records(...)` | through pegasus_data |
-| `confirm(claim)` | one run on the confirmation reserve, ledgered, under LOND |
+| `confirm(claim)` | one run on the confirmation reserve (event side R, §8.3), ledgered, under LOND |
+| `split_confirm()`, `corroborate(leads)`, `retier(leads)` | the honest split of the survey's leads, the independent-field test, the tier (§8.3) |
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 
@@ -606,6 +619,13 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 | infant mortality ↔ income, sanitation | E_b | national |
 | diarrhoea admissions ↔ sewerage | E_b (census years) | national |
 | winter respiratory admissions | B2s outbreak | South, Southeast |
+| COVID-19 enters the record in 2020 (a new cause code; train ≤ 2019) | change point, **BP** (B2 absorbs a step older than the last years: in-sample, 1 of 5,285 places) | the 5,285 municipalities with ≥ 5 deaths, 2020–23 |
+| municipalities installed in 2013 (IBGE: Mojuí dos Campos, Pescaria Brava, Balneário Rincão, Paraíso das Águas, Pinto Bandeira) | trend divergence, B2 (births) | the five municipalities; births under the new code only from 2013 |
+| female homicide in Roraima (Atlas da Violência 2019, 2021: the highest rate of the UFs) | group disparity, B0 (X85–Y09) | Roraima's municipalities; female share above the national pattern's |
+
+**Criterion for per-place lenses.** Cell-sparse outcomes cannot meet a place-level Jaccard 0.5 (the documented excess sits in a few places, the lens resolves others). For change point, trend divergence and group disparity the criterion is the **recall of the documented places weighted by their documented excess ≥ 0.5, with the effect's sign**; the Jaccard and precision are reported (`harness.recovery`). The pass of a positive is judged on the tier the lens runs at; a documented effect below the lens's minimum relevant effect (§8.4) is not a positive for it.
+
+**Marks have no declared positive.** The documented birth-weight effects in Brazil (COVID-19: preterm births +4% in odds, Brazil national; maternal age, secular trends) are below the 3% minimum on the mean log mark or absorbed by B2; a mark positive is planted (§10.3) until a space–time shift of ≥ 4% is documented.
 
 ### 10.2 Known negatives
 
@@ -652,13 +672,16 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), fit and Laplace (§5.3), blocks and model choice (§5.4), marks (§4.4), prediction for any slice | structures, fields |
 | `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
-| `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace |
+| `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |
+| `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `explain` (§7.7), `cohort` (§7.8); maps (§7.6) in phase 3 | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
+| `replication` | the event sides' models and expectations, the conditional test on B and R, matching a lead to its side-A finding (§8.3) | monolith, surprise, scans, leads, control |
+| `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
-| `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway |
+| `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `cli` | the `pegasus-core` command | tools |
 
 **Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it.
@@ -733,7 +756,8 @@ Every random draw is seeded from (object, cell, purpose).
 | 5.2 | every strength is learned (P7), the dispersion by place group included | φ_extra is a hierarchy (field, macro-region, state); the block's φ is one value per block | the block's φ by macro-region gained 0.009 nats per event held out on dengue and −0.0007 to +0.002 on chapters IX, X and XVIII (ADR-0006) |
 | 5.3 | Laplace uncertainty; marginal sds by selected inversion and Hutchinson–Lanczos | built (`laplace.py`), measured, off by default: perturbation draws on the exact NB information, CG with a block-Jacobi preconditioner; the predictive matched by moments | the draws match the exact inverse at their Monte-Carlo floor; parameter uncertainty is at most 10 % of the overdispersion and does not repair dengue's or BP's miscalibration (evaluation 2026-10-05, Laplace); the check against MCMC/INLA remains OQ-2 |
 | 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged. The full-Hessian update exists (`Posterior.fellner_schall`, from the draws) and is not in the fit | on IX it proposes τ_s 5× lower (425 → 72–81) and τ_s,grp 5× lower; whether a refit there calibrates better is untested |
-| 6.1 | B2s on every field; BP extrapolates the RW2 history | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the monthly grain holds h flat at its last thirty-six months' mean (annual grain: linear; 2026-10-05: 12 months gave precision 0.57 on dengue 2019–23, 36 months 0.64 at the same recall; the outbreak-robust reweighting reached 0.71 but lost recall, 0.81) | monthly first for the dense families (dengue, SIH); the last two months' slope is noise at that grain (evaluation 2026-10-05, dengue) |
+| 6.1 | B2s on every field; BP is a mixture over the history's regimes, not the RW2 forecast | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the annual grain damps the last slope (0.5 per year) and adds each place's damped B2 trend; at the monthly grain h is not extrapolated but drawn from the fit's years (a flat level36 baseline reached obs/expected 2.2 on dengue, the climatology 1.2; the outbreak-robust and level36 point baselines of evaluation 2026-10-05, baseline history, remain as `history=`) | the last two months' slope is noise at that grain; an epidemic series has no level to extrapolate; places drift apart (evaluation 2026-10-05, BP level) |
+| 10.1 | marks and E_w each recover a documented positive | marks: none declared; E_w: the cold → respiratory admissions effect (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at monthly municipal grain, below δ 0.1; arbovirus → microcephaly not recovered at region grain | no citable mark shift ≥ 4%; the E_w documented effects are weak at this grain (evaluation 2026-10-05-lens-positives) |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |

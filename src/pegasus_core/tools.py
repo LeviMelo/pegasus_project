@@ -9,6 +9,9 @@ the lenses at their tiers, error control across families (Benjamini–Bogomolov,
 §8.2), and the admitted findings written to the register. `confirm` is the
 agents' only route to a claim: one test on the spatial reserve (half B), under
 online FDR (LOND) whose state is read back from the ledger.
+
+The events are dealt to sides (`replication`, ARCHITECTURE §8.3): `side("A")` explores and selects, `split_confirm`
+tests what A selected on side B, `confirm` spends the reserve (side R), `corroborate` asks an independent field.
 """
 
 from __future__ import annotations
@@ -20,7 +23,19 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
-from . import config, control, fields, gateway, graphs, leads, monolith, store, surprise
+from . import (
+    config,
+    control,
+    corroborate,
+    fields,
+    gateway,
+    graphs,
+    leads,
+    monolith,
+    replication,
+    store,
+    surprise,
+)
 from .scans import explain, lenses
 
 LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
@@ -48,13 +63,16 @@ class Session:
         m = self.expectations.model(block)
         reg = self.expectations.registry
         leaf_index = {c: i for i, c in enumerate(m.data.leaves)}
-        totals = np.bincount(m.data.e, weights=m.data.y, minlength=len(m.data.leaves))
+        # admission reads all the events even when the model is a side's (`replication.load_a`): the same fields
+        # are scanned on A as on all the data, and the choice does not depend on which events landed on A
+        e, u, y = getattr(m, "full_counts", (m.data.e, m.data.u, m.data.y))
+        totals = np.bincount(e, weights=y, minlength=len(m.data.leaves))
 
         def admissible(node: str) -> bool:
             idx = [leaf_index[c] for c in reg.leaves(node) if c in leaf_index]
             if not idx:
                 return False
-            units = int(np.unique(m.data.u[np.isin(m.data.e, idx)]).size)
+            units = int(np.unique(u[np.isin(e, idx)]).size)
             return fields.admission(float(totals[idx].sum()), units, len(m.data.places))[0]
 
         return reg.walk(block, admissible)
@@ -187,7 +205,7 @@ class Session:
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
             for x in group:
                 rows = np.array([index[int(p)] for p in x.locus.get("places", []) if int(p) in index], dtype=int)
-                span, direction = _span_direction(x)
+                span, direction = replication.span_direction(x)
                 st = x.provenance.get("stats", {})
                 if x.estimand == "group_disparity":
                     ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
@@ -197,7 +215,8 @@ class Session:
                 if verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
                     x.status = "explained"
                 if replicate:
-                    x.replications, x.replication = self._replicate(x, s, rows, span, direction, half, edges)
+                    x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
+                    x.replication = control.replication_tier(kinds_of(x))
             log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
         if write:
             self.register.add(mine)
@@ -291,15 +310,15 @@ class Session:
         return out
 
     def _replicate(self, x: leads.Lead, s: surprise.Surprise, rows: np.ndarray, span: list[int] | None,
-                   direction: int, half, edges: np.ndarray) -> tuple[dict[str, Any], str]:
-        """R1: the effect in the temporal half the window does not touch (a trend: in both halves); R2: in both
-        spatial halves of a subset's places. Same sign, at least half the effect, one-sided p < 0.05 (`control.replication_tier`).
-        The expectation is B1 from the fit on all years, so these are splits of the evidence, not refits.
-        Neighbour support (the contiguous places outside the lead, same window) is recorded, not tiered."""
+                   direction: int, half, edges: np.ndarray) -> dict[str, Any]:
+        """The recurrence of an effect (tier R2) and its spatial homogeneity, from the expectation of the fit on all
+        years (splits of the evidence, not refits). Recurrence: the effect in the temporal half the window does not
+        touch (a trend: in both halves). Homogeneity: the effect in both spatial halves of a subset's places, which
+        were selected on the same data, so it is reported, not tiered. Same sign, at least half the effect,
+        one-sided p < 0.05 (`control.replicates`). Neighbour support is recorded."""
         out: dict[str, Any] = {}
-        p_other: dict[str, tuple[float, float]] = {}
         if x.estimand == "group_disparity" or direction == 0:
-            return {"untested": "no direction"}, "R0"
+            return {"untested": "no direction"}
         if x.estimand == "trend_divergence" and rows.size:
             st = x.provenance["stats"]
             yrs = s.years.astype(float)
@@ -309,11 +328,9 @@ class Session:
                 z = direction * diff[rows[0]] / max(sd[rows[0]], 1e-12)
                 ps.append((direction * diff[rows[0]], float(stats.norm.sf(z))))
                 out[name] = {"per_year": float(diff[rows[0]]), "p": ps[-1][1]}
-            weak = min(ps, key=lambda t: t[0])
-            p_other["temporal"] = weak
-            out["ok"] = control.replicates(float(abs(full)), *weak)
+            out["ok"] = control.replicates(float(abs(full)), *min(ps, key=lambda t: t[0]))
             out["full_per_year"] = float(full)
-            return out, control.replication_tier(float(abs(full)), p_other)
+            return out
         sign, full = direction, abs(np.log(max(x.effect, 1e-12)))
         win = (s.years >= span[0]) & (s.years <= span[-1])
         first, second = control.temporal_halves(s.years)
@@ -321,62 +338,160 @@ class Session:
         if other:
             eff, p = explain.split_effect(s.y, s.mu, s.phi, rows, other[0], sign)
             out["temporal"] = {"log_rr": eff, "p": p, "ok": control.replicates(full, sign * eff, p)}
-            p_other["temporal"] = (sign * eff if np.isfinite(eff) else 0.0, p)
         if len(rows) >= 2:
             if getattr(self, "_region_of", None) is None:       # 8 s a call: once per session
                 self._region_of = dict(zip(s.places.tolist(), gateway.regions(s.places, "ibge_immediate_region"), strict=True))
-            region = self._region_of
-            a, b = control.spatial_halves(s.places[rows], region)
+            a, b = control.spatial_halves(s.places[rows], self._region_of)
             ia, ib = (np.nonzero(np.isin(s.places, h))[0] for h in (a, b))
             if ia.size and ib.size:
                 parts = [explain.split_effect(s.y, s.mu, s.phi, r, win, sign) for r in (ia, ib)]
-                out["spatial"] = {"log_rr": [p[0] for p in parts], "p": [p[1] for p in parts], "ok": False}
                 weak = min(parts, key=lambda t: sign * t[0] if np.isfinite(t[0]) else -1e9)
-                p_other["spatial"] = (sign * weak[0] if np.isfinite(weak[0]) else 0.0, weak[1])
-                out["spatial"]["ok"] = control.replicates(full, *p_other["spatial"])
+                out["spatial"] = {"log_rr": [p[0] for p in parts], "p": [p[1] for p in parts],
+                                  "ok": control.replicates(full, sign * weak[0] if np.isfinite(weak[0]) else 0.0, weak[1])}
         near = np.unique(np.concatenate([edges[edges[:, 0] == r, 1] for r in rows] +
                                         [edges[edges[:, 1] == r, 0] for r in rows] + [np.array([], dtype=int)]))
         near = near[~np.isin(near, rows)]
         if near.size:
             eff, p = explain.split_effect(s.y, s.mu, s.phi, near, win, sign)
             out["neighbours"] = {"log_rr": eff, "p": p}
-        return out, control.replication_tier(float(full), p_other)
+        return out
+
+    # ---- honest splitting and corroboration (§8.3) -----------------------------------------
+
+    def side(self, side: str) -> Session:
+        """This session over one side of the events (`replication`): A explores and selects, with its own register
+        and ledger (its tests are not the all-data denominator); B and R are read to test and to confirm."""
+        out = Session(self.dataset, self.event, self.years, self.graph,
+                      ledger=control.Ledger(config.home() / "ledger_A") if side == "A" else self.ledger,
+                      register=leads.Register(config.home() / "leads_A") if side == "A" else self.register)
+        out.expectations = replication.SideExpectations(out.expectations, side)
+        return out
+
+    def split_confirm(self, q: float = 0.05, log=print) -> list[leads.Lead]:
+        """The leads selected on side A, each tested once on side B at its fixed locus, Benjamini-Hochberg over
+        all that were tested (valid because B played no part in the selection or in the fit). The verdict is
+        in ``lead.replications["split"]``; ``lead.replication`` is R1 for a lead that stands."""
+        a = self.side("A")
+        b = self.side("B")
+        ratio = replication.RATIO["B"]
+        selected = a.register.current()
+        edges = self.edges()
+        by_node: dict[str, list[leads.Lead]] = {}
+        for x in selected:
+            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
+        tested: list[tuple[leads.Lead, dict[str, Any]]] = []
+        for i, (node, group) in enumerate(sorted(by_node.items())):
+            surprises: dict[str, tuple[surprise.Surprise, surprise.Surprise]] = {}
+            cache: dict[str, Any] = {}
+            for x in group:
+                if x.tier not in surprises:
+                    surprises[x.tier] = (b.surprise(node, x.tier), a.surprise(node, x.tier))
+                sb, sa = surprises[x.tier]
+                tested.append((x, replication.test_lead(sb, x, edges, cache.setdefault(x.tier, {}), sa, ratio)))
+            log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
+        ok = np.array([r["tested"] for _, r in tested], dtype=bool)
+        p = np.array([r.get("p", 1.0) for _, r in tested])
+        mask = np.zeros(len(p), dtype=bool)
+        qv = np.ones(len(p))
+        mask[ok] = control.bh(p[ok], q)
+        qv[ok] = control.adjusted(p[ok])
+        for (x, r), hit, qq in zip(tested, mask, qv, strict=True):
+            x.replications = {**x.replications, "split": {**r, "q": float(qq), "ok": bool(hit)}}
+            x.replication = control.replication_tier(kinds_of(x))
+        a.register.add(selected)
+        return selected
+
+    def corroborate(self, register: list[leads.Lead], only_signals: bool = True, replicates: int = 4999,
+                    q: float = 0.05, log=print) -> list[leads.Lead]:
+        """Ask an independent field (S2iD, SINAN, SIH: `corroborate.RULES`) whether each lead's places and years are
+        unusual there, against that field's own null (random same-size place sets of the same states and population
+        quintiles). Benjamini-Hochberg within each source. Written to ``lead.replications["corroboration"]``."""
+        self._prepare_grid()
+        pop = self._pop.sum(1)
+        state = (self._grid_places // 10000).astype(int)
+        grid = corroborate.Fields(self._grid_places, self._grid_years, state, pop)
+        index = {int(p): j for j, p in enumerate(self._grid_places)}
+        reg = self.expectations.registry
+        done: list[tuple[leads.Lead, corroborate.Corroboration]] = []
+        for x in register:
+            cls = x.robustness.get("triage", {}).get("class")
+            if not x.fields or not x.fields[0].startswith(f"{self.dataset}:") or (only_signals and cls != explain.SIGNAL):
+                continue
+            node = x.fields[0].split(":")[-1]
+            span, direction = replication.span_direction(x)
+            rows = np.array([index[int(u)] for u in x.locus.get("places", []) if int(u) in index], dtype=int)
+            if rows.size == 0 or not span:
+                continue
+            c = corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
+                                        f"corroborate|{x.id}", replicates)
+            done.append((x, c))
+            if len(done) % 200 == 0:
+                log(f"corroborated {len(done)}")
+        for source in {c.source for _, c in done if c.tested}:
+            group = [(x, c) for x, c in done if c.tested and c.source == source]
+            ps = np.array([c.p for _, c in group])
+            mask, qv = control.bh(ps, q), control.adjusted(ps)
+            for (x, c), hit, qq in zip(group, mask, qv, strict=True):
+                x.replications = {**x.replications, "corroboration": {**c.asdict(), "q": float(qq), "ok": bool(hit)}}
+        for x, c in done:
+            if not c.tested:
+                x.replications = {**x.replications, "corroboration": {**c.asdict(), "ok": False}}
+            x.replication = control.replication_tier(kinds_of(x))
+        return [x for x, _ in done]
+
+    def retier(self, register: list[leads.Lead], selected: list[leads.Lead]) -> list[leads.Lead]:
+        """Give each lead of the all-data register the split verdict of the side-A lead that is the same finding
+        (one that stands on side B), then its tier from the confirmations it holds (`control.replication_tier`)."""
+        by_node: dict[str, list[leads.Lead]] = {}
+        for a in selected:
+            if a.replications.get("split", {}).get("ok"):
+                by_node.setdefault(a.fields[0], []).append(a)
+        for x in register:
+            hits = replication.match(x, by_node.get(x.fields[0], [])) if x.fields else []
+            if hits:
+                best = min(hits, key=lambda h: h.replications["split"]["q"])
+                x.replications = {**x.replications, "split": {**best.replications["split"], "matched": best.id}}
+            else:
+                x.replications = {k: v for k, v in x.replications.items() if k != "split"}
+            x.replication = control.replication_tier(kinds_of(x))
+            if x.replication != "R0" and x.status == "open":
+                x.status = "replicated"
+        return register
 
     # ---- agents ---------------------------------------------------------------------
 
     def confirm(self, node: str, lens: str, locus: dict[str, Any], q: float = 0.05) -> dict[str, Any]:
-        """One test of a claimed locus on the spatial reserve (half B), under LOND."""
-        s = self.surprise(node, LENS_TIERS.get(lens, "B1"))
-        _, side_b = control.spatial_halves(s.places, dict(zip(s.places.tolist(), gateway.regions(
-            s.places, "ibge_immediate_region"), strict=True)))
-        places = np.intersect1d(np.array(locus.get("places", [])), side_b)
-        if places.size == 0:
-            return {"tested": False, "reason": "no place of the locus lies in the reserve"}
-        yrs = locus.get("years", [int(s.years[0]), int(s.years[-1])])
-        rows = np.isin(s.places, places)
-        cols = (s.years >= yrs[0]) & (s.years <= yrs[-1])
-        Y = float(s.y[np.ix_(rows, cols)].sum())
-        M = float(s.mu[np.ix_(rows, cols)].sum())
-        p = explain.tail_p(Y, s.mu[np.ix_(rows, cols)], s.phi[np.ix_(rows, cols)])
-        test = self.ledger.register(control.Hypothesis("confirm", "agent", {"field": node, "lens": lens,
-                                                                            "locus": locus}, split="spatial:B"))
-        lond = control.LOND(q)
-        for r in self.ledger.table().to_pylist():
-            if r["kind"] == "result" and r["id"] != test and r.get("result") and '"lond"' in r["result"]:
-                lond.tested += 1
-                lond.rejected += int(json.loads(r["result"]).get("rejected", False))
-        hit = lond.test(p)
-        self.ledger.complete(test, p, Y / M if M > 0 else None, {"lond": True, "rejected": hit, "observed": Y,
-                                                               "expected": M})
-        return {"tested": True, "p": p, "rejected": hit, "observed": Y, "expected": M, "places": places.tolist()}
+        """One claim, tested once on the reserve (side R) under LOND."""
+        return self.confirm_many([(node, lens, locus)], q)[0]
+
+    def confirm_many(self, claims: list[tuple[str, str, dict[str, Any]]], q: float = 0.05) -> list[dict[str, Any]]:
+        """Claims (field node, lens, locus with ``places`` and ``years``, and ``direction`` "up"/"down") tested in the
+        order given, which must be fixed before the reserve is read, on side R: each locus at its lens's minimum
+        effect, the p-values entering the LOND stream of the ledger (`control.Reserve`)."""
+        r, a = self.side("R"), self.side("A")
+        edges = self.edges() if any(lens == "trend_divergence" for _, lens, _ in claims) else None
+        spend, out = [], []
+        for node, lens, locus in claims:
+            tier = LENS_TIERS.get(lens, "B1")
+            res = replication.test_locus(r.surprise(node, tier), lens, locus, -1 if locus.get("direction") == "down" else 1,
+                                         edges, None, a.surprise(node, tier), replication.RATIO["R"])
+            out.append(res)
+            if res["tested"]:
+                spend.append((control.Hypothesis("confirm", "agent", {"field": node, "lens": lens, "locus": locus}),
+                              res["p"], res.get("effect"), {k: v for k, v in res.items() if k != "p"}))
+        verdicts = iter(control.Reserve(self.ledger, q).spend(spend))
+        return [{**res, **next(verdicts)} if res["tested"] else res for res in out]
 
 
-def _span_direction(x: leads.Lead) -> tuple[list[int] | None, int]:
-    """A lead's years (first, last) and its direction: +1 up, -1 down, 0 a pattern."""
-    span = x.locus.get("years")
-    if x.estimand == "group_disparity":
-        return span, 0
-    if x.estimand == "space_time":
-        return span, 1 if x.locus.get("direction") == "up" else -1
-    size = np.log(max(x.effect, 1e-12)) if x.scale == "rate_ratio" else x.effect
-    return span, int(np.sign(size))
+def kinds_of(x: leads.Lead) -> set[str]:
+    """The independent confirmations a lead holds: ``split`` (selected on A, standing on B), ``recurs`` (the effect
+    in the temporal half it does not touch), ``corroborated`` (an independent field)."""
+    r = x.replications
+    kinds = set()
+    if (r.get("split") or {}).get("ok"):
+        kinds.add("split")
+    if (r.get("temporal") or {}).get("ok") or (x.estimand == "trend_divergence" and r.get("ok")):
+        kinds.add("recurs")
+    if (r.get("corroboration") or {}).get("ok"):
+        kinds.add("corroborated")
+    return kinds

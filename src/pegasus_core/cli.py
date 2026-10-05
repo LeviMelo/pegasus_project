@@ -152,5 +152,29 @@ def ledger(family: str = typer.Option(None)) -> None:
     console.print(t)
 
 
+@app.command("split-fit")
+def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
+              device: str = "cpu") -> None:
+    """Deal the events of blocks to the sides A, B, R and fit each block on side A alone (§8.3)."""
+    from . import replication
+
+    for block in blocks:
+        model = replication.prepare(dataset, event, block, _years(years), graph, device,
+                                    log=lambda line, b=block: console.print(f"{b} {line}"))
+        console.print_json(json.dumps(model.summary(), default=float))
+
+
+@app.command("split-survey")
+def split_survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
+                 blocks: list[str] = typer.Option(None, help="default: every fitted block"),
+                 replicates: int = 100) -> None:
+    """The survey on side A, then each lead it selects tested once on side B (honest sample splitting, §8.3)."""
+    s = _session(dataset, event, years, graph)
+    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print)
+    console.print(f"{len(admitted)} leads selected on side A")
+    done = s.split_confirm(log=console.print)
+    console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on side B")
+
+
 if __name__ == "__main__":
     app()

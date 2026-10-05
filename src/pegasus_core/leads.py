@@ -20,6 +20,7 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -80,8 +81,8 @@ class Lead:
 
 
 class Register:
-    def __init__(self):
-        self.path = config.home() / "leads"
+    def __init__(self, path: Path | None = None):
+        self.path = path or config.home() / "leads"
         self.path.mkdir(parents=True, exist_ok=True)
 
     def add(self, leads: list[Lead]) -> None:

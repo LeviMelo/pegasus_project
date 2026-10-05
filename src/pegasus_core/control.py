@@ -32,7 +32,7 @@ class Hypothesis:
     family: str             # lens or estimand × tier × field family × support (ARCHITECTURE §8.1)
     actor: str              # scan | agent | person
     spec: dict[str, Any]    # what is tested: fields, estimand, tier, scope, null
-    split: str = "all"      # all | temporal:first | temporal:second | spatial:A | spatial:B (reserve)
+    split: str = "all"      # all | event:A | event:B | event:R (the reserve; ARCHITECTURE §8.3)
 
 
 class Ledger:
@@ -227,13 +227,77 @@ def replicates(effect_full: float, effect: float, p: float, alpha: float = 0.05)
                 and abs(effect) >= abs(effect_full) / 2 and p < alpha)
 
 
-def replication_tier(effect_full: float, p_other: dict[str, tuple[float, float]], alpha: float = 0.05) -> str:
-    """The highest tier reached: R1 temporal, R2 spatial, R3 system (ARCHITECTURE §8.3).
-    ``p_other`` maps split name → (effect, one-sided p) in that split."""
-    tier = "R0"
-    for name, label in (("temporal", "R1"), ("spatial", "R2"), ("system", "R3")):
-        if name in p_other and replicates(effect_full, *p_other[name], alpha):
-            tier = label
-        else:
-            break
-    return tier
+#: The event sides (ARCHITECTURE §8.3): A explores, selects and fits the expectation; B is the scheduled
+#: survey's one test of what A selected; R is the confirmation reserve, spent by claims under LOND.
+SIDES: dict[str, float] = {"A": 0.5, "B": 0.3, "R": 0.2}
+
+
+def event_sides(y: np.ndarray, seed_text: str, fractions: dict[str, float] | None = None) -> dict[str, np.ndarray]:
+    """Deal the events of every cell row to the sides by multinomial thinning (fixed seed): stratified by
+    cell, a cell's events landing in each side in proportion to its fraction. Under a Poisson count the
+    sides are independent given the rate, and under a negative binomial their sizes stay the same
+    (a thinned NB(n, p) is an NB with the same n), so a side's expectation is the fraction times the whole's."""
+    fractions = fractions or SIDES
+    rng = np.random.default_rng(config.seed(seed_text))
+    left = np.rint(y).astype(np.int64)
+    out: dict[str, np.ndarray] = {}
+    remaining = 1.0
+    names = list(fractions)
+    for name in names[:-1]:
+        take = rng.binomial(left, min(fractions[name] / remaining, 1.0))
+        out[name] = take
+        left = left - take
+        remaining -= fractions[name]
+    out[names[-1]] = left
+    return out
+
+
+class Reserve:
+    """The confirmation reserve: side R of the events, spent only by claims, each under one LOND stream.
+
+    What it holds is the fraction ``SIDES["R"]`` of every cell's events, which no scan, no refit and no
+    agent's exploration has read. A claim is one fixed locus tested on those events; its p-value enters
+    the stream, whose state (tests so far, rejections so far) is read back from the ledger, so the budget is
+    the ledger's, not a session's. The stream is ordered by the caller, and the order must be fixed before
+    the p-values are seen (e.g. by the A-side evidence)."""
+
+    SPLIT = "event:R"
+
+    def __init__(self, ledger: Ledger, q: float = 0.05):
+        self.ledger, self.q = ledger, q
+
+    def state(self) -> tuple[int, int]:
+        """(tests, rejections) spent so far."""
+        tested = rejected = 0
+        for r in self.ledger.table().to_pylist():
+            if r["kind"] == "result" and r.get("result") and '"lond"' in r["result"]:
+                tested += 1
+                rejected += int(json.loads(r["result"]).get("rejected", False))
+        return tested, rejected
+
+    def spend(self, claims: list[tuple[Hypothesis, float, float | None, dict[str, Any]]]) -> list[dict[str, Any]]:
+        """Test the claims in the order given: (hypothesis, p on side R, effect, detail) → level and verdict."""
+        lond = LOND(self.q)
+        lond.tested, lond.rejected = self.state()
+        ids = self.ledger.register_many([Hypothesis(h.family, h.actor, h.spec, self.SPLIT) for h, *_ in claims])
+        out, done = [], []
+        for i, (_, p, effect, detail) in zip(ids, claims, strict=True):
+            level = self.q * lond._gamma(lond.tested + 1) * (lond.rejected + 1)
+            hit = lond.test(p)
+            done.append((i, p, effect, {**detail, "lond": True, "rejected": hit, "level": level}))
+            out.append({"p": p, "level": level, "rejected": hit})
+        self.ledger.complete_many(done)
+        return out
+
+
+def replication_tier(kinds: set[str]) -> str:
+    """The tier of a lead from the independent confirmations it has (ARCHITECTURE §8.3). R0 passes §8.2 on
+    all data. Every higher tier needs R1, the honest split: selected on side A, tested on side B. R2 adds the
+    recurrence of the effect in the temporal half it does not touch; R3 adds corroboration by an independent
+    field (a one-off event cannot recur, so this is its way up). Recurrence and corroboration are not ordered
+    by the other; the tier is the highest reached."""
+    if "split" not in kinds:
+        return "R0"
+    if "corroborated" in kinds:
+        return "R3"
+    return "R2" if "recurs" in kinds else "R1"

@@ -255,13 +255,10 @@ def _upper_tail(y: np.ndarray, mean: np.ndarray, phi_agg: np.ndarray) -> np.ndar
     return out
 
 
-def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05
-                     ) -> list[Finding]:
-    """From B2: a place's trend β_u against its graph neighbours' mean, in posterior sd. Two-sided."""
-    if s.tier != "B2" or "beta" not in s.extras:
-        raise ValueError("trend divergence reads B2's place trends")
-    family = f"trend_divergence|B2|{s.field.block}"
-    test = ledger.register(control.Hypothesis(family, "scan", {"lens": "trend_divergence", "field": s.field.id}))
+def trend_scores(s: surprise.Surprise, edges: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
+    """Each place's trend β_u less its graph neighbours' mean, with the sd of that difference, the minimum
+    divergence δ (a ratio TREND_PERIOD between the period's first and last year, in β's standardised units),
+    and which places have neighbours."""
     b, sd = s.extras["beta"], s.extras["beta_sd"]
     n = len(b)
     A = np.zeros(n)
@@ -281,10 +278,23 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
     # the period is a ratio TREND_PERIOD between its first and last year
     yrs = s.years.astype(float)
     span = (yrs.max() - yrs.min()) / max(yrs.std(), 1e-9)
-    delta = np.log(TREND_PERIOD) / span
-    diff = b - mean
-    d = np.divide(diff, np.sqrt(var), out=np.zeros(n), where=has & (var > 0))
-    excess = np.divide(np.abs(diff) - delta, np.sqrt(var), out=np.zeros(n), where=has & (var > 0))
+    return b - mean, np.sqrt(var), float(np.log(TREND_PERIOD) / span), has
+
+
+def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05
+                     ) -> list[Finding]:
+    """From B2: a place's trend β_u against its graph neighbours' mean, in posterior sd. Two-sided."""
+    if s.tier != "B2" or "beta" not in s.extras:
+        raise ValueError("trend divergence reads B2's place trends")
+    family = f"trend_divergence|B2|{s.field.block}"
+    test = ledger.register(control.Hypothesis(family, "scan", {"lens": "trend_divergence", "field": s.field.id}))
+    b = s.extras["beta"]
+    n = len(b)
+    diff, sd, delta, has = trend_scores(s, edges)
+    var = sd ** 2
+    mean = b - diff
+    d = np.divide(diff, sd, out=np.zeros(n), where=has & (var > 0))
+    excess = np.divide(np.abs(diff) - delta, sd, out=np.zeros(n), where=has & (var > 0))
     p = np.where(has, np.minimum(1.0, 2 * special.ndtr(-excess)), 1.0)
     hits = np.nonzero(control.bh(p, q))[0]
     out = [Finding("trend_divergence", s.field.id, "B2", {"places": [int(s.places[u])]}, float(d[u]), float(p[u]),
