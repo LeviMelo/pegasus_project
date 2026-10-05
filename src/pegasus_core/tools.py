@@ -40,11 +40,27 @@ from . import (
     surprise,
 )
 from .scans import explain, lenses
+from .scans import scales as scales_mod
 
 LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
+
+
+# The survey's lens/estimand/scale combinations, by what the gate allows (evaluation 2026-10-05-lens-positives,
+# "Lens redesign"): per lens, (reference, scales that pass, scales that fail). Failing combinations run only with
+# ``survey(ungated=True)``, as their own family, and their leads carry ``gate="failed"``.
+SURVEY_PLAN = (
+    ("outbreak", None, ("municipality",), ()),
+    ("change_point", None, ("municipality",), ()),
+    ("trend_divergence", "national", ("region", "state"), ("municipality",)),    # municipality: time-shift negatives
+    ("trend_divergence", "neighbours", (), ("municipality", "region", "state")),  # recovers no positive
+    ("space_time", None, ("municipality",), ()),
+    ("spatial_cluster", None, ("municipality",), ()),
+    ("group_disparity", None, (), ("municipality", "region", "state")),            # fails its negatives
+)
+UNGATED = "|ungated"                # suffix of the survey family of the failing combinations
 
 
 SURVEY_THREAD_GB = 0.5      # host memory one scanning thread adds over the loaded model (measured, evaluation 2026-10-05)
@@ -75,6 +91,7 @@ class Session:
     register: leads.Register = field(default_factory=leads.Register)
     _local: threading.local = field(default_factory=threading.local, init=False, repr=False)   # .memo: one field's tiers
     _edges: np.ndarray | None = field(default=None, init=False, repr=False)
+    _scales: dict | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph)
@@ -138,13 +155,25 @@ class Session:
             self._edges = graphs.edges(self.expectations.model(block).data.places, self.graph)
         return self._edges
 
+    def scales(self, names: tuple[str, ...] | list[str] | None = None) -> list[scales_mod.Scale]:
+        """The scales (municipality, immediate region, state) over the session's places, built once; ``names`` picks."""
+        if self._scales is None:
+            block = next(iter(self.expectations._models), None) or next(iter(self._blocks()))
+            self._scales = {x.name: x for x in scales_mod.standard(self.expectations.model(block).data.places)}
+        return [self._scales[n] for n in (names or self._scales)]
+
     def _blocks(self) -> list[str]:
         return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)})
 
     # ---- scanning ----------------------------------------------------------------
 
-    def scan(self, node: str, lens: str, tier: str | None = None, **kw) -> list[lenses.Finding]:
+    def scan(self, node: str, lens: str, tier: str | None = None, scales: tuple[str, ...] | None = None, **kw
+             ) -> list[lenses.Finding]:
+        """One lens on one field. ``scales`` (names; trend divergence and group disparity) default to the
+        municipality; ``reference`` (trend divergence) to ``neighbours``."""
         tier = tier or LENS_TIERS[lens]
+        if scales:
+            kw["scales"] = self.scales(scales)
         if lens == "group_disparity":
             y_g, mu_g = self.by_group(node)
             places = self.expectations.model(self.expectations.field(node).block).data.places
@@ -158,37 +187,55 @@ class Session:
 
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
                "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
-               workers: int | None = None) -> list[leads.Lead]:
-        """The scheduled pass over every admissible field; returns the leads admitted. Fields are scanned by
-        ``workers`` threads (default `survey_workers`; 1: in order, in this thread) over the one loaded model;
-        the lenses of a field share its tiers' expectations. The findings are merged in the fields' order,
-        so the leads do not depend on the number of workers."""
+               workers: int | None = None, ungated: bool = False) -> list[leads.Lead]:
+        """The scheduled pass over every admissible field; returns the leads admitted. Only the combinations the
+        gate allows run (`SURVEY_PLAN`: trend against the national course at regions and states, the outbreak,
+        change-point and space-time lenses at the municipality); ``ungated`` adds the failing ones, each a family
+        of its own, their leads marked ``gate="failed"``. A call's scales are its multiplicity (BH within each
+        scale at q / number of scales). Fields are scanned by ``workers`` threads (default `survey_workers`; 1: in
+        order, in this thread) over the one loaded model; the lenses of a field share its tiers' expectations. The
+        findings are merged in the fields' order, so the leads do not depend on the number of workers."""
         found: dict[str, list[lenses.Finding]] = {}
         log_lock = threading.Lock()
+        calls = []                  # (lens, reference, scale names, family suffix)
+        for lens, reference, passing, failing in SURVEY_PLAN:
+            if lens not in lens_names:
+                continue
+            tag = "|national" if reference == "national" else ""
+            if passing:
+                calls.append((lens, reference, passing, tag))
+            if ungated and failing:
+                calls.append((lens, reference, failing, tag + UNGATED))
 
         def one(block: str, f: fields.Field) -> list[tuple[str, list[lenses.Finding]]]:
             self._local.memo = {}      # B2 serves three lenses: computed once per field
             out = []
             try:
-                for lens in lens_names:
+                for lens, reference, scale_names, tag in calls:
                     kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster", "change_point") else {}
+                    if lens in ("trend_divergence", "group_disparity"):
+                        kw["scales"] = scale_names
+                    if reference:
+                        kw["reference"] = reference
+                    name = " ".join(x for x in (lens, reference, "+".join(scale_names)) if x)
                     try:
                         hits = self.scan(f.node, lens, **kw)
                     except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
                         with log_lock:
-                            log(f"FAIL {f.id} {lens}: {type(exc).__name__}: {exc}")
+                            log(f"FAIL {f.id} {name}: {type(exc).__name__}: {exc}")
                         continue
-                    out.append((f"{lens}|{LENS_TIERS[lens]}|{block}", hits))
+                    out.append((f"{lens}|{LENS_TIERS[lens]}|{block}{tag}", hits))
                     with log_lock:
-                        log(f"{f.id} {lens}: {len(hits)}")
+                        log(f"{f.id} {name}: {len(hits)}")
             finally:
                 self._local.memo = None
             return out
 
         tasks = [(block, f) for block in blocks or self._blocks() for f in self.fields(block)]
         n = survey_workers() if workers is None else max(1, workers)
+        self.edges()
+        self.scales()
         if n > 1 and tasks:
-            self.edges()
             results = [one(*tasks[0])]                             # the first field warms the shared caches alone
             with ThreadPoolExecutor(n) as pool:
                 results += pool.map(lambda t: one(*t), tasks[1:])
@@ -214,6 +261,7 @@ class Session:
                           null="Gumbel on NB replicates" if h.lens in ("space_time", "spatial_cluster", "change_point")
                           else "NB predictive",
                           calibrated=bool(h.stats.get("calibrated", True)), robustness={},
+                          gate="failed" if family.endswith(UNGATED) else "passed",
                           provenance={"graph": self.graph, "stats": h.stats})
 
     # ---- on demand -------------------------------------------------------------------
@@ -377,6 +425,8 @@ class Session:
         out: dict[str, Any] = {}
         if x.estimand == "group_disparity" or direction == 0:
             return {"untested": "no direction"}
+        if x.estimand == "trend_divergence" and (leads.trend_reference(x) != "neighbours" or x.locus.get("scale")):
+            return {"untested": "the trend replication reads a municipality's contrast with its neighbours"}
         if x.estimand == "trend_divergence" and rows.size:
             st = x.provenance["stats"]
             yrs = s.years.astype(float)

@@ -79,10 +79,12 @@ def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, gra
 @app.command()
 def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            blocks: list[str] = typer.Option(None, help="default: every fitted block"),
-           replicates: int = 100) -> None:
-    """The scheduled pass: every admissible field, the lenses, error control, leads."""
+           replicates: int = 100,
+           ungated: bool = typer.Option(False, help="also run the lens/estimand/scale combinations that fail their gate")
+           ) -> None:
+    """The scheduled pass: every admissible field, the gated lenses, error control, leads."""
     s = _session(dataset, event, years, graph)
-    admitted = s.survey(blocks or None, replicates=replicates, log=console.print)
+    admitted = s.survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
     console.print(f"{len(admitted)} leads admitted")
 
 
@@ -119,9 +121,9 @@ def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     """The lead register, best rank first."""
     from . import leads as register
 
-    t = Table("rank", "id", "kind", "estimand", "field", "locus", "effect", "q", "R")
+    t = Table("rank", "id", "kind", "estimand", "gate", "field", "locus", "effect", "q", "R")
     for x in [x for x in register.Register().current() if kind is None or x.kind == kind][:limit]:
-        t.add_row(f"{x.rank:.2f}", x.id, x.kind, x.estimand, x.fields[0].split(":")[-1],
+        t.add_row(f"{x.rank:.2f}", x.id, x.kind, x.estimand, x.gate, x.fields[0].split(":")[-1],
                   json.dumps(x.locus)[:50], f"{x.effect:.3g}", f"{x.q:.2g}", x.replication)
     console.print(t)
 
@@ -167,10 +169,11 @@ def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, g
 @app.command("split-survey")
 def split_survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
                  blocks: list[str] = typer.Option(None, help="default: every fitted block"),
-                 replicates: int = 100) -> None:
+                 replicates: int = 100,
+                 ungated: bool = typer.Option(False, help="also run the combinations that fail their gate")) -> None:
     """The survey on side A, then each lead it selects tested once on side B (honest sample splitting, §8.3)."""
     s = _session(dataset, event, years, graph)
-    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print)
+    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
     console.print(f"{len(admitted)} leads selected on side A")
     done = s.split_confirm(log=console.print)
     console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on side B")

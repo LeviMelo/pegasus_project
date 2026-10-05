@@ -108,3 +108,17 @@ The neighbours contrast at the state scale is power-limited, not misplaced: Bahi
 **Calibration.** Trend divergence (30 worlds each, three scales, both references): NB 0, MSR normal scores 0, time-shift normal scores 0 except `national` at the municipality (5/30; the shift of a trending series is a trend change), so the municipality takes ratio 1.5 and the `national` estimand is read at region and state. Group disparity: NB surrogates 0/15 at every sd; MSR negatives (which keep the field's large-scale group structure) fire at sd 0.2 in 9/15 (municipality), 9/15 (region), 15/15 (state) worlds and hold only from sd 1.0 (0/12; 0.6: state 2/12). **Group disparity fails the negatives at every sd that recovers the positives.** The shared reading: departures of the documented size are what this field's spatial dependence produces anyway, so a lens that reads large units cannot tell them from the negatives' rearranged copies.
 
 **Gate effect.** Trend divergence: `neighbours` fails, `national` recovered at region and state (one positive, flagged), negatives hold: **not gated** until a positive declared before any look is recovered. Group disparity: **FAIL** (negatives). Marks: floor 1.5%, still no positive. `Session.survey` reads the municipality scale only (a multi-municipality locus is not yet read by the leads code; §13).
+
+## The survey reads the gate (2026-10-05)
+
+`Session.survey` runs only the combinations the gate allows (`tools.SURVEY_PLAN`): outbreak, change point and space–time at the municipality, and the trend against the **national** course at **region and state** (BH at q/2). Failing combinations (trend against neighbours, national trend at the municipality, group disparity) run with `survey --ungated`, each a family of its own (`|ungated`), and their leads carry `gate="failed"` (a field of `Lead`; the register sorts them last, a story resting only on them has rank 0 and a flag). Scales are paid in each call's BH (q/number of scales). A region/state lead's trend replication is `untested` (the replication reads a municipality's contrast with its neighbours; it crashed on the national leads' stats before this change).
+
+**Check.** SIM.DO death 2010–2023 chapter III (21 fields), 50 replicates, 4 threads, scratch register (`data/perf/survey_profile.py`, outputs `data/perf/out/gate_*`; the machine's GPU was shared at 99%):
+
+| run | leads | wall | peak RSS |
+|---|---|---|---|
+| before (neighbours trend at the municipality, no scales) | 28 (22 space–time, 5 outbreak, 1 trend) | 64.7 s | 2.0 GB |
+| gated (default) | 53 (22 space–time, 5 outbreak, **26 national trend, all at state**: D50 12, D53 7, D62 3, D59 2, D50–D53 1, D64 1) | 72.9 s | 1.6 GB |
+| `--ungated` | 76 = the 53 plus 23 `gate: failed` (trend municipality 4, group disparity region 3, state 16) | 83.4 s | 1.9 GB |
+
+The 27 space–time and outbreak leads are identical to before; the old municipality trend lead is no longer a default lead; the 53 gated leads are the same in the ungated run. The state-scale trend leads are unreplicated departures of a state's course from the country's, flagged as the single, once-looked-at positive of the gate; none was read for meaning.

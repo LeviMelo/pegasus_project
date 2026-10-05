@@ -53,12 +53,15 @@ class Lead:
     robustness: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
     status: str = "open"           # open | replicated | explained | retired
+    gate: str = "passed"           # "failed": the lens/estimand/scale failed its gate (tools.SURVEY_PLAN); an exploratory lead
     note: str = ""
     id: str = ""
 
     def __post_init__(self):
         if self.kind not in KINDS:
             raise ValueError(f"lead kind {self.kind!r} not in {KINDS}")
+        if self.gate not in ("passed", "failed"):
+            raise ValueError(f"gate {self.gate!r}")
         if self.scale not in SCALES:
             raise ValueError(f"effect scale {self.scale!r} not in {SCALES}")
         if not self.id:
@@ -91,7 +94,7 @@ class Register:
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         rows = [{"id": x.id, "at": now, "rank": x.rank, "status": x.status, "kind": x.kind, "family": x.family,
                  "q": x.q, "effect": x.effect, "replication": x.replication,
-                 "body": json.dumps(asdict(x), default=_json)} for x in leads]
+                 "gate": x.gate, "body": json.dumps(asdict(x), default=_json)} for x in leads]
         pq.write_table(pa.Table.from_pylist(rows), self.path / f"part-{now.replace(':', '')}-{uuid.uuid4().hex[:8]}.parquet")
 
     def current(self) -> list[Lead]:
@@ -105,7 +108,7 @@ class Register:
             latest[r["id"]] = r
         out = [Lead(**{k: (tuple(v) if k == "interval" and v is not None else v)
                        for k, v in json.loads(r["body"]).items()}) for r in latest.values()]
-        return sorted(out, key=lambda x: -x.rank)
+        return sorted(out, key=lambda x: (x.gate == "failed", -x.rank))      # gate-failed leads after the others
 
     def get(self, lead_id: str) -> Lead:
         for x in self.current():
@@ -118,6 +121,12 @@ class Register:
             setattr(lead, k, v)
         self.add([lead])
         return lead
+
+
+def trend_reference(x: Lead) -> str:
+    """The estimand of a trend-divergence lead: ``neighbours`` (leads before the national estimand carry no mark)
+    or ``national``."""
+    return x.provenance.get("stats", {}).get("estimand", "neighbours")
 
 
 def _json(x: Any) -> Any:
@@ -175,8 +184,10 @@ def stories(register: list[Lead], max_subset: int = 1) -> list[Story]:
                 flags.append(f"substitution in {parent}: up {','.join(sorted(set(by_sign[1])))} / "
                              f"down {','.join(sorted(set(by_sign[-1])))}")
         places = list(members[0].locus.get("places", []))
-        out.append(Story(key, places, sorted(members, key=lambda m: -m.rank), sum(m.rank for m in members),
-                         fields_, flags))
+        if any(m.gate == "failed" for m in members):
+            flags.append("gate failed: " + ",".join(sorted({m.estimand for m in members if m.gate == "failed"})))
+        out.append(Story(key, places, sorted(members, key=lambda m: (m.gate == "failed", -m.rank)),
+                         sum(m.rank for m in members if m.gate != "failed"), fields_, flags))
     return sorted(out, key=lambda st: -st.rank)
 
 

@@ -210,6 +210,8 @@ def test_locus(s: surprise.Surprise, estimand: str, locus: dict[str, Any], direc
 
 def test_lead(s: surprise.Surprise, x: leads.Lead, edges: np.ndarray | None = None, cache: dict | None = None,
               given: surprise.Surprise | None = None, ratio: float | None = None) -> dict[str, Any]:
+    if x.estimand == "trend_divergence" and (leads.trend_reference(x) != "neighbours" or x.locus.get("scale")):
+        return {"tested": False, "reason": "the trend test reads a municipality's contrast with its neighbours"}
     return test_locus(s, x.estimand, x.locus, span_direction(x)[1], edges, cache, given, ratio)
 
 

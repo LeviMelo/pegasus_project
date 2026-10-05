@@ -418,7 +418,7 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
             out.append(Finding("trend_divergence", s.field.id, "B2", locus, float(d[k]), float(p[k]),
                                {"beta": float(b[k]), "neighbours" if reference == "neighbours" else "reference":
                                 float(ref[k]), "rate_ratio_per_sd_year": float(np.exp(b[k])),
-                                "scale": x.name, "dispersion": float(kappa[k])}))
+                                "scale": x.name, "dispersion": float(kappa[k]), "estimand": reference}))
         off += x.n
     ledger.complete(test, float(pool.min()), None, {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
     return out
