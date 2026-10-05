@@ -41,7 +41,7 @@
 | census coverage 2000/2010/2022: which tables are adjusted; what is the 2022 truth | §3.1 | agent (research) |
 | preliminary-file snapshots, scheduled daily | ADR-0004 | agent (pegasus_data) |
 | SIH blocks (fit, survey); the winter respiratory B2s positive | §10.1, §12 phase 1 | agent |
-| population account: **shipped** `population-account-1` (pegasus_data ADR-0145). Municipal median error 0.057 against vital-only 0.079 on the PES-corrected 2022; 80% intervals cover 0.79–0.81 | §3.1, §12 phase 2 | done |
+| population account: **shipped** `population-account-1` (pegasus_data decision 0145). Municipal median error 0.057 against vital-only 0.079 on the PES-corrected 2022; 80% intervals cover 0.79–0.81 | §3.1, §12 phase 2 | done |
 | SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
 | pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
 | performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
@@ -62,7 +62,7 @@
 11. The adult race bridge (SIM women ↔ SINASC mothers).
 12. Phase 4: the weekly grain and the nowcast (ADR-0004).
 13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
-14. The PegaSUS exposure switch: the gateway's population from `population-account-1` (pegasus_data ADR-0145) with its intervals, in place of POPSVS (P8). After the Laplace merge, because every cache key changes.
+14. The PegaSUS exposure switch: the gateway's population from `population-account-1` (pegasus_data decision 0145) with its intervals, in place of POPSVS (P8). After the Laplace merge, because every cache key changes.
 15. Population account follow-ups: an independent interval check (train 2000→2010, score Census 2010); 2000/2010 coverage taken from IBGE's reconciliation (no person-level PES) is recorded, not estimated; the North and Centre-West cover 0.66.
 16. SIDRA follow-ups: series stitched across census universes (literacy 10+ against 15+); the SIDRA store served to the gateway's context fields; an ingestion check once phaseb/c/d finish.
 17. Regenerate pegasus_data's shipped seed (build_resources.py) once all curation is committed: fresh installs still read SIM RACACOR as Bra/Amar/Indig.
