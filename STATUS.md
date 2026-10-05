@@ -46,7 +46,7 @@
 | pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
 | performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
 | surveillance feasibility: **done** (ADR-0004 updated): weekly alarms feasible for arboviruses only; preliminary-file snapshots must start now | ADR-0004 | done |
-| race bridge: **infant bridge shipped** (pegasus_data fcc1444, ADR-0143, `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
+| race bridge: **infant bridge shipped** (pegasus_data fcc1444 (its ADR 0143), `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
 | E_b gate: **passed** (evaluation 2026-10-05, ADR-0005): MSR on the normalised graph, δ_E 0.03 / 0.05; sanitation pairs admitted, smooth-field pairs not (low power) | §7.5, §8.4, §10.5 | agent |
 | **backlog, in order** (one fresh agent each; ≤ 5 at a time):
 1. Laplace uncertainty layer (worktree `worktree-agent-afb63cec4eed96769`; the CG cap; then the calibration verdict).
@@ -61,7 +61,7 @@
 10. Phase 3: the institution lattice (CNES); APAC families; dependency maps; tools over MCP.
 11. The adult race bridge (SIM women ↔ SINASC mothers).
 12. Phase 4: the weekly grain and the nowcast (ADR-0004).
-13. pegasus_data: the OQ-71 windows; roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
+13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
 | | queue |
 
 **Next:**
