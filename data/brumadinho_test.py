@@ -100,26 +100,34 @@ def facility_excess(E: float) -> dict:
             "n_facilities": len(out), "concentrated_outside": concentrated}
 
 
-def main() -> None:
+def main(nodes: list[str]) -> None:
+    """Usage: python data/brumadinho_test.py [J20-J22] [XI]  (default both); results of earlier runs are kept in the JSON,
+    so the primary outcome and the negative control may be run at different times (the XI fit is slow on a shared GPU)."""
+    path = "data/logs/brumadinho_result.json"
+    try:
+        out = json.load(open(path, encoding="utf-8"))
+    except FileNotFoundError:
+        out = {"primary": PRIMARY, "window": [W0, W1], "nodes": {}}
     ex = expectations()
-    out = {"primary": PRIMARY, "window": [W0, W1], "nodes": {}}
-    for node in ("J20-J22", "XI"):
+    for node in nodes:
         s = ex.prospective(node, 2018)
         out["nodes"][node] = summarise(s)
         r = out["nodes"][node]["primary"]
         print(node, "primary O", r["observed"], "E", round(r["expected"], 2), "ratio", round(r["ratio"], 3),
               "p(1.2)", r["p_min_effect_1.2"], flush=True)
-        json.dump(out, open("data/logs/brumadinho_result.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=float)
-    out["nodes"]["J20-J22"]["facilities"] = facility_excess(out["nodes"]["J20-J22"]["primary"]["expected"])
-    p1, f2, c3 = out["nodes"]["J20-J22"]["primary"], out["nodes"]["J20-J22"]["facilities"], out["nodes"]["XI"]["primary"]
-    out["criteria"] = {
-        "1_ratio_and_p": bool(p1["ratio"] >= 1.2 and p1["p_min_effect_1.2"] < 0.05),
-        "2_not_one_outside_facility": bool(f2["net_excess"] > 0 and not f2["concentrated_outside"]),
-        "3_negative_control": bool(c3["ratio"] < 1.2 or c3["p_min_effect_1.2"] >= 0.05)}
-    out["pass"] = all(out["criteria"].values())
-    json.dump(out, open("data/logs/brumadinho_result.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=float)
-    print(out["criteria"], "PASS" if out["pass"] else "FAIL")
+        if node == "J20-J22":
+            out["nodes"][node]["facilities"] = facility_excess(r["expected"])
+        json.dump(out, open(path, "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=float)
+    if {"J20-J22", "XI"} <= set(out["nodes"]):
+        p1, f2, c3 = out["nodes"]["J20-J22"]["primary"], out["nodes"]["J20-J22"]["facilities"], out["nodes"]["XI"]["primary"]
+        out["criteria"] = {
+            "1_ratio_and_p": bool(p1["ratio"] >= 1.2 and p1["p_min_effect_1.2"] < 0.05),
+            "2_not_one_outside_facility": bool(f2["net_excess"] > 0 and not f2["concentrated_outside"]),
+            "3_negative_control": bool(c3["ratio"] < 1.2 or c3["p_min_effect_1.2"] >= 0.05)}
+        out["pass"] = all(out["criteria"].values())
+        json.dump(out, open(path, "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=float)
+        print(out["criteria"], "PASS" if out["pass"] else "FAIL")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:] or ["J20-J22", "XI"])
