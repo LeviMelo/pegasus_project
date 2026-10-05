@@ -50,14 +50,22 @@ class Subset:
 
 def score(Y: np.ndarray, M: np.ndarray, kind: str = "poisson") -> np.ndarray:
     """Expectation-based scores (Neill 2012). ``poisson``: Y = Σy, M = Σμ. ``gaussian`` (marks):
-    Y = Σ w·(y − μ), M = Σ w, F = Y²/(2M) for Y > 0. Both keep the linear-time property with
-    priority Y/M per element."""
+    Y = Σ w·(y − μ), M = Σ w, F = Y²/(2M) for Y > 0. ``poisson_low``: the same Poisson score for a
+    deficit (Y < M). All keep the linear-time property, with priority Y/M per element (ascending
+    for the deficit: `_sign`)."""
     Y, M = np.asarray(Y, dtype=float), np.asarray(M, dtype=float)
     if kind == "gaussian":
         return np.where((Y > 0) & (M > 0), Y * Y / (2 * np.maximum(M, 1e-300)), 0.0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        s = Y * np.log(np.where(M > 0, Y / M, 1.0)) + M - Y
+        s = np.where(Y > 0, Y * np.log(np.where((M > 0) & (Y > 0), Y / M, 1.0)), 0.0) + M - Y
+    if kind == "poisson_low":
+        return np.where((Y < M) & (M > 0), s, 0.0)
     return np.where((Y > M) & (M > 0), s, 0.0)
+
+
+def _sign(kind: str) -> float:
+    """Priority direction: an excess ranks elements by descending y/μ, a deficit by ascending."""
+    return -1.0 if kind == "poisson_low" else 1.0
 
 
 def neighbourhoods(edges: np.ndarray, n: int, k: int) -> np.ndarray:
@@ -127,7 +135,7 @@ class Scanner:
             # places given windows: LTSS on y/μ within the neighbourhood
             Yk = Yw[np.arange(len(P)), :, new_win]                   # [C, K]
             Mk = Mw[np.arange(len(P)), :, new_win]
-            prio = np.where(self.valid & (Mk > 0), Yk / np.maximum(Mk, 1e-300), -np.inf)
+            prio = np.where(self.valid & (Mk > 0), _sign(self.kind) * Yk / np.maximum(Mk, 1e-300), -np.inf)
             order = np.argsort(-prio, axis=1)
             sy = np.cumsum(np.take_along_axis(Yk, order, 1), 1)
             sm = np.cumsum(np.take_along_axis(Mk, order, 1), 1)
@@ -230,7 +238,7 @@ def _reduce(A: np.ndarray, places: np.ndarray | None, window: tuple[int, int] | 
 
 
 def _ltss(Y: np.ndarray, M: np.ndarray, kind: str = "poisson") -> tuple[np.ndarray, float]:
-    prio = np.where(M > 0, Y / np.maximum(M, 1e-300), -np.inf)
+    prio = np.where(M > 0, _sign(kind) * Y / np.maximum(M, 1e-300), -np.inf)
     order = np.argsort(-prio)
     s = score(np.cumsum(Y[order]), np.cumsum(M[order]), kind)
     s[~np.isfinite(prio[order])] = 0
@@ -313,8 +321,11 @@ def _torch_score(Y, M, kind: str):
 
     if kind == "gaussian":
         return torch.where((Y > 0) & (M > 0), Y * Y / (2 * M.clamp(min=1e-30)), torch.zeros_like(Y))
-    ratio = torch.where(M > 0, Y / M.clamp(min=1e-30), torch.ones_like(Y))
-    return torch.where((Y > M) & (M > 0), Y * torch.log(ratio.clamp(min=1e-30)) + M - Y, torch.zeros_like(Y))
+    ratio = torch.where((M > 0) & (Y > 0), Y / M.clamp(min=1e-30), torch.ones_like(Y))
+    s = Y * torch.log(ratio) + M - Y
+    if kind == "poisson_low":
+        return torch.where((Y < M) & (M > 0), s, torch.zeros_like(Y))
+    return torch.where((Y > M) & (M > 0), s, torch.zeros_like(Y))
 
 
 def _device():
@@ -352,7 +363,8 @@ def _alternate(scanner: Scanner, Y, M):
         gi = win[..., None, None].expand(R, C, Yw.shape[2], 1)
         Yk = Yw.gather(3, gi)[..., 0]
         Mk = Mw[None].expand(R, -1, -1, -1).gather(3, gi)[..., 0]
-        prio = torch.where(valid[None] & (Mk > 0), Yk / Mk.clamp(min=1e-30), torch.full_like(Yk, -float("inf")))
+        prio = torch.where(valid[None] & (Mk > 0), _sign(scanner.kind) * Yk / Mk.clamp(min=1e-30),
+                           torch.full_like(Yk, -float("inf")))
         order = torch.argsort(-prio, dim=2)
         sp = _torch_score(Yk.gather(2, order).cumsum(2), Mk.gather(2, order).cumsum(2), scanner.kind)
         sp = torch.where(torch.isfinite(prio.gather(2, order)), sp, torch.zeros_like(sp))
@@ -414,5 +426,5 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
         if scanner.kind == "gaussian":
             y[sel] = 0.0
         else:
-            m[sel] = np.maximum(m[sel], y[sel])
+            m[sel] = np.minimum(m[sel], y[sel]) if scanner.kind == "poisson_low" else np.maximum(m[sel], y[sel])
     return out, nul

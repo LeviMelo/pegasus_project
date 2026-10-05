@@ -130,3 +130,43 @@ def _json(x: Any) -> Any:
 def admit(findings: list[Any], rejected: np.ndarray, qvalues: np.ndarray, make) -> list[Lead]:
     """Leads from the findings that error control rejected; ``make(finding, q)`` builds the Lead."""
     return [make(f, float(q)) for f, keep, q in zip(findings, rejected, qvalues, strict=True) if keep]
+
+
+@dataclass
+class Story:
+    """The leads of one place (a single-place locus) or of one subset, across fields and lenses."""
+
+    key: str
+    places: list[int]
+    leads: list[Lead]
+    rank: float
+    fields: list[str]
+    flags: list[str]
+
+
+def stories(register: list[Lead], max_subset: int = 1) -> list[Story]:
+    """Group leads into stories: every lead whose locus is one place joins that place's story; a
+    larger subset is its own story. A place with fields moving in opposite directions within one
+    block is flagged as a possible substitution (coding or diagnosis moving between codes)."""
+    groups: dict[str, list[Lead]] = {}
+    for x in register:
+        places = list(x.locus.get("places", []))
+        key = f"place {places[0]}" if len(places) <= max_subset and places else \
+            f"subset {x.id}"
+        groups.setdefault(key, []).append(x)
+    out = []
+    for key, members in groups.items():
+        fields_ = sorted({m.fields[0].split(":")[-1] for m in members})
+        flags = []
+        signs: dict[str, set[int]] = {}
+        for m in members:
+            block = m.family.split("|")[-1]
+            size = np.log(max(m.effect, 1e-12)) if m.scale == "rate_ratio" else m.effect
+            if size != 0:
+                signs.setdefault(block, set()).add(int(np.sign(size)))
+        if any(len(v) > 1 for v in signs.values()):
+            flags.append("opposite movements within a block (possible substitution)")
+        places = list(members[0].locus.get("places", []))
+        out.append(Story(key, places, sorted(members, key=lambda m: -m.rank), sum(m.rank for m in members),
+                         fields_, flags))
+    return sorted(out, key=lambda st: -st.rank)

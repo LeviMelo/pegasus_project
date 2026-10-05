@@ -110,6 +110,17 @@ def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
 
 
 @app.command()
+def stories(limit: int = 25) -> None:
+    """Leads grouped into stories (by place or subset), best first."""
+    from . import leads as register
+
+    t = Table("rank", "story", "fields", "leads", "flags")
+    for st in register.stories(register.Register().current())[:limit]:
+        t.add_row(f"{st.rank:.1f}", st.key, ", ".join(st.fields)[:60], str(len(st.leads)), "; ".join(st.flags)[:50])
+    console.print(t)
+
+
+@app.command()
 def ledger(family: str = typer.Option(None)) -> None:
     """Tests in the ledger, by family."""
     from collections import Counter

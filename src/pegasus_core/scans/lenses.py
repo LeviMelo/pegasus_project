@@ -70,36 +70,45 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
         y_down = np.where(usable, s.w * (-resid - MARK_LOG), 0.0)
         m = np.where(usable, s.w, 0.0)
     else:
-        # counts: the null's boundary is θ0·μ, replicates included (§8.4)
+        # counts: the null's boundary is θ0·μ for an excess and μ/θ0 for a deficit (§8.4)
         y = np.where(usable, s.y, 0.0)
         m = np.where(usable, RATE_RATIO * s.mu, 0.0)
+        m_low = np.where(usable, s.mu / RATE_RATIO, 0.0)
     if not usable.any():
         ledger.complete(test, 1.0, None, {"subsets": 0, "reason": "no usable cell"})
         return []
-    scanner = subset.Scanner(subset.neighbourhoods(edges, len(s.places), k), max_window=max_window,
-                             full_period=full_period, kind="gaussian" if mark else "poisson")
+    nbr = subset.neighbourhoods(edges, len(s.places), k)
+    scanner = subset.Scanner(nbr, max_window=max_window, full_period=full_period,
+                             kind="gaussian" if mark else "poisson")
     # a mark departs in either direction (low birth weight matters as much as high): both tails,
     # one null serving both (the Gaussian null is symmetric)
-    directions = (("up", 1.0, y_up), ("down", -1.0, y_down)) if mark else (("up", 1.0, y),)
-    # the null depends on (μ, φ, neighbourhoods, windows) only: one per field, shared by every
-    # scan of it, surrogates included (the harness re-scans the same μ many times)
-    null_key = (lens, s.field.id, s.tier, k, max_window, full_period, replicates, mark,
-                s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)))
-    out, nul = [], _NULLS.get(null_key)
-    for name, sign, data in directions:
-        found, nul = subset.scan(data, m, s.phi, scanner, alpha=alpha, replicates=replicates,
-                                 seed_parts=(lens, s.field.id, s.tier), nul=nul)
+    # both directions: an excess and a deficit (deficits show substitution and displacement, e.g.
+    # pneumonia deaths below their forecast while COVID-19 rose, evaluation 2026-10-04)
+    if mark:
+        directions = (("up", 1.0, y_up, m, scanner), ("down", -1.0, y_down, m, scanner))
+    else:
+        low = subset.Scanner(nbr, max_window=max_window, full_period=full_period, kind="poisson_low")
+        directions = (("up", 1.0, y, m, scanner), ("down", -1.0, y, m_low, low))
+    out = []
+    for name, sign, data, mm, sc in directions:
+        # the null depends on (μ, φ, neighbourhoods, windows, direction) only: one per field and
+        # direction, shared by every scan of it, surrogates included
+        null_key = (lens, name, s.field.id, s.tier, k, max_window, full_period, replicates, mark,
+                    s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)))
+        found, nul = subset.scan(data, mm, s.phi, sc, alpha=alpha, replicates=replicates,
+                                 seed_parts=(lens, name, s.field.id, s.tier), nul=_NULLS.get(null_key))
         _NULLS[null_key] = nul
         out += [Finding(lens, s.field.id, s.tier,
                         {"places": s.places[f.places].tolist(),
                          "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])], "direction": name},
                         float(np.exp(sign * f.observed / f.expected + sign * MARK_LOG)) if mark
-                        else f.ratio * RATE_RATIO,
+                        else _rr(f.observed, f.expected / (RATE_RATIO if name == "up" else 1 / RATE_RATIO)),
                         min(1.0, f.p * len(directions)),
                         {"score": f.score, "observed": f.observed,
-                         "expected": f.expected if mark else f.expected / RATE_RATIO,
+                         "expected": f.expected if mark else f.expected / (RATE_RATIO if name == "up" else 1 / RATE_RATIO),
                          "p_empirical": f.p_empirical, "null": "minimum effect",
                          "calibrated": bool(s.calibration.get("calibrated", True))}) for f in found]
+    out = [f for f in out if f.p <= alpha]   # α after the two directions' doubling
     ledger.complete(test, min([f.p for f in out], default=1.0), out[0].effect if out else None,
                     {"subsets": len(out), "null_loc": nul.loc, "null_scale": nul.scale,
                      "calibrated": s.calibration.get("calibrated")})
@@ -127,7 +136,7 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05) -> l
     hits = np.nonzero(control.bh(flat, q))[0]
     U, T = s.y.shape
     out = [Finding("outbreak", s.field.id, s.tier, {"places": [int(s.places[i // T])], "years": [int(s.years[i % T])]},
-                   float(s.y.flat[i] / max(s.mu.flat[i], 1e-12)), float(flat[i]),
+                   _rr(s.y.flat[i], s.mu.flat[i]), float(flat[i]),
                    {"observed": float(s.y.flat[i]), "expected": float(s.mu.flat[i]), "z": float(s.z.flat[i])})
            for i in hits]
     ledger.complete(test, float(flat.min()) if flat.size else 1.0, None, {"cells": int(ok.sum()), "hits": len(out)})
@@ -172,7 +181,7 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
         t = int(start[u])
         out.append(Finding("change_point", s.field.id, s.tier, {"places": [int(s.places[u])],
                                                                 "years": [int(s.years[t]), int(s.years[-1])]},
-                           float(RATE_RATIO * Y[u, t] / M[u, t]), float(p[u]),
+                           _rr(Y[u, t], M[u, t] / RATE_RATIO), float(p[u]),
                            {"observed": float(Y[u, t]), "expected": float(M[u, t] / RATE_RATIO), "windows": starts}))
     ledger.complete(test, float(p.min()), None, {"places": int(ok.sum()), "hits": len(out)})
     return out
@@ -217,11 +226,17 @@ def group_disparity(y_g: np.ndarray, mu_g: np.ndarray, places: np.ndarray, field
         overall = Y[u].sum() / M[u].sum()
         worst = int(np.nanargmax(np.abs(np.log(np.where(M[u] >= min_expected, sir_g, np.nan) / overall))))
         out.append(Finding("group_disparity", field_id, "B0", {"places": [int(places[u])], "groups": [worst]},
-                           float(sir_g[worst] / overall), float(p[u]),
+                           _rr(Y[u, worst], M[u, worst] * overall), float(p[u]),
                            {"G2": float(G2[u]), "df": int(df[u]), "gc": c, "sir": float(overall)}))
     ledger.complete(test, float(p.min()) if p.size else 1.0, None, {"places": int(tested.sum()), "gc": c,
                                                                     "hits": len(out)})
     return out
+
+
+def _rr(observed: float, expected: float) -> float:
+    """A rate ratio with a continuity correction, (y + ½)/(μ + ½): a zero count against a large
+    expectation is a strong deficit, not an infinite one (ranking used log 0, survey of IX)."""
+    return float((observed + 0.5) / (expected + 0.5))
 
 
 def _upper_tail(y: np.ndarray, mean: np.ndarray, phi_agg: np.ndarray) -> np.ndarray:

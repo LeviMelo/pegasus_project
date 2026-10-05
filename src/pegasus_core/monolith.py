@@ -341,14 +341,13 @@ class Monolith:
 
     # ---- fitting ----------------------------------------------------------------
 
-    def fit(self, outer: int = 25, inner: int = 300, tol: float = 0.02, log=print) -> Monolith:
+    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print) -> Monolith:
         start = time.time()
         self._initialise()
         changes = [np.inf]
         for it in range(outer):
-            # the mean need not be precise while the τ's still move: a third of the iterations until
-            # they settle (measured: L-BFGS uses all it is given here, chapter IX, evaluation 2026-10-04)
-            self._fit_mean(inner if max(changes) < 0.1 else max(inner // 3, 50))
+            # the mean need not be precise while the τ's still move: a few Newton steps until they settle
+            self._fit_mean(inner if max(changes) < 0.1 else 10)
             changes = self._update_taus()
             self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
@@ -382,27 +381,76 @@ class Monolith:
             self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
 
     def _fit_mean(self, iterations: int, tolerance: float = 1e-9) -> int:
-        """MAP of the mean given the τ's: L-BFGS on diagonally preconditioned parameters,
-        p = s ⊙ p̃ with s = 1/√(Fisher diagonal + τ·diag Q) per coordinate, so every coordinate's
-        curvature is about one. Unpreconditioned, curvatures spanned ~1e6 (b0 against a small
-        leaf's place effect) and L-BFGS ran its full 300 iterations every time (chapter IX).
-        Returns the iterations used."""
-        scale = self._preconditioner()
-        z = {k: (v.detach() / scale[k]).requires_grad_(True) for k, v in self.params.items()}
-        opt = torch.optim.LBFGS(list(z.values()), lr=1, max_iter=iterations, tolerance_grad=1e-7,
-                                tolerance_change=tolerance, history_size=30, line_search_fn="strong_wolfe")
-        leaves = self.params
+        """MAP of the mean given the τ's: truncated Newton–CG (OQ-6). Each step solves H d = −g by
+        conjugate gradients on exact Hessian–vector products (double backward through the
+        factorised total), preconditioned by the diagonal curvature, to a forcing tolerance
+        min(0.5, √‖g‖)·‖g‖ (Eisenstat–Walker); then an Armijo backtracking line search. Stops when
+        the objective's decrease falls below ``tolerance``. Returns the Newton steps taken.
 
-        def closure():
-            opt.zero_grad()
-            self.params = {k: z[k] * scale[k] for k in z}
+        It replaced L-BFGS, which used every iteration it was given and, from a start 14 units
+        above the optimum (scaled objective, chapter IX), diverged to NaN; Newton–CG reached a gap
+        of 1e-3 in one step (3 s) and 5e-6 in 40 s (evaluation 2026-10-04)."""
+        params = list(self.params.values())
+        steps = 0
+        for _ in range(iterations):
+            steps += 1
             loss = self.objective()
-            loss.backward()
-            return loss
+            grads = torch.autograd.grad(loss, params, create_graph=True)
+            g = torch.cat([q.reshape(-1) for q in grads]).detach()
+            gnorm = float(g.norm())
+            if gnorm < 1e-14:
+                break
+            curvature = torch.cat([(1.0 / v).reshape(-1) for v in self._preconditioner().values()]) ** 2
 
-        opt.step(closure)
-        self.params = {k: (z[k] * scale[k]).detach().requires_grad_(True) for k in leaves}
-        return int(opt.state[opt._params[0]]["n_iter"])
+            def hv(v: torch.Tensor, grads=grads) -> torch.Tensor:
+                parts, i = [], 0
+                for q in params:
+                    parts.append(v[i:i + q.numel()].view_as(q))
+                    i += q.numel()
+                out = torch.autograd.grad(grads, params, grad_outputs=parts, retain_graph=True)
+                return torch.cat([o.reshape(-1) for o in out]).detach()
+
+            x = torch.zeros_like(g)
+            r = -g
+            z = r / curvature
+            d = z.clone()
+            rz = float(r @ z)
+            forcing = min(0.5, gnorm ** 0.5) * gnorm
+            for _ in range(50):
+                Hd = hv(d)
+                dHd = float(d @ Hd)
+                if dHd <= 0:          # negative curvature: stop at the current iterate (or descend)
+                    if not x.any():
+                        x = -g / curvature
+                    break
+                alpha = rz / dHd
+                x = x + alpha * d
+                r = r - alpha * Hd
+                if float(r.norm()) < forcing:
+                    break
+                z = r / curvature
+                rz_new = float(r @ z)
+                d = z + (rz_new / rz) * d
+                rz = rz_new
+            f0, slope, step = float(loss), float(g @ x), 1.0
+            with torch.no_grad():
+                base = [q.detach().clone() for q in params]
+                for _ in range(30):
+                    i = 0
+                    for q, b0 in zip(params, base, strict=True):
+                        q.copy_(b0 + step * x[i:i + q.numel()].view_as(q))
+                        i += q.numel()
+                    f1 = float(self.objective())
+                    if np.isfinite(f1) and f1 <= f0 + 1e-4 * step * slope:
+                        break
+                    step /= 2
+                else:
+                    for q, b0 in zip(params, base, strict=True):
+                        q.copy_(b0)
+                    break
+            if f0 - f1 < tolerance * max(1.0, abs(f0)):
+                break
+        return steps
 
     def _preconditioner(self) -> dict[str, torch.Tensor]:
         """1/√(curvature) per raw parameter, in the units of the scaled objective."""
@@ -629,7 +677,7 @@ class MarkModel(Monolith):
         with torch.no_grad():
             self.params["b0"].fill_(float(np.sum(d.n * d.y) / np.sum(d.n)))
 
-    def fit(self, outer: int = 25, inner: int = 300, tol: float = 0.02, log=print) -> MarkModel:
+    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print) -> MarkModel:
         start = time.time()
         self._initialise()
         for it in range(outer):
