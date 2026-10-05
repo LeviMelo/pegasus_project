@@ -35,8 +35,45 @@ class EventCounts:
     key: dict
 
 
-def population(years: range | list[int], series: str = "POPSVS") -> pa.Table:
-    """Person-years by (u, year, sex, age 0..80): u 6-digit, sex 1 male / 2 female."""
+ACCOUNT = ("population_account", "population-account-2")   # the modelled product and its pinned version
+POPSVS_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]   # 18 bands, 80+ closes
+ACCOUNT_EDGES = list(range(0, 81, 5))   # 17 bands: the account's 0-4 holds ages 0 and 1-4, which POPSVS keeps apart
+POPSVS_PLACES = 5570
+_Z80 = 1.2815515655446004    # the 80% interval's half-width in standard deviations
+
+
+def age_edges(source: str | None = None) -> list[int]:
+    """The lower edges of the age bands a population source supports (the last band is open)."""
+    return list(ACCOUNT_EDGES if (source or config.population_source()) in ("account-2", "popsvs-5y") else POPSVS_EDGES)
+
+
+def population_key(source: str | None = None) -> dict:
+    """What an artefact built on a population adds to its key. POPSVS adds nothing (its keys predate the
+    switch and the data version already names the series); the account adds its source and model version."""
+    source = source or config.population_source()
+    return {} if source == "popsvs" else {"population": source, **({"population_model": ACCOUNT[1]} if source == "account-2" else {})}
+
+
+def population(years: range | list[int], series: str = "POPSVS", source: str | None = None) -> pa.Table:
+    """Person-years by (u, year, sex, age): u 6-digit, sex 1 male / 2 female.
+
+    ``source`` (default ``config.population_source()``): ``popsvs`` gives single years of age 0..80 (``series``
+    names the pegasus_data series). ``account-2`` gives pegasus_data's population account: age is the LOWER EDGE
+    of its five-year band (``age_edges``), and the column ``s`` is the standard deviation of log N, read from
+    its 80% interval. Not covered by the account (a municipality pooled with others in a comparable area,
+    16 of 5570) or before 2010 (years the account holds only for comparable areas): absent or an error."""
+    source = source or config.population_source()
+    if source == "account-2":
+        return _account_population(sorted(set(years)))
+    if source == "popsvs-5y":
+        # a control for measurements: POPSVS summed into the account's bands, to tell the source from the bands
+        pop = population(years, series)
+        con = duckdb.connect()
+        con.register("p", pop)
+        return con.execute("""SELECT u, year, sex, CAST(least(age // 5 * 5, 80) AS SMALLINT) AS age, sum(n) AS n
+                              FROM p GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
+    if source != "popsvs":
+        raise KeyError(f"unknown population source {source!r}: popsvs or account-2 (popsvs-5y: a control)")
     import pegasus_data as pg
 
     years = sorted(set(years))
@@ -57,6 +94,54 @@ def population(years: range | list[int], series: str = "POPSVS") -> pa.Table:
     return table
 
 
+def _account_population(years: list[int]) -> pa.Table:
+    """The population account's municipal rows (P8: a modelled input, read through pegasus_data's modelled
+    tier, with its uncertainty): (u, year, sex, age band edge, n, s)."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from pegasus_data.modelled import read_modelled
+
+    if min(years) < 2010 or max(years) > 2023:
+        raise LookupError(f"population-account-2 holds municipalities for 2010-2023 (comparable areas before); asked {years[0]}-{years[-1]}")
+    key = {"what": "population", "source": "account-2", "model": ACCOUNT[1], "years": years}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    raw, manifest = read_modelled(ACCOUNT[0], ACCOUNT[1], settings=SimpleNamespace(lake_dir=Path(config.data_root()) / "lake"))
+    con = duckdb.connect()
+    con.register("a", raw)
+    edges = ACCOUNT_EDGES
+    table = con.execute(f"""
+        SELECT CAST(CAST(place AS INTEGER) // 10 AS INTEGER) AS u, CAST(year AS SMALLINT) AS year,
+               CAST(sex AS TINYINT) AS sex,
+               CAST(CASE WHEN age_band = '80+' THEN 80 ELSE CAST(split_part(age_band, '-', 1) AS INTEGER) END AS SMALLINT) AS age,
+               CAST(population AS DOUBLE) AS n,
+               CASE WHEN population_lo > 0 AND population_hi > population_lo
+                    THEN (ln(population_hi) - ln(population_lo)) / (2 * {_Z80}) ELSE 0.0 END AS s
+        FROM a WHERE place_kind = 'municipality' AND place NOT LIKE '%+%' AND year IN ({', '.join(map(str, years))})
+        ORDER BY u, year, sex, age""").fetch_arrow_table()
+    if set(table.column("age").unique().to_pylist()) != set(edges):
+        raise ValueError("the account's age bands do not match ACCOUNT_EDGES")
+    store.put_table("gateway", key, table, {"source": f"pegasus_data modelled {ACCOUNT[0]}/{ACCOUNT[1]}",
+                                            "model": manifest.get("model")})
+    return table
+
+
+def _places_key(places: pa.Array | None, year: int) -> dict:
+    """A cache key part for a place set other than POPSVS's 5570 municipalities: counts are filtered to the
+    places given (the rest is unallocated), so the account's 5554 must not share an entry with POPSVS's."""
+    import hashlib
+
+    if places is None:
+        if config.population_source() == "popsvs":
+            return {}
+        places = population([year]).column("u")
+    codes = np.sort(np.asarray(places.to_numpy(zero_copy_only=False) if isinstance(places, pa.Array)
+                               else places.to_numpy(), dtype=np.int64))
+    return {} if len(codes) == POPSVS_PLACES else {"places": hashlib.sha256(codes.tobytes()).hexdigest()[:10]}
+
+
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
                  places: pa.Array | None = None) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
@@ -74,7 +159,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset)
-    key = {"what": "event_counts", "dataset": dataset, "event": event, "year": year, "classifier": column,
+    key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": column,
            "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1,
            **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
@@ -192,7 +277,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
         spec_class = primary[0] if primary else None
     when = _when(dataset)
-    key = {"what": "monthly_counts", "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
+    key = {"what": "monthly_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
            "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year),
            **({"code_list": True} if code_list else {})}
     cached = store.get_table("gateway", key)
@@ -273,7 +358,7 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     Values outside ``bounds`` (sentinels, impossible values) and missing values are counted
     as unallocated with their reason, never dropped silently."""
     strata = _strata(dataset)
-    key = {"what": "mark_moments", "dataset": dataset, "event": event, "year": year, "mark": mark,
+    key = {"what": "mark_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
            "bounds": list(bounds), "classifier": classifier, "data": config.data_version()}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -310,7 +395,7 @@ def code_list_counts(dataset: str, event: str, year: int, column: str,
     concatenated (SINASC's CODANOMAL: "Q02Q690"): an event counts once under each distinct
     category it carries. Events carrying none are the complement, not counted here."""
     strata = _strata(dataset)
-    key = {"what": "code_list_counts", "dataset": dataset, "event": event, "year": year, "column": column,
+    key = {"what": "code_list_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "column": column,
            "data": config.data_version()}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})

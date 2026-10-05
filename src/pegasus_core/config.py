@@ -32,6 +32,12 @@ def population_root() -> str:
                           "C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home")
 
 
+def population_source() -> str:
+    """The exposure the gateway reads unless a call names one: ``popsvs`` (IBGE's projection as the MoH
+    distributes it) or ``account-2`` (pegasus_data's modelled population account, with intervals; ADR-0010)."""
+    return os.environ.get("PEGASUS_POPULATION", "popsvs")
+
+
 @lru_cache(maxsize=1)
 def code_version() -> str:
     """This repository's commit, plus ``+dirty`` when the tree has changes."""

@@ -77,7 +77,7 @@ Leads are statistical objects, not conclusions.
 | **event type** | (dataset, grain, kind, classifiers with role, status, consolidation) |
 | **structure** | a shape over a variable's values: tree (parent table), list (membership table), ordinal, cyclic, with validity windows and crosswalks |
 | **graph** | a proximity graph over places or institutions: edges (from, to, weight, kind, vintage) |
-| **population** | person-years N by place × year × age × sex (× race), with uncertainty; the SUS-dependent variant; completeness by system, place and year. Two sources behind `gateway.population(source=)`: `popsvs` (IBGE's projection as the MoH distributes it, modelled, single years of age, no uncertainty) and `account-2` (pegasus_data's `population-account-2`, municipality × sex × five-year band × year 2010–2023, 80 % intervals read as σ of log N; ADR-0007). The source fixes the age bands (18 for POPSVS, 17 for the account, whose 0–4 holds ages 0 and 1–4); the cache keys carry the source and the model version |
+| **population** | person-years N by place × year × age × sex (× race), with uncertainty; the SUS-dependent variant; completeness by system, place and year. Two sources behind `gateway.population(source=)`: `popsvs` (IBGE's projection as the MoH distributes it, modelled, single years of age, no uncertainty) and `account-2` (pegasus_data's `population-account-2`, municipality × sex × five-year band × year 2010–2023, 80 % intervals read as σ of log N; ADR-0010). The source fixes the age bands (18 for POPSVS, 17 for the account, whose 0–4 holds ages 0 and 1–4); the cache keys carry the source and the model version |
 | **aggregates** | sparse non-empty cells of counts per event type and lattice; mark accumulator states (n, Σm, Σm², Σlog m, Σ(log m)², histogram on declared bins) |
 | **records and linked persons** | for cohort scans and agents |
 
@@ -598,6 +598,7 @@ Lead
 | `split_confirm()`, `corroborate(leads)`, `retier(leads)` | the honest split of the survey's leads, the independent-field test, the tier (§8.3) |
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
+
 
 ---
 
