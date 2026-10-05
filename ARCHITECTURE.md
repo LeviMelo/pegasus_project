@@ -539,6 +539,47 @@ A lead is selected on data and confirmed only by **units that took no part in th
 
 **The confirmation reserve is a reserved period** (`control.RESERVED_PERIODS`: SIM.DO 2024, final after every fit and survey on 2010-2023). `monolith.assemble` and `Session` refuse it (`ReservedPeriod`); only `confirm_many` opens it (`reserve_open`). A claim (a persistence claim: fixed places and direction) is tested once on it against the fit on the session's years, and its p-value enters one LOND stream (§8.2) whose state is read back from the ledger (`control.Reserve`, split `period:reserve`); the order of the claims is fixed before the reserve is read. Preliminary years are added only when final.
 
+### 8.4 Admission and minimum effects (calibrated, not set)
+
+**Admission.** A field enters a lens or pair scan if the harness's power curve for that lens (§10.3) gives power ≥ 0.5 for its reference effect:
+
+| scan | reference effect |
+|---|---|
+| lenses | rate ratio 1.5 over one macro-region-year |
+| pairs | ρ = 0.3 |
+
+Until the curves exist, the provisional rule: at least 1,000 events over the window and events in at least 5% of units. **A code tree is descended only while children stay admissible.**
+
+**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
+
+This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far: δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate).
+
+**Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
+
+| lens | H0 (boundary) | provisional |
+|---|---|---|
+| outbreak, change point, space–time | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
+| spatial cluster (B0) | the same | θ0 = 1.5, calibrated on the MSR negatives (evaluation 2026-10-05, lens gate) |
+| trend divergence | \|β_u − β̄_N(u)\| ≤ δ (or \|β_u\| ≤ δ), with δ a ratio between the period's first and last year, per scale | municipality 1.5 (time-shift negatives: 5/12 worlds at 1.2); region, state 1.2 (grid's lowest; 0 false leads in 30 worlds of each negative) |
+| group disparity | the groups' log-SIRs spread with sd ≤ sd_scale: G² against non-central χ²(df, sd²·Σμ/k), per scale | 0.2 at every scale, **not calibratable** on the spatial negatives: MSR holds only from sd 1.0 at the state (evaluation 2026-10-05-lens-positives) |
+| marks (all lenses) | \|mean log departure\| ≤ δ | 1.5%, calibrated on the PESO negatives (space–time MSR 30/30 worlds at 0.5%, 6/30 at 1%, 0/30 at 1.5% and 3%) |
+
+**Measured on IX** (evaluation 2026-10-04). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
+- hypertension (I10–I15): trend divergence fell from 116 to 38 places, group disparity from 121 to 7;
+- the strongest signals survived, São Borja among them.
+
+### 8.5 Mechanical overlap
+
+```
+overlap(X, Y) = |events(X) ∩ events(Y)| / min(|events(X)|, |events(Y)|)
+```
+
+It is computed from records by pegasus_data. Pairs with overlap > 0.05 are not tested for dependence: they are nested codes, alternative classifiers, or "any mention" against underlying cause. They may be tested on their non-shared events.
+
+---
+
+*(§8.4–§8.5 were lost in commit 4c0397a and restored from 4c0397a^ on 2026-10-05. Later changes to the values they name live in the evaluations: the marks floor of 1.5% (lens positives, redesign section); δ_E for E_b|Z in maps 0.1 (ADR-0013).)*
+
 ## 9. Leads, the ledger, use
 
 ### 9.1 The lead
