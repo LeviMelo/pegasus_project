@@ -21,6 +21,7 @@ Kleinman & Kulldorff 2010).
 
 from __future__ import annotations
 
+import hashlib
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -68,8 +69,21 @@ def _sign(kind: str) -> float:
     return -1.0 if kind == "poisson_low" else 1.0
 
 
+_NEIGHBOURHOODS: dict[tuple, np.ndarray] = {}
+
+
 def neighbourhoods(edges: np.ndarray, n: int, k: int) -> np.ndarray:
-    """Each node's k nearest nodes by graph hops (itself first), padded with −1 on small components."""
+    """Each node's k nearest nodes by graph hops (itself first), padded with −1 on small components.
+    A pure function of the graph: the result is kept (read-only) for the next field's scan of it."""
+    key = (n, k, hashlib.sha1(np.ascontiguousarray(edges).tobytes()).hexdigest())
+    if key not in _NEIGHBOURHOODS:
+        out = _neighbourhoods(edges, n, k)
+        out.flags.writeable = False
+        _NEIGHBOURHOODS[key] = out
+    return _NEIGHBOURHOODS[key]
+
+
+def _neighbourhoods(edges: np.ndarray, n: int, k: int) -> np.ndarray:
     adj: list[list[int]] = [[] for _ in range(n)]
     for a, b in edges:
         adj[a].append(int(b))
@@ -347,18 +361,23 @@ def _alternate(scanner: Scanner, Y, M):
     idx = torch.as_tensor(np.where(scanner.valid, scanner.nbr, 0), device=dev)
     zero = torch.zeros((), device=dev, dtype=Y.dtype)
     Mn = torch.where(valid[..., None], M[idx], zero)                                  # [C, K, T]
-    cm = torch.cat([torch.zeros(Mn.shape[:2] + (1,), device=dev, dtype=Y.dtype), Mn.cumsum(2)], 2)
-    Mw = cm[:, :, W[:, 1] + 1] - cm[:, :, W[:, 0]]                                   # [C, K, W]
+    # window sums as one product with the windows' indicator [T, W] (a cumsum over the short time axis
+    # was the largest kernel: 46% of the device time)
+    t = torch.arange(T, device=dev)[:, None]
+    ind = ((t >= W[:, 0][None]) & (t <= W[:, 1][None])).to(Y.dtype)
+    Mw = Mn @ ind                                                                    # [C, K, W]
     R, C = Y.shape[0], idx.shape[0]
     Yn = torch.where(valid[None, ..., None], Y[:, idx], zero)                         # [R, C, K, T]
-    cy = torch.cat([torch.zeros(Yn.shape[:3] + (1,), device=dev, dtype=Y.dtype), Yn.cumsum(3)], 3)
-    Yw = cy[..., W[:, 1] + 1] - cy[..., W[:, 0]]                                     # [R, C, K, W]
-    del Yn, cy
+    Yw = Yn @ ind                                                                    # [R, C, K, W]
+    del Yn
     P = valid.expand(R, -1, -1).clone()
     best = torch.zeros((R, C), device=dev, dtype=Y.dtype)
     win = torch.zeros((R, C), device=dev, dtype=torch.int64)
     for _ in range(scanner.sweeps):
-        sw = _torch_score((Yw * P[..., None]).sum(2), (Mw[None] * P[..., None]).sum(2), scanner.kind)
+        # Σ over the selected places of every window: a batched product, no [R, C, K, W] temporary
+        Pf = P.to(Y.dtype)
+        sw = _torch_score(torch.matmul(Pf.unsqueeze(2), Yw)[:, :, 0],
+                          torch.bmm(Pf.transpose(0, 1), Mw).transpose(0, 1), scanner.kind)
         win = sw.argmax(2)
         gi = win[..., None, None].expand(R, C, Yw.shape[2], 1)
         Yk = Yw.gather(3, gi)[..., 0]
@@ -410,15 +429,18 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
          nul: Null | None = None) -> tuple[list[Subset], Null]:
     """The recursive scan: report the best subset, condition it out (μ ← y on its cells; for the
     Gaussian score, its residuals ← 0), repeat until the next p exceeds α. Returns the subsets
-    with Gumbel and empirical p."""
-    nul = nul or null(scanner, m, phi, replicates, seed_parts)
-    m = m.copy()
+    with Gumbel and empirical p. The null is drawn only when the observed best score is positive
+    (a score of zero has p = 1 under any null): ``Null`` is None when no subset beat the expectation."""
+    m0, m = m, m.copy()          # the null is of the unconditioned expectation
     y = y.copy()
     out: list[Subset] = []
     for _ in range(max_subsets):
         s = scanner.best(y, m)
+        if s.score <= 0:
+            break
+        nul = nul or null(scanner, m0, phi, replicates, seed_parts)
         s.p, s.p_empirical = nul.p(s.score), nul.p_empirical(s.score)
-        if s.score <= 0 or s.p > alpha:
+        if s.p > alpha:
             break
         out.append(s)
         sel = np.ix_(s.places, np.arange(s.window[0], s.window[1] + 1), *s.free) if s.free else \

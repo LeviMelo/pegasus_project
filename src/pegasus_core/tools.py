@@ -17,6 +17,9 @@ tests what A selected on side B, `confirm` spends the reserve (side R), `corrobo
 from __future__ import annotations
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +47,24 @@ SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergen
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
 
+SURVEY_THREAD_GB = 0.5      # host memory one scanning thread adds over the loaded model (measured, evaluation 2026-10-05)
+
+
+def survey_workers() -> int:
+    """Threads for a survey: PEGASUS_SURVEY_WORKERS, else a quarter of the cores (at most 4), cut to what
+    the free memory carries (this much per thread, and 3 GB left for the machine)."""
+    if os.environ.get("PEGASUS_SURVEY_WORKERS"):
+        return max(1, int(os.environ["PEGASUS_SURVEY_WORKERS"]))
+    n = min(4, max(1, (os.cpu_count() or 4) // 4))
+    try:
+        import psutil
+
+        n = min(n, max(1, int((psutil.virtual_memory().available / 2 ** 30 - 3) / SURVEY_THREAD_GB)))
+    except ImportError:
+        pass
+    return n
+
+
 @dataclass
 class Session:
     dataset: str
@@ -52,6 +73,8 @@ class Session:
     graph: str = graphs.DEFAULT
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
+    _local: threading.local = field(default_factory=threading.local, init=False, repr=False)   # .memo: one field's tiers
+    _edges: np.ndarray | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph)
@@ -78,7 +101,13 @@ class Session:
         return reg.walk(block, admissible)
 
     def surprise(self, node: str, tier: str = "B1") -> surprise.Surprise:
-        return self.expectations.surprise(node, tier)
+        memo = getattr(self._local, "memo", None)       # set while a survey runs the lenses of one field
+        if memo is not None and (node, tier) in memo:
+            return memo[(node, tier)]
+        s = self.expectations.surprise(node, tier)
+        if memo is not None:
+            memo[(node, tier)] = s
+        return s
 
     def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         """Observed and B0-expected counts by (place, year, group), B0 re-levelled per year and
@@ -98,8 +127,13 @@ class Session:
         return {"places": s.places, "years": s.years, "observed": s.y, "expected": s.mu}
 
     def edges(self) -> np.ndarray:
-        places = self.expectations.model(next(iter(self._blocks()))).data.places
-        return graphs.edges(places, self.graph)
+        """The graph over the session's places, built once. The places are the population's, the same in
+        every block: an already loaded model gives them (loading another block's model for them cost
+        minutes and gigabytes, survey profile 2026-10-05)."""
+        if self._edges is None:
+            block = next(iter(self.expectations._models), None) or next(iter(self._blocks()))
+            self._edges = graphs.edges(self.expectations.model(block).data.places, self.graph)
+        return self._edges
 
     def _blocks(self) -> list[str]:
         return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)})
@@ -118,21 +152,46 @@ class Session:
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
 
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
-               "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print) -> list[leads.Lead]:
-        """The scheduled pass over every admissible field; returns the leads admitted."""
+               "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
+               workers: int | None = None) -> list[leads.Lead]:
+        """The scheduled pass over every admissible field; returns the leads admitted. Fields are scanned by
+        ``workers`` threads (default `survey_workers`; 1: in order, in this thread) over the one loaded model;
+        the lenses of a field share its tiers' expectations. The findings are merged in the fields' order,
+        so the leads do not depend on the number of workers."""
         found: dict[str, list[lenses.Finding]] = {}
-        for block in blocks or self._blocks():
-            for f in self.fields(block):
+        log_lock = threading.Lock()
+
+        def one(block: str, f: fields.Field) -> list[tuple[str, list[lenses.Finding]]]:
+            self._local.memo = {}      # B2 serves three lenses: computed once per field
+            out = []
+            try:
                 for lens in lens_names:
                     kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster", "change_point") else {}
                     try:
                         hits = self.scan(f.node, lens, **kw)
                     except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
-                        log(f"FAIL {f.id} {lens}: {type(exc).__name__}: {exc}")
+                        with log_lock:
+                            log(f"FAIL {f.id} {lens}: {type(exc).__name__}: {exc}")
                         continue
-                    family = f"{lens}|{LENS_TIERS[lens]}|{block}"
-                    found.setdefault(family, []).extend(hits)
-                    log(f"{f.id} {lens}: {len(hits)}")
+                    out.append((f"{lens}|{LENS_TIERS[lens]}|{block}", hits))
+                    with log_lock:
+                        log(f"{f.id} {lens}: {len(hits)}")
+            finally:
+                self._local.memo = None
+            return out
+
+        tasks = [(block, f) for block in blocks or self._blocks() for f in self.fields(block)]
+        n = survey_workers() if workers is None else max(1, workers)
+        if n > 1 and tasks:
+            self.edges()
+            results = [one(*tasks[0])]                             # the first field warms the shared caches alone
+            with ThreadPoolExecutor(n) as pool:
+                results += pool.map(lambda t: one(*t), tasks[1:])
+        else:
+            results = [one(*t) for t in tasks]
+        for res in results:
+            for family, hits in res:
+                found.setdefault(family, []).extend(hits)
         # error control across families: families selected by Simes, BH inside at the reduced level
         families = {k: np.array([h.p for h in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)

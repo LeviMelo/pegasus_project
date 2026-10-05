@@ -101,7 +101,8 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
                     s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)))
         found, nul = subset.scan(data, mm, s.phi, sc, alpha=alpha, replicates=replicates,
                                  seed_parts=(lens, name, s.field.id, s.tier), nul=_NULLS.get(null_key))
-        _NULLS[null_key] = nul
+        if nul is not None:
+            _NULLS[null_key] = nul
         out += [Finding(lens, s.field.id, s.tier,
                         {"places": s.places[f.places].tolist(),
                          "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])], "direction": name},
@@ -114,7 +115,7 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
                          "calibrated": bool(s.calibration.get("calibrated", True))}) for f in found]
     out = [f for f in out if f.p <= alpha]   # α after the two directions' doubling
     ledger.complete(test, min([f.p for f in out], default=1.0), out[0].effect if out else None,
-                    {"subsets": len(out), "null_loc": nul.loc, "null_scale": nul.scale,
+                    {"subsets": len(out), "null_loc": getattr(nul, "loc", None), "null_scale": getattr(nul, "scale", None),
                      "calibrated": s.calibration.get("calibrated")})
     return out
 

@@ -273,7 +273,8 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 **Memory:**
 - no array larger than the population tensor × the profile nodes of one block;
 - GPU work is chunked to 4 GB;
-- the non-empty cells stream in batches from Parquet.
+- the non-empty cells stream in batches from Parquet;
+- a survey scans fields on `PEGASUS_SURVEY_WORKERS` threads (default a quarter of the cores, at most 4, cut to free RAM) over one loaded model, the lenses of a field sharing its tiers' expectations; the scan's null runs on the GPU in batches (evaluation 2026-10-05-survey-throughput).
 
 **Budgets** are measured in phase 1 and recorded as evaluation entries. **The starting setup:** SIM, SINASC, SIH and SINAN, municipality × year, 2010–2023, 18 ages × 2 sexes, codes to three characters, population tensor 2.8 M cells. Its estimates, to be confirmed:
 

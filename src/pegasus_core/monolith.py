@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import torch
@@ -99,11 +100,10 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population)
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
-    uidx = {int(c): i for i, c in enumerate(places)}
     tidx = {int(y): i for i, y in enumerate(years)}
     N = np.zeros((len(places), len(years), 2 * nB))
-    pu = np.array([uidx[int(c)] for c in pop.column("u").to_numpy()])
-    pt = np.array([tidx[int(y)] for y in pop.column("year").to_numpy()])
+    pu = _index_of(places, pop.column("u").to_numpy())
+    pt = _index_of(years, pop.column("year").to_numpy())
     pg = (pop.column("sex").to_numpy().astype(int) - 1) * nB + age_band(pop.column("age").to_numpy(), edges)
     np.add.at(N, (pu, pt, pg), pop.column("n").to_numpy())
     S = None
@@ -146,9 +146,13 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     for year in years:
         ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args)
         tab = ec.counts
-        cat = np.array([c if block == "*" else c[:3] for c in tab.column("code").to_pylist()])
-        in_block = np.array([c in eidx for c in cat])
-        other = ~in_block & np.array([level_of.get(c) is None for c in cat])
+        # the codes are few and the rows many: decide once per distinct code, then index
+        enc = pc.dictionary_encode(tab.column("code").combine_chunks() if block == "*" else
+                                   pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, 3))
+        cats = enc.dictionary.to_pylist()
+        row_code = enc.indices.to_numpy(zero_copy_only=False)
+        in_block = np.array([c in eidx for c in cats], dtype=bool)[row_code]
+        other = ~in_block & np.array([level_of.get(c) is None for c in cats], dtype=bool)[row_code]
         unallocated["code not in ICD-10 tree"] = unallocated.get("code not in ICD-10 tree", 0) + int(
             tab.column(weight).to_numpy()[other].sum())
         for r in ec.unallocated.to_pylist():
@@ -164,9 +168,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
             in_block = in_block & inside
         sub = tab.filter(pa.array(in_block))
         time_index = (ym[in_block] if grain == "month" else np.full(sub.num_rows, tidx[int(year)], dtype=np.int64))
-        parts.append((np.array([eidx[c if block == "*" else c[:3]] for c in sub.column("code").to_pylist()],
-                               dtype=np.int64),
-                      np.array([uidx[int(x)] for x in sub.column("u").to_numpy()], dtype=np.int64),
+        parts.append((np.array([eidx.get(c, -1) for c in cats], dtype=np.int64)[row_code[in_block]],
+                      _index_of(places, sub.column("u").to_numpy()),
                       time_index.astype(np.int64),
                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
                        + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64),
@@ -206,6 +209,16 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         data.grain = "month"
         data.month_of_year = np.tile(np.arange(12), len(years))
     return data
+
+
+def _index_of(sorted_values: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Position of each value in a sorted array of distinct values; a value the array lacks raises."""
+    values = np.asarray(values).astype(sorted_values.dtype, copy=False)
+    pos = np.searchsorted(sorted_values, values)
+    if len(values) and (pos.max() >= len(sorted_values) or (sorted_values[pos] != values).any()):
+        raise KeyError(f"{int((sorted_values[np.minimum(pos, len(sorted_values) - 1)] != values).sum())} values "
+                       "outside the index")
+    return pos.astype(np.int64)
 
 
 def _chapter(code: str, parent_of: dict[str, str | None]) -> str | None:

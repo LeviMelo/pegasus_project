@@ -419,11 +419,15 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
 
     def fit(sel: np.ndarray) -> tuple[float, float]:
         yy, mm, ic = y[sel], mu[sel], inv_c[sel]
+        pos = yy > 0           # a zero count adds only φ log(φ/(φ+μ)): the gamma terms are needed where y > 0 (sparse fields: few)
+        yp, mp, ip = yy[pos], mm[pos], ic[pos]
 
         def nll(log_k: float) -> float:
-            phi = 1.0 / (ic + np.exp(log_k))
-            return -float(np.sum(special.gammaln(yy + phi) - special.gammaln(phi) + phi * np.log(phi / (phi + mm))
-                                 + yy * np.log(mm / (phi + mm))))
+            k = np.exp(log_k)
+            phi = 1.0 / (ic + k)
+            phi_p = 1.0 / (ip + k)
+            return -float(np.sum(phi * np.log(phi / (phi + mm)))
+                          + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp))))
 
         res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
         h = 0.25
