@@ -31,6 +31,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 import torch
 
 from . import config, monolith
@@ -141,6 +142,7 @@ class Posterior:
         self._W = W
         self._noise = {draws: noise} if draws else {}
         self._diag = None
+        self._blocks = None
 
     def _info_mul(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
         W = self._W
@@ -183,13 +185,65 @@ class Posterior:
 
     # ---- conjugate gradients ------------------------------------------------------------------
 
-    def solve(self, rhs: torch.Tensor, tol: float = 1e-6, maxiter: int = 1000) -> tuple[torch.Tensor, Solve]:
-        """H x = rhs by diagonally preconditioned CG (H is singular along the centring's null
-        space, which rhs and every CG direction's image leave alone)."""
-        M = self.diagonal()
+    def _block_preconditioner(self) -> list:
+        """Block-Jacobi per effect, in effect space: B_e = diag(Σ w over the cells an entry touches)
+        + τ_e Q_e, one sparse LU per batch row. The diagonal alone treats a smooth ICAR/RW mode as
+        stiff as a rough one; with τ up to 1e8 (effects shrunk to nothing) that is a condition number
+        near 1e5 and CG stalls. The coupling *between* effects (s, v, v_cat all explain the same
+        a[e, u]) is left to CG: it costs a factor of about the number of such effects."""
+        if self._blocks is not None:
+            return self._blocks
+        W, x_hat = self._W, self.m.effects()
+        with torch.no_grad():
+            xs = tuple(x_hat[k] for k in self.names)
+            _, vj = torch.func.vjp(lambda t: self.design(dict(zip(self.names, t, strict=True))), xs)
+            d = vj((W["u"], W["t"], W["g"]))[0]
+        blocks: list = [("diag", d[0].clamp_min(1e-12))]
+        for (name, c), di in zip(self.m.components.items(), d[1:], strict=True):
+            Q = c.shape.Q.tocsr()
+            dd = di.reshape(c.batch, -1).cpu().numpy()
+            if (Q - sp.diags(Q.diagonal())).nnz == 0:
+                tot = dd + c.tau * Q.diagonal()[None, :]
+                blocks.append(("diag", torch.as_tensor(np.maximum(tot, 1e-12 * max(tot.max(), 1e-300)),
+                                                       dtype=self.dtype, device=self.device).reshape(di.shape)))
+                continue
+            lus = []
+            for row in dd:
+                A = (c.tau * Q + sp.diags(row)).tocsc()
+                ridge = 1e-8 * A.diagonal().max() + 1e-12
+                lus.append(spla.splu(A + ridge * sp.eye(A.shape[0], format="csc")))
+            blocks.append(("lu", lus))
+        self._blocks = blocks
+        return blocks
+
+    def _apply_blocks(self, xs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
+        out = []
+        for (kind, data), x in zip(self._block_preconditioner(), xs, strict=True):
+            if kind == "diag":
+                out.append(x / data)
+            else:
+                v = x.reshape(len(data), -1).cpu().numpy()
+                r = np.stack([lu.solve(row) for lu, row in zip(data, v, strict=True)])
+                out.append(torch.as_tensor(r, dtype=self.dtype, device=self.device).reshape(x.shape))
+        return tuple(out)
+
+    def precondition(self, r: torch.Tensor, kind: str = "block") -> torch.Tensor:
+        """M⁻¹ r. ``block``: Cᵀ B⁻¹ C r (C, the centring, is an orthogonal projector, so this is
+        symmetric positive semi-definite on the range CG lives in); ``diag``: r / diag H."""
+        if kind == "diag":
+            return r / self.diagonal()
+        xs = self.effects_of(r)
+        z = self._apply_blocks(tuple(xs[k] for k in self.names))
+        return self._vjp((torch.zeros_like(self._W["u"]), torch.zeros_like(self._W["t"]),
+                          torch.zeros_like(self._W["g"]), z))[0]
+
+    def solve(self, rhs: torch.Tensor, tol: float = 1e-4, maxiter: int = 1000,
+              precond: str = "block") -> tuple[torch.Tensor, Solve]:
+        """H x = rhs by preconditioned CG (H is singular along the centring's null space, which
+        rhs and every CG direction's image leave alone)."""
         x = torch.zeros_like(rhs)
         r = rhs.clone()
-        z = r / M
+        z = self.precondition(r, precond)
         d = z.clone()
         rz = float(r @ z)
         bnorm = float(rhs.norm())
@@ -201,7 +255,7 @@ class Posterior:
             r = r - alpha * Hd
             if float(r.norm()) <= tol * bnorm:
                 break
-            z = r / M
+            z = self.precondition(r, precond)
             rz_new = float(r @ z)
             d = z + (rz_new / rz) * d
             rz = rz_new
@@ -230,7 +284,7 @@ class Posterior:
             out.append((np.sqrt(c.tau) * z).reshape(shape))
         return tuple(out)
 
-    def sample(self, draws: int, seed: int | None = None, tol: float = 1e-5, log=None) -> list[dict[str, torch.Tensor]]:
+    def sample(self, draws: int, seed: int | None = None, tol: float = 1e-4, precond: str = "block", log=None) -> list[dict[str, torch.Tensor]]:
         """``draws`` posterior displacements, as centred-effect dictionaries x̂ + C δ_s."""
         t0 = time.time()
         seed = seed if seed is not None else config.seed("laplace", self.m.key())
@@ -242,7 +296,7 @@ class Posterior:
         self.draws, self.solves = [], []
         for s in range(draws):
             rhs = self._vjp((la[s], lb[s], lc[s], self._prior_noise(gen)))[0]
-            delta, info = self.solve(rhs, tol=tol)
+            delta, info = self.solve(rhs, tol=tol, precond=precond)
             self.solves.append(info)
             with torch.no_grad():
                 dx = self.effects_of(delta)
