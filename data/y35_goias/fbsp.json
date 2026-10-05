@@ -1,0 +1,25 @@
+{
+ "note": "FBSP Anuario Brasileiro de Seguranca Publica, 'Mortes decorrentes de intervencoes policiais' (police on and off duty, civil and military), Goias and Brazil. Values read from the primary PDF tables by word position (pymupdf); 'pdf_page' is the 1-based page of the PDF file. 'first' is the value in the edition that first published the year, 'latest' in the latest edition that carries it (the editions revise earlier years). 2012-2014 for Goias: not obtained (see evaluation).",
+ "base_url": "https://forumseguranca.org.br/wp-content/uploads/",
+ "editions": {
+  "2017": {"file": "2017/12/ANUARIO_11_2017.pdf", "years": "2015-2016", "pdf_page": 13},
+  "2019": {"file": "https://static.poder360.com.br/2019/09/forumseguranca-Anuario-2019-FINAL-v3.pdf (mirror of the ano 13 PDF)", "years": "2017-2018", "pdf_page": 63},
+  "2020": {"file": "2020/10/anuario-14-2020-v1-interativo.pdf", "years": "2018-2019", "pdf_page": 83},
+  "2021": {"file": "2021/07/anuario-2021-completo-v6-bx.pdf", "years": "2019-2020", "pdf_page": 57},
+  "2022": {"file": "2022/06/anuario-2022.pdf", "years": "2020-2021", "pdf_page": 75},
+  "2023": {"file": "2023/07/anuario-2023.pdf", "years": "2021-2022", "pdf_page": 59},
+  "2024": {"file": "2024/07/anuario-2024.pdf", "years": "2022-2023", "pdf_page": 57}
+ },
+ "GO": {"2015": {"first": 141, "latest": 141, "ed": "2017"}, "2016": {"first": 209, "latest": 209, "ed": "2017"},
+        "2017": {"first": 265, "latest": 265, "ed": "2019"}, "2018": {"first": 425, "latest": 429, "ed": "2019,2020"},
+        "2019": {"first": 535, "latest": 533, "ed": "2020,2021"}, "2020": {"first": 631, "latest": 631, "ed": "2021,2022"},
+        "2021": {"first": 576, "latest": 564, "ed": "2022,2023"}, "2022": {"first": 538, "latest": 539, "ed": "2023,2024"},
+        "2023": {"first": 517, "latest": 517, "ed": "2024"}},
+ "BR": {"2013": {"latest": 2212, "ed": "2021 p.59 chart"}, "2014": {"latest": 3146, "ed": "2021 p.59 chart"},
+        "2015": {"first": 3330, "latest": 3330, "ed": "2017"}, "2016": {"first": 4223, "latest": 4220, "ed": "2017,2021 chart"},
+        "2017": {"first": 5179, "latest": 5179, "ed": "2019"}, "2018": {"first": 6220, "latest": 6175, "ed": "2019,2020"},
+        "2019": {"first": 6357, "latest": 6351, "ed": "2020,2021"}, "2020": {"first": 6416, "latest": 6413, "ed": "2021,2022"},
+        "2021": {"first": 6145, "latest": 6493, "ed": "2022,2023"}, "2022": {"first": 6429, "latest": 6455, "ed": "2023,2024"},
+        "2023": {"first": 6393, "latest": 6393, "ed": "2024"}},
+ "GO_2017_breakdown_ed2019_p52": {"2017": {"civil_on": 3, "military_on": 237, "civil_off": 1, "military_off": 24}, "2018": {"civil_on": 0, "military_on": 416, "civil_off": 1, "military_off": 8}}
+}
