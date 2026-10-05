@@ -543,46 +543,66 @@ class Monolith:
             c.tau = new
         return changes
 
-    def _dispersion(self) -> float:
-        """φ by maximum likelihood with μ fixed (ARCHITECTURE §5.2). Non-empty cells enter exactly;
-        the empty cells' Σ log p(0) = −φ Σ_empty log(1 + μ/φ) is the sum over every cell minus the
-        non-empty cells', the former streamed leaf by leaf (one [U, T, G] slab at a time, P10).
-
-        Two estimators failed first, on chapter IX 2010–2023: moments (Pearson residuals of cells
-        with tiny μ and y ≥ 1 dominate: φ = 0.013), and a power series for the empty cells
-        (they hold 1.95 M of 4.99 M expected events, μ/φ is not small, the series diverges)."""
+    def nb_loglik(self, phi: float | np.ndarray, x: dict[str, torch.Tensor] | None = None,
+                  places: np.ndarray | None = None) -> float:
+        """The NB log-likelihood of every cell of the block at fixed μ (ARCHITECTURE §5.2), ``phi`` a
+        scalar or a value per place, over the cells of ``places`` (a boolean mask; None: all). Non-empty
+        cells enter exactly; the empty cells' Σ log p(0) = −φ Σ_empty log(1 + μ/φ) is the sum over every
+        cell minus the non-empty cells', the former streamed leaf by leaf (one [U, T, G] slab at a time,
+        P10). ``x`` overrides the fitted effects (a forecast: held-out years)."""
         with torch.no_grad():
-            x = self.effects()
+            x = self.effects() if x is None else x
             mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
             lp = self._leaf_place(x)                                              # [E, U]
             lin = (self._time(x)[:, None, :]
                    + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None])
             base = torch.exp(lin)                                                 # [K, U, T]
             prof = torch.exp(x["f_all"] + x["f_grp"])                             # [K, G]
-        y = self.data.y
+        y, u = self.data.y, self.data.u
+        sel = slice(None)
+        keep = np.ones(self.N.shape[0], dtype=bool) if places is None else np.asarray(places, dtype=bool)
+        if places is not None:
+            cell = keep[u]
+            mu, y, u = mu[cell], y[cell], u[cell]
+            sel = torch.as_tensor(keep, device=self.device)
+        per_place = np.ndim(phi) > 0
+        ph = np.asarray(phi, dtype=float)[u] if per_place else float(phi)
+        full = (special.gammaln(y + ph) - special.gammaln(ph) - special.gammaln(y + 1)
+                + ph * np.log(ph / (ph + mu)) + y * np.log(mu / (ph + mu)))
+        divisor = (torch.as_tensor(np.asarray(phi, dtype=float)[keep], dtype=self.dtype, device=self.device)[:, None, None]
+                   if per_place else float(phi))
+        total = 0.0                                      # Σ_all φ log(1 + μ/φ)
+        with torch.no_grad():
+            for e in range(lp.shape[0]):
+                k = int(self.grp[e])
+                m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
+                total += float((divisor * torch.log1p(m / divisor)).sum())
+        return float(full.sum()) - (total - float((ph * np.log1p(mu / ph)).sum()))
 
-        def all_cells_log1p(phi: float) -> float:
-            total = 0.0
-            with torch.no_grad():
-                for e in range(lp.shape[0]):
-                    k = int(self.grp[e])
-                    m = lp[e][:, None, None] * base[k][:, :, None] * self.N * prof[k][None, None, :]
-                    total += float(torch.log1p(m / phi).sum())
-            return total
+    def _dispersion(self, places: np.ndarray | None = None) -> float:
+        """φ by maximum likelihood with μ fixed (ARCHITECTURE §5.2): the maximiser of `nb_loglik` over
+        the cells of ``places`` (a boolean mask over the block's places; None: all of them).
 
+        Two estimators failed first, on chapter IX 2010–2023: moments (Pearson residuals of cells
+        with tiny μ and y ≥ 1 dominate: φ = 0.013), and a power series for the empty cells
+        (they hold 1.95 M of 4.99 M expected events, μ/φ is not small, the series diverges)."""
         def nll(log_phi: float) -> float:
-            phi = float(np.exp(log_phi))
-            full = (special.gammaln(y + phi) - special.gammaln(phi) - special.gammaln(y + 1)
-                    + phi * np.log(phi / (phi + mu)) + y * np.log(mu / (phi + mu)))
-            empty = -phi * (all_cells_log1p(phi) - float(np.log1p(mu / phi).sum()))
-            return -(float(full.sum()) + empty)
+            return -self.nb_loglik(float(np.exp(log_phi)), places=places)
 
         res = optimize.minimize_scalar(nll, bounds=(np.log(1e-3), np.log(1e6)), method="bounded",
                                        options={"xatol": 1e-3})
         phi = float(np.exp(res.x))
-        self.dispersion_check = {"phi": phi, "evaluations": int(res.nfev),
-                                 "loglik_gain_over_poisson": float(nll(np.log(1e6)) - res.fun)}
+        if places is None:
+            self.dispersion_check = {"phi": phi, "evaluations": int(res.nfev),
+                                     "loglik_gain_over_poisson": float(nll(np.log(1e6)) - res.fun)}
         return float("inf") if phi > 0.99e6 else phi
+
+    def dispersion_by(self, labels: np.ndarray) -> np.ndarray:
+        """φ per place when each group of places (``labels``, one per place) has its own, by `_dispersion`."""
+        out = np.empty(len(labels))
+        for g in np.unique(labels):
+            out[labels == g] = self._dispersion(labels == g)
+        return out
 
     # ---- prediction ---------------------------------------------------------------
 

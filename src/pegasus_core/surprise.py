@@ -36,6 +36,12 @@ NO_INFORMATION = 8   # μ ≈ 0: the cell carries no information
 KS_TOLERANCE = 0.03
 KS_REGION_TOLERANCE = 0.05
 
+# the levels of the place-year dispersion component's hierarchy below its field-wide value
+# (ARCHITECTURE §5.2): each level's estimate is shrunk to its parent's, by the between-group
+# variance the data themselves show. () is one value per field.
+DISPERSION_LEVELS: tuple[str, ...] = ("macro", "state")
+MIN_DISPERSION_CELLS = 200
+
 
 @dataclass
 class Surprise:
@@ -154,7 +160,7 @@ class Expectations:
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 1}
+        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 2}
         if cache:
             hit = store.get_table("surprise", key)
             if hit is not None:
@@ -237,12 +243,16 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
     pop = m.data.N.sum(axis=2)
     seed = config.seed(f.id, tier, "pit", m.key())
     cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
-    extra = place_year_phi(y, mu, cells)
-    attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra))]
+    extra = place_year_phi(y, mu, cells, *_dispersion_levels(m.data.places, macro))
+    extra_cells = np.asarray(extra)[:, None] if np.ndim(extra) else extra
+    attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra_cells))]
     for source, phi, phi_agg in attempts:
         u, z = randomised_pit(y, mu, phi_agg, seed)
         cal = calibration(u, mu, macro)
-        cal["phi_source"], cal["phi"] = source, phi
+        cal["phi_source"] = source
+        cal["phi"] = float(np.median(phi)) if np.ndim(phi) else float(phi)
+        if np.ndim(phi):
+            cal["phi_by_macroregion"] = {str(r): float(np.median(phi[macro == r])) for r in np.unique(macro)}
         if cal["calibrated"]:
             break
     flags = np.zeros(y.shape, dtype=np.int8)
@@ -334,22 +344,66 @@ def aggregate_phi(mu: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:
     return np.divide(phi * mu ** 2, mu2, out=np.full(mu.shape, np.inf), where=mu2 > 0)
 
 
-def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray) -> float:
+def _dispersion_levels(places: np.ndarray, macro: np.ndarray) -> list[np.ndarray]:
+    """The grouping labels of ``DISPERSION_LEVELS``, coarse to fine, one per place."""
+    labels = {"macro": np.asarray(macro).astype(str), "state": (np.asarray(places) // 10000).astype(str)}
+    return [labels[k] for k in DISPERSION_LEVELS]
+
+
+def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray) -> float | np.ndarray:
     """The field's place-year variance component, by maximum likelihood on its aggregate cells:
     Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
     within a place-year share variation the expectation does not model; summing them adds it
-    coherently, which the independent-cell φ_cells misses (a U-shaped PIT, chapter IX B1)."""
+    coherently, which the independent-cell φ_cells misses (a U-shaped PIT, chapter IX B1).
+
+    With no ``levels`` one value for the field. With grouping labels per place, coarse to fine
+    (macro-region, then state), the component varies by group: each group's log(1/φ_extra) is
+    estimated by maximum likelihood on its own cells, then shrunk toward its parent's value by
+    the between-group variance τ² the groups themselves show (a random-effects moment estimate
+    on the observed information, so a group with little information keeps its parent's value).
+    Returns φ_extra per place."""
     ok = mu > 1e-9
-    yy, mm, pc = y[ok], mu[ok], phi_cells[ok]
-    inv_c = np.where(np.isfinite(pc), 1.0 / pc, 0.0)
+    inv_c = np.where(np.isfinite(phi_cells), 1.0 / phi_cells, 0.0)
+    lo, hi = -np.log(1e7), -np.log(1e-2)         # bounds of log κ, κ = 1/φ_extra
 
-    def nll(log_extra: float) -> float:
-        phi = 1.0 / (inv_c + np.exp(-log_extra))
-        return -float(np.sum(special.gammaln(yy + phi) - special.gammaln(phi) + phi * np.log(phi / (phi + mm))
-                             + yy * np.log(mm / (phi + mm))))
+    def fit(sel: np.ndarray) -> tuple[float, float]:
+        yy, mm, ic = y[sel], mu[sel], inv_c[sel]
 
-    res = optimize.minimize_scalar(nll, bounds=(np.log(1e-2), np.log(1e7)), method="bounded")
-    return float("inf") if res.x > np.log(0.99e7) else float(np.exp(res.x))
+        def nll(log_k: float) -> float:
+            phi = 1.0 / (ic + np.exp(log_k))
+            return -float(np.sum(special.gammaln(yy + phi) - special.gammaln(phi) + phi * np.log(phi / (phi + mm))
+                                 + yy * np.log(mm / (phi + mm))))
+
+        res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
+        h = 0.25
+        info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2     # observed information in log κ
+        return float(res.x), max(info, 1e-9)
+
+    def to_phi(log_k):
+        return np.where(np.asarray(log_k) < lo + 0.01, np.inf, np.exp(-np.asarray(log_k)))
+
+    top, _ = fit(ok)
+    if not levels:
+        return float(to_phi(top))
+    cur = np.full(mu.shape[0], top)
+    for lab in levels:
+        new = cur.copy()
+        found = []
+        for g in np.unique(lab):
+            rows = lab == g
+            sel = ok & rows[:, None]
+            if sel.sum() >= MIN_DISPERSION_CELLS:
+                est, info = fit(sel)
+                found.append((rows, est - cur[rows][0], 1.0 / info))
+        if found:
+            d = np.array([f[1] for f in found])
+            v = np.array([f[2] for f in found])
+            w = 1.0 / v
+            tau2 = max(0.0, (float(np.sum(w * d ** 2)) - len(d)) / float(np.sum(w)))      # E Σ w d² = τ² Σ w + n
+            for rows, dg, vg in found:
+                new[rows] = cur[rows][0] + dg * tau2 / (tau2 + vg)
+        cur = new
+    return to_phi(cur)
 
 
 def randomised_pit(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, seed: int) -> tuple[np.ndarray, np.ndarray]:

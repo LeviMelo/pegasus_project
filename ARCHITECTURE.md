@@ -227,7 +227,8 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **Non-empty cells enter exactly.**
 - **Empty cells enter through log p(0) = −φ log(1 + μ/φ).** The sum over every cell is streamed one leaf at a time: a [U, T, G] slab, the size of the population tensor (P10). One evaluation over chapter IX's 216 M implicit cells takes about a second; the one-dimensional optimum needs about 14.
 - **This text replaces a Pearson moment equation, measured wrong on chapter IX 2010–2023** (2026-10-04). Cells with tiny μ and y ≥ 1 dominate the Pearson sum, which gave φ = 0.013. A power-series expansion of the empty cells' term also fails: empty cells hold 1.95 M of the 4.99 M expected events, so μ/φ is not small there. The ML estimate is φ = 5.98.
-- **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2).
+- **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
+- **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
 ### 5.3 Optimisation and uncertainty
 
@@ -322,10 +323,13 @@ u_c = F(y_c − 1) + V_c · p(y_c),   V_c ~ U(0,1) seeded by (field, cell)
 
 **The criterion is a minimum relevant departure (P5), not a p-value.** With 10⁵ cells, any departure is significant.
 - A field is calibrated when its PIT's KS distance is ≤ 0.03 overall and ≤ 0.05 in every macro-region.
-  - A φ_extra per macro-region would calibrate dengue B2s in every region (evaluation 2026-10-05, Laplace; OQ 6); the field's single value does not.
+  - The component varies by macro-region (below; ADR-0006): with it 30 of 33 measured fits are calibrated at B1 and 27 at B2, against 28 and 25 for one value, and 18 and 22 for the block's φ alone.
 - A macro-region's 5,000–25,000 cells reach KS ≈ 0.02 by sampling alone.
 
 **A miscalibrated field** gets a field-level **place-year variance component**: Var(Y_ut) = μ + μ²/φ_agg + μ²/φ_extra, with φ_extra by maximum likelihood on the field's aggregate cells.
+- **It varies by group of places, in a hierarchy:** the field's value, then one per macro-region, then one per state (`surprise.DISPERSION_LEVELS`).
+  - Each group's log(1/φ_extra) is estimated by maximum likelihood on its own cells, then shrunk toward its parent's by the between-group variance τ² that the groups show (random-effects moment estimate on the observed information, so a group with little information keeps its parent's value).
+  - The PIT, the weights and the surprises carry the place's own value; BP keeps the block's φ (its calibration is recorded, never flagged).
 - **Why it is needed:** cells within a place-year share variation that the expectation does not model, and summing them adds it coherently. The independent-cell φ_agg misses it.
 - **What was measured** on chapter IX B1 (2026-10-04): a U-shaped PIT, with both tails at about 0.13 against 0.10. The component flattened it, bringing KS from 0.035 to 0.010.
 
@@ -726,6 +730,7 @@ Every random draw is seeded from (object, cell, purpose).
 | 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the same model reparametrised, its τ's learned by the same updates as every other effect; the priors differ |
 | 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
 | 4.2, 5.4 | the low-rank interaction ψωτ | not yet built | main effects and tiers first; patterns across blocks (CP-APR) read the interaction meanwhile |
+| 5.2 | every strength is learned (P7), the dispersion by place group included | φ_extra is a hierarchy (field, macro-region, state); the block's φ is one value per block | the block's φ by macro-region gained 0.009 nats per event held out on dengue and −0.0007 to +0.002 on chapters IX, X and XVIII (ADR-0006) |
 | 5.3 | Laplace uncertainty; marginal sds by selected inversion and Hutchinson–Lanczos | built (`laplace.py`), measured, off by default: perturbation draws on the exact NB information, CG with a block-Jacobi preconditioner; the predictive matched by moments | the draws match the exact inverse at their Monte-Carlo floor; parameter uncertainty is at most 10 % of the overdispersion and does not repair dengue's or BP's miscalibration (evaluation 2026-10-05, Laplace); the check against MCMC/INLA remains OQ-2 |
 | 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged. The full-Hessian update exists (`Posterior.fellner_schall`, from the draws) and is not in the fit | on IX it proposes τ_s 5× lower (425 → 72–81) and τ_s,grp 5× lower; whether a refit there calibrates better is untested |
 | 6.1 | B2s on every field; BP extrapolates the RW2 history | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the monthly grain holds h flat at its last thirty-six months' mean (annual grain: linear; 2026-10-05: 12 months gave precision 0.57 on dengue 2019–23, 36 months 0.64 at the same recall; the outbreak-robust reweighting reached 0.71 but lost recall, 0.81) | monthly first for the dense families (dengue, SIH); the last two months' slope is noise at that grain (evaluation 2026-10-05, dengue) |
