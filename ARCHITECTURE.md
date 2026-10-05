@@ -478,6 +478,10 @@ D'_S is the same with the augmented μ'.
 
 **Decomposition.** The change in expected events between two periods, split into population size, age–sex composition, place mix and risk (η). Each by counterfactual substitution of one component at a time, averaged over all orders (Shapley; exact for these four components). The risk part is reported by place and by group.
 
+**Triage (`explain.triage`, `Session.triage`).** A lead is read against what the data at hand can say about it, in order, and the first rule that fires gives its class (`lead.robustness["triage"]`; artefacts become `explained`): *system* (the denominator broke; the code's national level moved; the ill-defined chapter moved opposite; a residual category trending), *substitution* (siblings under the same parent undo the change), *noise* (too few events or too small an effect), *facility*, otherwise *signal*, which means **unexplained by the data at hand, not confirmed**. Evaluation 2026-10-05, lead triage.
+
+**Facility (`facility`).** The event cube by residence × recording facility × 3-character code × year (SIH-RD `CNES`, SIM-DO `CODESTAB`; one gateway-cached table per year). A lead is `facility` when at most `FAC_K` = 3 facilities carry at least `FAC_SHARE` = 70 % of its change (window against base years), that concentration is not what the facilities' size would carry (one-sided binomial p < 10^-3 against their share of the block's base-year events, unless they are the whole place), and a mechanism shows in the facilities' own behaviour: the same facilities' residents of *other* places show the same step in the lead-code share of the block (z >= 3, at least half the inside log ratio), or the facilities' volume without the lead's events stepped by x1.6. Concentrated but the others do not move: `place_specific`, the lead stays a signal. The class says the change is attributable to one institution's recording or volume; it does not say whether the institution coded differently or served a real event (a referral hospital receives both). SIM names a facility for 71-73 % of deaths only, so the read is partial there.
+
 ### 7.8 Cohort scans (phase 2)
 
 On linked cohorts from pegasus_data (person-level records): every attribute × every outcome.
@@ -529,7 +533,7 @@ Lead
   effect              estimate, interval, scale (rate ratio | ρ | log RR | share absorbed)
   test                statistic, p, q, family, null, calibration status
   replication         R0..R3, with each replication's effect
-  robustness          C-robust (race), denominator tension, recording flags, overlap
+  robustness          C-robust (race), denominator tension, recording flags, overlap, triage class (§7.7)
   provenance          data versions (pegasus_data), monolith version, code version, ledger id
   rank                evidence × effect × replication; never p alone
 ```
@@ -649,6 +653,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps` and `map_inputs` (§7.6), `explain` (§7.7), `cohort` (§7.8) | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
+| `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year) and the per-lead facility tally for the `facility` triage class (§7.7) | gateway, store, config |
 | `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
