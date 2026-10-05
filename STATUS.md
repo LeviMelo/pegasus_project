@@ -2,6 +2,8 @@
 
 **2026-10-04.** Every module of ARCHITECTURE §11.1 exists. The first block (ICD chapter IX, SIM 2010–2023) is fitted and read end to end: surprises at B0, B1 and B2, lenses, pairs (evaluation 2026-10-04).
 
+**Coverage of the architecture** (2026-10-05): [docs/architecture_coverage.md](docs/architecture_coverage.md) maps every ARCHITECTURE item to built / measured / partial / not built / superseded, with the data and scan coverage and the ten gaps that matter most. It reads the code and the evaluations, not this file; re-run it when a status changes.
+
 **Built:**
 - **The data path:**
   - `gateway`: population, event counts, structures, graphs, regions, overlap; it reconciles exactly with the official SIM totals;
