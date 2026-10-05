@@ -42,7 +42,9 @@ def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
 
     strata = gateway._strata(dataset)
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
-    classifier = next(c["column"] for c in spec["classifiers"] if c["role"] == "primary")
+    classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
+    if classifier is None:
+        raise LookupError(f"{dataset}/{event}: no primary classifier, no facility cube")
     fcol, mcol = facility_column(dataset)
     key = {"what": "facility_cube", "dataset": dataset, "event": event, "year": year, "classifier": classifier,
            "facility": fcol, "data": config.data_version(), "v": 1, **gateway._df_key(dataset, year)}

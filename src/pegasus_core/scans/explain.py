@@ -168,6 +168,7 @@ class Evidence:
     residual: bool = False          # the field's label is a residual category ("outros", "não especificad")
     group_spread: tuple[float, str] | None = None   # sd of the groups' log SIR and the groups furthest from the mean
     facility: FacilityTally | None = None           # the lead's events by the institution that recorded them
+    per_year: int = 1               # periods in a year on the grid: 1 (annual), 12 (``years`` are YYYYMM)
 
 
 @dataclass
@@ -184,21 +185,33 @@ def _contrast(a: np.ndarray, rows: np.ndarray, win: np.ndarray, base: np.ndarray
     return float(v[win].mean()) if win.any() else 0.0, float(np.median(v[base])) if base.any() else 0.0
 
 
-def _thirds(years: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    k = max(len(years) // 3, 1)
+def _annual(a: np.ndarray, per_year: int) -> np.ndarray:
+    """Sum the last axis from periods to calendar years (the identity at the annual grain)."""
+    return a if per_year == 1 else a.reshape(*a.shape[:-1], -1, per_year).sum(-1)
+
+
+def _thirds(years: np.ndarray, per_year: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """The last and the first third of the period, in whole years at the monthly grain (a third that starts
+    mid-year would compare winter with summer)."""
+    k = max(len(years) // 3 // per_year, 1) * per_year
     last, first = np.zeros(len(years), bool), np.zeros(len(years), bool)
     last[-k:], first[:k] = True, True
     return last, first
 
 
-def _window(years: np.ndarray, span: list[int] | None, estimand: str) -> tuple[np.ndarray, np.ndarray]:
-    """The lead's years and the years it is compared with: the rest of the period for a window, the last
-    against the first third for a trend or a pattern."""
+def _window(years: np.ndarray, span: list[int] | None, estimand: str, per_year: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """The lead's periods and the periods it is compared with: the rest of the period for a window, the last
+    against the first third for a trend or a pattern. At the monthly grain the base is the window's own calendar
+    months in the other years (an outbreak in the dengue season against the other seasons, not against the winter)."""
     if span and estimand != "trend_divergence":
         win = (years >= span[0]) & (years <= span[-1])
         if not win.all():
-            return win, ~win
-    return _thirds(years)
+            if per_year == 1:
+                return win, ~win
+            month = years % 100
+            seasonal = ~win & np.isin(month, month[win])
+            return win, seasonal if seasonal.any() else ~win
+    return _thirds(years, per_year)
 
 
 def _moves(a: np.ndarray, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> tuple[float, float]:
@@ -218,7 +231,8 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     ``direction`` is +1 for an excess or a rise, -1 for a deficit or a fall (0: a pattern). Order of reading:
     denominator, substitution, certification, recording, residual coding, noise, one institution; what is left is a
     signal. The facility read is filled for every lead that has a tally, whatever its class (``info["facility"]``)."""
-    win, base = _window(ev.years, span, estimand)
+    ppy = ev.per_year
+    win, base = _window(ev.years, span, estimand, ppy)
     windowed = bool(span) and estimand != "trend_divergence"
     n_w, n_b = _contrast(ev.y, rows, win, base)
     d_node, _ = _moves(ev.y, rows, win, base)
@@ -232,25 +246,30 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
 
     # 1. denominator: person-years missing, a year without a single death where the person-years would give dozens
     #    (a municipality not yet created or not reporting), or the crude death rate breaking beyond the nation's
-    pop = ev.pop[rows].sum(0)
-    if (pop <= 0).any() and ev.y[rows].sum(0)[pop <= 0].sum() > 0:
+    # (read in calendar years at the monthly grain: person-months are a twelfth of a year's, and a month without an
+    # event is the season, not a place missing from the data)
+    yrs = ev.years if ppy == 1 else ev.years[::ppy] // 100
+    span_y = span if ppy == 1 or not span else [span[0] // 100, span[-1] // 100]
+    pop = _annual(ev.pop[rows].sum(0), ppy)
+    y_rows = _annual(ev.y[rows].sum(0), ppy)
+    if (pop <= 0).any() and y_rows[pop <= 0].sum() > 0:
         return Triage(SYSTEM, "denominator: events in years without person-years (municipality created)", info)
-    near = (ev.years[1:] >= span[0] - 1) & (ev.years[:-1] <= span[-1] + 1) if windowed else np.ones(len(ev.years) - 1, bool)
+    near = (yrs[1:] >= span_y[0] - 1) & (yrs[:-1] <= span_y[-1] + 1) if windowed else np.ones(len(yrs) - 1, bool)
     if ev.total is not None:
-        deaths = ev.total[rows].sum(0)
+        deaths = _annual(ev.total[rows].sum(0), ppy)
         if np.any((deaths == 0) & (pop >= EMPTY_YEAR_POP)):
-            info["empty_years"] = [int(t) for t in ev.years[(deaths == 0) & (pop >= EMPTY_YEAR_POP)]]
+            info["empty_years"] = [int(t) for t in yrs[(deaths == 0) & (pop >= EMPTY_YEAR_POP)]]
             return Triage(SYSTEM, "denominator: a year with no deaths of any cause in a place with person-years", info)
         with np.errstate(divide="ignore", invalid="ignore"):
-            rate = np.log((deaths - ev.y[rows].sum(0) + 0.5) / np.maximum(pop, 1.0))     # without the lead's own events
-            nat_rate = np.log(ev.total.sum(0) / ev.pop.sum(0))
+            rate = np.log((deaths - y_rows + 0.5) / np.maximum(pop, 1.0))     # without the lead's own events
+            nat_rate = np.log(_annual(ev.total.sum(0), ppy) / _annual(ev.pop.sum(0), ppy))
             brk = np.abs(np.diff(rate) - np.diff(nat_rate))
         big = (pop[1:] >= RATE_BREAK_POP) & (pop[:-1] >= RATE_BREAK_POP)
         if np.any(brk[near & big] > np.log(RATE_BREAK)):
             info["death_rate_break"] = round(float(np.exp(brk[near & big].max())), 2)
             return Triage(SYSTEM, "denominator: the place's all-cause death rate breaks (boundary change or registration)", info)
     with np.errstate(divide="ignore", invalid="ignore"):
-        jump = np.abs(np.diff(np.log(pop))) - np.abs(np.diff(np.log(ev.pop.sum(0))))
+        jump = np.abs(np.diff(np.log(pop))) - np.abs(np.diff(np.log(_annual(ev.pop.sum(0), ppy))))
     if np.any(jump[near] > np.log(POP_BREAK)):
         info["population_jump"] = round(float(np.exp(np.nanmax(jump[near]))), 2)
         return Triage(SYSTEM, "denominator: the place's person-years break (boundary change or re-estimate)", info)
@@ -275,19 +294,22 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
             return Triage(SYSTEM, "certification: the change goes to the ill-defined chapter", info)
 
     # 4. recording: the code is being introduced or retired nationally, or the expectation learned a surge
-    spike = windowed and win.sum() <= 2 and (~win).sum() >= 6        # a short window is the event itself, not the code's drift
-    keep = ~win if spike else np.ones(len(ev.years), bool)
+    #    (the national course and a surge elsewhere are read in calendar years: a window touches every year it has a month in)
+    nat_a = _annual(nat, ppy)
+    win_a = win if ppy == 1 else _annual(win.astype(int), ppy) > 0
+    spike = windowed and win_a.sum() <= 2 and (~win_a).sum() >= 6        # a short window is the event itself, not the code's drift
+    keep = ~win_a if spike else np.ones(len(yrs), bool)
     k = max(min(3, int(keep.sum()) // 2), 1)
-    first, last = np.median(nat[keep][:k]), np.median(nat[keep][-k:])
+    first, last = np.median(nat_a[keep][:k]), np.median(nat_a[keep][-k:])
     info["national_first"], info["national_last"] = round(float(first), 1), round(float(last), 1)
     ratio = (last + 0.5) / (first + 0.5)
-    national_peak = spike and direction > 0 and nat[win].max() >= 2 * max(np.median(nat[~win]), 1.0)   # the nation peaks there too: an event
+    national_peak = spike and direction > 0 and nat[win].max() >= 2 * max(np.median(nat[base]), 1.0)   # the nation peaks there too: an event
     if not national_peak and max(first, last) >= 20 and (ratio >= DRIFT or ratio <= 1 / DRIFT):
         return Triage(SYSTEM, f"recording: the code's national level moves x{ratio:.2g} over the period", info)
     if direction < 0 and windowed:
-        rest = ev.y[rows].sum(0)[~win]
+        rest = y_rows[~win_a]
         if rest.size >= 4 and rest.max() >= SURGE * max(np.median(rest), 1.0) and rest.max() - np.median(rest) >= 20:
-            info["surge"] = [int(ev.years[~win][rest.argmax()]), float(rest.max())]
+            info["surge"] = [int(yrs[~win_a][rest.argmax()]), float(rest.max())]
             return Triage(SYSTEM, "model: a deficit against an expectation that learned a surge elsewhere in the period", info)
 
     # 5. residual categories ("other", "unspecified") that trend or differ by age and sex are coding practice;

@@ -16,6 +16,7 @@ ledger. The event sides survive for sizes only: `honest_sizes`.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -103,6 +104,7 @@ class Session:
     event: str
     years: list[int]
     graph: str = graphs.DEFAULT
+    source: dict = field(default_factory=dict)   # the event reader: {"grain": "month"} for the monthly grain
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
     _local: threading.local = field(default_factory=threading.local, init=False, repr=False)   # .memo: one field's tiers
@@ -111,7 +113,7 @@ class Session:
 
     def __post_init__(self):
         control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
-        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph)
+        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source)
 
     # ---- reading ---------------------------------------------------------------
 
@@ -224,8 +226,8 @@ class Session:
         findings are merged in the fields' order, so the leads do not depend on the number of workers.
         ``prospective=t0`` runs the plan's prospective lenses (`PROSPECTIVE_TIERS`) on the years after t0 against a
         fit up to t0: the outbreak lens on the alarm baseline, the others on the calibrated expectation
-        (ADR-0012). It is a different family from the retrospective survey, and its leads are not
-        yet explained or replicated (those read the retrospective tiers)."""
+        (ADR-0012). It is a different family from the retrospective survey; its leads carry ``train_last`` and
+        ``purpose``, from which explanation, triage and replication rebuild the same prospective expectation."""
         if prospective is not None:
             lens_names = tuple(x for x in lens_names if x in PROSPECTIVE_TIERS)
         found: dict[str, list[lenses.Finding]] = {}
@@ -285,18 +287,18 @@ class Session:
         admitted = []
         for fam, mask in rejected.items():
             qv = control.adjusted(families[fam])
-            admitted += leads.admit(found[fam], mask, qv, lambda h, qq, fam=fam: self._lead(h, qq, fam))
+            admitted += leads.admit(found[fam], mask, qv, lambda h, qq, fam=fam: self._lead(h, qq, fam, prospective))
         self.register.add(admitted)
         return admitted
 
-    def _lead(self, h: lenses.Finding, q: float, family: str) -> leads.Lead:
+    def _lead(self, h: lenses.Finding, q: float, family: str, train_last: int | None = None) -> leads.Lead:
         return leads.Lead(kind="subset" if h.lens in ("space_time", "spatial_cluster") else "residual",
                           estimand=h.lens, tier=h.tier, fields=[h.field], locus=h.locus, effect=h.effect,
                           scale=SCALE[h.lens], interval=None, p=h.p, q=q, family=family,
                           null="Gumbel on NB replicates" if h.lens in ("space_time", "spatial_cluster", "change_point")
                           else "NB predictive",
                           calibrated=bool(h.stats.get("calibrated", True)), robustness={},
-                          gate="failed" if family.endswith(UNGATED) else "passed",
+                          gate="failed" if family.endswith(UNGATED) else "passed", train_last=train_last,
                           provenance={"graph": self.graph, "stats": h.stats})
 
     # ---- on demand -------------------------------------------------------------------
@@ -304,7 +306,7 @@ class Session:
     def explain_away(self, lead: leads.Lead, candidate: np.ndarray, tier: str | None = None) -> explain.Explanation:
         """``candidate`` [U, T] over the session's places and years."""
         node = lead.fields[0].split(":")[-1]
-        s = self.surprise(node, tier or lead.tier)
+        s = self.surprise(node, tier or lead.tier, lead.train_last)
         mask = np.zeros(s.y.shape, dtype=bool)
         pi = np.isin(s.places, lead.locus.get("places", s.places.tolist()))
         yrs = lead.locus.get("years", [int(s.years[0]), int(s.years[-1])])
@@ -337,18 +339,22 @@ class Session:
         artefacts are marked `explained`. With ``write`` the new states are appended to the register."""
         mine = [x for x in (register if register is not None else self.register.current())
                 if x.fields and x.fields[0].startswith(f"{self.dataset}:")]
-        by_node: dict[str, list[leads.Lead]] = {}
+        by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
         for x in mine:
-            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
+            by_node.setdefault((x.fields[0].split(":")[-1], x.train_last or 0, x.tier if x.train_last else ""), []).append(x)
         edges = self.edges() if replicate else None
         fac = self._facilities() if facility else None
-        for i, (node, group) in enumerate(sorted(by_node.items())):
+        if facility and fac is None:
+            self._prepare_grid()
+            log("facility read skipped: " + ("the cube is by year, the grain here is monthly" if self._per_year > 1
+                                             else "the event names no facility classifier"))
+        for i, ((node, train_last, tier), group) in enumerate(sorted(by_node.items())):
             ev = self._evidence(node)
             if fac is not None:
                 block_codes = self._data(self.expectations.registry.chapter(node)).leaves
                 lead_codes = [block_codes[j] for j in self._leaves(node)[1]]
             index = {int(p): j for j, p in enumerate(self._grid_places)}
-            s = self.surprise(node, "B1") if replicate else None
+            s = (self.surprise(node, tier, train_last) if train_last else self.surprise(node, "B1")) if replicate else None
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
             for x in group:
                 rows = np.array([index[int(p)] for p in x.locus.get("places", []) if int(p) in index], dtype=int)
@@ -366,7 +372,7 @@ class Session:
                 if replicate:
                     x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
                     x.replication = control.replication_tier(kinds_of(x))
-            log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
+            log(f"{i + 1}/{len(by_node)} {node}{f' ({tier} fit to {train_last})' if train_last else ''}: {len(group)} leads")
         if write:
             self.register.add(mine)
         return mine
@@ -375,15 +381,15 @@ class Session:
         """The facility cube of the session's years on the evidence grid (None: the dataset names no facility)."""
         if "_fac" not in self.__dict__:
             self._prepare_grid()
-            try:
-                self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
-            except LookupError:
-                self._fac = None
+            self._fac = None
+            if self._per_year == 1:         # the cube is by year: no facility read at the monthly grain (`triage` says so)
+                with contextlib.suppress(LookupError):      # the event names no facility classifier (SINAN): nothing to read
+                    self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
         return self._fac
 
     def _prepare_grid(self) -> None:
         """Every fitted block's observed counts (all causes, the ill-defined chapter) on one grid."""
-        if getattr(self, "_total", None) is not None:
+        if getattr(self, "_pop", None) is not None:
             return
         blocks = self._blocks()
         total = ill = pop = None
@@ -394,26 +400,32 @@ class Session:
             if b == "XVIII":
                 ill = n
             pop = d.N.sum(2)
-            self._grid_places, self._grid_years = d.places, d.years
+            self._grid_places, self._grid_years = d.places, d.periods()       # YYYYMM at the monthly grain
+            self._per_year = 12 if d.grain == "month" else 1
+        if blocks == ["*"]:
+            total = ill = None      # an event type without a classifier tree has no all-cause count: the death-rate reads need one
         self._total, self._ill, self._pop = total, ill, pop
 
     def _data(self, block: str) -> monolith.BlockData:
         """A block's cells, cached on disk: assembling one takes about a minute."""
         cache = self.__dict__.setdefault("_blocks_data", {})
         if block not in cache:
+            reader = self.expectations._reader()
             key = {"dataset": self.dataset, "event": self.event, "block": block, "years": self.years,
-                   "data": config.data_version(), "triage_block": 1}
+                   "data": config.data_version(), "triage_block": 1, **({"reader": reader} if reader else {})}
             hit = store.get_arrays("triage_block", key)
             if hit is not None:
                 meta = store.manifest("triage_block", key)
                 cache[block] = monolith.BlockData(self.dataset, self.event, block, hit["years"], hit["places"],
                                                   meta["leaves"], meta["groups"], hit["leaf_group"], hit["N"], hit["e"],
                                                   hit["u"], hit["t"], hit["g"], hit["y"], key=key)
+                if meta.get("grain") == "month":
+                    cache[block].grain, cache[block].month_of_year = "month", np.tile(np.arange(12), len(hit["years"]))
             else:
-                d = monolith.assemble(self.dataset, self.event, block, self.years)
+                d = monolith.assemble(self.dataset, self.event, block, self.years, **reader)
                 store.put_arrays("triage_block", key, {k: getattr(d, k) for k in
                                  ("years", "places", "leaf_group", "N", "e", "u", "t", "g", "y")},
-                                 {"leaves": d.leaves, "groups": d.groups})
+                                 {"leaves": d.leaves, "groups": d.groups, "grain": d.grain})
                 cache[block] = d
         return cache[block]
 
@@ -443,7 +455,7 @@ class Session:
             sl = np.concatenate([self._leaves(c)[1] for c in others]) if others else np.array([], dtype=int)
             sib = self._counts(d, sl) if sl.size else None
         return explain.Evidence(self._grid_years, y, sib, self._ill, self._total, self._pop, chapter=reg.chapter(node),
-                                residual=explain.residual_label(reg.label.get(node, "")))
+                                residual=explain.residual_label(reg.label.get(node, "")), per_year=self._per_year)
 
     def _by_group_cells(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         d, leaves = self._leaves(node)
@@ -610,11 +622,11 @@ class Session:
         for x in selected:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
         for i, (node, group) in enumerate(sorted(by_node.items())):
-            surprises: dict[str, surprise.Surprise] = {}
+            surprises: dict[tuple[str, int | None], surprise.Surprise] = {}
             for x in group:
-                if x.tier not in surprises:
-                    surprises[x.tier] = e.surprise(node, x.tier)
-                x.replications = {**x.replications, "honest": replication.honest_effect(surprises[x.tier], x)}
+                if (x.tier, x.train_last) not in surprises:
+                    surprises[x.tier, x.train_last] = e.surprise(node, x.tier, x.train_last)
+                x.replications = {**x.replications, "honest": replication.honest_effect(surprises[x.tier, x.train_last], x)}
             log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
         a.register.add(selected)
         return selected
@@ -751,7 +763,7 @@ def lead_row(x: leads.Lead) -> dict[str, Any]:
     """A lead, compact: where, what, how large, how well controlled, how replicated."""
     span, direction = replication.span_direction(x)
     return {"id": x.id, "rank": round(x.rank, 3), "kind": x.kind, "estimand": x.estimand, "field": x.fields[0],
-            "node": x.fields[0].split(":")[-1], "tier": x.tier, "places": list(x.locus.get("places", []))[:20],
+            "node": x.fields[0].split(":")[-1], "tier": x.tier, "train_last": x.train_last, "purpose": x.purpose, "places": list(x.locus.get("places", []))[:20],
             "n_places": len(x.locus.get("places", [])), "years": span,
             "direction": {1: "up", -1: "down", 0: "pattern"}[direction], "effect": x.effect, "scale": x.scale,
             "q": x.q, "family": x.family, "replication": x.replication, "status": x.status,

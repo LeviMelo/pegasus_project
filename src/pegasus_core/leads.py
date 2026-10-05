@@ -30,6 +30,7 @@ import pyarrow.parquet as pq
 from . import config
 
 KINDS = ("residual", "subset", "pattern", "relation", "cohort", "observation", "structural")
+PROSPECTIVE_PURPOSE = {"BP": "expectation", "BPA": "alarm"}      # the tier of each object (`surprise.PURPOSE_TIER`)
 SCALES = ("rate_ratio", "rho", "log_rr", "share_absorbed", "sd")
 
 
@@ -54,6 +55,8 @@ class Lead:
     provenance: dict[str, Any] = field(default_factory=dict)
     status: str = "open"           # open | replicated | explained | retired
     gate: str = "passed"           # "failed": the lens/estimand/scale failed its gate (tools.SURVEY_PLAN); an exploratory lead
+    train_last: int | None = None  # a prospective lead (tier BP/BPA, ADR-0012): the last year of the fit it was read against
+    purpose: str | None = None     # ... and which object: "expectation" (BP) or "alarm" (BPA)
     note: str = ""
     id: str = ""
 
@@ -64,8 +67,13 @@ class Lead:
             raise ValueError(f"gate {self.gate!r}")
         if self.scale not in SCALES:
             raise ValueError(f"effect scale {self.scale!r} not in {SCALES}")
+        if self.train_last is not None and self.purpose is None:
+            self.purpose = PROSPECTIVE_PURPOSE.get(self.tier)
+        if self.train_last is not None and self.purpose not in PROSPECTIVE_PURPOSE.values():
+            raise ValueError(f"a prospective lead (train_last {self.train_last}) needs a purpose, not {self.purpose!r}")
         if not self.id:
-            body = json.dumps([self.kind, self.estimand, self.tier, sorted(self.fields), self.locus, self.family],
+            key = [self.kind, self.estimand, self.tier, sorted(self.fields), self.locus, self.family]
+            body = json.dumps(key + ([self.train_last] if self.train_last is not None else []),   # retrospective ids unchanged
                               sort_keys=True, default=str)
             self.id = hashlib.sha256(body.encode()).hexdigest()[:16]
         self.provenance.setdefault("code_version", config.code_version())
@@ -102,7 +110,7 @@ class Register:
         files = sorted(self.path.glob("part-*.parquet"))
         if not files:
             return []
-        rows = pa.concat_tables([pq.read_table(f) for f in files]).to_pylist()
+        rows = pa.concat_tables([pq.read_table(f) for f in files], promote_options="default").to_pylist()   # parts differ in nullability
         latest: dict[str, dict] = {}
         for r in sorted(rows, key=lambda r: r["at"]):
             latest[r["id"]] = r
