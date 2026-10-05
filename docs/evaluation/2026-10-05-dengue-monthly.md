@@ -50,6 +50,7 @@ In-sample on the full fit, 936k municipality-months. Every tier needed the field
 | B2 | 0.028 | Centro-Oeste 0.065 | 0.033 | Centro-Oeste 0.106 |
 | **B2s** | **0.011** (calibrated) | Centro-Oeste 0.047 | 0.015 | Centro-Oeste 0.078 |
 
+- **Correction (2026-10-05, Laplace entry):** B2/B2s kept B1's Σμ² under the refit means. With it scaled by r², the field-φ rows read B2 0.034 (Centro-Oeste 0.066) and B2s 0.019 (0.048): B2s is still calibrated, B2 no longer is.
 - **Season is what calibrates dengue.** B2s flattens the PIT histogram (all deciles 0.094–0.105); B0 to B2 are humped.
 - **Centro-Oeste fails first** at every tier; the B2s 2019–23 subset (KS 0.078) fails the regional criterion though the whole period passes.
 - **BP, trained to 2014, predicting 2015–2016:** observed 3,065,926 against 1,172,045 expected (×2.6); KS 0.225 (Sul 0.10, Centro-Oeste 0.32). Recorded, never flagged: this tier exists to show the departure.

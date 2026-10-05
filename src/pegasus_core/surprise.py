@@ -67,15 +67,16 @@ class Expectations:
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
                  structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
-                 forecast: bool = True):
+                 center: str = "plugin", forecast: bool = True):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
         "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
         MAP's predictive, NB(mu, phi)); with draws, a cell's predictive integrates mu over the Laplace
-        posterior (ARCHITECTURE 5.3, `laplace.py`)."""
+        posterior (ARCHITECTURE 5.3, `laplace.py`), centred on the MAP's expectation (``center="plugin"``) or
+        on the posterior mean (``"posterior"``)."""
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})
-        self.laplace, self.device, self.forecast = int(laplace), device, forecast
+        self.laplace, self.device, self.forecast, self.center = int(laplace), device, forecast, center
         self._posteriors: dict = {}
         classifier = self.source.get("column") or self.source.get("classifier")
         self.registry = fields.Registry(dataset, event, structure, classifier=classifier)
@@ -125,7 +126,7 @@ class Expectations:
             mom = post.moments(leaves, True, x_fn=lambda xd: (tm, monolith.extrapolate_effects(
                 model, tm, xd, history,
                 increments=None if fv is None else laplace.forecast_increments(model, tm, fv, gen))))
-            mu, mu2, var = mom["mean"], mom["mu2"], mom["var"]
+            mu, mu2, var = _recentre(mom, mu, self.center)
         y = tm.observed(leaves)
         out = _assemble(f, "BP", tm, y, mu, mu2, model.phi, self.macroregions(tm.data.places), flag_calibration=False,
                         var=var)
@@ -184,10 +185,14 @@ class Expectations:
             mu, extras = refit_place_trend(y, mu, mu2, m.phi, axis)
         elif tier == "B2s":
             mu, extras = refit_place_season(y, mu, mu2, m.phi, m.data.month_of_year)
+        if tier in ("B2", "B2s"):
+            # the refit moved each cell's mean by r = mu / mu_point; the sum of squared cell means moves by r^2
+            # (a B1 sum under a refit mean made the aggregate dispersion phi mu^2 / sum(mu^2) meaningless)
+            mu2 = mu2 * np.divide(mu, mu_point, out=np.ones_like(mu), where=mu_point > 0) ** 2
         var = None
         eta_var = extras.pop("eta_var", None)
         if mom is not None:
-            mu, mu2, var = _predictive(mom, mu, mu_point, eta_var)
+            mu, mu2, var = _predictive(mom, mu, mu_point, eta_var, self.center)
         out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places), var=var)
         out.extras = extras
         if cache:
@@ -196,18 +201,29 @@ class Expectations:
         return out
 
 
-def _predictive(mom: dict, mu_tier: np.ndarray, mu_point: np.ndarray, eta_var: np.ndarray | None
-                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _recentre(mom: dict, mu_point: np.ndarray, center: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(mean, sum mu^2, Var mu) of the draws, centred on the plug-in (the MAP's expectation, which
+    the fit's score equations tie to the observed totals) or left on the posterior mean (which sits
+    exp(Var(eta)/2) above it, and over-shoots the totals of the cells the fit has seen)."""
+    mean, var, mu2 = mom["mean"], mom["var"], mom["mu2"]
+    if center == "posterior":
+        return mean, mu2, var
+    s = np.divide(mu_point, mean, out=np.ones_like(mean), where=mean > 0)
+    return mu_point, mu2 * s ** 2, var * s ** 2
+
+
+def _predictive(mom: dict, mu_tier: np.ndarray, mu_point: np.ndarray, eta_var: np.ndarray | None,
+                center: str = "plugin") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The posterior-predictive mean, sum of mu^2 and Var(mu) of a tier from the draws' moments of the
     B1/B0 expectation. B2 and B2s refit each place's course around the B1 expectation: the refit scales
     the draws by r = mu_tier/mu_point and adds the place coefficients' own posterior variance
     ``eta_var`` (independent of the draws: an approximation, additive on the log scale)."""
-    mean, var, mu2 = mom["mean"], mom["var"], mom["mu2"]
+    mean, mu2, var = _recentre(mom, mu_point, center)
     if eta_var is None:
         return mean, mu2, var
     r = np.divide(mu_tier, mu_point, out=np.ones_like(mu_tier), where=mu_point > 0)
     cv2 = var / np.maximum(mean, 1e-300) ** 2
-    mean = r * mean * np.exp(eta_var / 2)
+    mean = r * mean * (np.exp(eta_var / 2) if center == "posterior" else 1.0)
     cv2_total = (1 + cv2) * np.exp(eta_var) - 1
     return mean, r ** 2 * mu2, cv2_total * mean ** 2
 

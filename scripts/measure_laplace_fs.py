@@ -12,7 +12,6 @@ import sys
 import time
 
 import numpy as np
-import torch
 
 from pegasus_core import laplace, monolith
 

@@ -72,9 +72,16 @@ def ladder(c: dict) -> dict:
 def run(make_ex, fields_tiers, label: str) -> dict:
     res = {}
     bp = any(t == "BP" for _, t in fields_tiers)
-    variants = [("map", 0, True), ("laplace", S, False)] + ([("laplace+forecast", S, True)] if bp else [])
-    for name, draws, forecast in variants:
-        ex = make_ex(draws, forecast)
+    variants = [("map", 0, True, "plugin")]
+    if S:
+        variants += [("laplace", S, False, "plugin"), ("laplace-postmean", S, False, "posterior")]
+    if bp and S:
+        variants += [("laplace+forecast", S, True, "plugin"), ("laplace+forecast-postmean", S, True, "posterior")]
+    shared: dict = {}                       # the draws are made once and re-centred by variant
+    for name, draws, forecast, center in variants:
+        ex = make_ex(draws, forecast, center)
+        if draws:
+            ex._posteriors = shared
         for node, tier in fields_tiers:
             captured.clear()
             t = time.time()
@@ -104,33 +111,33 @@ out: dict = {"draws": S, "device": device}
 if mode == "ix":
     nodes = ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"]
 
-    def make(draws, forecast=True):
-        return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="knn6", laplace=draws, device=device, forecast=forecast)
+    def make(draws, forecast=True, center="plugin"):
+        return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="knn6", laplace=draws, device=device, forecast=forecast, center=center)
 
     out = run(make, [(n, t) for n in nodes for t in ("B0", "B1", "B2")], "IX")
 elif mode == "dengue":
-    def make(draws, forecast=True):
+    def make(draws, forecast=True, center="plugin"):
         return surprise.Expectations("SINAN-DENG", "probable_case", range(2010, 2024), source={"grain": "month"},
-                                     laplace=draws, device=device, forecast=forecast)
+                                     laplace=draws, device=device, forecast=forecast, center=center)
 
     out = run(make, [("*", t) for t in ("B0", "B1", "B2", "B2s")], "dengue")
 elif mode in ("bp-dengue18", "bp-dengue14"):
     last = 2018 if mode.endswith("18") else 2014
 
-    def make(draws, forecast=True):
+    def make(draws, forecast=True, center="plugin"):
         yrs = range(2010, 2024) if last == 2018 else range(2010, 2017)
         return surprise.Expectations("SINAN-DENG", "probable_case", yrs, source={"grain": "month"},
-                                     laplace=draws, device=device, forecast=forecast)
+                                     laplace=draws, device=device, forecast=forecast, center=center)
 
     make.train_last = last
     out = run(make, [("*", "BP")], mode)
 elif mode == "bp-ix19":
-    def make(draws, forecast=True):
+    def make(draws, forecast=True, center="plugin"):
         return surprise.Expectations("SIM.DO", "death", range(2010, 2024), graph="contiguity", laplace=draws,
-                                     device=device, forecast=forecast)
+                                     device=device, forecast=forecast, center=center)
 
     make.train_last = 2019
     out = run(make, [(n, "BP") for n in ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"]], mode)
 out["draws"], out["device"] = S, device
-with open(f"data/logs/laplace_{mode}.json", "w", encoding="utf-8") as fh:
+with open(f"data/logs/laplace_{mode}{'' if S else '_map'}.json", "w", encoding="utf-8") as fh:
     json.dump(out, fh, indent=1, default=float, ensure_ascii=False)

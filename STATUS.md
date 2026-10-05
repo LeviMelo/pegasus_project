@@ -49,7 +49,7 @@
 | race bridge: **infant bridge shipped** (pegasus_data fcc1444 (its ADR 0143), `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
 | E_b gate: **passed** (evaluation 2026-10-05, ADR-0005): MSR on the normalised graph, δ_E 0.03 / 0.05; sanitation pairs admitted, smooth-field pairs not (low power) | §7.5, §8.4, §10.5 | agent |
 | **backlog, in order** (one fresh agent each; ≤ 5 at a time):
-1. Laplace uncertainty layer (worktree `worktree-agent-afb63cec4eed96769`; the CG cap; then the calibration verdict).
+1. Laplace uncertainty layer: **done** (evaluation 2026-10-05, Laplace): cheap draws (block-Jacobi, 40–90 CG iterations), off by default; the verdict: parameter uncertainty is not what miscalibrates; next is OQ 6 (φ_extra per region; an epidemic-level effect).
 2. SIH readout: winter respiratory B2s, calibration, the survey leads.
 3. SINAN: arbovirus → microcephaly E_w; an outbreak-robust BP.
 4. The harness re-run under ADR-0005 negatives: false-lead rates and power curves per lens, the §10.5 gate for every lens.

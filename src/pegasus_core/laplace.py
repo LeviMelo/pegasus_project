@@ -124,7 +124,7 @@ class Posterior:
         likelihood-noise vectors (the (a, b, c) reductions of √w·ε) for perturbation sampling."""
         m = self.m
         E, (U, T, G) = len(m.data.leaves), m.N.shape
-        kw = dict(dtype=self.dtype, device=self.device)
+        kw = {"dtype": self.dtype, "device": self.device}
         W = {"u": torch.zeros(E, U, **kw), "t": torch.zeros(E, T, **kw), "g": torch.zeros(E, G, **kw),
              "ut": torch.zeros(E, U, T, **kw), "ug": torch.zeros(E, U, G, **kw), "tg": torch.zeros(E, T, G, **kw)}
         noise = [(torch.zeros(draws, E, U, **kw), torch.zeros(draws, E, T, **kw), torch.zeros(draws, E, G, **kw))]
@@ -176,7 +176,7 @@ class Posterior:
             zero_x = tuple(torch.zeros(sh, dtype=self.dtype, device=self.device) for sh in self._eff_shapes)
             lik = self._vjp((W["u"], W["t"], W["g"], zero_x))[0]
             pen = []
-            for (name, c), size, shape in zip(self.m.components.items(), self.sizes[1:], self.shapes[1:], strict=True):
+            for c in self.m.components.values():
                 d = torch.as_tensor(c.shape.Q.diagonal(), dtype=self.dtype, device=self.device)
                 pen.append((c.tau * d[None, :].expand(c.batch, -1)).reshape(-1))
             d = lik + torch.cat([torch.zeros(self.sizes[0], dtype=self.dtype, device=self.device), *pen])
@@ -199,7 +199,7 @@ class Posterior:
             _, vj = torch.func.vjp(lambda t: self.design(dict(zip(self.names, t, strict=True))), xs)
             d = vj((W["u"], W["t"], W["g"]))[0]
         blocks: list = [("diag", d[0].clamp_min(1e-12))]
-        for (name, c), di in zip(self.m.components.items(), d[1:], strict=True):
+        for c, di in zip(self.m.components.values(), d[1:], strict=True):
             Q = c.shape.Q.tocsr()
             dd = di.reshape(c.batch, -1).cpu().numpy()
             if (Q - sp.diags(Q.diagonal())).nnz == 0:
@@ -237,7 +237,7 @@ class Posterior:
         return self._vjp((torch.zeros_like(self._W["u"]), torch.zeros_like(self._W["t"]),
                           torch.zeros_like(self._W["g"]), z))[0]
 
-    def solve(self, rhs: torch.Tensor, tol: float = 1e-4, maxiter: int = 1000,
+    def solve(self, rhs: torch.Tensor, tol: float = 1e-3, maxiter: int = 1000,
               precond: str = "block") -> tuple[torch.Tensor, Solve]:
         """H x = rhs by preconditioned CG (H is singular along the centring's null space, which
         rhs and every CG direction's image leave alone)."""
@@ -247,8 +247,7 @@ class Posterior:
         d = z.clone()
         rz = float(r @ z)
         bnorm = float(rhs.norm())
-        it = 0
-        for it in range(1, maxiter + 1):
+        for it in range(1, maxiter + 1):  # noqa: B007
             Hd = self.hvp(d)
             alpha = rz / float(d @ Hd)
             x = x + alpha * d
@@ -284,7 +283,7 @@ class Posterior:
             out.append((np.sqrt(c.tau) * z).reshape(shape))
         return tuple(out)
 
-    def sample(self, draws: int, seed: int | None = None, tol: float = 1e-4, precond: str = "block", log=None) -> list[dict[str, torch.Tensor]]:
+    def sample(self, draws: int, seed: int | None = None, tol: float = 1e-3, precond: str = "block", log=None) -> list[dict[str, torch.Tensor]]:
         """``draws`` posterior displacements, as centred-effect dictionaries x̂ + C δ_s."""
         t0 = time.time()
         seed = seed if seed is not None else config.seed("laplace", self.m.key())
@@ -316,7 +315,7 @@ class Posterior:
         if not self.draws:
             raise RuntimeError("no draws: call sample() first")
         x_hat = self.m.effects()
-        tr = {name: 0.0 for name in self.m.components}
+        tr = dict.fromkeys(self.m.components, 0.0)
         for xs in self.draws:
             d = tuple(xs[k] - x_hat[k] for k in self.names)
             q = self._tauQ(d)
@@ -415,7 +414,7 @@ def forecast_increments(model: monolith.Monolith, tm: monolith.Monolith, varianc
                         gen: torch.Generator) -> dict[str, torch.Tensor]:
     """One draw of the history's forecast error (marginally right per period; periods independent)."""
     K, T = len(model.data.groups), tm.N.shape[1]
-    kw = dict(dtype=model.dtype, device=model.device)
+    kw = {"dtype": model.dtype, "device": model.device}
     sd = lambda name: torch.as_tensor(np.sqrt(variance[name]), **kw)  # noqa: E731
     inc_all = (torch.randn((1, T), generator=gen, **kw) * sd("h_all")[None, :])
     inc_grp = torch.randn((K, T), generator=gen, **kw) * sd("h_grp")[None, :]

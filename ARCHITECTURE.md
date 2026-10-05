@@ -236,8 +236,10 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - **The likelihood's linear part** Σ y·η comes from sufficient statistics computed once.
   - **L-BFGS was replaced** (open question 6 (resolved), evaluation 2026-10-04). It used every iteration it was given, and from a perturbed start it diverged. Chapter IX now fits in 229 s.
 - **Warm starts.** From the previous version's parameters on every data update.
-- **Uncertainty.** The Laplace approximation at the mode, with Hessian–vector products. Marginal standard errors of linear predictors come by sparse selected inversion of the GMRF blocks and Hutchinson–Lanczos estimates for the dense low-rank part.
-- **Posterior predictive for a cell.** NB with μ inflated by `exp(Var(η_c)/2)`, and its variance augmented accordingly.
+- **Uncertainty.** The Laplace approximation at the mode (`laplace.py`), never forming the Hessian: with the NB expected information w = φμ/(φ+μ), FᵀWF needs only the pairwise marginals of w per leaf (one pass over the slabs), and a Hessian–vector product is three small einsums and one vjp.
+  - **Draws, not selected inversion or Hutchinson probes.** Perturb-and-MAP draws (Papandreou–Yuille) solved by CG with a block-Jacobi preconditioner per effect (sparse LU of diag(Σw) + τQ), tolerance 10⁻³: about 40–90 iterations per draw. Their per-cell variance has relative error √(2/S) whatever the correlation; against an exact dense inverse it sits at that floor (evaluation 2026-10-05, Laplace). The diagonal preconditioner capped at 1,000 iterations.
+  - **Off by default** (`Expectations(laplace=0)`): it moves in-sample calibration by ≤ 0.01 KS.
+- **Posterior predictive.** The aggregate's NB is matched to the draws' moments, 1/φ_eff = (E[Σμ²]/φ + Var(Σμ))/m². In-sample tiers are centred on the MAP's μ (the score equations tie it to the data; the posterior mean overshoots by `exp(Var η/2)`), BP on the posterior mean, and BP adds the history's forecast error (annual: the RW2 forecast variance; monthly: an empirical level-change variance, a heuristic).
 - **The approximation is checked, not assumed.** On a random sample of fields and states (never only the densest slice), the Laplace fit is compared with an exact MCMC or INLA fit. Agreement criteria and results are evaluation entries.
 
 ### 5.4 Blocks, model choice, two-level fit
@@ -320,6 +322,7 @@ u_c = F(y_c − 1) + V_c · p(y_c),   V_c ~ U(0,1) seeded by (field, cell)
 
 **The criterion is a minimum relevant departure (P5), not a p-value.** With 10⁵ cells, any departure is significant.
 - A field is calibrated when its PIT's KS distance is ≤ 0.03 overall and ≤ 0.05 in every macro-region.
+  - A φ_extra per macro-region would calibrate dengue B2s in every region (evaluation 2026-10-05, Laplace; OQ 6); the field's single value does not.
 - A macro-region's 5,000–25,000 cells reach KS ≈ 0.02 by sampling alone.
 
 **A miscalibrated field** gets a field-level **place-year variance component**: Var(Y_ut) = μ + μ²/φ_agg + μ²/φ_extra, with φ_extra by maximum likelihood on the field's aggregate cells.
@@ -643,7 +646,8 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), fit and Laplace (§5.3), blocks and model choice (§5.4), marks (§4.4), prediction for any slice | structures, fields |
-| `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith |
+| `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
+| `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace |
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `explain` (§7.7), `cohort` (§7.8); maps (§7.6) in phase 3 | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `leads` | the lead object, ranking, register | control, scans |
@@ -721,8 +725,8 @@ Every random draw is seeded from (object, cell, purpose).
 | 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the same model reparametrised, its τ's learned by the same updates as every other effect; the priors differ |
 | 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
 | 4.2, 5.4 | the low-rank interaction ψωτ | not yet built | main effects and tiers first; patterns across blocks (CP-APR) read the interaction meanwhile |
-| 5.3 | Laplace uncertainty; the predictive inflated by Var(η) | MAP only; the predictive is NB(μ̂, φ) | the B2 per-place refit carries its own posterior sd; full Laplace is OQ-2 |
-| 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged | the exact trace per effect is affordable, the cross-effect terms are not |
+| 5.3 | Laplace uncertainty; marginal sds by selected inversion and Hutchinson–Lanczos | built (`laplace.py`), measured, off by default: perturbation draws on the exact NB information, CG with a block-Jacobi preconditioner; the predictive matched by moments | the draws match the exact inverse at their Monte-Carlo floor; parameter uncertainty is at most 10 % of the overdispersion and does not repair dengue's or BP's miscalibration (evaluation 2026-10-05, Laplace); the check against MCMC/INLA remains OQ-2 |
+| 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged. The full-Hessian update exists (`Posterior.fellner_schall`, from the draws) and is not in the fit | on IX it proposes τ_s 5× lower (425 → 72–81) and τ_s,grp 5× lower; whether a refit there calibrates better is untested |
 | 6.1 | B2s on every field; BP extrapolates the RW2 history | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the monthly grain holds h flat at its last twelve months' mean (annual grain: linear) | monthly first for the dense families (dengue, SIH); the last two months' slope is noise at that grain (evaluation 2026-10-05, dengue) |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the lenses pass places × time | the per-group surprise is not yet wired into the lenses |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
