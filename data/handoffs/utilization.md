@@ -1,0 +1,7 @@
+# Utilization-factor front (scan side; ARCHITECTURE 4.2 model-side fix waits for fit throughput)
+
+- DONE: `maps.factors` (weighted PCA of the SIH place effects) and `dependency_map(adjust=k)` / `_conditional(fac)` in scans/maps.py; scans/utilization.py (tensor, parallel analysis); scripts data/utilization/*.py; evaluation docs/evaluation/2026-10-05-utilization.md + EVALUATION row; ADR-0018 + DECISIONS row; ARCHITECTURE 7.6 bullet and module-table line (staged by hunk: the file also holds the ADR-0019 front's edits); dependency-map entry corrected (21 SIH chapters, not 22).
+- Result: 2 factors (33 %, 17 %) above the Moran null; CP-APR agrees; conditional layer SIH x SIH 89 -> 1 (I x X), SIH x SIM / SIH x SINASC none appear; planted check keeps SIH-specific, removes utilization; negatives 2 in 40 worlds (SIH x SIH, sign opposite to marginal).
+- Not touched: monolith.py, tools.py, cli.py (the `map` CLI has no --utilization option yet; run `data/utilization/run_map.py`), harness.py (map_negatives forwards `adjust` via **kw).
+- Open: leave-two-out factor per SIH pair (removes the induced-sign edges); planted SIH-SIM relation of real size for power; factor in the model (psi-omega-tau) when fit throughput allows; time-resolved factors (inputs are pooled 2015-19); SIM-side analogue (certification quality) for SIM x SIM IX-XI.
+- Run times: tensor build 435 s (cached in store maps/sih_tensor), map 40-46 s per adjusted run, negatives 20 worlds about 15-20 min under the heavy queue (waits up to 16 min).
