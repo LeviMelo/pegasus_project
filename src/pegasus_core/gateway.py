@@ -36,7 +36,8 @@ class EventCounts:
 
 
 ACCOUNT = ("population_account", "population-account-2")   # the modelled product and its pinned version
-TENSOR = {"account-3": ("population-account-3", 2000, 2023), "account-4": ("population-account-4", 2000, 2030)}   # source: version, years held
+TENSOR = {"account-3": ("population-account-3", 2000, 2023), "account-4": ("population-account-4", 2000, 2030),
+          "account-6": ("population-account-6", 1991, 2030)}   # source: version, years held
 POPSVS_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]   # 18 bands, 80+ closes
 ACCOUNT_EDGES = list(range(0, 81, 5))   # 17 bands: the account's 0-4 holds ages 0 and 1-4, which POPSVS keeps apart
 POPSVS_PLACES = 5570
@@ -53,7 +54,7 @@ def population_key(source: str | None = None) -> dict:
     """What an artefact built on a population adds to its key. POPSVS adds nothing (its keys predate the
     switch and the data version already names the series); the account adds its source and model version."""
     source = source or config.population_source()
-    model = ACCOUNT[1] if source == "account-2" else TENSOR[source][0] if source in TENSOR else None
+    model = ACCOUNT[1] if source == "account-2" else TENSOR[source][0] if source in TENSOR else TENSOR["account-6"][0] if source == "hybrid" else None
     return {} if source == "popsvs" else {"population": source, **({} if model is None else {"population_model": model})}
 
 
@@ -72,6 +73,19 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
     source = source or config.population_source()
     if source in TENSOR:
         return _tensor_population(sorted(set(years)), source)
+    if source == "hybrid":
+        # POPSVS at every age but 0, the account's age 0 (population-account-6; evaluation 2026-10-05 exposure, hybrid)
+        pop, acc = population(years, series, "popsvs"), _tensor_population(sorted(set(years)), "account-6")
+        con = duckdb.connect()
+        con.register("p", pop)
+        con.register("a", acc)
+        return con.execute("""
+            SELECT CAST(u AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, CAST(sex AS TINYINT) AS sex, CAST(age AS SMALLINT) AS age,
+                   CAST(n AS DOUBLE) AS n, CAST(0 AS DOUBLE) AS s FROM p WHERE age > 0
+            UNION ALL
+            SELECT CAST(u AS INTEGER), CAST(year AS SMALLINT), CAST(sex AS TINYINT), CAST(age AS SMALLINT), n, s
+            FROM a WHERE age = 0 AND u IN (SELECT DISTINCT u FROM p)
+            ORDER BY u, year, sex, age""").fetch_arrow_table()
     if source == "account-2":
         return _account_population(sorted(set(years)))
     if source == "popsvs-5y":
@@ -82,7 +96,7 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
         return con.execute("""SELECT u, year, sex, CAST(least(age // 5 * 5, 80) AS SMALLINT) AS age, sum(n) AS n
                               FROM p GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
     if source != "popsvs":
-        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4 or account-2 (popsvs-5y: a control)")
+        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-6, hybrid or account-2 (popsvs-5y: a control)")
     import pegasus_data as pg
 
     years = sorted(set(years))
