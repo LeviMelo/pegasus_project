@@ -53,7 +53,7 @@ In-sample on the full fit, 936k municipality-months. Every tier needed the field
 - **Season is what calibrates dengue.** B2s flattens the PIT histogram (all deciles 0.094–0.105); B0 to B2 are humped.
 - **Centro-Oeste fails first** at every tier; the B2s 2019–23 subset (KS 0.078) fails the regional criterion though the whole period passes.
 - **BP, trained to 2014, predicting 2015–2016:** observed 3,065,926 against 1,172,045 expected (×2.6); KS 0.225 (Sul 0.10, Centro-Oeste 0.32). Recorded, never flagged: this tier exists to show the departure.
-- **BP, trained to 2018, predicting 2019–2023: not yet run.** The train-2018 fit failed with CUDA out-of-memory (another agent held the GPU) and its restart was blocked; an earlier CPU fit, run beside two others, had reached outer 12 in 1,224 s when it was stopped to move to the GPU.
+- **BP, trained to 2018, predicting 2019–2023** (fit 1,138+ s on GPU, second attempt after a CUDA out-of-memory): observed 6,082,292 against 1,692,144 expected (×3.6); KS 0.310 (Centro-Oeste 0.53, Sudeste 0.39, Norte 0.28, Nordeste 0.27, Sul 0.20); 36% of the PIT mass in the top decile. The training ends in the two trough years (2017–18: 239,395 and 262,611 cases), so a flat level at their mean expects trough dengue for five years.
 
 ## The known positive: dengue epidemics by state
 
@@ -63,11 +63,17 @@ State-level outbreak lens (municipalities lifted to 27 states; state-month varia
 |---|---|---|---|---|---|
 | **B2s** (fit over 2010–23) | 4,536 | 1 | 173 | 0 | 0 |
 | **BP trained to 2014**, 2015–16 | 648 | 37 | 37 | 0.78 | 0.78 |
+| **BP trained to 2018**, 2019–23 | 1,620 | 103 | 64 | 0.92 | 0.57 |
 
 - **B2s does not recover the epidemics, by construction:** the monthly history h is fitted to the national waves, so the epidemic years are normal there. Its 474 municipal hits (of 935,760 cells) fall in 2017–18 (108 and 85), the troughs after the waves: local flare-ups against a low national level. This is §6.1's statement (surveillance reads BP), now measured; **the §10.1 row "dengue epidemics, B2s" should name BP**, and B2s is for out-of-season events.
 - **BP recovers 2015–16:** 13 of 19 epidemic states in 2015 and 16 of 18 in 2016 flagged (29 of 37). The 8 misses (Acre, Rio Grande do Norte, Alagoas, Minas Gerais, Rio de Janeiro ×2, Paraná, Distrito Federal) had incidences 352–847: states whose 2010–14 training already held epidemics. The 8 flags below 300 include Santa Catarina 2015–16 (62 and 70 per 100,000, rate ratio 44 and 63): dengue arriving where the past held almost none, a departure from the past and not an epidemic by incidence.
+- **BP trained to 2018:** 59 of 64 epidemic state-years in 2019–23 flagged (recall 0.92; at ≥150 per 100,000, 0.87). The 5 misses: Alagoas 2022 (393), Minas Gerais 2020 and 2022 (388, 421), Mato Grosso do Sul 2021 (351), Goiás 2020 (885). The 44 flags below 300 are mostly small-incidence states against a trough baseline (Amazonas 103 per 100,000 in 2019 at rate ratio 8.8; Roraima 2019 at 3.2): the baseline, not the lens, is what 2017–18 make low. Precision 0.57 is therefore a statement about the flat-level forecast; a baseline that remembers earlier epidemics (a longer training window, or the level over the last 36 months) is the next measurement.
 - **The monthly forecast of h.** The documented linear extrapolation (RW2 forecast mean from the last two periods) is unusable at the monthly grain: h moves ±0.3 per month, and a 60-month horizon would carry the last slope (0.32 per month on the full fit) to a factor of e^19. `extrapolate` now holds the monthly h flat at its last twelve months' mean (annual grain unchanged).
+
+## What φ = 0.235 means for ADR-0004
+
+With Var = μ + μ²/φ and φ = 0.235, a cell's coefficient of variation never falls below 1/√φ ≈ 2.1, however large μ: one municipality-month cannot show a plausible outbreak (a cell must exceed μ by many times to leave the predictive, and the 474 municipal B2s hits are 0.05% of cells). Detection has to come from clusters (the space-time lens, whose Poisson scan sums cells) and from BP, where a whole state's level departs from the past: at state-month the BP lens flagged 630 of 1,620 cells in 2019–23. A single-cell outbreak lens is not a dengue instrument.
 
 ## Pending
 
-- BP trained to 2018 (2019–2023) calibration and state recovery; the space-time lens at B2s; 2024 is outside the data.
+- The space-time lens at B2s and BP on dengue; 2024 is outside the data.
