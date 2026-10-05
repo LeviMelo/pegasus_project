@@ -1,4 +1,4 @@
-"""What the exposure switch changes (evaluation 2026-10-05, exposure): POPSVS against population-account-2.
+"""What the exposure switch changes (evaluation 2026-10-05, exposure): POPSVS against population-account-2 and -3.
 
 Usage:
     python scripts/measure_exposure.py fit TARGET POP [SPAN]     fit and store a block (SPAN: full 2010-2023 | train 2010-2019)
@@ -6,11 +6,13 @@ Usage:
 
 TARGET  ix      SIM.DO death, chapter IX, nodes IX, I20-I25, I60-I69, I10-I15
         births  SINASC-DN birth, the total
-POP     popsvs | popsvs-5y (POPSVS summed into the account's bands: the control that separates source from bands) | account-2
+POP     popsvs | popsvs-5y (POPSVS summed into the account's bands: the control that separates source from bands)
+        | account-2 (17 bands) | account-3 (population-account-3 summed onto POPSVS's 18 bands; account-4 is the same plus 2024-2030)
 
 eval, per POP, tiers B0/B1/B2 (in-sample, 2010-2023) and BP (fitted to 2019, 2020-2023 held out): the PIT's KS overall and
 per macro-region (block phi, then the field's place-year phi), the NB negative log-likelihood of the place-year totals
-(common places only: the account holds 5554 of POPSVS's 5570), and for account-2 the exposure variance off / rho 0 / rho 1.
+(common places only: account-2 holds 5554 of POPSVS's 5570, account-3 all), and for an account the exposure variance off
+(EXPOSURE_RHOS=none,0,1 adds rho 0 and rho 1).
 Then, between the sources, where the expectation and the standardised surprise move. Output: data/exposure/<target>.json."""
 import json
 import os
@@ -129,9 +131,9 @@ def evaluate(target: str, pops: list[str]) -> dict:
     res: dict = {}
     keep: dict = {}
     for pop in pops:
-        rhos = [None, 0.0, 1.0] if pop == "account-2" else [None]
+        rhos = [None if r == "none" else float(r) for r in os.environ.get("EXPOSURE_RHOS", "none").split(",")]             if pop.startswith("account") else [None]
         for rho in rhos:
-            name = pop if pop != "account-2" else f"account-2|rho={rho}"
+            name = pop if rho is None else f"{pop}|rho={rho}"
             ex = surprise.Expectations(dataset, event, FULL, GRAPH, population=pop, exposure_rho=rho)
             for node in nodes:
                 for tier in os.environ.get("EXPOSURE_TIERS", "B0,B1,B2,BP").split(","):
@@ -154,12 +156,14 @@ def evaluate(target: str, pops: list[str]) -> dict:
                           f"{res[f'{node}|{tier}'][name]['field_phi']['ks']:.3f} nll {res[f'{node}|{tier}'][name]['block_phi']['nll']:.0f}"
                           f"/{res[f'{node}|{tier}'][name]['field_phi']['nll']:.0f}  {time.time() - t:.0f}s", flush=True)
     # common places, then every score again over them
-    if "popsvs" in pops and "account-2" in pops:
-        common = np.intersect1d(keep[(nodes[0], "B1", "popsvs")]["places"], keep[(nodes[0], "B1", "account-2|rho=None")]["places"])
+    acc = next((p for p in pops if p.startswith("account")), None)
+    if "popsvs" in pops and acc:
+        acc_name = next(n for (nd, tr, n) in keep if n.startswith(acc) and (nd, tr) == (nodes[0], "B1"))
+        common = np.intersect1d(keep[(nodes[0], "B1", "popsvs")]["places"], keep[(nodes[0], "B1", acc_name)]["places"])
         for (node, tier, name), c in keep.items():
             res[f"{node}|{tier}"][name]["common"] = score(c, common)
         res["common_places"] = int(len(common))
-        res["leads_shift"] = shifts(keep, nodes, common)
+        res["leads_shift"] = shifts(keep, nodes, common, acc_name)
     for v in res.values():
         if isinstance(v, dict):
             for x in v.values():
@@ -168,11 +172,11 @@ def evaluate(target: str, pops: list[str]) -> dict:
     return res
 
 
-def shifts(keep: dict, nodes: list[str], common: np.ndarray) -> dict:
+def shifts(keep: dict, nodes: list[str], common: np.ndarray, acc_name: str) -> dict:
     """Where the expectation and the surprise move between POPSVS and the account (B1, IX / the first node)."""
     out: dict = {}
     for node in nodes:
-        a, b = keep[(node, "B1", "popsvs")], keep[(node, "B1", "account-2|rho=0.0")]
+        a, b = keep[(node, "B1", "popsvs")], keep[(node, "B1", acc_name)]
         ia, ib = np.isin(a["places"], common), np.isin(b["places"], common)
         pl = a["places"][ia]
         mua, mub = a["mu_s"][ia], b["mu_s"][ib]
@@ -191,10 +195,10 @@ def shifts(keep: dict, nodes: list[str], common: np.ndarray) -> dict:
                                       "share_cells_changing_by_over_1_sd": float(np.mean(np.abs(zb[sel] - za[sel]) > 1))})
         out_node = {"by_size": d["size_classes"]}
         # leads: the 50 most surprising place-years upward (z) under each source, and how many are shared
-        for lab, zz in (("popsvs", za), ("account-2", zb)):
+        for lab, zz in (("popsvs", za), ("account", zb)):
             top = np.argsort(-zz.ravel())[:200]
             out_node[f"top200_{lab}"] = set(top.tolist())
-        out_node["top200_shared"] = len(out_node.pop("top200_popsvs") & out_node.pop("top200_account-2"))
+        out_node["top200_shared"] = len(out_node.pop("top200_popsvs") & out_node.pop("top200_account"))
         dz = (zb - za).ravel()
         idx = np.argsort(-np.abs(dz))[:15]
         U, T = za.shape

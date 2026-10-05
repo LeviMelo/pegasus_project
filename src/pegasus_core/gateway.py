@@ -36,6 +36,7 @@ class EventCounts:
 
 
 ACCOUNT = ("population_account", "population-account-2")   # the modelled product and its pinned version
+TENSOR = {"account-3": ("population-account-3", 2000, 2023), "account-4": ("population-account-4", 2000, 2030)}   # source: version, years held
 POPSVS_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]   # 18 bands, 80+ closes
 ACCOUNT_EDGES = list(range(0, 81, 5))   # 17 bands: the account's 0-4 holds ages 0 and 1-4, which POPSVS keeps apart
 POPSVS_PLACES = 5570
@@ -44,6 +45,7 @@ _Z80 = 1.2815515655446004    # the 80% interval's half-width in standard deviati
 
 def age_edges(source: str | None = None) -> list[int]:
     """The lower edges of the age bands a population source supports (the last band is open)."""
+    # account-3/4 hold single ages and are summed onto POPSVS's 18 bands
     return list(ACCOUNT_EDGES if (source or config.population_source()) in ("account-2", "popsvs-5y") else POPSVS_EDGES)
 
 
@@ -51,7 +53,8 @@ def population_key(source: str | None = None) -> dict:
     """What an artefact built on a population adds to its key. POPSVS adds nothing (its keys predate the
     switch and the data version already names the series); the account adds its source and model version."""
     source = source or config.population_source()
-    return {} if source == "popsvs" else {"population": source, **({"population_model": ACCOUNT[1]} if source == "account-2" else {})}
+    model = ACCOUNT[1] if source == "account-2" else TENSOR[source][0] if source in TENSOR else None
+    return {} if source == "popsvs" else {"population": source, **({} if model is None else {"population_model": model})}
 
 
 def population(years: range | list[int], series: str = "POPSVS", source: str | None = None) -> pa.Table:
@@ -61,8 +64,14 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
     names the pegasus_data series). ``account-2`` gives pegasus_data's population account: age is the LOWER EDGE
     of its five-year band (``age_edges``), and the column ``s`` is the standard deviation of log N, read from
     its 80% interval. Not covered by the account (a municipality pooled with others in a comparable area,
-    16 of 5570) or before 2010 (years the account holds only for comparable areas): absent or an error."""
+    16 of 5570) or before 2010 (years the account holds only for comparable areas): absent or an error.
+    ``account-3`` (2000-2023) and ``account-4`` (2000-2030, the forecast beyond 2023) are pegasus_data's complete
+    tensor (all 5570 municipalities, single ages 0-100, race; ADR-0151): the race ``total``, single ages 0-79 and
+    the 80-100 summed to 80+, then summed onto POPSVS's 18 bands exactly (ages 0 and 1-4 apart); age is the
+    band's lower edge (``age_edges``), ``s`` the sd of log N."""
     source = source or config.population_source()
+    if source in TENSOR:
+        return _tensor_population(sorted(set(years)), source)
     if source == "account-2":
         return _account_population(sorted(set(years)))
     if source == "popsvs-5y":
@@ -73,7 +82,7 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
         return con.execute("""SELECT u, year, sex, CAST(least(age // 5 * 5, 80) AS SMALLINT) AS age, sum(n) AS n
                               FROM p GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
     if source != "popsvs":
-        raise KeyError(f"unknown population source {source!r}: popsvs or account-2 (popsvs-5y: a control)")
+        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4 or account-2 (popsvs-5y: a control)")
     import pegasus_data as pg
 
     years = sorted(set(years))
@@ -125,6 +134,41 @@ def _account_population(years: list[int]) -> pa.Table:
         raise ValueError("the account's age bands do not match ACCOUNT_EDGES")
     store.put_table("gateway", key, table, {"source": f"pegasus_data modelled {ACCOUNT[0]}/{ACCOUNT[1]}",
                                             "model": manifest.get("model")})
+    return table
+
+
+def _tensor_population(years: list[int], source: str) -> pa.Table:
+    """population-account-3/4 on the gateway's 18 POPSVS bands: (u, year, sex, age band edge, n, s).
+
+    The bands are the exact sums of the single ages (0 | 1-4 | 5-9 ... 75-79 | 80+). A band's ``s`` (sd of log N) is
+    the sum of its ages' sds of N over the band's N, i.e. the ages' errors taken as perfectly correlated: an upper
+    bound, as the single ages of a band share one band total (ADR-0151)."""
+    from pathlib import Path
+
+    version, first, last = TENSOR[source]
+    if min(years) < first or max(years) > last:
+        hint = "; account-4 holds the forecast to 2030" if source == "account-3" and max(years) > last else ""
+        raise LookupError(f"{version} holds {first}-{last}; asked {years[0]}-{years[-1]}{hint}")
+    key = {"what": "population", "source": source, "model": version, "years": years}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    path = Path(config.data_root()) / "lake" / "modelled" / ACCOUNT[0] / version / "estimates.parquet"
+    con = duckdb.connect()
+    table = con.execute(f"""
+        WITH a AS (
+            SELECT municipality // 10 AS u, year, sex, least(age, {MAX_AGE}) AS age_s, population AS n,
+                   CASE WHEN population_lo > 0 AND population_hi > population_lo
+                        THEN population * (ln(population_hi) - ln(population_lo)) / (2 * {_Z80}) ELSE 0.0 END AS sd
+            FROM read_parquet('{path.as_posix()}')
+            WHERE race = 'total' AND year IN ({', '.join(map(str, years))}))
+        SELECT CAST(u AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, CAST(sex AS TINYINT) AS sex,
+               CAST(CASE WHEN age_s < 1 THEN 0 WHEN age_s < 5 THEN 1 ELSE age_s // 5 * 5 END AS SMALLINT) AS age,
+               CAST(sum(n) AS DOUBLE) AS n, CAST(CASE WHEN sum(n) > 0 THEN sum(sd) / sum(n) ELSE 0.0 END AS DOUBLE) AS s
+        FROM a WHERE sex IN (1, 2) GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
+    if set(table.column("age").unique().to_pylist()) != set(POPSVS_EDGES):
+        raise ValueError(f"{version}: the bands do not match POPSVS_EDGES")
+    store.put_table("gateway", key, table, {"source": f"pegasus_data modelled {ACCOUNT[0]}/{version}, race total, bands summed"})
     return table
 
 

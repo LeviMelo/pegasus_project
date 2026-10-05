@@ -34,7 +34,8 @@ def population_root() -> str:
 
 def population_source() -> str:
     """The exposure the gateway reads unless a call names one: ``popsvs`` (IBGE's projection as the MoH
-    distributes it) or ``account-2`` (pegasus_data's modelled population account, with intervals; ADR-0010)."""
+    distributes it) ``account-2`` (pegasus_data's modelled population account, with intervals; ADR-0010) or ``account-3`` / ``account-4``
+    (its complete tensor, single ages; ADR-0010 amended)."""
     return os.environ.get("PEGASUS_POPULATION", "popsvs")
 
 
