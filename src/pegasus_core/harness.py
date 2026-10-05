@@ -119,6 +119,45 @@ POSITIVES: tuple[Positive, ...] = (
              criterion="ρ(cold anomaly → admissions) < −δ at lag 0–1, absent in the 5-year-shifted control",
              note="Requia et al., Environ Res 2023;231:116231, low temperature and respiratory admissions in Brazil, "
                   "RR 1.07 (1.01–1.14)"),
+    # declared BEFORE any CNES field was read against these outcomes (commit order is the evidence). E_b positives and an
+    # explain-away test with the CNES supply fields (ADR-0150 of pegasus_data); constants and rules fixed here
+    Positive("Roemer's law: SUS admissions and SUS beds", "SIH-RD+CNES", "hospitalisation", "*", "E_b", "B0",
+             "5,570 municipalities", (2015, 2019),
+             criterion="rho > 0 and p <= 0.05 at delta_E = 0.03 (E_b), and rho > 0 and p <= 0.05 at delta_E|Z = 0.05 with "
+                       "Z = [log GDP pc 2021, urban share]; both required",
+             note="Outcome: all-cause SIH-RD admissions by residence, 2015-2019 (before COVID), indirectly standardised on the "
+                  "national sex x 5-year-age rates of each year, Poisson shrunk place effect (surprise.refit_place, T=1, as the "
+                  "diarrhoea outcome). Context: cnes_beds_sus (December stocks) per 1,000 residents of POPSVS, mean of 2015-2019 "
+                  "yearly rates, asinh; z-scored with constant sd 0.05, a municipality without a CNES record carries no weight. "
+                  "Roemer MI 1961 Hospitals 35:36-42 ('a bed built is a bed filled'); Delamater et al. 2013 PLoS ONE 8(2):e54900 "
+                  "doi:10.1371/journal.pone.0054900 (Michigan ZIP codes, spatial SAR, positive, standardised 0.21). Beds are placed "
+                  "where demand is, and residents of bedless towns are admitted in the hub: E_b cannot separate supply-induced "
+                  "demand from demand-placed supply"),
+    Positive("Primary care coverage and infant mortality", "SIM.DO+SINASC-DN+CNES", "death", "age0", "E_b|Z", "B0",
+             "5,570 municipalities", (2018, 2022),
+             criterion="rho < 0 and p <= 0.05 at delta_E|Z = 0.05 given log GDP pc 2021",
+             note="Context: ESF coverage = min(1, 3,450 x cnes_teams_esf / POPSVS population), mean of December 2018-2022. "
+                  "Outcome as the census positives (infant deaths 2018-22 over SINASC births, shrunk). Aquino, Oliveira & "
+                  "Barreto 2009 AJPH 99:87-93 (Family Health Program and infant mortality, Brazilian municipalities, "
+                  "doi:10.2105/AJPH.2007.127480); Rasella et al. 2013 Lancet 382:57-64 (doi:10.1016/S0140-6736(13)60715-1). "
+                  "Those are panel designs; the cross-section is confounded by indication (ESF reached the poorest first)"),
+    Positive("Sanitation and infant mortality survive adjustment for primary care", "SIM.DO+SINASC-DN+CENSO+CNES", "death",
+             "age0", "E_b|Z", "B0", "5,570 municipalities", (2018, 2022),
+             criterion="of IM-no_bathroom, IM-water, DIA-no_bathroom (the pairs admitted at delta_E|Z given log GDP pc, "
+                       "pairs-gate entry): sign kept in 3 of 3 and p <= 0.05 at delta_E|Z in at least 2 of 3, with "
+                       "Z = [log GDP pc, ESF coverage, community health agents per 1,000 (asinh)]",
+             note="Census 2022 shares and the outcomes as the E_b gate (scripts/gate_eb.py inputs); ESF coverage as above, agents "
+                  "= cnes_community_health_agents_professionals per 1,000, mean December 2018-2022. A mediator of sanitation "
+                  "through primary care would shrink rho; a confounder would too"),
+    Positive("Sao Borja acute MI (I21) from 2018: a supply step", "SIM.DO+CNES", "death", "I21", "explain_away", "B2",
+             "mun:431800", (2018, 2023),
+             criterion="explained by supply when, in one of six CNES fields (beds_total, beds_icu_total, equipment_ct, "
+                       "facilities_hospital_sus, physicians_professionals, teams_esf), the log ratio of the mean of the lead's "
+                       "first two years to the mean of the two before exceeds the 99th percentile of the same log ratio over the "
+                       "5,570 municipalities, at the same place; explain_away over the lead's places across all years reported",
+             note="Lead-triage entry item 14: I21 112 against 20 a year, neighbours flat, ill-defined share 8.0% -> 1.8%. The "
+                  "same rule applies to the other leads in the 'unexplained' top 15 of that entry; the supply fields are "
+                  "2008-2023 December stocks. A supply step explains a detection or recording change, not incidence"),
 )
 
 
