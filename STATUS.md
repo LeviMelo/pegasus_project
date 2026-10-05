@@ -41,7 +41,7 @@
 | SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
 | pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
 | performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
-| surveillance feasibility: publication lag per system; reporting delay from dates inside the records | ADR-0004 | agent |
+| surveillance feasibility: **done** (ADR-0004 updated): weekly alarms feasible for arboviruses only; preliminary-file snapshots must start now | ADR-0004 | done |
 | race bridge: first measurement done (evaluation 2026-10-04: 63% agreement SINASC↔SIM, the direction reversing by region); now the bridge model | §2, §12 phase 3 | agent |
 | E_b positives against census context: 12/12 signs right, 2/12 admitted (evaluation 2026-10-04); now the E_b gate: MSR null against Dutilleul, δ_E calibrated on negatives | §7.5, §8.4, §10.5 | agent |
 | not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools | | next wave |

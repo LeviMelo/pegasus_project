@@ -35,3 +35,27 @@ PegaSUS will also run as a **prospective surveillance system**: early alarms on 
    - It sets a floor on the smallest detectable rate ratio, whatever the count.
    - At φ = 6 nothing under about ×8 is detectable in one cell; at φ = 30, nothing under about ×3.
 2. **Publication lag per system,** from pegasus_data's catalog.
+
+## Feasibility, measured (2026-10-05)
+
+Evaluations: `2026-10-05-surveillance-lags`, `2026-10-05-dengue-monthly`.
+
+**Weeks behind real time at posting, with a nowcast:**
+
+| system | weeks behind |
+|---|---|
+| SINAN arboviruses | 1–2 |
+| SIM, SINASC | ~10 |
+| SIH | ~5, month grain |
+
+Only the arboviruses support a weekly alarm now.
+
+**Reporting delay is not stable.** It changes by year, state and epidemic load, so it is estimated per place from the last closed year.
+
+**Files are revised after publication:**
+- SIA rises 26% at its first rewrite;
+- DENGBR21 was re-issued without 47% of its rows (discarded cases).
+
+**Dengue's dispersion is extreme (φ = 0.235).** A single cell cannot show an outbreak, so detection comes from clusters and BP. BP recovered 29 of 37 epidemic state-years in 2015–16.
+
+**Consequence.** Snapshots of the preliminary files begin before phase 4. A revision history cannot be recovered afterwards.
