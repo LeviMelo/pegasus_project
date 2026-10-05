@@ -149,8 +149,17 @@ def surrogate(s: surprise.Surprise, seed_parts: tuple) -> surprise.Surprise:
     rng = np.random.default_rng(config.seed(*seed_parts))
     y = subset.replicate(s.mu, s.phi, rng)
     u, z = surprise.randomised_pit(y, s.mu, s.phi, config.seed(*seed_parts, "pit"))
+    extras = s.extras
+    if "beta" in s.extras:
+        # B2's place trends must be the surrogate's own, refitted around the B2 expectation (so a
+        # trend lens tests the null, not the real data's trends again)
+        yrs = s.years.astype(float)
+        st = (yrs - yrs.mean()) / max(yrs.std(), 1e-9)
+        _, b, sd, tau = surprise.refit_place(y, s.mu, s.phi, np.stack([np.ones_like(st), st], axis=1))
+        extras = {**s.extras, "alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
+                  "tau": tau}
     return surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, u, z, s.w, s.flags,
-                             s.calibration, s.extras)
+                             s.calibration, extras)
 
 
 def false_lead_rate(run_lens, s: surprise.Surprise, surrogates: int = 20) -> dict[str, float]:
@@ -222,6 +231,7 @@ def run(session: Any, node: str, lens: str, surrogates: int = 20, loci: int = 40
         "spatial_cluster": lambda x: lenses.spatial_cluster(x, edges, sandbox, replicates=replicates),
         "outbreak": lambda x: lenses.outbreak(x, sandbox),
         "change_point": lambda x: lenses.change_point(x, sandbox, replicates=replicates),
+        "trend_divergence": lambda x: lenses.trend_divergence(x, edges, sandbox),
     }
     out: dict[str, Any] = {"field": s.field.id, "lens": lens, "tier": tier, "calibration": s.calibration}
     log(f"{s.field.id} {lens}: surrogates")
