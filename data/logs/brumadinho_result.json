@@ -1,0 +1,527 @@
+{
+ "primary": 310900,
+ "window": [
+  201902,
+  202001
+ ],
+ "nodes": {
+  "J20-J22": {
+   "primary": {
+    "observed": 3.0,
+    "expected": 4.367282143961234,
+    "ratio": 0.6869260792202733,
+    "excess": -1.3672821439612344,
+    "p_min_effect_1.2": 0.8671683469938871,
+    "p_vs_1.0": 0.7841833173920166
+   },
+   "calibration_ks": 0.028788234510022992,
+   "curve": [
+    {
+     "month": 201901,
+     "observed": 4.0,
+     "expected": 0.17570469354255108,
+     "ratio": 22.765470400090962,
+     "rest_of_brazil_ratio": 1.18473853192774
+    },
+    {
+     "month": 201902,
+     "observed": 0.0,
+     "expected": 0.20682971006622414,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.2977829531601572
+    },
+    {
+     "month": 201903,
+     "observed": 0.0,
+     "expected": 0.3898127651430643,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.3850961555619883
+    },
+    {
+     "month": 201904,
+     "observed": 2.0,
+     "expected": 0.5580789572488244,
+     "ratio": 3.583722292378572,
+     "rest_of_brazil_ratio": 1.41411295518561
+    },
+    {
+     "month": 201905,
+     "observed": 0.0,
+     "expected": 0.6265783213674934,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.2943958087555676
+    },
+    {
+     "month": 201906,
+     "observed": 0.0,
+     "expected": 0.5604515020235834,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.1429461640469707
+    },
+    {
+     "month": 201907,
+     "observed": 0.0,
+     "expected": 0.442949460154813,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.0269543681207611
+    },
+    {
+     "month": 201908,
+     "observed": 1.0,
+     "expected": 0.3423116231562176,
+     "ratio": 2.921314768045838,
+     "rest_of_brazil_ratio": 1.0971013994618397
+    },
+    {
+     "month": 201909,
+     "observed": 0.0,
+     "expected": 0.2974994125825052,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.1564289585182221
+    },
+    {
+     "month": 201910,
+     "observed": 0.0,
+     "expected": 0.2926170729380596,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.2688078625383823
+    },
+    {
+     "month": 201911,
+     "observed": 0.0,
+     "expected": 0.2574722685445262,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.1163270688876774
+    },
+    {
+     "month": 201912,
+     "observed": 0.0,
+     "expected": 0.21883213067463553,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.1864395567689205
+    },
+    {
+     "month": 202001,
+     "observed": 0.0,
+     "expected": 0.17384892006128833,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 1.0223534137175645
+    },
+    {
+     "month": 202002,
+     "observed": 1.0,
+     "expected": 0.20464519761331565,
+     "ratio": 4.886506068368804,
+     "rest_of_brazil_ratio": 1.1170397793508573
+    },
+    {
+     "month": 202003,
+     "observed": 0.0,
+     "expected": 0.38569560596179847,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.9624655873928446
+    },
+    {
+     "month": 202004,
+     "observed": 0.0,
+     "expected": 0.5521845892132754,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.20764793537520262
+    },
+    {
+     "month": 202005,
+     "observed": 0.0,
+     "expected": 0.6199604706471519,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.131420126762657
+    },
+    {
+     "month": 202006,
+     "observed": 0.0,
+     "expected": 0.5545320754333234,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.15127311603217777
+    },
+    {
+     "month": 202007,
+     "observed": 0.0,
+     "expected": 0.43827107709559265,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.2724356419083599
+    },
+    {
+     "month": 202008,
+     "observed": 0.0,
+     "expected": 0.33869616576704153,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.3392451779634301
+    },
+    {
+     "month": 202009,
+     "observed": 0.0,
+     "expected": 0.2943572567901321,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.35567848444856043
+    },
+    {
+     "month": 202010,
+     "observed": 0.0,
+     "expected": 0.28952648387538515,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.3449616040096997
+    },
+    {
+     "month": 202011,
+     "observed": 0.0,
+     "expected": 0.2547528750070406,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.38479432892104626
+    },
+    {
+     "month": 202012,
+     "observed": 0.0,
+     "expected": 0.21652084998675866,
+     "ratio": 0.0,
+     "rest_of_brazil_ratio": 0.27015908831702895
+    }
+   ],
+   "secondary_pooled": {
+    "observed": 312.0,
+    "expected": 206.2135901557462,
+    "ratio": 1.512994365523421,
+    "excess": 105.7864098442538,
+    "p_min_effect_1.2": 0.02124093131422804,
+    "p_vs_1.0": 0.0001252545803337666
+   },
+   "rest_of_brazil_same_window": {
+    "observed": 67152.0,
+    "expected": 55124.4237530413,
+    "ratio": 1.2181896050440821,
+    "excess": 12027.576246958699,
+    "p_min_effect_1.2": 0.2810754743190343,
+    "p_vs_1.0": 5.514742512477611e-15
+   },
+   "secondary_places": [
+    {
+     "observed": 19.0,
+     "expected": 2.4021479068820413,
+     "ratio": 7.909587892388262,
+     "excess": 16.597852093117957,
+     "p_min_effect_1.2": 1.7982494476558878e-08,
+     "p_vs_1.0": 1.1926907453268576e-09,
+     "u": 310020,
+     "name": "Abaeté",
+     "p_bonferroni_25": 4.4956236191397195e-07
+    },
+    {
+     "observed": 105.0,
+     "expected": 77.23633733746892,
+     "ratio": 1.3594637397320284,
+     "excess": 27.763662662531075,
+     "p_min_effect_1.2": 0.28210085915458194,
+     "p_vs_1.0": 0.0860158712159098,
+     "u": 310670,
+     "name": "Betim",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 1.0,
+     "expected": 0.12999148323557788,
+     "ratio": 7.692811675882979,
+     "excess": 0.8700085167644221,
+     "p_min_effect_1.2": 0.14402998741948508,
+     "p_vs_1.0": 0.12161034383744429,
+     "u": 310700,
+     "name": "Biquinhas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 8.0,
+     "expected": 4.137288152643967,
+     "ratio": 1.933633748688144,
+     "excess": 3.8627118473560333,
+     "p_min_effect_1.2": 0.1501212869329029,
+     "p_vs_1.0": 0.07607043377499646,
+     "u": 310990,
+     "name": "Caetanópolis",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 36.0,
+     "expected": 9.261375561740973,
+     "ratio": 3.8871115591853447,
+     "excess": 26.738624438259027,
+     "p_min_effect_1.2": 1.9835911870588606e-06,
+     "p_vs_1.0": 5.7510721033439946e-08,
+     "u": 312090,
+     "name": "Curvelo",
+     "p_bonferroni_25": 4.958977967647151e-05
+    },
+    {
+     "observed": 54.0,
+     "expected": 52.292260953660396,
+     "ratio": 1.0326575867096843,
+     "excess": 1.7077390463396043,
+     "p_min_effect_1.2": 0.7005108444512553,
+     "p_vs_1.0": 0.4353510248668469,
+     "u": 312410,
+     "name": "Esmeraldas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 8.0,
+     "expected": 0.1994957292049409,
+     "ratio": 40.1011090908199,
+     "excess": 7.800504270795059,
+     "p_min_effect_1.2": 5.138435584748209e-10,
+     "p_vs_1.0": 1.250268300940184e-10,
+     "u": 312570,
+     "name": "Felixlândia",
+     "p_bonferroni_25": 1.2846088961870522e-08
+    },
+    {
+     "observed": 1.0,
+     "expected": 0.5288909587622023,
+     "ratio": 1.8907489028369189,
+     "excess": 0.47110904123779773,
+     "p_min_effect_1.2": 0.4651646817321298,
+     "p_vs_1.0": 0.4070885423441515,
+     "u": 312600,
+     "name": "Florestal",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 0.0,
+     "expected": 1.5527873741440676,
+     "ratio": 0.0,
+     "excess": -1.5527873741440676,
+     "p_min_effect_1.2": 1.0,
+     "p_vs_1.0": 1.0,
+     "u": 312640,
+     "name": "Fortuna de Minas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 7.0,
+     "expected": 3.9839113393138588,
+     "ratio": 1.7570672145544273,
+     "excess": 3.0160886606861412,
+     "p_min_effect_1.2": 0.22283466339041552,
+     "p_vs_1.0": 0.12681117525071495,
+     "u": 313010,
+     "name": "Igarapé",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 6.0,
+     "expected": 3.031444338975846,
+     "ratio": 1.9792545496735268,
+     "excess": 2.968555661024154,
+     "p_min_effect_1.2": 0.17579791865015454,
+     "p_vs_1.0": 0.10078597950771406,
+     "u": 313665,
+     "name": "Juatuba",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 0.0,
+     "expected": 0.23374497071653666,
+     "ratio": 0.0,
+     "excess": -0.23374497071653666,
+     "p_min_effect_1.2": 1.0,
+     "p_vs_1.0": 1.0,
+     "u": 313970,
+     "name": "Maravilhas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 4.0,
+     "expected": 1.5991553749827687,
+     "ratio": 2.501320423628693,
+     "excess": 2.400844625017231,
+     "p_min_effect_1.2": 0.1365446933817391,
+     "p_vs_1.0": 0.08572909487805494,
+     "u": 314015,
+     "name": "Mário Campos",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 3.0,
+     "expected": 5.37886105002396,
+     "ratio": 0.5577388915794054,
+     "excess": -2.3788610500239598,
+     "p_min_effect_1.2": 0.9325086274424019,
+     "p_vs_1.0": 0.875822034864785,
+     "u": 314070,
+     "name": "Mateus Leme",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 1.0,
+     "expected": 0.5849212248824064,
+     "ratio": 1.7096319255657748,
+     "excess": 0.4150787751175936,
+     "p_min_effect_1.2": 0.49903449144551554,
+     "p_vs_1.0": 0.4386857152089863,
+     "u": 314350,
+     "name": "Morada Nova de Minas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 0.0,
+     "expected": 0.7840543238976837,
+     "ratio": 0.0,
+     "excess": -0.7840543238976837,
+     "p_min_effect_1.2": 1.0,
+     "p_vs_1.0": 1.0,
+     "u": 314640,
+     "name": "Paineiras",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 3.0,
+     "expected": 2.484461491674944,
+     "ratio": 1.2075051314148149,
+     "excess": 0.5155385083250561,
+     "p_min_effect_1.2": 0.5577572629640137,
+     "p_vs_1.0": 0.44505709236376845,
+     "u": 314690,
+     "name": "Papagaios",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 17.0,
+     "expected": 16.15046199561432,
+     "ratio": 1.052601467661815,
+     "excess": 0.8495380043856784,
+     "p_min_effect_1.2": 0.6635140910866985,
+     "p_vs_1.0": 0.44304213947789906,
+     "u": 314710,
+     "name": "Pará de Minas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 6.0,
+     "expected": 5.699306516485977,
+     "ratio": 1.0527596616613317,
+     "excess": 0.30069348351402336,
+     "p_min_effect_1.2": 0.6443313015460463,
+     "p_vs_1.0": 0.4909273066188768,
+     "u": 314740,
+     "name": "Paraopeba",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 1.0,
+     "expected": 0.6173598753730203,
+     "ratio": 1.619800767576256,
+     "excess": 0.3826401246269797,
+     "p_min_effect_1.2": 0.5173878567624257,
+     "p_vs_1.0": 0.455993352651049,
+     "u": 314960,
+     "name": "Pequi",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 17.0,
+     "expected": 5.0947714418716785,
+     "ratio": 3.3367541986838707,
+     "excess": 11.905228558128321,
+     "p_min_effect_1.2": 0.0014094868623613353,
+     "p_vs_1.0": 0.0002449465449977443,
+     "u": 315200,
+     "name": "Pompéu",
+     "p_bonferroni_25": 0.03523717155903338
+    },
+    {
+     "observed": 1.0,
+     "expected": 0.39578625520652294,
+     "ratio": 2.5266162905990655,
+     "excess": 0.604213744793477,
+     "p_min_effect_1.2": 0.3748171576429931,
+     "p_vs_1.0": 0.3243930244156872,
+     "u": 316170,
+     "name": "São Gonçalo do Abaeté",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 3.0,
+     "expected": 4.006603915731732,
+     "ratio": 0.7487638067293471,
+     "excess": -1.0066039157317324,
+     "p_min_effect_1.2": 0.8287943067449264,
+     "p_vs_1.0": 0.7361752430560252,
+     "u": 316292,
+     "name": "São Joaquim de Bicas",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 3.0,
+     "expected": 0.7775751488460124,
+     "ratio": 3.8581479930939855,
+     "excess": 2.2224248511539875,
+     "p_min_effect_1.2": 0.07216826087488193,
+     "p_vs_1.0": 0.047190345807541834,
+     "u": 316310,
+     "name": "São José da Varginha",
+     "p_bonferroni_25": 1.0
+    },
+    {
+     "observed": 8.0,
+     "expected": 7.6505954344058456,
+     "ratio": 1.0456702447005406,
+     "excess": 0.34940456559415445,
+     "p_min_effect_1.2": 0.6529034486183847,
+     "p_vs_1.0": 0.4824843095737008,
+     "u": 316935,
+     "name": "Três Marias",
+     "p_bonferroni_25": 1.0
+    }
+   ],
+   "facilities": {
+    "window_total": 3,
+    "net_excess": -1.3672821439612342,
+    "facilities": [
+     {
+      "facility": "2124289",
+      "hospital_municipality": "310900",
+      "window": 3,
+      "baseline_share": 0.6875,
+      "expected": 3.0025064739733485,
+      "excess": -0.0025064739733484664,
+      "share_of_net_excess": null
+     },
+     {
+      "facility": "2192896",
+      "hospital_municipality": "310620",
+      "window": 0,
+      "baseline_share": 0.0625,
+      "expected": 0.27295513399757715,
+      "excess": -0.27295513399757715,
+      "share_of_net_excess": null
+     },
+     {
+      "facility": "0026948",
+      "hospital_municipality": "310620",
+      "window": 0,
+      "baseline_share": 0.0625,
+      "expected": 0.27295513399757715,
+      "excess": -0.27295513399757715,
+      "share_of_net_excess": null
+     },
+     {
+      "facility": "2126494",
+      "hospital_municipality": "310670",
+      "window": 0,
+      "baseline_share": 0.1875,
+      "expected": 0.8188654019927315,
+      "excess": -0.8188654019927315,
+      "share_of_net_excess": null
+     }
+    ],
+    "n_facilities": 4,
+    "concentrated_outside": []
+   }
+  }
+ }
+}
