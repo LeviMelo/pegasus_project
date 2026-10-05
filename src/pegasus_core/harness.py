@@ -96,6 +96,14 @@ POSITIVES: tuple[Positive, ...] = (
              note="Atlas da Violência 2019 Table 2.1 (2010-12) and 2025 Table 2.1 (2013-23), IPEA/FBSP: UF rates; "
                   "a municipality's documented divergence is its UF's log-rate slope less its contiguity neighbours' UFs' mean; "
                   "documented where |d| >= ln 1.5/13 per year"),
+    # a second estimand of the trend lens, declared in a later commit than the first round and before its national run was
+    # scored (the national run had been looked at once against the neighbours' loci: 4 UFs found; these loci follow from the Atlas
+    # tables alone): trend against the national course
+    Positive("Homicide trend divergence from the national course", "SIM.DO", "death", "X85-Y09", "trend_divergence", "B2",
+             "declare_positives:trend_divergence_national (2,289 municipalities of 14 UFs)", (2010, 2023),
+             criterion="excess-weighted recall >= 0.5 of the documented municipalities, sign of d_u; reference=national",
+             note="Atlas da Violência 2019 Table 2.1 and 2025 Table 2.1: a municipality's documented divergence is its UF's "
+                  "log-rate slope (2010-23) less Brazil's; documented where |d| >= ln 1.5 / 13 per year"),
     Positive("Women's share of homicide victims, by UF", "SIM.DO", "death", "X85-Y09", "group_disparity", "B0",
              "declare_positives:group_women (UFs RO RR AP RN AL SE SP SC RS MS)", (2013, 2023),
              criterion="excess-weighted recall >= 0.5; sign of (observed / expected female share - 1) as documented",

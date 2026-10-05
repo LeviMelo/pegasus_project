@@ -49,6 +49,17 @@ out = {"threshold": THRESH, "slopes": {str(k): round(v, 4) for k, v in sorted(sl
        "trend_divergence": {"places": [int(p) for p in places[sel]], "d": [round(float(x), 4) for x in d[sel]],
                             "weight": [round(float(x), 1) for x in est_deaths_y.sum(1)[sel]]}}
 
+# Trend divergence against the national course (a second declared estimand, written 2026-10-05 after the first
+# round and before the national lens was scored): d_u = slope(UF of u) minus Brazil's slope (Atlas "BR" series),
+# documented where |d_u| >= ln 1.5 / 13; weight = estimated deaths. The loci follow from the Atlas tables alone.
+s_br = float(np.polyfit(np.array(YEARS) - 2016.5, np.log(np.array(A["rate"]["BR"])), 1)[0])
+d_nat = s_uf - s_br
+sel_n = np.abs(d_nat) >= THRESH
+out["trend_divergence_national"] = {"br_slope": round(s_br, 4), "places": [int(p) for p in places[sel_n]],
+                                    "d": [round(float(x), 4) for x in d_nat[sel_n]],
+                                    "weight": [round(float(x), 1) for x in est_deaths_y.sum(1)[sel_n]],
+                                    "ufs": {str(u): round(float(slope[u] - s_br), 4) for u in sorted(slope) if abs(slope[u] - s_br) >= THRESH}}
+
 yrs = slice(3, 14)                                           # 2013-2023
 D = np.array(A["deaths"]["BR"])
 for name, key in (("women", "women"), ("young_men", "young_men")):
@@ -66,6 +77,8 @@ Path("data/p3/declared.json").write_text(json.dumps(out), encoding="utf-8")
 td = out["trend_divergence"]
 print("threshold", round(THRESH, 4), "| slopes", out["slopes"])
 print("trend divergence: places", len(td["places"]), "up", sum(x > 0 for x in td["d"]), "down", sum(x < 0 for x in td["d"]), "est deaths", round(sum(td["weight"])))
+tn = out["trend_divergence_national"]
+print("trend divergence national: places", len(tn["places"]), "up", sum(x > 0 for x in tn["d"]), "down", sum(x < 0 for x in tn["d"]), "UFs", tn["ufs"])
 for k in ("group_women", "group_young_men"):
     g = out[k]
     print(k, "UFs", g["ufs"], "places", len(g["places"]))
