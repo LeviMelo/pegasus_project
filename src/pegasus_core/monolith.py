@@ -804,8 +804,11 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
     """A fit carried to later periods: every effect as fitted, the histories h extrapolated.
     ``history`` chooses the forecast of h:
       linear    the RW2's forecast mean, linear from the last two fitted periods (the annual default);
-      level     flat at the mean of the last twelve months (the monthly default);
-      level36   flat at the mean of the last thirty-six months;
+      level     flat at the mean of the last twelve months;
+      level36   flat at the mean of the last thirty-six months (the monthly default: on dengue 2019–23
+                precision 0.57 -> 0.64 for recall 0.92 -> 0.91; median and robust reach precision 0.71
+                but recall 0.81, missing the big epidemics of states that already had one in the fit,
+                evaluation 2026-10-05, dengue baseline);
       median    flat at the median over the whole fit (a long memory that ignores epidemics as outliers);
       robust    flat at a Farrington-style reweighted mean over the whole fit: months more than one
                 robust sd (1.4826 MAD) from the level get weight 1/r², iterated, so past epidemics
@@ -829,7 +832,7 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
     error (`laplace.forecast_increments`)."""
     monthly = model.data.grain == "month"
     if history == "auto":
-        history = "level" if monthly else "linear"
+        history = "level36" if monthly else "linear"
     test = tm.data
     with torch.no_grad():
         x = {k: v.detach().clone() for k, v in effects.items()}

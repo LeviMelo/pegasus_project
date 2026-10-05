@@ -373,7 +373,7 @@ def predictive_phi(mean: np.ndarray, var: np.ndarray, mu2: np.ndarray, phi: floa
 # ---------------------------------------------------------------------- the forecast of the history
 
 
-def forecast_variance(model: monolith.Monolith, tm: monolith.Monolith) -> dict[str, np.ndarray]:
+def forecast_variance(model: monolith.Monolith, tm: monolith.Monolith, window: int = 36) -> dict[str, np.ndarray]:
     """The variance, per test period, of the history's forecast error beyond the parameters' own
     uncertainty (which the draws carry): what the future history adds to the departure.
 
@@ -383,20 +383,22 @@ def forecast_variance(model: monolith.Monolith, tm: monolith.Monolith) -> dict[s
 
     Monthly grain, flat level: the RW2 forecast is meaningless (the history is nearly free,
     tau ~ 0.002, and a 60-month horizon would carry a variance of ~700), so the error of holding h at
-    its last twelve months' mean is measured on the fitted history itself: V(k) = mean over origins
-    t of [h(t+k) - mean(h(t-11..t))]^2, made non-decreasing in k. A descriptive statistic of how far
+    its last ``window`` months' mean (36: the monthly default of ``monolith.extrapolate``) is measured
+    on the fitted history itself: V(k) = mean over origins t of [h(t+k) - mean(h(t-window+1..t))]^2,
+    made non-decreasing in k. A descriptive statistic of how far
     the level of this series has moved in k months, not a model."""
     T = tm.N.shape[1]
     out: dict[str, np.ndarray] = {}
     if model.data.grain == "month":
         with torch.no_grad():
             h = (model.effects()["h_all"][0]).cpu().numpy()
-        lvl = np.array([h[t - 11:t + 1].mean() for t in range(11, len(h))])
+        w = window
+        lvl = np.array([h[t - w + 1:t + 1].mean() for t in range(w - 1, len(h))])
         v = np.full(T, np.nan)
         for k in range(1, T + 1):
-            origins = np.arange(11, len(h) - k)
+            origins = np.arange(w - 1, len(h) - k)
             if len(origins) >= 6:
-                v[k - 1] = np.mean((h[origins + k] - lvl[origins - 11]) ** 2)
+                v[k - 1] = np.mean((h[origins + k] - lvl[origins - (w - 1)]) ** 2)
         valid = np.nonzero(np.isfinite(v))[0]
         v[len(valid):] = v[valid[-1]] if len(valid) else 0.0
         out["h_all"] = np.maximum.accumulate(np.nan_to_num(v))
