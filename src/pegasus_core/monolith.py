@@ -802,12 +802,17 @@ class MarkModel(Monolith):
 
 def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tuple[Monolith, dict[str, torch.Tensor]]:
     """A fit carried to later periods: every effect as fitted, the histories h extrapolated.
-    ``history`` is ``linear`` (the RW2's forecast mean, linear from the last two fitted periods),
-    ``level`` (flat at the mean of the last twelve months) or ``auto``: linear at the annual grain,
-    level at the monthly. At the monthly grain h is free to follow epidemic waves (τ_h ≈ 0.002 on
-    dengue), so the last two months' slope is noise that a 60-month horizon multiplies
-    (evaluation 2026-10-04, dengue monthly). Returns a model over the test data (for its exposure
-    and cells) and the forecast effects."""
+    ``history`` chooses the forecast of h:
+      linear    the RW2's forecast mean, linear from the last two fitted periods (the annual default);
+      level     flat at the mean of the last twelve months (the monthly default);
+      level36   flat at the mean of the last thirty-six months;
+      median    flat at the median over the whole fit (a long memory that ignores epidemics as outliers);
+      robust    flat at a Farrington-style reweighted mean over the whole fit: months more than one
+                robust sd (1.4826 MAD) from the level get weight 1/r², iterated, so past epidemics
+                are downweighted and the baseline is the endemic level.
+    At the monthly grain h is free to follow epidemic waves (τ_h ≈ 0.002 on dengue), so the last two
+    months' slope is noise that a 60-month horizon multiplies (evaluation 2026-10-05, dengue monthly).
+    Returns a model over the test data (for its exposure and cells) and the forecast effects."""
     if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
             or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
@@ -834,16 +839,43 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
         else:
             last = float(model.data.years[-1])
             steps = torch.as_tensor(test.years.astype(float) - last, dtype=model.dtype, device=model.device)
-        for name in ("h_all", "h_grp"):
-            h = x[name]
-            if history == "level":
-                x[name] = h[:, -12:].mean(dim=1, keepdim=True) + 0.0 * steps[None, :]
-            else:
+        if history == "linear":
+            for name in ("h_all", "h_grp"):
+                h = x[name]
                 slope = h[:, -1:] - h[:, -2:-1]
                 x[name] = h[:, -1:] + slope * steps[None, :]
-            if increments is not None:
+        else:
+            H = (x["h_all"] + x["h_grp"]).cpu().numpy()                      # [groups, T]
+            level = np.array([_baseline_level(row, history) for row in H])
+            level = torch.as_tensor(level, dtype=model.dtype, device=model.device)[:, None]
+            x["h_all"] = level.mean(dim=0, keepdim=True) + 0.0 * steps[None, :]
+            x["h_grp"] = (level - level.mean(dim=0, keepdim=True)) + 0.0 * steps[None, :]
+        if increments is not None:
+            for name in ("h_all", "h_grp"):
                 x[name] = x[name] + increments[name]
     return x
+
+
+def _baseline_level(h: np.ndarray, kind: str) -> float:
+    """A flat baseline for a history h (log scale) over its fitted months."""
+    if kind == "level":
+        return float(h[-12:].mean())
+    if kind == "level36":
+        return float(h[-36:].mean())
+    if kind == "median":
+        return float(np.median(h))
+    if kind == "robust":
+        level = float(np.median(h))
+        scale = max(1.4826 * float(np.median(np.abs(h - level))), 1e-6)
+        for _ in range(50):
+            r = np.abs(h - level) / scale
+            w = np.where(r <= 1.0, 1.0, 1.0 / np.maximum(r, 1e-12) ** 2)
+            new = float((w * h).sum() / w.sum())
+            if abs(new - level) < 1e-8:
+                break
+            level = new
+        return level
+    raise ValueError(f"unknown history forecast {kind!r}")
 
 
 def heldout(model: Monolith, test: BlockData) -> dict:

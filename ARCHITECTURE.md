@@ -507,7 +507,7 @@ Until the curves exist, the provisional rule: at least 1,000 events over the win
 
 **Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
 
-This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.**
+This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far (ADR-0005): δ_E = 0.03 for E_b, 0.05 for E_b|Z.
 
 **Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
 
@@ -603,7 +603,7 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 
 Each negative keeps a field's own dependence and removes the relation:
 
-- **Between places:** Moran spectral randomisation (Wagner & Dray 2015). The field's coordinates in the graph's Moran eigenvectors get random signs, which keeps its spatial autocorrelation spectrum exactly.
+- **Between places:** Moran spectral randomisation (Wagner & Dray 2015) on the **symmetric-normalised** adjacency D^{-1/2}WD^{-1/2}, generated on a different graph from the one the test uses (ADR-0005). The field's coordinates in the Moran eigenvectors get random signs, which keeps its spatial autocorrelation spectrum. On the raw border-weight matrix the top eigenvectors are localised, and the null spread came out 3.5× too small (measured 2026-10-05).
 - **Within places:** the field's series shifted by k ≥ 2 years within each place.
 
 **Withdrawn from this list:** "random partitions of one system's events into two fields". Both halves inherit the same place risk, so they correlate by construction. That makes them a positive for power, not a negative.

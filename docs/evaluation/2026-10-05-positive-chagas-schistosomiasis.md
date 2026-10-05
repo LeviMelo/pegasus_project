@@ -1,0 +1,19 @@
+# Known positives: Chagas disease and schistosomiasis, spatial cluster at B0 (2026-10-05)
+
+**Regime:** SIM.DO deaths 2010–2023 by residence, chapter I block (contiguity), tier B0, `lenses.spatial_cluster` (30 nearest places, 200 replicates); `data/positive_endemic.py`, artefact `data/logs/positive_endemic.json`. Commit: this entry's own.
+
+**The data are deaths (B57, B65), not SINAN notifications.** `SINAN-CHAG` and `SINAN-ESQU` have no event types in pegasus_data (`pg.event_types` raises), though both decode (26 and 20 published years): handoff `docs/handoffs/2026-10-05-sinan-chag-esqu.md`. Deaths measure the chronic disease (Chagas) and the severe end (schistosomiasis); acute Chagas notifications would be an Amazon signal, a different locus.
+
+**References for the endemic areas (Ministry of Health):**
+- **Chagas:** the Ministry's table of deaths and mortality coefficient by state of residence, SIM, 2010–2019 ([PDF](https://www.gov.br/saude/pt-br/assuntos/saude-de-a-a-z/d/doenca-de-chagas/arquivos/mortalidade-por-doenca-de-chagas-2010-a-2019.pdf)). Mean coefficients per 100,000: Goiás 11.5, Distrito Federal 7.4, Minas Gerais 5.4, Bahia 4.3, Tocantins 3.5, against Brazil 2.25. The reference locus is these five states (1,656 municipalities). The table is itself a tabulation of SIM, so it fixes where the locus is, not an independent count.
+- **Schistosomiasis:** the Ministry's page ([esquistossomose](https://www.gov.br/saude/pt-br/assuntos/saude-de-a-a-z/e/esquistossomose)) names the endemic transmission areas: Alagoas, Bahia, Pernambuco, Rio Grande do Norte, Paraíba, Sergipe, Espírito Santo, Minas Gerais (2,100 municipalities); focal transmission elsewhere (read through a page summary, not the page itself).
+
+## Result
+
+**Chagas (61,504 deaths).** B0 observed over expected by state: **Goiás 5.58, Distrito Federal 4.33, Minas Gerais 2.15, Bahia 1.97, Tocantins 1.75**: the Ministry's five states, in the Ministry's order (Alagoas 1.52, São Paulo 0.97, everything else below 1). The reference states hold 60.3% of the deaths against 22.9% expected. Four upward clusters (111 municipalities: Goiás 50, Minas Gerais 60, Distrito Federal 1; largest RR 10.4 in Minas Gerais, 29 municipalities, 2,200 against 210; the Goiás–DF–MG block RR 5.4, 5,561 against 1,036). **All 111 lie in reference states** (precision 1.0) and hold **12,844 of the reference states' 22,984 excess deaths (55.9%)**. KS 0.018 (B0 is not expected to calibrate).
+
+**Schistosomiasis (6,699 deaths).** B0 ratios: **Alagoas 7.73, Pernambuco 7.39, Sergipe 4.79, Bahia 1.82, Minas Gerais 1.38**, Espírito Santo 1.18, Paraíba 1.17; Rio Grande do Norte 0.53 is the one named state below 1. The reference states hold 80.5% of the deaths against 30.2% expected. Twenty upward clusters (337 municipalities: Pernambuco 100, Minas Gerais 80, Bahia 59, Alagoas 53, Sergipe 37, Paraíba 6, Espírito Santo 2); the first is 30 Pernambuco municipalities, RR 9.2, 1,356 against 146. **All lie in reference states** (precision 1.0), capturing the whole of the reference's excess (3,494 of 3,370; the clusters also remove deficits elsewhere in the states). KS 0.010.
+
+**The criterion as written (Jaccard of the clusters' municipalities with the states' ≥ 0.5) fails: 0.067 and 0.160.** The locus is the whole state, and a cluster is a 30-neighbour set; the union of the lens's clusters can never fill 1,656 municipalities. Precision 1.0 and the excess captured are the figures that bear on the question the lens answers (is the endemic area where the model finds departures from Brazil), and the state-level ratios pass for 5 of 5 and 7 of 8 states. The Jaccard criterion should be restated for loci larger than the scan neighbourhood.
+
+**Not shown:** Bahia and Tocantins contribute no cluster to Chagas (their excess is diffuse, below the 30-neighbour scan's reach); Rio Grande do Norte, an endemic state, has fewer schistosomiasis deaths than Brazil's rates imply.

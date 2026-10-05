@@ -12,7 +12,7 @@
   - `fields`: registry, admission, overlap, lifting.
 - **Reading the model:**
   - `surprise`: tiers B0, B1 and B2, randomised PIT, calibration, place-year φ;
-  - `scans`: the lenses, subset scanning with a Gumbel null, pairs (E_b, E_b|Z, E_w with Dutilleul and AR(1) n_eff), CP-APR patterns, explaining away, Shapley decomposition, cohort scans.
+  - `scans`: the lenses, subset scanning with a Gumbel null, pairs (E_b, E_b|Z with MSR on the normalised graph, E_w with AR(1) n_eff), CP-APR patterns, explaining away, Shapley decomposition, cohort scans.
 - **Inference and use:**
   - `control`: the ledger, BH/BY/Simes, Benjamini–Bogomolov, TreeBH, LOND, splits, replication tiers;
   - `leads`;
@@ -46,9 +46,23 @@
 | pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
 | performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
 | surveillance feasibility: **done** (ADR-0004 updated): weekly alarms feasible for arboviruses only; preliminary-file snapshots must start now | ADR-0004 | done |
-| race bridge: **infant bridge shipped** (pegasus_data fcc1444, ADR-0143, `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
-| E_b positives against census context: 12/12 signs right, 2/12 admitted (evaluation 2026-10-04); now the E_b gate: MSR null against Dutilleul, δ_E calibrated on negatives | §7.5, §8.4, §10.5 | agent |
-| not started: SINAN positives (leptospirosis RS 2024, Chagas, schistosomiasis); arbovirus → microcephaly E_w; Laplace predictive (OQ-2); race in groups; SUS-dependent exposure and completeness; care-flow graph; low-rank interaction; MCP tools; the institution lattice | | next wave |
+| race bridge: **infant bridge shipped** (pegasus_data fcc1444 (its ADR 0143), `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
+| E_b gate: **passed** (evaluation 2026-10-05, ADR-0005): MSR on the normalised graph, δ_E 0.03 / 0.05; sanitation pairs admitted, smooth-field pairs not (low power) | §7.5, §8.4, §10.5 | agent |
+| **backlog, in order** (one fresh agent each; ≤ 5 at a time):
+1. Laplace uncertainty layer (worktree `worktree-agent-afb63cec4eed96769`; the CG cap; then the calibration verdict).
+2. SIH readout: winter respiratory B2s, calibration, the survey leads.
+3. SINAN: arbovirus → microcephaly E_w; an outbreak-robust BP.
+4. The harness re-run under ADR-0005 negatives: false-lead rates and power curves per lens, the §10.5 gate for every lens.
+5. Race in the groups g (infant through the bridge; the adult sensitivity band).
+6. The SUS-dependent population (ANS) and completeness by system (modelled tier).
+7. Lead triage: the SIM survey's leads, the coding-substitution and artefact classes.
+8. The low-rank interaction ψωτ and patterns across blocks (§4.2, §7.4).
+9. The horseshoe on tree levels (§4.3).
+10. Phase 3: the institution lattice (CNES); APAC families; dependency maps; tools over MCP.
+11. The adult race bridge (SIM women ↔ SINASC mothers).
+12. Phase 4: the weekly grain and the nowcast (ADR-0004).
+13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
+| | queue |
 
 **Next:**
 1. **Held-out deviance** (fit 2010–2021, score 2022–2023). It serves two first measurements: contiguity against kNN, and tree pooling.

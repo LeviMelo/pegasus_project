@@ -8,9 +8,11 @@
   finds there is its false-lead rate.
 - Negative controls for pairs: surrogates that keep each field's dependence and
   remove the relation. Between places, Moran spectral randomisation (Wagner &
-  Dray 2015): the field's coordinates in the graph's Moran eigenvectors get
-  random signs, so its spatial autocorrelation spectrum is kept exactly. Within
-  places, the field's series shifted by k ≥ 2 years.
+  Dray 2015) on the symmetric-normalised graph (``pairs.MoranBasis``): the
+  field's coordinates in the Moran eigenvectors get random signs, so its
+  spectrum is kept exactly. The raw weight matrix is not used: its eigenvectors
+  localise and the surrogates lose long-range structure (evaluation 2026-10-05).
+  Within places, the field's series shifted by k ≥ 2 years.
 - The gate: a lens runs in production after recovering its positives, holding
   its false-lead rate ≤ q on surrogates, and publishing a power curve.
 
@@ -25,10 +27,9 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
-import scipy.sparse as sp
 
 from . import config, store, surprise
-from .scans import subset
+from .scans import pairs, subset
 
 Q = 0.05
 
@@ -205,28 +206,71 @@ def false_lead_rate(run_lens, s: surprise.Surprise, surrogates: int = 20) -> dic
             "share_with_any": float(np.mean(np.array(counts) > 0))}
 
 
-class MoranSpectrum:
-    """Moran eigenvectors of a graph: the eigenvectors of the doubly-centred weight matrix."""
+DELTA_GRID = (0.0, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1)
 
-    def __init__(self, edges: np.ndarray, weights: np.ndarray | None, n: int):
-        key = {"what": "moran_spectrum", "n": n, "edges": int(len(edges)),
-               "hash": int(np.sum(edges[:, 0] * 7919 + edges[:, 1]))}
-        hit = store.get_arrays("harness", key)
-        if hit is None:
-            w = np.ones(len(edges)) if weights is None else weights
-            W = sp.coo_matrix((w, (edges[:, 0], edges[:, 1])), shape=(n, n)).toarray()
-            W = np.maximum(W, W.T)
-            H = np.eye(n) - 1.0 / n
-            vals, vecs = np.linalg.eigh(H @ W @ H)
-            hit = {"values": vals, "vectors": vecs}
-            store.put_arrays("harness", key, hit)
-        self.values, self.vectors = hit["values"], hit["vectors"]
 
-    def randomise(self, x: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-        """MSR (singleton variant): random signs on each Moran-eigenvector coordinate of x."""
-        mean = x.mean()
-        c = self.vectors.T @ (x - mean)
-        return mean + self.vectors @ (c * rng.choice([-1.0, 1.0], size=len(c)))
+def pair_negatives(outcome: tuple[np.ndarray, np.ndarray], contexts: dict[str, np.ndarray | tuple], test_basis: pairs.MoranBasis,
+                   gen_basis: pairs.MoranBasis, draws: int = 200, context_sd: float = 0.05,
+                   Z: np.ndarray | None = None, seed: tuple = ("pair-negatives",)) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """E_b negative controls (§10.2): the real outcome effect (b̂, sd) against Moran-randomised surrogates of each
+    real context field. The surrogates come from ``gen_basis``, a basis other than the one that tests them, so
+    the test is not judged by its own randomisation. With an adjustment design Z [n, q] (E_b|Z), the part of the
+    context explained by Z is kept and only its residual is randomised, so the null is x ⟂ outcome given Z.
+    A context is its field x, or (x, sd) when it carries its own noise (another outcome's place effects).
+    Returns, per context, (ρ̂, n_eff) over the draws."""
+    out = {}
+    for name, spec in contexts.items():
+        x, sd = spec if isinstance(spec, tuple) else (spec, np.full(len(spec), context_sd))
+        rng = np.random.default_rng(config.seed(*seed, name))
+        fitted = np.zeros_like(x)
+        if Z is not None:
+            Zc = np.column_stack([np.ones(len(x)), Z])
+            fitted = Zc @ np.linalg.lstsq(Zc, x, rcond=None)[0]
+        S = fitted[:, None] + gen_basis.randomise(np.repeat((x - fitted)[:, None], draws, 1), rng)
+        effects = {"outcome": outcome} | {f"s{j}": (S[:, j], sd) for j in range(draws)}
+        _, R, n_eff = pairs.statistics(effects, test_basis, Z)
+        out[name] = (R[0, 1:], n_eff[0, 1:])
+    return out
+
+
+def calibrate_delta(families: dict[str, list[tuple[np.ndarray, np.ndarray]]], q: float = Q,
+                    grid: tuple[float, ...] = DELTA_GRID) -> dict[str, Any]:
+    """δ_E (§8.4): the smallest δ on the grid at which no family's false-lead rate exceeds q. A family is an
+    outcome field against its contexts; its rate is the share of all its negative-control pairs with p ≤ q
+    under H0 |ρ| ≤ δ (pooled over the contexts: single field pairs carry too little Monte-Carlo mass)."""
+    rates = {}
+    for d in grid:
+        rates[d] = {f: float(np.mean(np.concatenate([pairs.minimum_effect_p(r, n, d) <= q for r, n in cells])))
+                    for f, cells in families.items()}
+    ok = [d for d in grid if max(rates[d].values()) <= q]
+    return {"delta_E": min(ok) if ok else None, "rate_by_delta_and_family": rates}
+
+
+def pair_power(mu: np.ndarray, signal_sd: float, template_outcome: np.ndarray, template_context: np.ndarray,
+               template_latent: np.ndarray, gen_basis: pairs.MoranBasis, test_basis: pairs.MoranBasis,
+               rhos: tuple[float, ...] = (0.15, 0.3, 0.45), reps: int = 50, delta: float = pairs.MIN_EFFECT["E_b"],
+               context_sd: float = 0.05, seed: tuple = ("pair-power",)) -> dict[float, dict[str, float]]:
+    """E_b power on planted shared latent fields (§10.3). The outcome counts are Poisson(μ·exp(σ_b b)) and the
+    context is a field, both carrying the latent L: b = √(1−ρ) B₀ + √ρ L, x = √(1−ρ) X₀ + √ρ L, the three
+    independent Moran-randomised copies of the given templates (their spectra), standardised. The outcome effect is
+    refitted as in production (surprise.refit_place), so shrinkage attenuates the observed ρ̂ below ρ."""
+    std = lambda v: (v - v.mean()) / v.std()  # noqa: E731
+    out = {}
+    for rho in rhos:
+        hits, seen = [], []
+        for r in range(reps):
+            rng = np.random.default_rng(config.seed(*seed, rho, r))
+            L, B0, X0 = (std(gen_basis.randomise(t, rng)) for t in (template_latent, template_outcome, template_context))
+            b_true = np.sqrt(1 - rho) * B0 + np.sqrt(rho) * L
+            x = np.sqrt(1 - rho) * X0 + np.sqrt(rho) * L
+            y = rng.poisson(mu * np.exp(signal_sd * b_true))[:, None]
+            _, b, sd, _ = surprise.refit_place(y, mu[:, None], np.full(y.shape, np.inf), np.ones((1, 1)))
+            _, R, n_eff = pairs.statistics({"outcome": (b[:, 0], sd[:, 0]), "context": (x, np.full(len(x), context_sd))},
+                                           test_basis)
+            hits.append(float(pairs.minimum_effect_p(R[0, 1], n_eff[0, 1], delta) <= Q))
+            seen.append(float(R[0, 1]))
+        out[rho] = {"power": float(np.mean(hits)), "mean_observed_rho": float(np.mean(seen))}
+    return out
 
 
 def shifted(z: np.ndarray, k: int) -> np.ndarray:

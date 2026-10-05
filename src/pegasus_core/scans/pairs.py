@@ -5,26 +5,38 @@ per field (a = √w ⊙ (x − x̄_w)), so ρ_XY = aᵀb / (‖a‖‖b‖): the
 √(w_X w_Y), the geometric mean of the two fields' information.
 
 Effective sample sizes respect each field's own dependence:
-- between places (E_b): Dutilleul's n_eff = 1 + n² / tr(R_X R_Y), with R from
-  each field's correlogram over distance classes, so tr(R_X R_Y) = n +
-  Σ_k n_k r_X(k) r_Y(k) for every pair at once;
+- between places (E_b): Moran spectral randomisation, in closed form. The Moran eigenvectors of the
+  place graph are those of the doubly-centred symmetric-normalised adjacency D^-½ W D^-½ (a graph
+  Fourier basis ordered by scale). Under H0 one field's place effects e_Y (the weighted-least-squares
+  residual on the adjustment design Z) have random signs on their coordinates c_k; the weights come
+  afterwards, so the numerator a_Xᵀ(√w_Y ⊙ e*_Y) = Σ_k s_k c_k (Vᵀh)_k with h = √w_Y ⊙ Q_Y a_X (Q_Y
+  projects off √w_Y ⊙ Z). Its variance is σ² = Σ_k c_k² (Vᵀh)_k² / (‖a_X‖²‖a_Y‖²), the larger of
+  the two orders of (X, Y), and n_eff = 3 + 1/σ². Randomising the weighted field a_Y instead would
+  treat the weights as part of the spatial pattern, and with concentrated weights (the effective
+  sample size of √(w_X w_Y) is 385 of 5,570) it understates σ two- to fivefold: 0.019 against a true
+  0.092 for two outcomes (evaluation 2026-10-05);
 - within places (E_w): AR(1) per field, n_eff,u = T (1 − a_X a_Y)/(1 + a_X a_Y),
   summed over places and divided by the design effect 1 + (U−1) ρ̄_space.
 
-Every pair is tested against its minimum relevant effect: H0 |ρ| ≤ δ.
+Every pair is tested against its minimum relevant effect: H0 |ρ| ≤ δ, with δ_E from the harness
+(ARCHITECTURE §8.4).
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 from scipy import special, stats
 
-from .. import control, gateway
+from .. import config, control, graphs, store
 
-DELTA = 0.1  # provisional δ until the harness calibrates it (ARCHITECTURE §8.4)
+# Minimum effects δ_E (ARCHITECTURE §8.4): H0 is |ρ| ≤ δ_E. E_b and E_b|Z are the smallest δ at which the false-lead
+# rate on the harness's negative controls is ≤ q (evaluation 2026-10-05); E_w is provisional.
+MIN_EFFECT = {"E_b": 0.03, "E_b|Z": 0.05, "E_w": 0.1}
+BASIS_GRAPH = "contiguity01"  # the place graph whose Moran basis tests E_b
 
 
 @dataclass
@@ -66,81 +78,125 @@ def _weighted(x: np.ndarray, w: np.ndarray) -> np.ndarray:
     return np.sqrt(w) * (x - mean)
 
 
-# ---------------------------------------------------------------------- spatial correlogram
+# ---------------------------------------------------------------------- the Moran basis
 
 
-class Correlogram:
-    """Distance classes over places: great-circle km between population centres, on fixed,
-    roughly logarithmic edges. Equal-count classes were tried first and failed: with 5,570
-    municipalities the first class spans 0–242 km, far beyond municipal autocorrelation."""
+class MoranBasis:
+    """Moran eigenvectors of a place graph: the eigenvectors of H D^-½ W D^-½ H (H centres). The
+    symmetric normalisation makes them scale-ordered graph Fourier modes; the raw weight matrix W
+    does not (its top eigenvectors localise on hubs, and sign randomisation on them keeps almost no
+    long-range structure: evaluation 2026-10-05). Computed once per graph and cached."""
 
-    EDGES_KM = (15, 30, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1000, 1500, 2000, 3000)
+    def __init__(self, places: np.ndarray, kind: str = BASIS_GRAPH):
+        self.kind, self.n = kind, len(places)
+        key = {"what": "moran_basis", "kind": kind, "places": self.n, "first": int(places[0]), "last": int(places[-1]),
+               "sum": int(np.sum(places)), "resource": config.resource_version("proximity.parquet"), "v": 1}
+        hit = store.get_arrays("graphs", key)
+        if hit is None:
+            hit = self._decompose(places, kind)
+            store.put_arrays("graphs", key, hit)
+        self.values, self.vectors = hit["values"], hit["vectors"]
+        self._gpu = None
 
-    def __init__(self, places: np.ndarray, edges_km: tuple[float, ...] = EDGES_KM):
-        pts = np.radians(gateway.municipality_points(places))
-        lon, lat = (torch.as_tensor(pts[:, i], device=_device()) for i in (0, 1))
+    @staticmethod
+    def _decompose(places: np.ndarray, kind: str) -> dict[str, np.ndarray]:
+        edges, weights = graphs.graph(places, kind)
         n = len(places)
-        D = torch.empty((n, n), dtype=torch.float32, device=_device())
-        for a in range(0, n, 1024):
-            dlat = lat[a:a + 1024, None] - lat[None, :]
-            dlon = lon[a:a + 1024, None] - lon[None, :]
-            h = torch.sin(dlat / 2) ** 2 + torch.cos(lat[a:a + 1024, None]) * torch.cos(lat[None, :]) * torch.sin(dlon / 2) ** 2
-            D[a:a + 1024] = (2 * 6371.0 * torch.asin(torch.sqrt(torch.clamp(h, 0, 1)))).float()
-        self.edges = np.asarray(edges_km, dtype=float)
-        cls = torch.bucketize(D, torch.as_tensor(self.edges, device=_device(), dtype=torch.float32)).to(torch.int8)
-        cls.fill_diagonal_(-1)
-        self.cls = cls
-        self.n = n
-        self.counts = np.array([int((cls == k).sum()) for k in range(len(self.edges) + 1)], dtype=float)
+        e = torch.as_tensor(edges, device=_device())
+        W = torch.zeros((n, n), dtype=torch.float64, device=_device())
+        W[e[:, 0], e[:, 1]] = torch.as_tensor(weights, dtype=torch.float64, device=_device())
+        W = torch.maximum(W, W.T)
+        d = W.sum(1).clamp(min=1e-12).sqrt()
+        M = W / d[:, None] / d[None, :]
+        M = M - M.mean(0, keepdim=True) - M.mean(1, keepdim=True) + M.mean()      # H M H
+        for attempt in range(4):
+            try:
+                vals, vecs = torch.linalg.eigh(M)
+                break
+            except RuntimeError:           # the GPU is shared: a transient allocation failure
+                torch.cuda.empty_cache()
+                time.sleep(5 * (attempt + 1))
+        else:
+            vals, vecs = (torch.as_tensor(a) for a in np.linalg.eigh(M.cpu().numpy()))
+        return {"values": vals.cpu().numpy(), "vectors": vecs.cpu().numpy().astype(np.float32)}
 
-    def coefficients(self, A: np.ndarray) -> np.ndarray:
-        """r[f, k]: Moran-type autocorrelation of each (weighted, centred) column in each class."""
-        t = torch.as_tensor(A, dtype=torch.float32, device=_device())
-        var = (t ** 2).mean(0)
-        out = []
-        for k in range(len(self.counts)):
-            if self.counts[k] == 0:
-                out.append(np.zeros(t.shape[1]))
-                continue
-            C = (self.cls == k).float()
-            out.append(((t * (C @ t)).sum(0) / self.counts[k] / torch.clamp(var, min=1e-30)).cpu().numpy())
-        return np.clip(np.stack(out, axis=1), -1, 1)
+    def _v(self) -> torch.Tensor:
+        if self._gpu is None:
+            self._gpu = torch.as_tensor(self.vectors, device=_device())
+        return self._gpu
 
-    def n_eff(self, r: np.ndarray) -> np.ndarray:
-        """Dutilleul's n_eff for every pair: 1 + n² / (n + Σ_k n_k r_X(k) r_Y(k))."""
-        tr = self.n + (r * self.counts) @ r.T
-        return np.clip(1 + self.n ** 2 / np.maximum(tr, self.n), 3.0, float(self.n))
+    def randomise(self, x: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """MSR (Wagner & Dray 2015): random signs on the Moran-eigenvector coordinates of x [n] or [n, R]."""
+        x2 = x[:, None] if x.ndim == 1 else x
+        mean = x2.mean(0)
+        t = torch.as_tensor(x2 - mean, dtype=torch.float32, device=_device())
+        signs = torch.as_tensor(rng.choice([-1.0, 1.0], size=t.shape), dtype=torch.float32, device=_device())
+        out = (self._v() @ ((self._v().T @ t) * signs)).double().cpu().numpy() + mean
+        return out[:, 0] if x.ndim == 1 else out
 
 
 # ---------------------------------------------------------------------- estimands
 
 
-def between(effects: dict[str, tuple[np.ndarray, np.ndarray]], correlogram: Correlogram, ledger: control.Ledger,
-            family: str, delta: float = DELTA, Z: np.ndarray | None = None, rank: bool = False,
-            testable=None) -> list[Pair]:
-    """E_b (or E_b|Z with an adjustment design Z [n, q]): place effects b̂(u) with their sd.
-    ``testable(x, y)`` excludes pairs with overlap above 0.05 (or unknown)."""
+def statistics(effects: dict[str, tuple[np.ndarray, np.ndarray]], basis: MoranBasis, Z: np.ndarray | None = None,
+               rank: bool = False, against: str | None = None) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """(names, ρ̂, n_eff) for every pair of E_b place effects b̂(u) with their sd, optionally adjusted for a design
+    Z [n, q]: each field is residualised on [1, Z] under its own weights. ``against`` restricts the n_eff to the pairs
+    that contain that field (the others are NaN): the harness's negative controls need nothing else."""
     names = list(effects)
     B = np.stack([effects[k][0] for k in names], axis=1)
     W = np.stack([1.0 / np.maximum(effects[k][1], 1e-6) ** 2 for k in names], axis=1)
     if rank:
         B = np.apply_along_axis(stats.rankdata, 0, B)
-    A = _weighted(B, W)
-    q = 0
-    if Z is not None:
-        Zc = np.column_stack([np.ones(len(Z)), Z])
-        q = Z.shape[1]
-        for f in range(A.shape[1]):
-            sw = np.sqrt(W[:, f])
-            coef, *_ = np.linalg.lstsq(Zc * sw[:, None], A[:, f], rcond=None)
-            A[:, f] = A[:, f] - (Zc * sw[:, None]) @ coef
-    R = _gram(A)
-    n_eff = correlogram.n_eff(correlogram.coefficients(A)) - q
+    W = np.where(np.isfinite(B) & np.isfinite(W), W, 0.0)          # a missing value carries no weight
+    B = np.where(np.isfinite(B), B, 0.0)
+    n, F = B.shape
+    Zc = np.ones((n, 1)) if Z is None else np.column_stack([np.ones(n), Z])
+    E, A = np.empty_like(B), np.empty_like(B)
+    for f in range(F):
+        sw = np.sqrt(W[:, f])
+        coef, *_ = np.linalg.lstsq(Zc * sw[:, None], sw * B[:, f], rcond=None)
+        E[:, f] = B[:, f] - Zc @ coef                              # the field net of Z, weighted-least-squares
+        A[:, f] = sw * E[:, f]
+    return names, _gram(A), _n_eff(A, E, np.sqrt(W), Zc, basis, None if against is None else names.index(against))
+
+
+def _n_eff(A: np.ndarray, E: np.ndarray, SW: np.ndarray, Zc: np.ndarray, basis: MoranBasis,
+           target: int | None) -> np.ndarray:
+    """n_eff = 3 + 1/σ² for pairs of columns (see the module docstring), on the GPU, one randomised field Y at a time."""
+    dev = _device()
+    n, F = A.shape
+    V = basis._v()
+    At = torch.as_tensor(A, dtype=torch.float32, device=dev)
+    Et = torch.as_tensor(E - E.mean(0), dtype=torch.float32, device=dev)
+    c2 = (V.T @ Et) ** 2                                           # [k, F]: energy of each field per eigenvector
+    norm = (At ** 2).sum(0).clamp(min=1e-30)
+    SWt = torch.as_tensor(SW, dtype=torch.float32, device=dev)
+    Zt = torch.as_tensor(Zc, dtype=torch.float64, device=dev)
+    sigma2 = torch.full((F, F), float("nan"), dtype=torch.float64, device=dev)
+    for y in range(F):
+        xs = list(range(F)) if target is None or y == target else [target]
+        T = (SWt[:, y:y + 1].double() * Zt)                        # √w_Y ⊙ Z, the span Q_Y projects off
+        Xs = At[:, xs].double()
+        QX = (Xs - T @ torch.linalg.solve(T.T @ T + 1e-12 * torch.eye(T.shape[1], dtype=torch.float64, device=dev),
+                                          T.T @ Xs)).float()
+        PH = V.T @ (SWt[:, y:y + 1] * QX)                          # [k, len(xs)]
+        sigma2[xs, y] = ((c2[:, y:y + 1] * PH ** 2).sum(0) / (norm[xs] * norm[y])).double()
+    s2 = torch.fmax(sigma2, sigma2.T).cpu().numpy()                # the larger of the two orders
+    return np.clip(3 + 1 / np.maximum(s2, 1e-12), 3.0, float(n))
+
+
+def between(effects: dict[str, tuple[np.ndarray, np.ndarray]], basis: MoranBasis, ledger: control.Ledger,
+            family: str, delta: float | None = None, Z: np.ndarray | None = None, rank: bool = False,
+            testable=None) -> list[Pair]:
+    """E_b (or E_b|Z with an adjustment design Z [n, q]). ``testable(x, y)`` excludes pairs with
+    overlap above 0.05 (or unknown)."""
+    names, R, n_eff = statistics(effects, basis, Z, rank)
     estimand = "E_b|Z" if Z is not None else "E_b"
-    return _test(estimand, names, R, n_eff, delta, ledger, family, testable, 0)
+    return _test(estimand, names, R, n_eff, MIN_EFFECT[estimand] if delta is None else delta, ledger, family, testable, 0)
 
 
-def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, delta: float = DELTA,
+def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, delta: float = MIN_EFFECT["E_w"],
            rank: bool = False, testable=None) -> list[Pair]:
     """E_w at lag ℓ (Y follows X by ℓ periods) on calibrated surprises z with their weights w."""
     names = list(surprises)
