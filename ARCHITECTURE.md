@@ -31,6 +31,8 @@ PegaSUS:
 - **reads leads from it:** where the data depart from it (§7.1–7.3), what its own structure shows (§7.4), how departures relate (§7.5–7.6);
 - **serves those readings** to people and to AI agents (§9).
 
+Later (phase 4, ADR-0004), the same model and lenses run **prospectively**, as surveillance across every diagnosis code and system.
+
 Leads are statistical objects, not conclusions.
 
 **Principles.** Each answers a documented failure of the 2026 engine (`docs/discussion/2026-10-03-what-was-built.md`).
@@ -704,6 +706,7 @@ Every random draw is seeded from (object, cell, purpose).
 | **1** | `fields`; `structures`; `monolith` (annual; SIM, SINASC, SIH); `surprise`; lenses; subset scanning | roles and event types; code structures; contiguity and distance graphs; POPSVS | univariate positives recovered; false-lead rates; measured compute budgets; **first measurements:** tree pooling by chapter, graph choice |
 | **2** | pairs (E_b, E_w, E_b\|Z); FDR across families; replication; explaining away; decomposition; cohort scans; SINAN; sub-annual grain for dense families | care-flow graph; population account v1 (2022 hold-out); linked cohorts | pair positives; negatives; calibrated δ and admission |
 | **3** | patterns across blocks; dependency maps; tools over MCP; institution lattice; agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
+| **4** | prospective surveillance (ADR-0004): weekly grain; an outbreak-robust alarm baseline; a nowcast from in-record delays; alarms controlled by a false-alarm rate; syndromic scans across SIM, SIH and SINAN | dates of notification, entry and processing typed in every family; snapshots of the preliminary files (for revisions) | a benchmark against published alerts (InfoDengue) and confirmed epidemics: timeliness, false alarms, hits |
 
 ---
 
