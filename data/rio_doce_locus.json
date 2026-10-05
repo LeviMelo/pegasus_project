@@ -1,0 +1,211 @@
+{
+ "source": "IBAMA, Laudo Tecnico Preliminar, Impactos ambientais decorrentes do desastre envolvendo o rompimento da barragem de Fundao, Nov 2015, sec. 2.4 table (41 municipios)",
+ "url": "https://www.ibama.gov.br/phocadownload/noticias/noticias2015/laudo_tecnico_preliminar_Ibama.pdf",
+ "municipalities": [
+  {
+   "name": "Acaiaca",
+   "uf": "MG",
+   "code6": "310040"
+  },
+  {
+   "name": "Aimorés",
+   "uf": "MG",
+   "code6": "310110"
+  },
+  {
+   "name": "Alpercata",
+   "uf": "MG",
+   "code6": "310180"
+  },
+  {
+   "name": "Barra Longa",
+   "uf": "MG",
+   "code6": "310570"
+  },
+  {
+   "name": "Belo Oriente",
+   "uf": "MG",
+   "code6": "310630"
+  },
+  {
+   "name": "Bom Jesus do Galho",
+   "uf": "MG",
+   "code6": "310780"
+  },
+  {
+   "name": "Bugre",
+   "uf": "MG",
+   "code6": "310925"
+  },
+  {
+   "name": "Caratinga",
+   "uf": "MG",
+   "code6": "311340"
+  },
+  {
+   "name": "Conselheiro Pena",
+   "uf": "MG",
+   "code6": "311840"
+  },
+  {
+   "name": "Córrego Novo",
+   "uf": "MG",
+   "code6": "312000"
+  },
+  {
+   "name": "Dionísio",
+   "uf": "MG",
+   "code6": "312180"
+  },
+  {
+   "name": "Fernandes Tourinho",
+   "uf": "MG",
+   "code6": "312580"
+  },
+  {
+   "name": "Galiléia",
+   "uf": "MG",
+   "code6": "312730"
+  },
+  {
+   "name": "Governador Valadares",
+   "uf": "MG",
+   "code6": "312770"
+  },
+  {
+   "name": "Iapu",
+   "uf": "MG",
+   "code6": "312930"
+  },
+  {
+   "name": "Ipaba",
+   "uf": "MG",
+   "code6": "313115"
+  },
+  {
+   "name": "Ipatinga",
+   "uf": "MG",
+   "code6": "313130"
+  },
+  {
+   "name": "Itueta",
+   "uf": "MG",
+   "code6": "313410"
+  },
+  {
+   "name": "Mariana",
+   "uf": "MG",
+   "code6": "314000"
+  },
+  {
+   "name": "Marliéria",
+   "uf": "MG",
+   "code6": "314030"
+  },
+  {
+   "name": "Naque",
+   "uf": "MG",
+   "code6": "314435"
+  },
+  {
+   "name": "Periquito",
+   "uf": "MG",
+   "code6": "314995"
+  },
+  {
+   "name": "Pingo-d'Água",
+   "uf": "MG",
+   "code6": "315053"
+  },
+  {
+   "name": "Ponte Nova",
+   "uf": "MG",
+   "code6": "315210"
+  },
+  {
+   "name": "Raul Soares",
+   "uf": "MG",
+   "code6": "315400"
+  },
+  {
+   "name": "Resplendor",
+   "uf": "MG",
+   "code6": "315430"
+  },
+  {
+   "name": "Rio Doce",
+   "uf": "MG",
+   "code6": "315500"
+  },
+  {
+   "name": "Santa Cruz do Escalvado",
+   "uf": "MG",
+   "code6": "315740"
+  },
+  {
+   "name": "Santana do Paraíso",
+   "uf": "MG",
+   "code6": "315895"
+  },
+  {
+   "name": "São Domingos do Prata",
+   "uf": "MG",
+   "code6": "316100"
+  },
+  {
+   "name": "São José do Goiabal",
+   "uf": "MG",
+   "code6": "316340"
+  },
+  {
+   "name": "São Pedro dos Ferros",
+   "uf": "MG",
+   "code6": "316400"
+  },
+  {
+   "name": "Sem-Peixe",
+   "uf": "MG",
+   "code6": "316556"
+  },
+  {
+   "name": "Sobrália",
+   "uf": "MG",
+   "code6": "316770"
+  },
+  {
+   "name": "Timóteo",
+   "uf": "MG",
+   "code6": "316870"
+  },
+  {
+   "name": "Tumiritinga",
+   "uf": "MG",
+   "code6": "316950"
+  },
+  {
+   "name": "Rio Casca",
+   "uf": "MG",
+   "code6": "315490"
+  },
+  {
+   "name": "Baixo Guandu",
+   "uf": "ES",
+   "code6": "320080"
+  },
+  {
+   "name": "Colatina",
+   "uf": "ES",
+   "code6": "320150"
+  },
+  {
+   "name": "Linhares",
+   "uf": "ES",
+   "code6": "320320"
+  },
+  {
+   "name": "Marilândia",
+   "uf": "ES",
+   "code6": "320335"
+  }
+ ]
+}
