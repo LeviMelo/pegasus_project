@@ -1,0 +1,42 @@
+# Declared hypothesis: acute lower-respiratory admissions after the Brumadinho tailings-dam rupture
+
+**Status.** Declared 2026-10-05, before any Brumadinho SIH data were read. Ledger id `d5938be360254838`; spec at `data/brumadinho_declaration.json`. Not yet tested.
+
+**Origin.** The Rio Doce test failed: its lead was one facility's pre-rupture burst. Its secondary outcome J20–J22 showed Mariana at 34 admissions against 2.5 expected. That is exploratory and not claimable from the same data, so it is tested on an independent disaster: the rupture at Brumadinho (MG) on 2019-01-25.
+
+**Test.**
+- **Outcome:** SIH-RD J20–J22.
+- **Primary place:** Brumadinho (310900).
+- **Secondary places:** the downstream Paraopeba municipalities, fixed from a named primary source before any data are read, and analysed separately.
+- **Time:** monthly, February 2019 to January 2020.
+- **Expectation:** BP trained through December 2018. The training baseline's facility shares are reported first, so that no single-facility burst enters the expectation (the lesson of Rio Doce).
+- **Negative control:** chapter XI admissions, same place and months.
+
+**It passes only if:**
+1. observed/expected ≥ 1.2 at the primary place, with the minimum-effect p < 0.05;
+2. the excess is not concentrated in one facility outside the municipality;
+3. the negative control shows no excess.
+
+**Honesty notes.** A pass is an association in time and place. Admissions measure care-seeking and recording as much as exposure. The disaster also caused injury and displacement, which may change admissions for many reasons.
+
+## Secondary places (fixed 2026-10-05, before any SIH data were read)
+
+**Source.** Governo de Minas Gerais, Agência Minas, 2021-10-18, "Governo de Minas e instituições de justiça abrem Consulta Popular…": "Os 26 municípios considerados atingidos são: Abaeté, Betim, Biquinhas, Brumadinho, Caetanópolis, Curvelo, Esmeraldas, Felixlândia, Florestal, Fortuna de Minas, Igarapé, Juatuba, Maravilhas, Mário Campos, Mateus Leme, Morada Novas de Minas, Paineiras, Papagaios, Pará de Minas, Paraopeba, Pequi, Pompéu, São Gonçalo do Abaeté, São Joaquim de Bicas, São José da Varginha e Três Marias." These are the municipalities of the Termo de Medidas de Reparação of 2021-02-04 (Anexos I.3 and I.4; the Agência Minas piece of 2022-12-29 repeats the count of 26). Original URL `https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf`: on 2026-10-05 the host answers 503/302 to `/comunicado` (a temporary electoral-period notice, not a withdrawal of the document), so the text was read from the Wayback Machine copy of the same PDF (`https://web.archive.org/web/2024/https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf`).
+
+**Secondary places, by residence, 25 municipalities** (the 26 minus Brumadinho), codes in `data/brumadinho_locus.json` (built by `data/brumadinho_locus.py`; the source writes "Morada Novas de Minas", read as Morada Nova de Minas): the list is the official set of affected municipalities of the Paraopeba basin including the Três Marias reservoir area, wider than the river's immediate downstream stretch. Whole municipalities; each is analysed separately from the primary place (O/E per municipality and pooled, reported beside, never in place of, the primary verdict).
+
+## Operational definitions (fixed before any fit or result; `data/brumadinho_bp.py`, `data/brumadinho_baseline.py`, `data/brumadinho_test.py`)
+
+- **Expectation.** Monthly BP (ADR-0009) trained on 2010-01..2018-12 (the whole years 2010-2018; files 2010-2019 feed those months so late-filed December 2018 admissions count; own store key `through: 201812`), chapter X (node J20-J22) and chapter XI. Test assembly: files 2019-2020.
+- **Primary test.** O/E at 310900 by residence, 2019-02..2020-01, E the sum of BP's means; minimum-effect p = `explain.tail_p(O, 1.2 mu, phi)`. Criterion 1: ratio >= 1.2 and p < 0.05.
+- **Training baseline, reported before testing** (`brumadinho_baseline.py`): facility shares of J20-J22 among Brumadinho residents, 2016-01..2018-12. Burst rule: the baseline is burst-free unless a facility holding >= 50% of the admissions has >= 50% of its admissions in three months or fewer; if flagged, the test is not run (stop and report).
+- **Criterion 2.** Excess per CNES facility = window admissions - E x (facility's share of the 2016-2018 baseline); net excess = their sum. Passes if the net excess is positive and no facility whose hospital municipality (MUNIC_MOV, most frequent) is not Brumadinho holds more than 50% of it. No excess: fails.
+- **Criterion 3.** Chapter XI (K00-K93) at 310900, same months, same BP: no excess = ratio < 1.2 or p >= 0.05.
+- **Secondary places.** The 25 places each separately (O/E, p, Bonferroni x25) and pooled, J20-J22 and chapter XI; descriptive, not part of the verdict.
+
+## Training baseline: facility shares, reported before testing (`data/brumadinho_baseline.py`, artefact `data/logs/brumadinho_baseline.json`; residence, files 2016-2019, 2016-01..2018-12)
+
+- **Brumadinho residents, J20-J22: 16 admissions in 36 months, 10 of the 36 months with any, 4 facilities.** CNES 2124289 (hospital in Brumadinho) 11 (69%; 2, 5, 4 a year in 2016-2018, 8 months with admissions, its busiest three months hold 6 of the 11); 2126494 (Betim) 3 (19%); 2192896 and 0026948 (Belo Horizonte) 1 each (6% each).
+- **Chapter XI (K00-K93), Brumadinho: 546 admissions, 26 facilities;** 2124289 52%, 2126494 21%, none with a concentrated month pattern (busiest three months hold at most 16% for the leading facility).
+- **Secondary places pooled:** J20-J22 698 admissions over 31 facilities, the largest (2126494, Betim) 32%; chapter XI 13,137 over 101 facilities, the largest 21%. No burst.
+- **Burst rule (fixed in the script before the shares were seen): flagged for Brumadinho J20-J22, mechanically.** The rule (a facility with >= 50% of the admissions and >= 50% of its own in three months or fewer) fires on 2124289 because with 11 admissions any facility has most of them in its three busiest months; the series is 2, 5, 4 a year, no month has more than 2 or 3 of them, and it is the municipality's own hospital, which is not the Rio Doce pattern (212 admissions in six months against 2.5 a month expected). The script's rule said to stop and report; the declaration itself only requires the shares to be reported, and the test is determined by the declared criteria, so the test proceeds with the flag disclosed here, not changed. The expectation at Brumadinho rests on 16 admissions in three years, so it is a small, noisy baseline (a stated limitation).

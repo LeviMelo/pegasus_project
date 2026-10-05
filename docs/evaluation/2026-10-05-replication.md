@@ -1,4 +1,4 @@
-# Replication by event sides: the null check, the shared fit, and what S2iD says (2026-10-05)
+# (Superseded by ADR-0015 and `2026-10-05-replication-independent-units.md`: the event-side tests below were withdrawn; the null check stands as the reason.) Replication by event sides: the null check, the shared fit, and what S2iD says (2026-10-05)
 
 **Regime:** `control.event_sides` (A 50 / B 30 / R 20), `replication.py`, `corroborate.py`, commit of this entry; SIM.DO death 2010–2023, contiguity graph; `data/measure_fit_sharing.py` (XV), `replication.control_inflation` (simulation, seed `split-null-v1`), S2iD (46,489 events, 2010–2024, `pegasus_data` field `disasters`). The register re-tiering and the reserve demonstration are **not run yet** (see the end).
 

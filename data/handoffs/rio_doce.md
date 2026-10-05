@@ -1,4 +1,4 @@
-# Rio Doce confirmatory test (agent "rio doce", 2026-10-05; ledger 49f1626af33f4867) -- PAUSED by the author
+# Rio Doce confirmatory test (agent "rio doce", 2026-10-05; ledger 49f1626af33f4867) -- COMPLETE: FAIL (see the entry "Result")
 ## Where it stands (no result data has been read; the test script has NOT been run)
 - Step 1 DONE and committed alone (f5438d7): locus = the 41 municipalities of the IBAMA Laudo Tecnico Preliminar (Nov 2015), sec. 2.4 table;
   IBGE codes in data/rio_doce_locus.json; section "Locus" in docs/evaluation/2026-10-05-rio-doce-declaration.md. (IBAMA URL gives 403 to curl; text read from

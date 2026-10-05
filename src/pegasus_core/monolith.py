@@ -24,6 +24,7 @@ import inspect
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from functools import lru_cache
 
 import numpy as np
 import pyarrow as pa
@@ -84,6 +85,40 @@ class BlockData:
 
 
 ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
+NEWBORN_SHARE = 0.5     # a field is a newborn-exposure field when at least this share of its events are at age 0
+
+
+def _icd10_tree() -> tuple[dict, dict]:
+    tree = gateway.code_structure("ICD10")
+    code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
+    return dict(zip(code, parent, strict=True)), dict(zip(code, level, strict=True))
+
+
+@lru_cache(maxsize=64)
+def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str) -> float:
+    """The share of the block's events (years given) recorded at age 0, from the gateway's cached counts."""
+    parent_of, level_of = ({"*": None}, {"*": "category"}) if block == "*" else _icd10_tree()
+    at0 = total = 0.0
+    for year in years:
+        tab = gateway.event_counts(dataset, event, int(year)).counts
+        enc = pc.dictionary_encode(pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, 3)
+                                   if block != "*" else tab.column("code").combine_chunks())
+        ok = np.array([block == "*" or (level_of.get(c) == "category" and _chapter(c, parent_of) == block)
+                       for c in enc.dictionary.to_pylist()], dtype=bool)
+        keep = ok[enc.indices.to_numpy(zero_copy_only=False)]
+        y, age = tab.column("y").to_numpy()[keep], tab.column("age").to_numpy()[keep]
+        at0, total = at0 + float(y[age < 1].sum()), total + float(y.sum())
+    return at0 / total if total else 0.0
+
+
+def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", **_) -> str:
+    """The exposure a field reads when none is named (and ``PEGASUS_POPULATION`` is unset): ``hybrid`` (POPSVS and
+    the account's age 0) for a newborn-exposure field, defined by its data as a block of which at least
+    ``NEWBORN_SHARE`` of the events are at age 0 (SIM chapter XVI: 0.9; chapter IX: 0.002), else ``popsvs``
+    (ADR-0010 amended). Only event counts are classified; code-list and mark readers keep POPSVS."""
+    if source != "events":
+        return "popsvs"
+    return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version()) >= NEWBORN_SHARE else "popsvs"
 
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
@@ -101,7 +136,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     if not cache:
         return _assemble(dataset, event, block, years, profile, source, grain, population, **source_args)
     ys = np.array(sorted(set(years)))
-    population = population or config.population_source()
+    population = population or config.population_pinned() or default_population(
+        dataset, event, block, ys.tolist(), source, **source_args)
     pop = gateway.population(ys.tolist(), source=population)
     h = hashlib.sha256()
     for name in pop.column_names:
@@ -175,7 +211,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     years = np.array(sorted(set(years)))
-    population = population or config.population_source()
+    population = population or config.population_pinned() or default_population(
+        dataset, event, block, years.tolist(), source, **source_args)
     edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population)
@@ -200,10 +237,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         # an event type without a classifier tree: one leaf, every event in it
         parent_of, level_of = {"*": None}, {"*": "category"}
     else:
-        tree = gateway.code_structure("ICD10")
-        code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
-        parent_of = dict(zip(code, parent, strict=True))
-        level_of = dict(zip(code, level, strict=True))
+        parent_of, level_of = _icd10_tree()
     categories = (["*"] if block == "*" else
                   sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block))
     carrier = {c: (parent_of[c] if profile == "group" and parent_of[c] is not None else c) for c in categories}
@@ -381,6 +415,7 @@ class Monolith:
         self.forcing = 0.5               # the largest relative residual CG stops at (Eisenstat–Walker cap)
         self.cg_iterations = 0           # conjugate-gradient iterations so far (the cost of the mean fit)
         self.newton_log: list[tuple] = []   # per Newton step: objective, gradient norm, CG iterations, step length, decrease
+        self.supply: np.ndarray | None = None   # [U, T] facility-supply multiplier of the expectation (facility.attach_supply)
         self.history: list[dict] = []
         self.trace_log: list[tuple] = []
         self.p_e = self.grp[self.e]
@@ -849,7 +884,10 @@ class Monolith:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)
             mu2 = (w2[:, :, None] * torch.exp(2 * lin) * M2).sum(0)
-        return mu.cpu().numpy(), mu2.cpu().numpy()
+        mu, mu2 = mu.cpu().numpy(), mu2.cpu().numpy()
+        if self.supply is not None:
+            mu, mu2 = mu * self.supply, mu2 * self.supply ** 2
+        return mu, mu2
 
     def expected_by_group(self, leaves: np.ndarray, spatial: bool = True,
                           x: dict[str, torch.Tensor] | None = None) -> np.ndarray:
@@ -865,7 +903,8 @@ class Monolith:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]
             mu = torch.einsum("ku,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
-        return mu.cpu().numpy()
+        mu = mu.cpu().numpy()
+        return mu if self.supply is None else mu * self.supply[:, :, None]
 
     def exposure_variance(self, leaves: np.ndarray, spatial: bool = True, rho: float = 0.0,
                           x: dict[str, torch.Tensor] | None = None) -> np.ndarray:

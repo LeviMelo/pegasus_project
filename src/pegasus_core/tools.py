@@ -104,6 +104,7 @@ class Session:
     event: str
     years: list[int]
     graph: str = graphs.DEFAULT
+    supply: bool = False          # the facility-supply term in every expectation (ADR-0016)
     source: dict = field(default_factory=dict)   # the event reader: {"grain": "month"} for the monthly grain
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
@@ -113,7 +114,7 @@ class Session:
 
     def __post_init__(self):
         control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
-        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source)
+        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source, supply=self.supply)
 
     # ---- reading ---------------------------------------------------------------
 
@@ -153,6 +154,15 @@ class Session:
         if memo is not None:
             memo[key] = s
         return s
+
+    def institutions(self, node: str) -> dict:
+        """The institution lattice of a field (E_i, ADR-0016): its facilities' steps against their catchment's expectation
+        (`facility.institution_lattice`), read on the B1 expectation without the supply term. Annual grain; SIH-RD, whose
+        events all name a facility (SIM-DO's CODESTAB is empty for a death at home)."""
+        su = self.expectations.surprise(node, "B1")
+        codes = list(self.expectations.registry.leaves(node))
+        p = facility.pairs(self.dataset, self.event, [int(y) for y in su.years], codes)
+        return facility.institution_lattice(p, su.places, np.asarray(su.years), su.mu)
 
     def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         """Observed and B0-expected counts by (place, year, group), B0 re-levelled per year and
@@ -632,10 +642,10 @@ class Session:
         return selected
 
     def corroborate(self, register: list[leads.Lead], only_signals: bool = True, replicates: int = 4999,
-                    q: float = 0.05, log=print) -> list[leads.Lead]:
+                    q: float = 0.05, log=print, refine_p: float = 0.01, refine_replicates: int = 99999) -> list[leads.Lead]:
         """Ask an independent field (S2iD, SINAN, SIH: `corroborate.RULES`) whether each lead's places and years are
         unusual there, against that field's own null (random same-size place sets of the same state and
-        population quintile; scattered, not connected: a contiguous cluster shares its neighbours' shocks, see OPEN_QUESTIONS 7). Benjamini-Hochberg within each source.
+        population quintile; a cluster of touching places is replaced by connected sets grown on the graph, `corroborate._null_sets`). Leads with p < ``refine_p`` are redrawn at ``refine_replicates`` so that Benjamini-Hochberg over many tests can reject. Benjamini-Hochberg within each source.
         Written to ``lead.replications["corroboration"]``."""
         self._prepare_grid()
         pop = self._pop.sum(1)
@@ -658,6 +668,15 @@ class Session:
             done.append((x, c))
             if len(done) % 200 == 0:
                 log(f"corroborated {len(done)}")
+        # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests needs the best
+        # to reach q / m: the promising ones are redrawn with many more replicates, so the tier is reachable
+        for i, (x, c) in enumerate(done):
+            if c.tested and c.p < refine_p and c.source:
+                node = x.fields[0].split(":")[-1]
+                span, direction = replication.span_direction(x)
+                rows = np.array([index[int(u)] for u in x.locus["places"] if int(u) in index], dtype=int)
+                done[i] = (x, corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
+                                                      f"corroborate-refine|{x.id}", refine_replicates))
         for source in {c.source for _, c in done if c.tested}:
             group = [(x, c) for x, c in done if c.tested and c.source == source]
             ps = np.array([c.p for _, c in group])
@@ -679,7 +698,7 @@ class Session:
             by_node.setdefault(a.fields[0], []).append(a)
         for x in register:
             hits = replication.match(x, by_node.get(x.fields[0], [])) if x.fields else []
-            for key in ("prospective", "spatial_unit", "honest"):
+            for key in ("prospective", "honest"):   # the verdicts of the selecting session; the spatial and corroboration verdicts belong to the register itself
                 have = [h for h in hits if h.replications.get(key, {}).get("tested", h.replications.get(key, {}).get("sized"))]
                 if have:
                     best = min(have, key=lambda h: h.replications[key].get("q", h.q))

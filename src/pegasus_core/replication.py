@@ -413,14 +413,14 @@ def simulate_sizes(level: float, size: float, cells: int = 200000, alpha_sel: fl
 
 def simulate_spatial(side: int = 14, size: float = 10.0, level: float = 200.0, shock: float = 0.0, range_: int = 0,
                      trend: float = 0.0, buffer: bool = True, units: int = 300, select: float = 0.05, years: int = 14,
-                     seed_text: str = "spatial-sim-v1") -> dict[str, float]:
+                     slope_sd: float = 0.0, seed_text: str = "spatial-sim-v1") -> dict[str, float]:
     """The other-places tier on worlds: a unit of ``side`` x ``side`` municipalities on a lattice (rook neighbours;
     regions of 3 x 3), NB size ``size``, ``level`` events per cell-year, a log-linear course whose total change over
     the period is ``trend`` times the scale's minimum divergence (0: the null), and a year-by-year shock of sd
-    ``shock`` (log scale) smooth over ``range_`` steps of the graph, so neighbours share it. The unit is selected when its trend on
+    ``shock`` (log scale) smooth over ``range_`` steps of the graph, so neighbours share it; ``slope_sd`` (in units of the divergence delta) adds a random log-linear slope per municipality that is smooth in the same way (neighbours share a trend). The unit is selected when its trend on
     one random half of the regions (buffered or not) reaches ``select``; the share of the selected units that
     replicate on the other half at 0.05 is reported."""
-    rng = np.random.default_rng(config.seed(seed_text, side, size, level, shock, range_, trend, buffer))
+    rng = np.random.default_rng(config.seed(seed_text, side, size, level, shock, range_, trend, buffer, slope_sd))
     n = side * side
     ij = np.stack(np.meshgrid(np.arange(side), np.arange(side), indexing="ij"), -1).reshape(-1, 2)
     idx = np.arange(n).reshape(side, side)
@@ -438,7 +438,8 @@ def simulate_spatial(side: int = 14, size: float = 10.0, level: float = 200.0, s
     sel = hit = 0
     for _ in range(units):
         shocks = shock * (smooth @ rng.standard_normal((n, years))) / scale_sd[:, None] if shock else 0.0
-        mu = np.broadcast_to(level * np.exp(trend * delta * x)[None, :], (n, years)) * np.exp(shocks)
+        slopes = (slope_sd * delta * (smooth @ rng.standard_normal(n)) / scale_sd)[:, None] * x[None, :] if slope_sd else 0.0
+        mu = np.broadcast_to(level * np.exp(trend * delta * x)[None, :], (n, years)) * np.exp(shocks + slopes)
         y = _world(rng, mu, size)
         s = types.SimpleNamespace(places=np.arange(n), years=yrs, y=y, phi=np.full((n, years), size),
                                   extras={"offset": np.full((n, years), float(level))})

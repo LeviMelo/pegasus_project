@@ -2,7 +2,7 @@
 
 **Date.** 2026-10-05. **Status.** Active. Supersedes ADR-0007.
 
-**Evidence.** The finding is OPEN_QUESTIONS 7 / `docs/evaluation/2026-10-05-replication.md` (commit 9fc46be): the sides of a cell's events are thinned from one cell and share its frailty, so under NB variation the marginal test on B calls 0.28-1.00 of null cells replicated and the test conditional on A has power 0.07-0.21 at three times the boundary. The size and power of the three tiers below on NB worlds are **not yet measured** (`replication.simulate_*` are written and smoke-tested only; handoff `data/handoffs/replication.md`).
+**Evidence.** The finding is OPEN_QUESTIONS 7 / `docs/evaluation/2026-10-05-replication.md` (commit 9fc46be): the sides of a cell's events are thinned from one cell and share its frailty, so under NB variation the marginal test on B calls 0.28-1.00 of null cells replicated and the test conditional on A has power 0.07-0.21 at three times the boundary. **Measured** in `docs/evaluation/2026-10-05-replication-independent-units.md`: the later-years tier is conservative (size ≤ 0.014 with independent frailty, ≤ 0.07 with serially correlated frailty and an exact expectation) and sees a persistent departure only when the fit did not already know it (power 0.92 to 1.00 against an exact expectation, 0.05 to 0.18 when the fit absorbs the training years); the sizes on side E are unbiased with 0.92 to 0.96 coverage; the spatial tier holds 0.05 against shocks that vary by year and not against a trend field smooth over the unit; corroboration with scattered nulls is 20% liberal on real SIH placebos (0.061) and with connected nulls calibrated (0.049). On the SIM register (survey on the years ≤ 2019, blocks I, IX, X, XVIII, XX): 333 of 7,496 leads are R1, none R2 or R3; of 446 national-trend unit claims 57 hold both the later years and other places; no SIM signal is corroborated.
 
 ## Decision
 
@@ -17,4 +17,6 @@
 ## Limits
 
 - A lead from the all-years register cannot be tiered temporally unless a survey on the years up to t re-finds it (`retier` matches by field, direction, place and window); the later-years tier is therefore run per origin t.
-- Corroboration still draws scattered null place sets; a contiguous cluster shares its neighbours' shocks in the other field (OPEN_QUESTIONS 7).
+- Corroboration draws a lead's touching places as connected null sets grown on the graph (amended after the placebo windows: scattered sets were 20% liberal) and redraws the promising leads at 99,999 replicates (a permutation p at 4,999 cannot clear BH over hundreds of tests). A trend field smooth over a whole unit is shared by its halves: a unit claim confirmed by other places is a coherent regional trend, which is what it claims.
+- `retier` carries the selecting session's verdicts (later years, sizes) only; the spatial and corroboration verdicts are the register's own.
+- Regions (84 claims) never pass the spatial tier: too few municipalities to halve with a buffer.

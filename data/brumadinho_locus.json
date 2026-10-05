@@ -1,0 +1,137 @@
+{
+ "source": "Governo de Minas Gerais, Agencia Minas, 'Governo de Minas e instituicoes de justica abrem Consulta Popular que vai definir prioridades de investimento em Brumadinho e mais 25 municipios' (2021-10-18): 'Os 26 municipios considerados atingidos sao: ...'; also Agencia Minas 2022-12-29 'Reparacao de Brumadinho e municipios atingidos avanca...' (26 municipios)",
+ "url": "https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf",
+ "retrieved_from": "https://web.archive.org/web/2024/https://www.agenciaminas.mg.gov.br/news/pdf/111715.pdf (live host serves a temporary electoral-period notice, HTTP 503/302 to /comunicado, on 2026-10-05; the archived copy is the same PDF)",
+ "primary": {
+  "name": "Brumadinho",
+  "uf": "MG",
+  "code6": "310900"
+ },
+ "municipalities": [
+  {
+   "name": "Abaeté",
+   "uf": "MG",
+   "code6": "310020"
+  },
+  {
+   "name": "Betim",
+   "uf": "MG",
+   "code6": "310670"
+  },
+  {
+   "name": "Biquinhas",
+   "uf": "MG",
+   "code6": "310700"
+  },
+  {
+   "name": "Caetanópolis",
+   "uf": "MG",
+   "code6": "310990"
+  },
+  {
+   "name": "Curvelo",
+   "uf": "MG",
+   "code6": "312090"
+  },
+  {
+   "name": "Esmeraldas",
+   "uf": "MG",
+   "code6": "312410"
+  },
+  {
+   "name": "Felixlândia",
+   "uf": "MG",
+   "code6": "312570"
+  },
+  {
+   "name": "Florestal",
+   "uf": "MG",
+   "code6": "312600"
+  },
+  {
+   "name": "Fortuna de Minas",
+   "uf": "MG",
+   "code6": "312640"
+  },
+  {
+   "name": "Igarapé",
+   "uf": "MG",
+   "code6": "313010"
+  },
+  {
+   "name": "Juatuba",
+   "uf": "MG",
+   "code6": "313665"
+  },
+  {
+   "name": "Maravilhas",
+   "uf": "MG",
+   "code6": "313970"
+  },
+  {
+   "name": "Mário Campos",
+   "uf": "MG",
+   "code6": "314015"
+  },
+  {
+   "name": "Mateus Leme",
+   "uf": "MG",
+   "code6": "314070"
+  },
+  {
+   "name": "Morada Nova de Minas",
+   "uf": "MG",
+   "code6": "314350"
+  },
+  {
+   "name": "Paineiras",
+   "uf": "MG",
+   "code6": "314640"
+  },
+  {
+   "name": "Papagaios",
+   "uf": "MG",
+   "code6": "314690"
+  },
+  {
+   "name": "Pará de Minas",
+   "uf": "MG",
+   "code6": "314710"
+  },
+  {
+   "name": "Paraopeba",
+   "uf": "MG",
+   "code6": "314740"
+  },
+  {
+   "name": "Pequi",
+   "uf": "MG",
+   "code6": "314960"
+  },
+  {
+   "name": "Pompéu",
+   "uf": "MG",
+   "code6": "315200"
+  },
+  {
+   "name": "São Gonçalo do Abaeté",
+   "uf": "MG",
+   "code6": "316170"
+  },
+  {
+   "name": "São Joaquim de Bicas",
+   "uf": "MG",
+   "code6": "316292"
+  },
+  {
+   "name": "São José da Varginha",
+   "uf": "MG",
+   "code6": "316310"
+  },
+  {
+   "name": "Três Marias",
+   "uf": "MG",
+   "code6": "316935"
+  }
+ ]
+}

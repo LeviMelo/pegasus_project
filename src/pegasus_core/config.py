@@ -39,6 +39,12 @@ def population_source() -> str:
     return os.environ.get("PEGASUS_POPULATION", "popsvs")
 
 
+def population_pinned() -> str | None:
+    """The source ``PEGASUS_POPULATION`` names, None when it is unset (then ``monolith.default_population`` chooses
+    per field: ``hybrid`` where the events are the newborn's, ``popsvs`` otherwise; ADR-0010 amended)."""
+    return os.environ.get("PEGASUS_POPULATION") or None
+
+
 @lru_cache(maxsize=1)
 def code_version() -> str:
     """This repository's commit, plus ``+dirty`` when the tree has changes."""
@@ -95,3 +101,10 @@ def seed(*parts: object) -> int:
     """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4)."""
     digest = hashlib.blake2b("|".join(map(str, parts)).encode(), digest_size=8).digest()
     return int.from_bytes(digest, "little") & 0x7FFF_FFFF_FFFF_FFFF
+
+
+def supply_exponents() -> dict[str, float] | None:
+    """``PEGASUS_SUPPLY=volume:1,utilisation:0.5``: the facility-supply exponents given instead of chosen by likelihood
+    (`facility.fit_supply`); unset: chosen."""
+    raw = os.environ.get("PEGASUS_SUPPLY")
+    return None if not raw else {k: float(v) for k, v in (kv.split(":") for kv in raw.split(","))}

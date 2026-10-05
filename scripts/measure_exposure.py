@@ -27,6 +27,7 @@ from pegasus_core import config, graphs, laplace, monolith, prospective, surpris
 TARGETS = {
     "ix": ("SIM.DO", "death", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),
     "births": ("SINASC-DN", "birth", "*", ["*"]),
+    "xvi": ("SIM.DO", "death", "XVI", ["XVI"]),     # perinatal conditions: the infant field (age 0 exposure)
 }
 GRAPH = "contiguity"
 FULL, TRAIN = list(range(2010, 2024)), list(range(2010, 2020))
