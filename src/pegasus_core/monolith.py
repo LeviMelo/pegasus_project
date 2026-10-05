@@ -927,9 +927,16 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
     return x
 
 
-def regime_history(model: Monolith, history: str = "auto") -> str:
-    """BP's default history: ``climatology`` at the monthly grain, ``damped5`` at the annual one."""
-    return history if history != "auto" else ("climatology" if model.data.grain == "month" else "damped5")
+def regime_history(model: Monolith, history: str = "auto", purpose: str = "expectation") -> str:
+    """BP's default history. The ``expectation`` (calibrated, for surprises; ADR-0009): ``climatology`` at the
+    monthly grain, ``damped5`` at the annual one. The ``alarm`` baseline (ADR-0012): at the monthly grain the
+    flat ``level36``, the mean of the last 36 months of h, which no past epidemic regime enters; at the annual
+    grain the expectation's own single member (a damped slope has no epidemic regimes to leave out)."""
+    if history != "auto":
+        return history
+    if model.data.grain == "month":
+        return "level36" if purpose == "alarm" else "climatology"
+    return "damped5"
 
 
 def extrapolate_members(model: Monolith, tm: Monolith, history: str = "auto",

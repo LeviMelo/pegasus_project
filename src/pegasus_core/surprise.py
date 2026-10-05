@@ -20,8 +20,11 @@ from scipy import optimize, special, stats
 
 from . import config, fields, gateway, laplace, monolith, prospective, store
 
-TIERS = ("B0", "B1", "B2", "B2s", "BP")
-SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True}
+TIERS = ("B0", "B1", "B2", "B2s", "BP", "BPA")
+SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True, "BPA": True}
+# The prospective tier has two objects (ADR-0012): the calibrated EXPECTATION (BP; for surprises) and the
+# ALARM BASELINE (BPA; for epidemic detection, a flat level that past epidemics do not enter).
+PURPOSE_TIER = {"expectation": "BP", "alarm": "BPA"}
 
 # flags, a bitmask per cell
 DENOMINATOR = 1      # events where the population is zero (denominator tension)
@@ -126,8 +129,14 @@ class Expectations:
         return self.registry.field(node)
 
     def prospective(self, node: str | fields.Field, train_last: int, history: str = "auto",
-                    course: bool | None = None) -> Surprise:
-        """Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
+                    course: bool | None = None, purpose: str = "expectation") -> Surprise:
+        """Tier BP (``purpose="expectation"``) or BPA (``"alarm"``), two objects (ADR-0012): the expectation is
+        calibrated and shows surprises; the alarm baseline detects epidemics. They differ in the history
+        (`monolith.regime_history`): the expectation's regime mixture takes past epidemics as normal, the alarm's
+        flat level (dengue: ``level36``) does not, and with it the lens recovers the epidemics the mixture
+        explains (dengue 2019–23, recall 0.81 against 0.48). Everything else (the training fit's φ_extra,
+        the Laplace and exposure variance) is shared. At the annual grain the two coincide, but for the tier's
+        name. Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
         extrapolated (`monolith.extrapolate_members`). Surveillance needs it: a fit over the whole period
         learns an epidemic as normal (COVID-19 in SIM: B34 deaths 2020 observed 213,152 against
         212,821 expected at B1, evaluation 2026-10-04). Calibration is recorded, never flagged:
@@ -144,7 +153,9 @@ class Expectations:
         if cls is monolith.MarkModel:
             raise NotImplementedError("the prospective tier is for counts")
         model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader())
-        regime = monolith.regime_history(model, history)
+        if purpose not in PURPOSE_TIER:
+            raise ValueError(f"purpose {purpose!r}: one of {sorted(PURPOSE_TIER)}")
+        regime = monolith.regime_history(model, history, purpose)
         point = "level36" if regime == "climatology" else regime
         tm, x_point = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test,
                                                                     **self._reader()), point)
@@ -182,7 +193,8 @@ class Expectations:
         y = tm.observed(leaves)
         u, z, phi = prospective.mixture_pit(y, comps, config.seed(f.id, "BP", "pit", tm.key()))
         cal = calibration(u, mean, macro)
-        cal.update({"phi_source": "training fit", "regimes": len(comps), "phi": float(np.median(extra))})
+        cal.update({"phi_source": "training fit", "regimes": len(comps), "phi": float(np.median(extra)),
+                    "purpose": purpose, "history": regime})
         pop = tm.data.N.sum(axis=2)
         flags = np.zeros(y.shape, dtype=np.int8)
         flags[(pop <= 0) & (y > 0)] |= DENOMINATOR
@@ -191,7 +203,7 @@ class Expectations:
         for ev in unseen.values():
             flags[ev > 0] |= NEW_CATEGORY
         w_info = np.where(np.isinf(phi), mean, mean / (1 + mean / phi))
-        out = Surprise(f, "BP", tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal)
+        out = Surprise(f, PURPOSE_TIER[purpose], tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
         if unseen:
             # a category the fit never saw has no expectation: it is out of the node (it would break the chapter's

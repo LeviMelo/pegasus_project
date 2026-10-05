@@ -298,7 +298,8 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 | **B1** | B0 + g (graph terms) | departures from the region |
 | **B2** | B1 + a place-level random intercept and slope per field: `α_{u} + β_{u}(t − t̄)`, shrunk to the region | departures from a place's own course |
 | **B2s** | B2 + season (sub-annual grains) | out-of-season events |
-| **BP** | prospective: the years after t₀ against the fit on years ≤ t₀, every place and category effect as learned before t₀; the history h carried forward and each place's own course (annual), or the fit's years as regimes (monthly); a mixture predictive | departures from the past: epidemics, new practices |
+| **BP** | prospective, the *expectation*: the years after t₀ against the fit on years ≤ t₀, every place and category effect as learned before t₀; the history h carried forward and each place's own course (annual), or the fit's years as regimes (monthly); a mixture predictive | departures from the past: epidemics, new practices |
+| **BPA** | prospective, the *alarm baseline* (ADR-0012): BP with the monthly history a flat level (the last 36 months of h) that past epidemics do not enter; identical to BP at the annual grain | an epidemic, even one that repeats a past one |
 
 - **Tiers are computed from one fit:** B0 and B1 by dropping terms, B2 by a cheap per-field refit of `(α_u, β_u)` with the rest as offset.
 - **B0 is re-levelled to the national total of each year.** Dropping centred log-scale place effects also drops E[exp(s + v)] > 1. Without the re-levelling, B0 fell 11% short on chapter IX.
@@ -314,7 +315,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - **annual grain:** h is the RW2's last slope damped by 0.5 per year, and each place carries its own B2 trend over the fit, damped by 0.5, with the coefficients' posterior variance;
   - **monthly grain:** the regimes are the fit's own years (each year's twelve months of h, equal weights), the epidemic years of the history being normal ones;
   - **a category the fit never saw has no expectation** (ADR-0011): it leaves the node, its events are counted per year (`extras["new_category"]`, flag `NEW_CATEGORY`) and it alarms at five events in a year. A known category that explodes (B34 in SIM, 802 training deaths against 714,782 later) is not unseen: it is the lens's positive;
-  - **alarm baseline.** The regimes predictive is calibrated, not an epidemic alarm: past epidemics are regimes (dengue 2019–23, recall of state epidemic-years 0.48 against 0.81 for `history="level36"`, evaluation 2026-10-05, dengue note). The outbreak lens for "an epidemic by incidence" reads `history="level36"`.
+  - **two objects (ADR-0012).** `Expectations.prospective(..., purpose="expectation")` is BP, the calibrated predictive of the above, for surprises and the calibration check (§6.2). `purpose="alarm"` is BPA, for epidemic detection: the regimes predictive is calibrated but a weak alarm, since past epidemics are regimes (dengue state epidemic-years, recall/precision 2019–23 0.48/0.84 against 0.81/0.75; 2015–16 0.22/0.80 against 0.49/0.90). BPA keeps the training fit's φ_extra and the variance terms and replaces the monthly regimes by the flat `level36`. A prospective survey (`Session.survey(prospective=t0)`, `tools.PROSPECTIVE_TIERS`) reads BPA for the outbreak lens and BP for the others. The alarm's false-alarm rate per place over time stays phase 4 (ADR-0004 item 4).
 
 ### 6.2 Calibration
 
@@ -365,7 +366,7 @@ Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family 
 | lens | statistic | null |
 |---|---|---|
 | spatial cluster | expectation-based Poisson scan over graph-connected place sets (§7.2 restricted to places) | §7.2 |
-| outbreak, change point | outbreak: each cell's upper tail under the B2/B2s predictive (the PIT), with BH. Change point: per place, the exact NB tail of each trailing window, with Bonferroni over the windows, then BH across places | the predictive, exact; simulated nulls failed on sparse fields (evaluation 2026-10-04) |
+| outbreak, change point | outbreak: each cell's upper tail under the B2/B2s predictive (the PIT; prospectively under BPA, the alarm baseline, §6.1), with BH. Change point: per place, the exact NB tail of each trailing window, with Bonferroni over the windows, then BH across places | the predictive, exact; simulated nulls failed on sparse fields (evaluation 2026-10-04) |
 | space-time cluster | §7.2 over place × time | §7.2 |
 | group disparity | per unit of each scale: likelihood-ratio heterogeneity of the groups' SIRs against the national **observed** group pattern (B0 by group, re-levelled to the observed national total of each year and group), each group's deviance divided by its NB variance factor | non-central χ²(df, sd²·Σμ/k) |
 | trend divergence | per unit of each scale: `β_u − mean_{N(u)} β` from B2 (reference `neighbours`) or `β_u` (reference `national`, B1 carrying the national course), in posterior standard deviations | the posterior (a coarser unit: Student t, sd inflated by its dispersion around a cubic course) |

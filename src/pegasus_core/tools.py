@@ -45,6 +45,10 @@ from .scans import scales as scales_mod
 
 LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
+# The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
+# (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
+# epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
+PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
 SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
@@ -61,6 +65,17 @@ SURVEY_PLAN = (
     ("spatial_cluster", None, ("municipality",), ()),
     ("group_disparity", None, (), ("municipality", "region", "state")),            # fails its negatives
 )
+
+
+def lens_tier(lens: str, prospective: bool = False) -> str:
+    """The expectation tier a lens reads: retrospective (`LENS_TIERS`) or, in a prospective survey, `PROSPECTIVE_TIERS`."""
+    if not prospective:
+        return LENS_TIERS[lens]
+    if lens not in PROSPECTIVE_TIERS:
+        raise ValueError(f"the {lens} lens has no prospective tier (one of {sorted(PROSPECTIVE_TIERS)})")
+    return PROSPECTIVE_TIERS[lens]
+
+
 UNGATED = "|ungated"                # suffix of the survey family of the failing combinations
 
 
@@ -119,13 +134,22 @@ class Session:
 
         return reg.walk(block, admissible)
 
-    def surprise(self, node: str, tier: str = "B1") -> surprise.Surprise:
+    def surprise(self, node: str, tier: str = "B1", train_last: int | None = None) -> surprise.Surprise:
+        """The field's expectation at ``tier``; the prospective tiers (BP the expectation, BPA the alarm baseline,
+        ADR-0012) are fitted on the years up to ``train_last``."""
         memo = getattr(self._local, "memo", None)       # set while a survey runs the lenses of one field
-        if memo is not None and (node, tier) in memo:
-            return memo[(node, tier)]
-        s = self.expectations.surprise(node, tier)
+        key = (node, tier, train_last)
+        if memo is not None and key in memo:
+            return memo[key]
+        if tier in ("BP", "BPA"):
+            if train_last is None:
+                raise ValueError(f"tier {tier} is fitted on the years up to a train_last")
+            purpose = next(k for k, v in surprise.PURPOSE_TIER.items() if v == tier)
+            s = self.expectations.prospective(node, train_last, purpose=purpose)
+        else:
+            s = self.expectations.surprise(node, tier)
         if memo is not None:
-            memo[(node, tier)] = s
+            memo[key] = s
         return s
 
     def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
@@ -169,11 +193,12 @@ class Session:
 
     # ---- scanning ----------------------------------------------------------------
 
-    def scan(self, node: str, lens: str, tier: str | None = None, scales: tuple[str, ...] | None = None, **kw
-             ) -> list[lenses.Finding]:
+    def scan(self, node: str, lens: str, tier: str | None = None, scales: tuple[str, ...] | None = None,
+             train_last: int | None = None, **kw) -> list[lenses.Finding]:
         """One lens on one field. ``scales`` (names; trend divergence and group disparity) default to the
-        municipality; ``reference`` (trend divergence) to ``neighbours``."""
-        tier = tier or LENS_TIERS[lens]
+        municipality; ``reference`` (trend divergence) to ``neighbours``. ``train_last`` makes the scan prospective:
+        the lens reads its `PROSPECTIVE_TIERS` tier, fitted on the years up to it."""
+        tier = tier or lens_tier(lens, train_last is not None)
         if scales:
             kw["scales"] = self.scales(scales)
         if lens == "group_disparity":
@@ -182,26 +207,32 @@ class Session:
             phi = float(self.expectations.model(self.expectations.field(node).block).phi)
             return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
                                           **{"phi": phi, **kw})
-        s = self.surprise(node, tier)
+        s = self.surprise(node, tier, train_last)
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
 
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
                "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
-               workers: int | None = None, ungated: bool = False) -> list[leads.Lead]:
+               workers: int | None = None, ungated: bool = False, prospective: int | None = None) -> list[leads.Lead]:
         """The scheduled pass over every admissible field; returns the leads admitted. Only the combinations the
         gate allows run (`SURVEY_PLAN`: trend against the national course at regions and states, the outbreak,
         change-point and space-time lenses at the municipality); ``ungated`` adds the failing ones, each a family
         of its own, their leads marked ``gate="failed"``. A call's scales are its multiplicity (BH within each
         scale at q / number of scales). Fields are scanned by ``workers`` threads (default `survey_workers`; 1: in
         order, in this thread) over the one loaded model; the lenses of a field share its tiers' expectations. The
-        findings are merged in the fields' order, so the leads do not depend on the number of workers."""
+        findings are merged in the fields' order, so the leads do not depend on the number of workers.
+        ``prospective=t0`` runs the plan's prospective lenses (`PROSPECTIVE_TIERS`) on the years after t0 against a
+        fit up to t0: the outbreak lens on the alarm baseline, the others on the calibrated expectation
+        (ADR-0012). It is a different family from the retrospective survey, and its leads are not
+        yet explained or replicated (those read the retrospective tiers)."""
+        if prospective is not None:
+            lens_names = tuple(x for x in lens_names if x in PROSPECTIVE_TIERS)
         found: dict[str, list[lenses.Finding]] = {}
         log_lock = threading.Lock()
         calls = []                  # (lens, reference, scale names, family suffix)
         for lens, reference, passing, failing in SURVEY_PLAN:
-            if lens not in lens_names:
+            if lens not in lens_names or (prospective is not None and reference):
                 continue
             tag = "|national" if reference == "national" else ""
             if passing:
@@ -220,13 +251,15 @@ class Session:
                     if reference:
                         kw["reference"] = reference
                     name = " ".join(x for x in (lens, reference, "+".join(scale_names)) if x)
+                    if prospective is not None:
+                        kw["train_last"] = prospective
                     try:
                         hits = self.scan(f.node, lens, **kw)
                     except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
                         with log_lock:
                             log(f"FAIL {f.id} {name}: {type(exc).__name__}: {exc}")
                         continue
-                    out.append((f"{lens}|{LENS_TIERS[lens]}|{block}{tag}", hits))
+                    out.append((f"{lens}|{lens_tier(lens, prospective is not None)}|{block}{tag}", hits))
                     with log_lock:
                         log(f"{f.id} {name}: {len(hits)}")
             finally:
