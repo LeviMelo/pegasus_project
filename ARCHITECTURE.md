@@ -90,6 +90,8 @@ Leads are statistical objects, not conclusions.
 
 The **population tensor** P = U × T × G holds N_c.
 
+**Institution cell.** `c = (f, t)`, f a recording facility (CNES for SIH, CODESTAB for SIM) and t a year, with the facility's **catchment** as exposure: the expected events of a block at f are `m_ft = Σ_u q_uf μ_ut`, the place model's expectation spread by the care-flow kernel q (the share of place u's other-chapter events recorded at f). It is the second lattice, read for the estimand *between institutions* (P4, E_i). Built for SIH at the annual grain, one block at a time (§4.5, ADR-0017).
+
 **Field.** A projection of events onto a lattice:
 
 ```
@@ -189,6 +191,13 @@ For a mark m of event type e (length of stay, cost, birth weight, gestational we
 | binary share (death in hospital, caesarean) | beta-binomial |
 
 The location ν follows the structure of §4.2, plus **case-mix** (the event type's classifier and declared case-mix roles) and an institution effect (shrunk) where the mark has an institution.
+
+### 4.5 Institutions: a supply term, and the lattice
+
+A hospital's volume or coding step reaches a place's residents' counts (SIH names the recording facility of every admission). Two objects, because only one part of it can be taken out of a place's expectation without hiding real events (ADR-0017).
+
+- **Supply term (opt-in, `Session(supply=True)`).** The expectation of an annual count block is multiplied by `A_ut = renorm(exp(β_v L_vol + β_u L_util))`. Both indices come from the *other* chapters only (not the block, not I, X or XXII, which carry epidemics), so a real outbreak of the block never enters them: `L_vol` is the log of Σ_f w_uf r_ft, w_uf the share of the place's block events recorded at facility f and r_ft the facility's other-chapter volume as a share of the nation's over its own mean; `L_util` the log of the place's own other-chapter admissions over what its mean rate and the nation's course give. Each log index is soft-thresholded at two standard deviations of its counting noise (`facility._deadband`), because a sole-provider town's index is its own counts. `renorm` keeps each place's and each year's expected total. The exponents are chosen on a grid by the negative binomial likelihood of the block's place-year cells under its B1 expectation (`facility.fit_supply`), and the term is applied after the fit (§13). At the monthly grain it is off: the cube is annual.
+- **Institution lattice (`Session.institutions`, `facility.institution_lattice`).** Cells (f, t) with the facility's catchment as exposure (§3.2). A facility's best window of years (a step or a bump) is found by the Poisson likelihood ratio against its constant ratio of observed to catchment-expected events, scaled by the dispersion of the facilities' own residuals; it is *volume* when the facility's other-chapter volume moved with it, *specific* when it did not (the facility's handling of the block: coding, a service, a real event it served). A specific step is a lead of its own, read as E_i (§7.5), not subtracted from the places it serves: a referral hospital receives real events and coding alike (ADR-0014).
 
 ---
 
@@ -427,7 +436,7 @@ minimise Σ_c [ μ_c m_c − y_c log(μ_c m_c) ]  over  m_c = Σ_r λ_r a_r(u) b
 | **E_b, between places** | weighted correlation ρ̂ over units of place effects b̂(u) (the posterior mean of a field-specific place intercept over B0, shrunk), pair weight `√(w_X w_Y)` with `w = 1/se²`, each field centred by its own weighted mean | **Dutilleul's modified t:** `n_eff = 1 + n² / tr(R̂_X R̂_Y)`, with R̂ from each field's spatial correlogram on the graph's distance classes |
 | **E_b\|Z, adjusted** | partial correlation given a declared adjustment set Z (urbanisation, income, macro-region) | same, with n_eff − dim(Z) |
 | **E_w, within places, lag ℓ** | `ρ̂_ℓ = Σ_{u,t} w z^X_{u,t} z^Y_{u,t+ℓ} / norm`, pooled over places, on B2 surprises | per place, `n_eff,u = T_u (1−φ̂_X φ̂_Y)/(1+φ̂_X φ̂_Y)` (AR(1)); summed over places; divided by the design effect `1 + (U−1) ρ̄_space` for cross-place correlation at equal t |
-| **E_i, between institutions** | as E_b on the institution lattice | as E_b, on the care-flow graph |
+| **E_i, between institutions** | as E_b on the institution lattice; first stage: a facility's step against its catchment-expected events (§4.5), no pair yet | as E_b, on the care-flow graph |
 | **across systems** | the same quantity in two systems (notifications against admissions): E_w on the log ratio | as E_w |
 
 **Minimum-effect test (P5):**
@@ -653,7 +662,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps` and `map_inputs` (§7.6), `explain` (§7.7), `cohort` (§7.8) | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
-| `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year) and the per-lead facility tally for the `facility` triage class (§7.7) | gateway, store, config |
+| `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year), the per-lead facility tally for the `facility` triage class (§7.7), the supply term of a block's expectation and the institution lattice (§4.5) | gateway, store, config |
 | `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
@@ -716,7 +725,7 @@ Every random draw is seeded from (object, cell, purpose).
 | **0** | harness (§10); `gateway`; `store`; `control` (ledger) | aggregates; event types for SIM, SINASC, SIH | the harness runs end to end on surrogates |
 | **1** | `fields`; `structures`; `monolith` (annual; SIM, SINASC, SIH); `surprise`; lenses; subset scanning | roles and event types; code structures; contiguity and distance graphs; POPSVS | univariate positives recovered; false-lead rates; measured compute budgets; **first measurements:** tree pooling by chapter, graph choice |
 | **2** | pairs (E_b, E_w, E_b\|Z); FDR across families; replication; explaining away; decomposition; cohort scans; SINAN; sub-annual grain for dense families | care-flow graph; population account v1 (2022 hold-out); linked cohorts | pair positives; negatives; calibrated δ and admission |
-| **3** | patterns across blocks; dependency maps; tools over MCP (built, ADR-0008; paused: its use and integration are to be planned with the author); institution lattice; agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
+| **3** | patterns across blocks; dependency maps; tools over MCP (built, ADR-0008; paused: its use and integration are to be planned with the author); institution lattice (first stage built, ADR-0017: the supply term and the facility steps for SIH; crossed place × facility effects at the node level remain); agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
 | **4** | prospective surveillance (ADR-0004): weekly grain; an outbreak-robust alarm baseline; a nowcast from in-record delays; alarms controlled by a false-alarm rate; syndromic scans across SIM, SIH and SINAN | dates of notification, entry and processing typed in every family; snapshots of the preliminary files (for revisions) | a benchmark against published alerts (InfoDengue) and confirmed epidemics: timeliness, false alarms, hits |
 
 ---
@@ -743,3 +752,4 @@ Every random draw is seeded from (object, cell, purpose).
 | 2.1 | meaning comes from pegasus_data | `gateway._date_sql` parses raw date text (YYYYMMDD, DDMMYYYY), and `_residence_sql` maps the Federal District's administrative-region codes in SIH-RD 2008–2017 to 530010 | interim; pegasus_data now derives `<COL>_date` and `MUNIC_RES_municipio` (pegasus_data c893b69, 1f88401). Binding the roles to them changes every gateway cache key, so the switch waits for the next re-warm |
 | 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | spatial cluster θ0 = 1.5 (pooled negatives 0.04, worst family 5/30), where the family rule gives 2.0; single-field negatives are MSR of the residuals on a knn8 graph and a per-place shift, with a normal-scores variant | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |
 | 7.6 | a sparse + low-rank Gaussian graphical model, penalties by StARS, edges also passing the pair test | pairwise E_b and E_b\|Z given the declared contexts, no joint model; run 2026-10-05 (ADR-0013): delta_E|Z 0.1, 0 false edges in 40 surrogate worlds | each pair carries its own spatial n_eff, which a joint likelihood has no place for; the conditional layer conditions on declared contexts as the low-rank part would |
+| 4.5 | the facility effect is part of the model: a place × facility supply term estimated with the monolith, and crossed place and facility effects at the node level | the supply term is a multiplier of the fitted expectation, with two exponents chosen by likelihood after the fit on the same cells (opt-in); the facility's own handling of a node (coding) is not subtracted, only read on the lattice | the independent evidence (other chapters) removes 11 % of the facility class and 6.5 % of the signals (evaluation 2026-10-05, institutions); what the facility does with the block's own codes cannot be subtracted without absorbing an outbreak that one hospital serves. A refit with the term inside the likelihood, and crossed effects where places share facilities, are the next stage |

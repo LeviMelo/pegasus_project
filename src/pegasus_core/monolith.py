@@ -299,6 +299,7 @@ class Monolith:
         self.grp = t(data.leaf_group)
         self.n_cells = float(nE * np.count_nonzero(data.N > 0))
         self.phi: float = float("inf")
+        self.supply: np.ndarray | None = None   # [U, T] facility-supply multiplier of the expectation (facility.attach_supply)
         self.history: list[dict] = []
         self.trace_log: list[tuple] = []
         self.p_e = self.grp[self.e]
@@ -660,7 +661,10 @@ class Monolith:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)
             mu2 = (w2[:, :, None] * torch.exp(2 * lin) * M2).sum(0)
-        return mu.cpu().numpy(), mu2.cpu().numpy()
+        mu, mu2 = mu.cpu().numpy(), mu2.cpu().numpy()
+        if self.supply is not None:
+            mu, mu2 = mu * self.supply, mu2 * self.supply ** 2
+        return mu, mu2
 
     def expected_by_group(self, leaves: np.ndarray, spatial: bool = True,
                           x: dict[str, torch.Tensor] | None = None) -> np.ndarray:
@@ -676,7 +680,8 @@ class Monolith:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]
             mu = torch.einsum("ku,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
-        return mu.cpu().numpy()
+        mu = mu.cpu().numpy()
+        return mu if self.supply is None else mu * self.supply[:, :, None]
 
     def exposure_variance(self, leaves: np.ndarray, spatial: bool = True, rho: float = 0.0,
                           x: dict[str, torch.Tensor] | None = None) -> np.ndarray:

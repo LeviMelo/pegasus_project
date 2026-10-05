@@ -104,6 +104,7 @@ class Session:
     event: str
     years: list[int]
     graph: str = graphs.DEFAULT
+    supply: bool = False          # the facility-supply term in every expectation (ADR-0017)
     source: dict = field(default_factory=dict)   # the event reader: {"grain": "month"} for the monthly grain
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
@@ -113,7 +114,7 @@ class Session:
 
     def __post_init__(self):
         control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
-        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source)
+        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source, supply=self.supply)
 
     # ---- reading ---------------------------------------------------------------
 
@@ -153,6 +154,15 @@ class Session:
         if memo is not None:
             memo[key] = s
         return s
+
+    def institutions(self, node: str) -> dict:
+        """The institution lattice of a field (E_i, ADR-0017): its facilities' steps against their catchment's expectation
+        (`facility.institution_lattice`), read on the B1 expectation without the supply term. Annual grain; SIH-RD, whose
+        events all name a facility (SIM-DO's CODESTAB is empty for a death at home)."""
+        su = self.expectations.surprise(node, "B1")
+        codes = list(self.expectations.registry.leaves(node))
+        p = facility.pairs(self.dataset, self.event, [int(y) for y in su.years], codes)
+        return facility.institution_lattice(p, su.places, np.asarray(su.years), su.mu)
 
     def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         """Observed and B0-expected counts by (place, year, group), B0 re-levelled per year and

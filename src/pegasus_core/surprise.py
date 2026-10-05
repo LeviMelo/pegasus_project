@@ -18,7 +18,7 @@ import numpy as np
 import pyarrow as pa
 from scipy import optimize, special, stats
 
-from . import config, fields, gateway, laplace, monolith, prospective, store
+from . import config, facility, fields, gateway, laplace, monolith, prospective, store
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP", "BPA")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True, "BPA": True}
@@ -81,7 +81,7 @@ class Expectations:
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
                  structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
                  center: str = "plugin", population: str | None = None,
-                 exposure_rho: float | None = EXPOSURE_RHO):
+                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
         "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
@@ -92,6 +92,8 @@ class Expectations:
         predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
         correlation ``exposure_rho`` between a place-year's cells (None: ignored)."""
         self.population, self.exposure_rho = population, exposure_rho
+        self.supply = supply        # fit the facility-supply term onto each loaded count block (facility.attach_supply, ADR-0017)
+        self.supplies: dict = {}
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})
         self.laplace, self.device, self.center = int(laplace), device, center
@@ -106,6 +108,8 @@ class Expectations:
             cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
             self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
                                            device=self.device, **self._reader())
+            if self.supply and cls is monolith.Monolith and self._models[block].data.grain == "year":
+                self.supplies[block] = facility.attach_supply(self._models[block], self.dataset, self.event)
         return self._models[block]
 
     def _reader(self) -> dict:
