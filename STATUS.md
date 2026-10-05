@@ -63,7 +63,7 @@
 12. Phase 4: the weekly grain and the nowcast (ADR-0004).
 13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
 14. The PegaSUS exposure switch: the gateway's population from `population-account-1` (pegasus_data decision 0145) with its intervals, in place of POPSVS (P8). After the Laplace merge, because every cache key changes.
-15. Population account follow-ups: an independent interval check (train 2000→2010, score Census 2010); 2000/2010 coverage taken from IBGE's reconciliation (no person-level PES) is recorded, not estimated; the North and Centre-West cover 0.66.
+15. **Population account v2.** The independent check (2000→2010, pegasus_data 581e99e) found no skill over vital-only (median error 0.077 against 0.076) and 80% intervals covering 0.69 (N 0.54, CO 0.55). v1's 2010→2022 advantage (0.057 against 0.079) does not replicate. Needed: migration covariates (economy, the care-flow graph, region-specific widening) and validation on both intervals before PegaSUS adopts it (item 14 waits on this).
 16. SIDRA follow-ups: series stitched across census universes (literacy 10+ against 15+); the SIDRA store served to the gateway's context fields; an ingestion check once phaseb/c/d finish.
 17. Regenerate pegasus_data's shipped seed (build_resources.py) once all curation is committed: fresh installs still read SIM RACACOR as Bra/Amar/Indig.
 18. An epidemic-level effect for BP: dengue's prospective forecast is 2.0–2.8× off whatever its variance (the Laplace evaluation, 2026-10-05). A state-year or regime component in the extrapolation.
