@@ -339,16 +339,17 @@ def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float)
 
 
 def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
-                outer: int = 20) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                outer: int = 20, tau: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Per place u, log μ'_ut = log μ_ut + X_t·b_u with b_u ~ N(0, diag(1/τ)): exact p×p Newton per
     place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ)."""
     live = mu.sum(axis=1) > 0
     U, k = mu.shape[0], X.shape[1]
     pois = np.isinf(phi_agg)
     b = np.zeros((U, k))
-    tau = np.ones(k)
+    fixed = tau is not None
+    tau = np.asarray(tau, dtype=float) if fixed else np.ones(k)
     H = np.broadcast_to(np.eye(k), (U, k, k)).copy()
-    for _ in range(outer):
+    for _ in range(1 if fixed else outer):
         for _ in range(iterations):
             m = mu * np.exp(b @ X.T)
             wgt = np.where(pois, m, m / (1 + m / np.where(pois, 1.0, phi_agg)))
@@ -360,6 +361,8 @@ def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarra
             b += np.clip(step, -3, 3)
             if np.abs(step).max() < 1e-6:
                 break
+        if fixed:
+            break
         Hinv = np.linalg.inv(H)
         quad = (b[live] ** 2).sum(axis=0)
         tr = np.einsum("uii->ui", Hinv[live]).sum(axis=0)

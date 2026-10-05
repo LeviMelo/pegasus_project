@@ -147,7 +147,12 @@ def region_year_loci(places_region: np.ndarray, T: int, regions: list[str] | Non
 def surrogate(s: surprise.Surprise, seed_parts: tuple) -> surprise.Surprise:
     """The same field with y ~ NB(μ, φ): a world where the model is true."""
     rng = np.random.default_rng(config.seed(*seed_parts))
-    y = subset.replicate(s.mu, s.phi, rng)
+    return with_counts(s, subset.replicate(s.mu, s.phi, rng), seed_parts)
+
+
+def with_counts(s: surprise.Surprise, y: np.ndarray, seed_parts: tuple) -> surprise.Surprise:
+    """The field with other counts y (a surrogate, a planted signal): its PIT redrawn and, at B2,
+    its place trends refitted."""
     u, z = surprise.randomised_pit(y, s.mu, s.phi, config.seed(*seed_parts, "pit"))
     extras = s.extras
     if "beta" in s.extras:
@@ -155,11 +160,42 @@ def surrogate(s: surprise.Surprise, seed_parts: tuple) -> surprise.Surprise:
         # trend lens tests the null, not the real data's trends again)
         yrs = s.years.astype(float)
         st = (yrs - yrs.mean()) / max(yrs.std(), 1e-9)
-        _, b, sd, tau = surprise.refit_place(y, s.mu, s.phi, np.stack([np.ones_like(st), st], axis=1))
+        # τ as learned from the field's real data: re-estimating it from null-but-one data shrinks
+        # every trend to zero (the first trend power curve was 0 at θ = 2, 2026-10-04)
+        _, b, sd, tau = surprise.refit_place(y, s.mu, s.phi, np.stack([np.ones_like(st), st], axis=1),
+                                             tau=s.extras["tau"])
         extras = {**s.extras, "alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
                   "tau": tau}
     return surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, u, z, s.w, s.flags,
                              s.calibration, extras)
+
+
+def trend_power(s: surprise.Surprise, run_lens, places: list[int], ratios: list[float],
+                seed_parts: tuple = ("trend-power",)) -> dict[str, Any]:
+    """Power of the trend lens: one place at a time, its expectation multiplied by a ratio θ between
+    the period's first and last year (log-linear), y ~ NB around it, everything else null; the
+    lens must report that place. Reported by θ and by the place's expected count."""
+    rng = np.random.default_rng(config.seed(*seed_parts, s.field.id))
+    yrs = s.years.astype(float)
+    frac = (yrs - yrs.min()) / max(yrs.max() - yrs.min(), 1e-9) - 0.5
+    rows = []
+    for theta in ratios:
+        for u in places:
+            mu = s.mu.copy()
+            mu[u] = s.mu[u] * np.exp(np.log(theta) * frac)
+            y = subset.replicate(mu, s.phi, rng)
+            found = run_lens(with_counts(s, y, (*seed_parts, theta, u)))
+            hit = any(int(s.places[u]) in f.locus.get("places", []) for f in found)
+            rows.append((float(theta), float(s.mu[u].sum()), hit))
+    bins = [0, 30, 100, 300, 1000, np.inf]
+    by = {}
+    for theta in ratios:
+        for lo, hi in zip(bins[:-1], bins[1:], strict=True):
+            sel = [h for t, m, h in rows if t == theta and lo <= m < hi]
+            if sel:
+                by[f"θ={theta} μ∈[{lo},{hi})"] = (round(float(np.mean(sel)), 2), len(sel))
+    return {"field": s.field.id, "curve": {float(t): round(float(np.mean([h for tt, _, h in rows if tt == t])), 2)
+                                           for t in ratios}, "by_expected": by}
 
 
 def false_lead_rate(run_lens, s: surprise.Surprise, surrogates: int = 20) -> dict[str, float]:
@@ -237,6 +273,14 @@ def run(session: Any, node: str, lens: str, surrogates: int = 20, loci: int = 40
     log(f"{s.field.id} {lens}: surrogates")
     out["false_leads"] = false_lead_rate(runners[lens], s, surrogates)
     log(f"  false leads {out['false_leads']}")
+    if lens == "trend_divergence":
+        rng = np.random.default_rng(config.seed("trend-loci", s.field.id))
+        tot = s.mu.sum(1)
+        candidates = np.nonzero(tot > 5)[0]
+        chosen = rng.choice(candidates, size=min(loci, len(candidates)), replace=False).tolist()
+        log(f"  trend power on {len(chosen)} places")
+        out["power"] = trend_power(s, runners[lens], chosen, [1.2, 1.5, 2.0])
+        log(f"  power {out['power']['curve']} {out['power']['by_expected']}")
     if lens in ("space_time", "spatial_cluster"):
         regions = gateway.regions(s.places, "ibge_immediate_region")
         full = lens == "spatial_cluster"
