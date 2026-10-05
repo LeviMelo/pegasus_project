@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 import pyarrow as pa
@@ -79,6 +80,42 @@ class BlockData:
         return self.years
 
 
+NEWBORN_SHARE = 0.5     # a field is a newborn-exposure field when at least this share of its events are at age 0
+
+
+def _icd10_tree() -> tuple[dict, dict]:
+    tree = gateway.code_structure("ICD10")
+    code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
+    return dict(zip(code, parent, strict=True)), dict(zip(code, level, strict=True))
+
+
+@lru_cache(maxsize=64)
+def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str) -> float:
+    """The share of the block's events (years given) recorded at age 0, from the gateway's cached counts."""
+    parent_of, level_of = ({"*": None}, {"*": "category"}) if block == "*" else _icd10_tree()
+    at0 = total = 0.0
+    for year in years:
+        tab = gateway.event_counts(dataset, event, int(year)).counts
+        enc = pc.dictionary_encode(pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, 3)
+                                   if block != "*" else tab.column("code").combine_chunks())
+        ok = np.array([block == "*" or (level_of.get(c) == "category" and _chapter(c, parent_of) == block)
+                       for c in enc.dictionary.to_pylist()], dtype=bool)
+        keep = ok[enc.indices.to_numpy(zero_copy_only=False)]
+        y, age = tab.column("y").to_numpy()[keep], tab.column("age").to_numpy()[keep]
+        at0, total = at0 + float(y[age < 1].sum()), total + float(y.sum())
+    return at0 / total if total else 0.0
+
+
+def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", **_) -> str:
+    """The exposure a field reads when none is named (and ``PEGASUS_POPULATION`` is unset): ``hybrid`` (POPSVS and
+    the account's age 0) for a newborn-exposure field, defined by its data as a block of which at least
+    ``NEWBORN_SHARE`` of the events are at age 0 (SIM chapter XVI: 0.9; chapter IX: 0.002), else ``popsvs``
+    (ADR-0010 amended). Only event counts are classified; code-list and mark readers keep POPSVS."""
+    if source != "events":
+        return "popsvs"
+    return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version()) >= NEWBORN_SHARE else "popsvs"
+
+
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
              source: str = "events", grain: str = "year", population: str | None = None, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
@@ -96,7 +133,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     years = np.array(sorted(set(years)))
-    population = population or config.population_source()
+    population = population or config.population_pinned() or default_population(
+        dataset, event, block, years.tolist(), source, **source_args)
     edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population)
@@ -121,10 +159,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         # an event type without a classifier tree: one leaf, every event in it
         parent_of, level_of = {"*": None}, {"*": "category"}
     else:
-        tree = gateway.code_structure("ICD10")
-        code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
-        parent_of = dict(zip(code, parent, strict=True))
-        level_of = dict(zip(code, level, strict=True))
+        parent_of, level_of = _icd10_tree()
     categories = (["*"] if block == "*" else
                   sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block))
     carrier = {c: (parent_of[c] if profile == "group" and parent_of[c] is not None else c) for c in categories}

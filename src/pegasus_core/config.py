@@ -39,6 +39,12 @@ def population_source() -> str:
     return os.environ.get("PEGASUS_POPULATION", "popsvs")
 
 
+def population_pinned() -> str | None:
+    """The source ``PEGASUS_POPULATION`` names, None when it is unset (then ``monolith.default_population`` chooses
+    per field: ``hybrid`` where the events are the newborn's, ``popsvs`` otherwise; ADR-0010 amended)."""
+    return os.environ.get("PEGASUS_POPULATION") or None
+
+
 @lru_cache(maxsize=1)
 def code_version() -> str:
     """This repository's commit, plus ``+dirty`` when the tree has changes."""
