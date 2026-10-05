@@ -157,7 +157,7 @@ def ledger(family: str = typer.Option(None)) -> None:
 @app.command("split-fit")
 def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
               device: str = "cpu") -> None:
-    """Deal the events of blocks to the sides A, B, R and fit each block on side A alone (§8.3)."""
+    """Deal the events of blocks to the sides A, E and fit each block on side A alone (§8.3)."""
     from . import replication
 
     for block in blocks:
@@ -171,12 +171,25 @@ def split_survey(dataset: str, event: str, years: str = Years, graph: str = "con
                  blocks: list[str] = typer.Option(None, help="default: every fitted block"),
                  replicates: int = 100,
                  ungated: bool = typer.Option(False, help="also run the combinations that fail their gate")) -> None:
-    """The survey on side A, then each lead it selects tested once on side B (honest sample splitting, §8.3)."""
+    """The survey on side A, then the size of each lead it selects read on side E (§8.3: a size, never a verdict)."""
     s = _session(dataset, event, years, graph)
     admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
     console.print(f"{len(admitted)} leads selected on side A")
-    done = s.split_confirm(log=console.print)
-    console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on side B")
+    done = s.honest_sizes(log=console.print)
+    console.print(f"{sum(1 for x in done if x.replications.get('honest', {}).get('sized'))} sized on side E")
+
+
+@app.command("temporal-survey")
+def temporal_survey(dataset: str, event: str, last: int, years: str = Years, graph: str = "contiguity",
+                    blocks: list[str] = typer.Option(None, help="default: every fitted block"), replicates: int = 100,
+                    ungated: bool = typer.Option(False, help="also run the combinations that fail their gate")) -> None:
+    """Select on the years up to LAST (its own register leads_T<LAST>), then test what it selected on the later years of
+    ``years`` against a fit that ends at LAST (§8.3, later years). Needs the blocks fitted on the years up to LAST."""
+    s = _session(dataset, event, years, graph)
+    admitted = s.train(last).survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
+    console.print(f"{len(admitted)} leads selected on the years up to {last}")
+    done = s.temporal_confirm(last, log=console.print)
+    console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on the later years")
 
 
 @app.command("mcp")

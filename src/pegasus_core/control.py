@@ -1,4 +1,4 @@
-"""Error control: the ledger, FDR, splits and replication (ARCHITECTURE §8, §9.2).
+"""Error control: the ledger, FDR, the independent units of replication and the reserve (ARCHITECTURE §8, §9.2).
 
 The ledger is the denominator of every error rate: a test is written before it
 runs, with its family, and its result appended when it finishes. FDR is applied
@@ -7,6 +7,7 @@ to what the ledger holds, never to a hand-picked list.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -22,6 +23,7 @@ import pyarrow.parquet as pq
 from . import config
 
 _LOCK = threading.Lock()
+_PARTS: dict[Path, pa.Table] = {}      # Ledger part files already read
 
 
 # ---------------------------------------------------------------------- ledger
@@ -32,7 +34,7 @@ class Hypothesis:
     family: str             # lens or estimand × tier × field family × support (ARCHITECTURE §8.1)
     actor: str              # scan | agent | person
     spec: dict[str, Any]    # what is tested: fields, estimand, tier, scope, null
-    split: str = "all"      # all | event:A | event:B | event:R (the reserve; ARCHITECTURE §8.3)
+    split: str = "all"      # all | event:A (the selecting side) | period:reserve (ARCHITECTURE §8.3)
 
 
 class Ledger:
@@ -66,8 +68,13 @@ class Ledger:
                        "data_version": config.data_code_version(), "at": now} for i, p, e, r in rows])
 
     def table(self) -> pa.Table:
+        """Every row. The part files are immutable, so each is read once per process (thousands of small files
+        make a full read take minutes)."""
         files = sorted(self.path.glob("part-*.parquet"))
-        return pa.concat_tables([pq.read_table(f) for f in files]) if files else pa.table({})
+        for f in files:
+            if f not in _PARTS:
+                _PARTS[f] = pq.read_table(f)
+        return pa.concat_tables([_PARTS[f] for f in files]) if files else pa.table({})
 
     def family(self, family: str) -> list[dict[str, Any]]:
         """Registered tests of a family with their results (a test without a result counts as p = 1)."""
@@ -189,7 +196,7 @@ class LOND:
     def test(self, p: float) -> bool:
         self.tested += 1
         alpha = self.q * self._gamma(self.tested) * (self.rejected + 1)
-        hit = p <= alpha
+        hit = bool(p <= alpha)          # a Python bool: the ledger stores it as JSON
         self.rejected += int(hit)
         return hit
 
@@ -227,16 +234,15 @@ def replicates(effect_full: float, effect: float, p: float, alpha: float = 0.05)
                 and abs(effect) >= abs(effect_full) / 2 and p < alpha)
 
 
-#: The event sides (ARCHITECTURE §8.3): A explores, selects and fits the expectation; B is the scheduled
-#: survey's one test of what A selected; R is the confirmation reserve, spent by claims under LOND.
-SIDES: dict[str, float] = {"A": 0.5, "B": 0.3, "R": 0.2}
+#: The event sides (ARCHITECTURE §8.3). They are **not** a test of anything: the sides of one cell share its
+#: frailty. A selects (and fits, where `split-fit` ran); E estimates, a size that selection on A did not bias.
+SIDES: dict[str, float] = {"A": 0.5, "E": 0.5}
 
 
 def event_sides(y: np.ndarray, seed_text: str, fractions: dict[str, float] | None = None) -> dict[str, np.ndarray]:
     """Deal the events of every cell row to the sides by multinomial thinning (fixed seed): stratified by
-    cell, a cell's events landing in each side in proportion to its fraction. Under a Poisson count the
-    sides are independent given the rate, and under a negative binomial their sizes stay the same
-    (a thinned NB(n, p) is an NB with the same n), so a side's expectation is the fraction times the whole's."""
+    cell, a cell's events landing in each side in proportion to its fraction. Given the cell's rate the sides
+    are independent Poisson counts, so a size read on E is unbiased for the rate whatever was selected on A."""
     fractions = fractions or SIDES
     rng = np.random.default_rng(config.seed(seed_text))
     left = np.rint(y).astype(np.int64)
@@ -252,16 +258,56 @@ def event_sides(y: np.ndarray, seed_text: str, fractions: dict[str, float] | Non
     return out
 
 
+# ---------------------------------------------------------------------- the reserved periods
+
+
+#: Periods that no fit, scan or exploration may read (ARCHITECTURE §8.3): the confirmation reserve, by dataset.
+#: SIM.DO 2024 is the final file published in December 2025, after every fit and survey (years 2010-2023);
+#: the later years are preliminary and incomplete (evaluation 2026-10-05, surveillance lags) and stay unreserved
+#: until final. Extending the list is the only way to enlarge the reserve; shrinking it spends it.
+RESERVED_PERIODS: dict[str, list[int]] = {"SIM.DO": [2024]}
+
+_RESERVE = threading.local()
+
+
+class ReservedPeriod(RuntimeError):
+    """A fit, a scan or an assembly of events asked for a period held in the confirmation reserve."""
+
+
+def reserved(dataset: str) -> list[int]:
+    return list(RESERVED_PERIODS.get(dataset, []))
+
+
+def check_reserved(dataset: str, years) -> None:
+    """Raise `ReservedPeriod` if ``years`` touch the reserve of ``dataset`` and no claim is being tested. Called by
+    the one reader of events (`monolith.assemble`) and by the sessions, so no fit and no scan can read the reserve."""
+    hit = sorted({int(y) for y in years} & set(reserved(dataset)))
+    if hit and not getattr(_RESERVE, "open", False):
+        raise ReservedPeriod(f"{dataset} {hit} belong to the confirmation reserve: only a claim (`Session.confirm`) reads them")
+
+
+@contextlib.contextmanager
+def reserve_open():
+    """The reserve is readable inside this block: `Session.confirm_many` uses it, nothing else does."""
+    before = getattr(_RESERVE, "open", False)
+    _RESERVE.open = True
+    try:
+        yield
+    finally:
+        _RESERVE.open = before
+
+
 class Reserve:
-    """The confirmation reserve: side R of the events, spent only by claims, each under one LOND stream.
+    """The confirmation reserve: the reserved periods of a dataset, spent only by claims, each under one LOND stream.
 
-    What it holds is the fraction ``SIDES["R"]`` of every cell's events, which no scan, no refit and no
-    agent's exploration has read. A claim is one fixed locus tested on those events; its p-value enters
-    the stream, whose state (tests so far, rejections so far) is read back from the ledger, so the budget is
-    the ledger's, not a session's. The stream is ordered by the caller, and the order must be fixed before
-    the p-values are seen (e.g. by the A-side evidence)."""
+    What it holds is data that no scan, no refit and no agent's exploration has read, and that did not exist when
+    the leads were selected: a claim that a departure persists or recurs is tested on the later period with the
+    expectation of a fit that ends before it (`Session.confirm_many`). The p-value of a claim enters the stream,
+    whose state (tests so far, rejections so far) is read back from the ledger, so the budget is the ledger's, not
+    a session's. The stream is ordered by the caller, and the order must be fixed before the p-values are seen
+    (e.g. by the evidence of the selecting survey)."""
 
-    SPLIT = "event:R"
+    SPLIT = "period:reserve"
 
     def __init__(self, ledger: Ledger, q: float = 0.05):
         self.ledger, self.q = ledger, q
@@ -272,11 +318,31 @@ class Reserve:
         for r in self.ledger.table().to_pylist():
             if r["kind"] == "result" and r.get("result") and '"lond"' in r["result"]:
                 tested += 1
-                rejected += int(json.loads(r["result"]).get("rejected", False))
+                rejected += json.loads(r["result"]).get("rejected") in (True, "True")   # older rows: numpy bool as text
         return tested, rejected
 
+    def level(self) -> float:
+        """The level at which the next claim would be tested: q · γ(tests + 1) · (rejections + 1)."""
+        lond = LOND(self.q)
+        tested, rejected = self.state()
+        return float(self.q * lond._gamma(tested + 1) * (rejected + 1))
+
+    def previous(self, spec: dict[str, Any]) -> dict[str, Any] | None:
+        """The earlier spend of the same claim (``spec`` without the caller), with its result, or None. The
+        reserve is read once per claim: asking again must not buy a second draw."""
+        want = json.dumps({k: v for k, v in spec.items() if k != "caller"}, sort_keys=True, default=str)
+        rows = self.ledger.table().to_pylist()
+        done = {r["id"]: r for r in rows if r["kind"] == "result"}
+        for r in rows:
+            if r["kind"] == "pending" and r["split"] == self.SPLIT and r["id"] in done:
+                have = json.loads(r["spec"])
+                if json.dumps({k: v for k, v in have.items() if k != "caller"}, sort_keys=True, default=str) == want:
+                    return {"id": r["id"], "at": r["at"], "caller": have.get("caller"), "actor": r["actor"],
+                            "p": done[r["id"]]["p"], "result": json.loads(done[r["id"]]["result"])}
+        return None
+
     def spend(self, claims: list[tuple[Hypothesis, float, float | None, dict[str, Any]]]) -> list[dict[str, Any]]:
-        """Test the claims in the order given: (hypothesis, p on side R, effect, detail) → level and verdict."""
+        """Test the claims in the order given: (hypothesis, p on the reserve, effect, detail) → level and verdict."""
         lond = LOND(self.q)
         lond.tested, lond.rejected = self.state()
         ids = self.ledger.register_many([Hypothesis(h.family, h.actor, h.spec, self.SPLIT) for h, *_ in claims])
@@ -290,14 +356,14 @@ class Reserve:
         return out
 
 
+#: The kinds of independent confirmation (ARCHITECTURE §8.3). Each is a test on units that took no part in the
+#: selection: later years (``temporal``), other places (``spatial``), another record system (``corroborated``).
+KINDS = ("temporal", "spatial", "corroborated")
+
+
 def replication_tier(kinds: set[str]) -> str:
-    """The tier of a lead from the independent confirmations it has (ARCHITECTURE §8.3). R0 passes §8.2 on
-    all data. Every higher tier needs R1, the honest split: selected on side A, tested on side B. R2 adds the
-    recurrence of the effect in the temporal half it does not touch; R3 adds corroboration by an independent
-    field (a one-off event cannot recur, so this is its way up). Recurrence and corroboration are not ordered
-    by the other; the tier is the highest reached."""
-    if "split" not in kinds:
-        return "R0"
-    if "corroborated" in kinds:
-        return "R3"
-    return "R2" if "recurs" in kinds else "R1"
+    """The tier of a lead: R0 passes §8.2 on all data, and R_k holds k of the independent confirmations
+    (`KINDS`). A one-off event cannot recur and has no other place, so for it R1 is corroboration, and for a
+    persistent departure R1 is the later years. The tiers count independent evidence, they are not a ladder of
+    strength: which kinds a lead holds is in ``tools.explain_lead``."""
+    return f"R{len(set(kinds) & set(KINDS))}"

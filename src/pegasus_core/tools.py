@@ -4,14 +4,14 @@ A `Session` binds one event type's fitted monolith (dataset, event, years,
 graph) to the ledger and the lead register. Everything that tests something
 goes through the ledger; everything admitted becomes a lead.
 
-`survey` is the scheduled pass: every admissible field of each fitted block,
-the lenses at their tiers, error control across families (Benjamini–Bogomolov,
-§8.2), and the admitted findings written to the register. `confirm` is the
-agents' only route to a claim: one test on the spatial reserve (half B), under
-online FDR (LOND) whose state is read back from the ledger.
+`survey` is the scheduled pass: every admissible field of each fitted block, the lenses at their tiers, error
+control across families (Benjamini–Bogomolov, §8.2), and the admitted findings written to the register.
 
-The events are dealt to sides (`replication`, ARCHITECTURE §8.3): `side("A")` explores and selects, `split_confirm`
-tests what A selected on side B, `confirm` spends the reserve (side R), `corroborate` asks an independent field.
+Replication is by units that took no part in the selection (`replication`, ARCHITECTURE §8.3): `train(last)` selects
+on the years up to ``last`` and `temporal_confirm` tests the later years; `spatial_confirm` tests a unit claim on
+places its selection did not use; `corroborate` asks an independent record system; `confirm` is the agents' only
+route to a claim: one test on the reserved period, under online FDR (LOND) whose state is read back from the
+ledger. The event sides survive for sizes only: `honest_sizes`.
 """
 
 from __future__ import annotations
@@ -95,6 +95,7 @@ class Session:
     _scales: dict | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
+        control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
         self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph)
 
     # ---- reading ---------------------------------------------------------------
@@ -483,63 +484,118 @@ class Session:
             out["neighbours"] = {"log_rr": eff, "p": p}
         return out
 
-    # ---- honest splitting and corroboration (§8.3) -----------------------------------------
+    # ---- replication by independent units (§8.3) --------------------------------------------
+
+    split_home = None      # (a Path) where the selecting sessions (side A, training years) keep their register and ledger
 
     def side(self, side: str) -> Session:
         """This session over one side of the events (`replication`): A explores and selects, with its own register
-        and ledger (its tests are not the all-data denominator); B and R are read to test and to confirm."""
+        and ledger (its tests are not the all-data denominator); E is read to size what A selected."""
+        home = self.split_home or config.home()
         out = Session(self.dataset, self.event, self.years, self.graph,
                       ledger=control.Ledger(home / "ledger_A") if side == "A" else self.ledger,
                       register=leads.Register(home / "leads_A") if side == "A" else self.register)
         out.expectations = replication.SideExpectations(out.expectations, side)
         return out
 
-    def split_confirm(self, q: float = 0.05, log=print) -> list[leads.Lead]:
-        """The leads selected on side A, each tested once on side B at its fixed locus, Benjamini-Hochberg over
-        all that were tested (valid because B played no part in the selection or in the fit). The verdict is
-        in ``lead.replications["split"]``; ``lead.replication`` is R1 for a lead that stands."""
-        a = self.side("A")
-        b = self.side("B")
-        ratio = replication.RATIO["B"]
-        selected = a.register.current()
-        edges = self.edges()
-        by_node: dict[str, list[leads.Lead]] = {}
-    split_home = None      # (a Path) where side A keeps its register and ledger (default: the home)
+    def train(self, last: int) -> Session:
+        """This session over the years up to ``last``, with its own register and ledger: the survey that selects
+        what the later years then test (`temporal_confirm`). Nothing after ``last`` is read."""
+        home = self.split_home or config.home()
+        return Session(self.dataset, self.event, [y for y in self.years if y <= last], self.graph,
+                       ledger=control.Ledger(home / f"ledger_T{last}"), register=leads.Register(home / f"leads_T{last}"))
 
+    def temporal_confirm(self, last: int, q: float = 0.05, level: str = "state", log=print) -> list[leads.Lead]:
+        """The leads the survey selected on the years up to ``last`` (`train`), each tested once at its fixed places on the
+        later years of this session, against a fit that ends at ``last`` (BP, the place's course not carried
+        forward), re-levelled to the state's course of each year (`replication.relevel`); Benjamini-Hochberg over
+        everything tested. The verdict is in ``lead.replications["prospective"]``. A one-off event does not
+        recur: it stays untested here by nature, and needs corroboration."""
+        t = self.train(last)
+        selected = t.register.current()
+        by_node: dict[str, list[leads.Lead]] = {}
         for x in selected:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
         tested: list[tuple[leads.Lead, dict[str, Any]]] = []
-        home = self.split_home or config.home()
         for i, (node, group) in enumerate(sorted(by_node.items())):
-            surprises: dict[str, tuple[surprise.Surprise, surprise.Surprise]] = {}
-            cache: dict[str, Any] = {}
-            for x in group:
-                if x.tier not in surprises:
-                    surprises[x.tier] = (b.surprise(node, x.tier), a.surprise(node, x.tier))
-                sb, sa = surprises[x.tier]
-                tested.append((x, replication.test_lead(sb, x, edges, cache.setdefault(x.tier, {}), sa, ratio)))
+            try:
+                sp = self.expectations.prospective(node, last, course=False)
+            except LookupError as exc:
+                tested += [(x, {"tested": False, "reason": str(exc)}) for x in group]
+                continue
+            tested += [(x, replication.test_lead(sp, x, level)) for x in group]
             log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
-        ok = np.array([r["tested"] for _, r in tested], dtype=bool)
+        self._record(tested, "prospective", q)
+        t.register.add(selected)
+        return selected
+
+    def spatial_confirm(self, register: list[leads.Lead], q: float = 0.05, log=print) -> list[leads.Lead]:
+        """The unit claims of ``register`` (a state's or region's trend against the national course): the lens's statistic
+        on one random half of the unit's municipalities must reach 0.05, and the same statistic on the other
+        half, separated from the first by a buffer of the graph's neighbours, is the p-value (`replication.test_spatial`);
+        Benjamini-Hochberg over the units selected on their first half. Written to ``lead.replications["spatial_unit"]``.
+        A cluster or a municipality was itself chosen among the places and has none to split: it stays untested."""
+        mine = [x for x in register if x.estimand == "trend_divergence" and x.locus.get("scale")
+                and leads.trend_reference(x) == "national" and x.fields and x.fields[0].startswith(f"{self.dataset}:")]
+        edges = self.edges()
+        region_of = None
+        by_node: dict[str, list[leads.Lead]] = {}
+        for x in mine:
+            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
+        tested: list[tuple[leads.Lead, dict[str, Any]]] = []
+        for node, group in sorted(by_node.items()):
+            s = self.surprise(node, "B2")
+            if region_of is None:
+                region_of = dict(zip(s.places.tolist(), gateway.regions(s.places, "ibge_immediate_region"), strict=True))
+            for x in group:
+                h1, h2 = replication.spatial_split(np.array(x.locus["places"]), region_of, edges, s.places, x.id)
+                tested.append((x, replication.test_spatial(s, x, h1, h2) if len(h1) and len(h2)
+                               else {"tested": False, "reason": "a half has no places"}))
+        self._record([(x, r) for x, r in tested], "spatial_unit", q, only=lambda r: r.get("selected"))
+        log(f"{len(mine)} unit claims, {sum(1 for _, r in tested if r.get('selected'))} selected on their first half")
+        return mine
+
+    @staticmethod
+    def _record(tested: list[tuple[leads.Lead, dict[str, Any]]], key: str, q: float, only=None) -> None:
+        """Benjamini-Hochberg over the tests that ran (and ``only`` those, if given), written to each lead's ``replications[key]``."""
+        ok = np.array([bool(r["tested"]) and (only is None or bool(only(r))) for _, r in tested], dtype=bool)
         p = np.array([r.get("p", 1.0) for _, r in tested])
-        mask = np.zeros(len(p), dtype=bool)
-        qv = np.ones(len(p))
+        mask, qv = np.zeros(len(p), dtype=bool), np.ones(len(p))
         mask[ok] = control.bh(p[ok], q)
         qv[ok] = control.adjusted(p[ok])
         for (x, r), hit, qq in zip(tested, mask, qv, strict=True):
-            x.replications = {**x.replications, "split": {**r, "q": float(qq), "ok": bool(hit)}}
+            x.replications = {**x.replications, key: {**r, "q": float(qq), "ok": bool(hit)}}
             x.replication = control.replication_tier(kinds_of(x))
+
+    def honest_sizes(self, log=print) -> list[leads.Lead]:
+        """The size of every lead selected on side A, read on side E (`replication.honest_effect`): a rate ratio and its
+        exact Poisson interval, unbiased for the locus's realised rate whatever A selected. Written to
+        ``lead.replications["honest"]``; it is a size, never a verdict."""
+        a, e = self.side("A"), self.side("E")
+        selected = a.register.current()
+        by_node: dict[str, list[leads.Lead]] = {}
+        for x in selected:
+            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
+        for i, (node, group) in enumerate(sorted(by_node.items())):
+            surprises: dict[str, surprise.Surprise] = {}
+            for x in group:
+                if x.tier not in surprises:
+                    surprises[x.tier] = e.surprise(node, x.tier)
+                x.replications = {**x.replications, "honest": replication.honest_effect(surprises[x.tier], x)}
+            log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
         a.register.add(selected)
         return selected
 
     def corroborate(self, register: list[leads.Lead], only_signals: bool = True, replicates: int = 4999,
                     q: float = 0.05, log=print) -> list[leads.Lead]:
         """Ask an independent field (S2iD, SINAN, SIH: `corroborate.RULES`) whether each lead's places and years are
-        unusual there, against that field's own null (random same-size place sets of the same states and population
-        quintiles). Benjamini-Hochberg within each source. Written to ``lead.replications["corroboration"]``."""
+        unusual there, against that field's own null (random same-size place sets of the same state and
+        population quintile; scattered, not connected: a contiguous cluster shares its neighbours' shocks, see OPEN_QUESTIONS 7). Benjamini-Hochberg within each source.
+        Written to ``lead.replications["corroboration"]``."""
         self._prepare_grid()
         pop = self._pop.sum(1)
         state = (self._grid_places // 10000).astype(int)
-        grid = corroborate.Fields(self._grid_places, self._grid_years, state, pop)
+        grid = corroborate.Fields(self._grid_places, self._grid_years, state, pop, self.edges())
         index = {int(p): j for j, p in enumerate(self._grid_places)}
         reg = self.expectations.registry
         done: list[tuple[leads.Lead, corroborate.Corroboration]] = []
@@ -570,19 +626,21 @@ class Session:
         return [x for x, _ in done]
 
     def retier(self, register: list[leads.Lead], selected: list[leads.Lead]) -> list[leads.Lead]:
-        """Give each lead of the all-data register the split verdict of the side-A lead that is the same finding
-        (one that stands on side B), then its tier from the confirmations it holds (`control.replication_tier`)."""
+        """Give each lead of the all-data register the verdicts of the selecting session's lead that is the same finding
+        (`replication.match`; the tested one with the smallest q): the later-years test (``selected`` from `train`) or the
+        size on side E (from side A), then its tier from the confirmations it holds (`control.replication_tier`)."""
         by_node: dict[str, list[leads.Lead]] = {}
         for a in selected:
-            if a.replications.get("split", {}).get("ok"):
-                by_node.setdefault(a.fields[0], []).append(a)
+            by_node.setdefault(a.fields[0], []).append(a)
         for x in register:
             hits = replication.match(x, by_node.get(x.fields[0], [])) if x.fields else []
-            if hits:
-                best = min(hits, key=lambda h: h.replications["split"]["q"])
-                x.replications = {**x.replications, "split": {**best.replications["split"], "matched": best.id}}
-            else:
-                x.replications = {k: v for k, v in x.replications.items() if k != "split"}
+            for key in ("prospective", "spatial_unit", "honest"):
+                have = [h for h in hits if h.replications.get(key, {}).get("tested", h.replications.get(key, {}).get("sized"))]
+                if have:
+                    best = min(have, key=lambda h: h.replications[key].get("q", h.q))
+                    x.replications = {**x.replications, key: {**best.replications[key], "matched": best.id}}
+                else:
+                    x.replications = {k: v for k, v in x.replications.items() if k != key}
             x.replication = control.replication_tier(kinds_of(x))
             if x.replication != "R0" and x.status == "open":
                 x.status = "replicated"
@@ -592,40 +650,48 @@ class Session:
 
     def confirm(self, node: str, lens: str, locus: dict[str, Any], q: float = 0.05, actor: str = "agent",
                 caller: str | None = None) -> dict[str, Any]:
-        """One claim, tested once on the reserve (side R) under LOND."""
+        """One claim, tested once on the reserved period under LOND."""
         return self.confirm_many([(node, lens, locus)], q, actor, caller)[0]
 
     def confirm_many(self, claims: list[tuple[str, str, dict[str, Any]]], q: float = 0.05, actor: str = "agent",
                      caller: str | None = None) -> list[dict[str, Any]]:
-        """Claims (field node, lens, locus with ``places`` and ``years``, and ``direction`` "up"/"down") tested in the
-        order given, which must be fixed before the reserve is read, on side R: each locus at its lens's minimum
-        effect, the p-values entering the LOND stream of the ledger (`control.Reserve`). ``actor`` (agent | person)
-        and ``caller`` (who asked: an MCP client's name, a user) are written with the hypothesis."""
-        r, a = self.side("R"), self.side("A")
-        edges = self.edges() if any(lens == "trend_divergence" for _, lens, _ in claims) else None
-        spend, out = [], []
-        for node, lens, locus in claims:
-            tier = LENS_TIERS.get(lens, "B1")
-            res = replication.test_locus(r.surprise(node, tier), lens, locus, -1 if locus.get("direction") == "down" else 1,
-                                         edges, None, a.surprise(node, tier), replication.RATIO["R"])
-            out.append(res)
-            if res["tested"]:
-                spec = {"field": node, "lens": lens, "locus": locus, **({"caller": caller} if caller else {})}
-                spend.append((control.Hypothesis("confirm", actor, spec),
-                              res["p"], res.get("effect"), {k: v for k, v in res.items() if k != "p"}))
+        """Claims (field node, lens, locus with ``places`` and ``direction`` "up"/"down") that the departure persists or
+        recurs, tested in the order given, which must be fixed before the reserve is read: each locus on the
+        reserved period of the dataset (`control.RESERVED_PERIODS`), against the fit on this session's years,
+        re-levelled by state (`replication.test_prospective`), at its lens's minimum effect. The p-values enter the
+        LOND stream of the ledger (`control.Reserve`). ``actor`` (agent | person) and ``caller`` (who asked) are
+        written with the hypothesis. A session's own years can never include the reserve (`control.check_reserved`)."""
+        held = control.reserved(self.dataset)
+        if not held:
+            raise LookupError(f"{self.dataset} has no reserved period")
+        last = max(self.years)
+        spend, out, bp = [], [], {}
+        with control.reserve_open():
+            exp = surprise.Expectations(self.dataset, self.event, sorted(set(self.years) | set(held)), self.graph)
+            for node, lens, locus in claims:
+                if node not in bp:
+                    bp[node] = exp.prospective(node, last, course=False)
+                res = replication.test_prospective(bp[node], lens, locus, -1 if locus.get("direction") == "down" else 1)
+                out.append(res)
+                if res["tested"]:
+                    spec = {"field": node, "lens": lens, "locus": locus, **({"caller": caller} if caller else {})}
+                    spend.append((control.Hypothesis("confirm", actor, spec),
+                                  res["p"], res.get("effect"), {k: v for k, v in res.items() if k != "p"}))
         verdicts = iter(control.Reserve(self.ledger, q).spend(spend))
         return [{**res, **next(verdicts)} if res["tested"] else res for res in out]
 
 
 def kinds_of(x: leads.Lead) -> set[str]:
-    """The independent confirmations a lead holds: ``split`` (selected on A, standing on B), ``recurs`` (the effect
-    in the temporal half it does not touch), ``corroborated`` (an independent field)."""
+    """The independent confirmations a lead holds (`control.KINDS`): ``temporal`` (it stands on the years after the fit's
+    last, `Session.temporal_confirm`), ``spatial`` (it stands on the places that did not select it,
+    `Session.spatial_confirm`), ``corroborated`` (an independent field, `Session.corroborate`). The in-sample splits of
+    `Session.triage` (``temporal``, ``spatial``) are descriptions, not confirmations: they share the selection."""
     r = x.replications
     kinds = set()
-    if (r.get("split") or {}).get("ok"):
-        kinds.add("split")
-    if (r.get("temporal") or {}).get("ok") or (x.estimand == "trend_divergence" and r.get("ok")):
-        kinds.add("recurs")
+    if (r.get("prospective") or {}).get("ok"):
+        kinds.add("temporal")
+    if (r.get("spatial_unit") or {}).get("ok"):
+        kinds.add("spatial")
     if (r.get("corroboration") or {}).get("ok"):
         kinds.add("corroborated")
     return kinds

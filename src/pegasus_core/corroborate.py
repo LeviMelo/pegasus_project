@@ -142,8 +142,10 @@ def sinan_matrix(dataset: str, event: str, places: np.ndarray, years: np.ndarray
 class Fields:
     """The corroborating fields on the session's grid (places × years), loaded once."""
 
-    def __init__(self, places: np.ndarray, years: np.ndarray, state_of: np.ndarray, population: np.ndarray):
+    def __init__(self, places: np.ndarray, years: np.ndarray, state_of: np.ndarray, population: np.ndarray,
+                 edges: np.ndarray | None = None):
         self.places, self.years = places, np.asarray(years)
+        self.edges = edges      # the graph, for a null of connected place sets (not yet used: OPEN_QUESTIONS 7)
         self.state = state_of
         self.quintile = np.digitize(population, np.quantile(population, [0.2, 0.4, 0.6, 0.8]))
         self._index = {int(u): i for i, u in enumerate(places)}

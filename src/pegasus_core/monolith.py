@@ -29,7 +29,7 @@ import scipy.sparse.linalg as spla
 import torch
 from scipy import optimize, special
 
-from . import config, gateway, store, structures
+from . import config, control, gateway, store, structures
 
 AGE_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]  # 18 bands; last is 80+
 N_BANDS = len(AGE_EDGES)
@@ -94,6 +94,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
         mark         accumulator states of a numeric mark (``mark=``, ``bounds=``,
                      ``classifier=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
     """
+    control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     years = np.array(sorted(set(years)))
     population = population or config.population_source()
     edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)

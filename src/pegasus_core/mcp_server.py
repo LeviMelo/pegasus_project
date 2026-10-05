@@ -252,9 +252,9 @@ def confirm_claim(node: str, lens: str, places: list[int], years: list[int], dir
                   spend: bool = False, actor: str = "agent", dataset: str = DATASET, event: str = EVENT,
                   span: str = YEARS, graph: str = graphs.DEFAULT) -> dict[str, Any]:
     """WRITES, and SPENDS error budget. Register one claim in the ledger and test it once on the confirmation
-    reserve (side R: events no scan, fit or exploration has read) under online FDR (LOND). The claim is one fixed
+    reserve (the reserved period of the dataset, `control.RESERVED_PERIODS`: data no scan, fit or exploration may read) under online FDR (LOND). The claim is one fixed
     locus: field `node`, `lens` (outbreak | change_point | space_time | spatial_cluster), `places` (municipality
-    codes), `years` ([first, last]) and `direction` (up | down). Decide it before looking at the reserve; the
+    codes), `years` ([first, last], the window the lead was selected on; the test is on the reserved period) and `direction` (up | down). Decide it before looking at the reserve; the
     budget is shared and finite, a rejection raises the budget a little, a miss spends it for good.
 
     Safety: nothing is written unless `spend` is true AND the server was started with `--allow-confirm` AND

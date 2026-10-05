@@ -1,6 +1,6 @@
 # ADR-0007: Replication is by event sides, a conditional test on side B, and corroboration by an independent field
 
-**Date.** 2026-10-05. **Status.** Active. Supersedes the temporal/spatial/system ladder of ARCHITECTURE §8.3 as first written.
+**Date.** 2026-10-05. **Status.** Superseded by ADR-0015 (the event sides cannot replicate an excess under extra-Poisson variation; text kept). Supersedes the temporal/spatial/system ladder of ARCHITECTURE §8.3 as first written.
 
 **Evidence.** `docs/evaluation/2026-10-05-replication.md`; the defects are in `docs/evaluation/2026-10-05-lead-triage.md` (R1 asks a one-off event to recur; the spatial halves were chosen after selection on the same data; the splits used the all-years fit; the reserve was never spent).
 

@@ -494,68 +494,23 @@ A **family** is (lens or estimand, tier, field family or pair of field families,
 - **Down code trees:** TreeBH (Bogomolov et al. 2021) when a lens tests the nodes of a classifier tree.
 - **Agents.** Exploratory tests are logged but carry no claim. Claims pass through `confirm` (§9.3) on the reserve (§8.3), whose stream is controlled by online FDR (LOND).
 
-### 8.3 Splits and replication
+### 8.3 Replication (ADR-0015)
 
-A lead is selected on data and must be confirmed on data that took no part in the selection. Splits of the **period** or of the **places** do not do that for the leads that matter most (a one-off event cannot recur in the other half of the period, and a cluster of places selected on all the data is homogeneous by construction), so the primary split is of the **events**.
+A lead is selected on data and confirmed only by **units that took no part in the selection**. Splitting a cell's own events cannot do it: the sides share the cell's frailty, so under extra-Poisson variation the excursion that selected the cell shows on the other side (ADR-0007, withdrawn; OPEN_QUESTIONS 7).
 
-| split | definition |
+| independent unit | test |
 |---|---|
-| **event sides** | every cell's events dealt, by a fixed seed, to **A** (50%), **B** (30%) and **R** (20%): multinomial thinning, stratified by cell. A negative binomial thinned keeps its size, so a side's expectation is the whole's times its fraction. |
-| temporal halves | the period split at its midpoint year (recurrence) |
-| spatial halves | IBGE immediate geographic regions (510) randomly halved within each state, fixed seed: a **homogeneity** check of a subset's places, reported and not tiered |
-| independent field | the same place and years in another field (§8.3.2) |
+| **later years** (`temporal`) | selected by a survey on the years up to t (`Session.train`); the fit refitted without the later years (BP, the place's course not carried forward); the same places tested on the later years' sum, re-levelled to each state-year's observed course (`replication.relevel`), one-sided at the lens's minimum effect; BH over what was tested. A persistent or recurring departure replicates; a one-off event cannot. |
+| **other places** (`spatial`) | for a claim about a predeclared unit (a state's or region's trend): the lens on one random half of its municipalities (immediate regions halved) must reach 0.05; the same statistic on the other half, separated by a buffer of graph neighbours (ADR-0005), is the p-value. A cluster or a municipality was chosen among the places: untested. |
+| **another record system** (`corroborated`, §8.3.2) | the lead's places and years in S2iD, SINAN or SIH against that field's own place-set null |
 
-**Honest sample splitting.** Side A is refitted alone (`split-fit`): the expectation, the dispersions, the scans, the selection and the error control (§8.2) of the survey on A use A's events only. Each lead selected on A is tested **once** at its fixed locus on side B, at the lens's own minimum effect, and the tests are controlled by Benjamini–Hochberg over everything A selected. B and R read A's fit (expected counts times the fractions' ratio) and their own events. **The test on B is conditional on A's count:** the sides share each cell's rate, and under a negative binomial the extra-Poisson part of that rate is in the null and is seen in both sides; a marginal test on B called 28–100% of null cells "replicated" wherever the expected count exceeds the size (n = 10, μ ≥ 20), against 0.04–0.06 for the conditional (`replication.conditional_p`; evaluation 2026-10-05-replication). What it asks is whether B exceeds what A's count and the model's own heterogeneity predict.
+**Tiers.** R0 passes §8.2 on all data; R_k holds k of the three confirmations. They count independent evidence and are not a ladder; a lead's kinds are listed by `explain_lead`.
 
-**Corroboration (§8.3.2).** The place set and years of a lead, in a field that shares none of its records: SIM deaths against S2iD (disasters), SINAN (notifications) or SIH (admissions that did not end in death: the in-hospital deaths are the SIM records, §8.5, and their share is recorded). **The null is the corroborating field's own:** the same statistic (places with a registered disaster; the log ratio of the window's count to the places' median year) on random place sets of the same size, in the same states, in the same population quintile, over the same years; p = (1 + #{null ≥ observed}) / (1 + B), B = 4,999. BH within each source. A deficit is not corroborated by a field. The rules (which field for which codes) are data (`corroborate.RULES`).
+**Corroboration (§8.3.2).** The place set and years of a lead, in a field that shares none of its records: SIM deaths against S2iD (disasters), SINAN (notifications) or SIH (admissions that did not end in death: the in-hospital deaths are the SIM records, §8.5, and their share is recorded). **The null is the corroborating field's own:** the same statistic (places with a registered disaster; the log ratio of the window's count to the places' median year) on random place sets of the same size, in the same states, in the same population quintile, over the same years; p = (1 + #{null >= observed}) / (1 + B), B = 4,999. BH within each source. A deficit is not corroborated by a field. The rules (which field for which codes) are data (`corroborate.RULES`). The null sets are scattered; a contiguous cluster shares its neighbours' shocks (OPEN_QUESTIONS 7).
 
-| tier | requirement |
-|---|---|
-| R0 | passes §8.2 on all data |
-| R1 | selected on A, standing on B (honest split): required for every tier below |
-| R2 | R1 and recurrence: the same sign, ≥ half the effect, p < 0.05 one-sided in the temporal half the window does not touch (a trend: in both halves) |
-| R3 | R1 and corroboration by an independent field. Recurrence and corroboration do not require each other: a one-off event reaches R3 without R2. |
+**The event split** (`control.SIDES`, A 50 / E 50; `Session.honest_sizes`) is kept for sizes only: given a cell's rate its sides are independent Poisson counts, so the rate ratio read on E, with its exact Poisson interval, is unbiased for the locus's realised rate whatever A selected. It includes the cell's frailty and is no evidence of recurrence.
 
-**The confirmation reserve is side R.** It holds a fifth of every cell's events, which no scan, refit or exploration has read. A claim (`confirm`, `confirm_many`) is one fixed locus tested on R, and its p-value enters one LOND stream (§8.2) whose state, tests and rejections so far, is read back from the ledger (`control.Reserve`, split `event:R`); the order of the claims is fixed before R is read. The survey spends B; only claims spend R; agents explore on A.
-
-### 8.4 Admission and minimum effects (calibrated, not set)
-
-**Admission.** A field enters a lens or pair scan if the harness's power curve for that lens (§10.3) gives power ≥ 0.5 for its reference effect:
-
-| scan | reference effect |
-|---|---|
-| lenses | rate ratio 1.5 over one macro-region-year |
-| pairs | ρ = 0.3 |
-
-Until the curves exist, the provisional rule: at least 1,000 events over the window and events in at least 5% of units. **A code tree is descended only while children stay admissible.**
-
-**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
-
-This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far: δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate).
-
-**Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
-
-| lens | H0 (boundary) | provisional |
-|---|---|---|
-| outbreak, change point, space–time | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
-| spatial cluster (B0) | the same | θ0 = 1.5, calibrated on the MSR negatives (evaluation 2026-10-05, lens gate) |
-| trend divergence | \|β_u − β̄_N(u)\| ≤ δ (or \|β_u\| ≤ δ), with δ a ratio between the period's first and last year, per scale | municipality 1.5 (time-shift negatives: 5/12 worlds at 1.2); region, state 1.2 (grid's lowest; 0 false leads in 30 worlds of each negative) |
-| group disparity | the groups' log-SIRs spread with sd ≤ sd_scale: G² against non-central χ²(df, sd²·Σμ/k), per scale | 0.2 at every scale, **not calibratable** on the spatial negatives: MSR holds only from sd 1.0 at the state (evaluation 2026-10-05-lens-positives) |
-| marks (all lenses) | \|mean log departure\| ≤ δ | 1.5%, calibrated on the PESO negatives (space–time MSR 30/30 worlds at 0.5%, 6/30 at 1%, 0/30 at 1.5% and 3%) |
-
-**Measured on IX** (evaluation 2026-10-04). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
-- hypertension (I10–I15): trend divergence fell from 116 to 38 places, group disparity from 121 to 7;
-- the strongest signals survived, São Borja among them.
-
-### 8.5 Mechanical overlap
-
-```
-overlap(X, Y) = |events(X) ∩ events(Y)| / min(|events(X)|, |events(Y)|)
-```
-
-It is computed from records by pegasus_data. Pairs with overlap > 0.05 are not tested for dependence: they are nested codes, alternative classifiers, or "any mention" against underlying cause. They may be tested on their non-shared events.
-
----
+**The confirmation reserve is a reserved period** (`control.RESERVED_PERIODS`: SIM.DO 2024, final after every fit and survey on 2010-2023). `monolith.assemble` and `Session` refuse it (`ReservedPeriod`); only `confirm_many` opens it (`reserve_open`). A claim (a persistence claim: fixed places and direction) is tested once on it against the fit on the session's years, and its p-value enters one LOND stream (§8.2) whose state is read back from the ledger (`control.Reserve`, split `period:reserve`); the order of the claims is fixed before the reserve is read. Preliminary years are added only when final.
 
 ## 9. Leads, the ledger, use
 
@@ -599,8 +554,8 @@ Lead
 | `explain_away(lead, candidate)`, `decompose(field, periods, scope)` | §7.7 |
 | `fields(query)`, `field(id)` | the registry |
 | `cohort(...)`, `records(...)` | through pegasus_data |
-| `confirm(claim)` | one run on the confirmation reserve (event side R, §8.3), ledgered, under LOND |
-| `split_confirm()`, `corroborate(leads)`, `retier(leads)` | the honest split of the survey's leads, the independent-field test, the tier (§8.3) |
+| `confirm(claim)` | one run on the reserved period (§8.3), ledgered, under LOND |
+| `train(t)`, `temporal_confirm(t)`, `spatial_confirm(leads)`, `corroborate(leads)`, `honest_sizes()`, `retier(leads, selected)` | the independent-unit tests, sizes after selection, the tier (§8.3) |
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 
@@ -687,7 +642,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `explain` (§7.7), `cohort` (§7.8); maps (§7.6) in phase 3 | surprise, monolith, fields |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
-| `replication` | the event sides' models and expectations, the conditional test on B and R, matching a lead to its side-A finding (§8.3) | monolith, surprise, scans, leads, control |
+| `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
 | `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
