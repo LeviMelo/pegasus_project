@@ -66,6 +66,9 @@
 15. Population account follow-ups: an independent interval check (train 2000→2010, score Census 2010); 2000/2010 coverage taken from IBGE's reconciliation (no person-level PES) is recorded, not estimated; the North and Centre-West cover 0.66.
 16. SIDRA follow-ups: series stitched across census universes (literacy 10+ against 15+); the SIDRA store served to the gateway's context fields; an ingestion check once phaseb/c/d finish.
 17. Regenerate pegasus_data's shipped seed (build_resources.py) once all curation is committed: fresh installs still read SIM RACACOR as Bra/Amar/Indig.
+18. An epidemic-level effect for BP: dengue's prospective forecast is 2.0–2.8× off whatever its variance (the Laplace evaluation, 2026-10-05). A state-year or regime component in the extrapolation.
+20. Regional dispersion (OQ 6): agent running.
+19. Laplace follow-ups: an MCMC/INLA reference; a refit at the full-Hessian Fellner–Schall τ's (spatial τ about 5× lower on IX).
 | | queue |
 
 **Next:**
