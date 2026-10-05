@@ -39,7 +39,7 @@
 | SIH blocks (fit, survey); the winter respiratory B2s positive | §10.1, §12 phase 1 | agent |
 | population account v1: Census 2000, migration trained on 2000→2010, scored on 2010→2022 | §3.1, §12 phase 2 | agent (pegasus_data modelled tier) |
 | SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
-| pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (OQ-71 for SIA/CNES); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
+| pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
 | performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
 | surveillance feasibility: publication lag per system; reporting delay from dates inside the records | ADR-0004 | agent |
 | race bridge: first measurement done (evaluation 2026-10-04: 63% agreement SINASC↔SIM, the direction reversing by region); now the bridge model | §2, §12 phase 3 | agent |

@@ -591,7 +591,8 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 | microcephaly and congenital anomalies | space-time, B2 | Northeast, 2015–16 |
 | arbovirus notifications → microcephaly births | E_w, lag 6–9 months (monthly) | Northeast, 2015–16 |
 | COVID-19 excess deaths | space–time and outbreak, **BP** (train ≤ 2019) on groups and chapters (SIM codes COVID-19 as B34.2) | national, 2020–21; Amazonas, January 2021 |
-| dengue epidemics; seasonality | outbreak, B2s | by state |
+| dengue epidemics | outbreak and space–time, **BP** (trained before the epidemic; measured 2026-10-05: B2s absorbs epidemics into each place's fitted history) | by state |
+| dengue seasonality | calibration and season amplitude, B2s | by region |
 | leptospirosis after the floods | space-time | Rio Grande do Sul, May–July 2024 |
 | Chagas disease, schistosomiasis | spatial cluster, B0 | known endemic areas |
 | infant mortality ↔ income, sanitation | E_b | national |
