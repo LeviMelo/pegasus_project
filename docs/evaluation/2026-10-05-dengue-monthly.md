@@ -71,6 +71,17 @@ State-level outbreak lens (municipalities lifted to 27 states; state-month varia
 - **BP trained to 2018:** 59 of 64 epidemic state-years in 2019–23 flagged (recall 0.92; at ≥150 per 100,000, 0.87). The 5 misses: Alagoas 2022 (393), Minas Gerais 2020 and 2022 (388, 421), Mato Grosso do Sul 2021 (351), Goiás 2020 (885). The 44 flags below 300 are mostly small-incidence states against a trough baseline (Amazonas 103 per 100,000 in 2019 at rate ratio 8.8; Roraima 2019 at 3.2): the baseline, not the lens, is what 2017–18 make low. Precision 0.57 is therefore a statement about the flat-level forecast; a baseline that remembers earlier epidemics (a longer training window, or the level over the last 36 months) is the next measurement.
 - **The monthly forecast of h.** The documented linear extrapolation (RW2 forecast mean from the last two periods) is unusable at the monthly grain: h moves ±0.3 per month, and a 60-month horizon would carry the last slope (0.32 per month on the full fit) to a factor of e^19. `extrapolate` now holds the monthly h flat at its last twelve months' mean (annual grain unchanged).
 
+- **Note (2026-10-05, after ADR-0009; `data/dengue_outbreak_bp2.py`, `data/logs/dengue_outbreak_bp2.json`, fits as cached, same truth and state-month φ_extra 3.63).** The rows above were measured on the earlier BP and stay as written. On the BP of ADR-0009 (the training fit's φ_extra in every cell, the fit's years as regimes):
+
+  | BP | 2015–16 flagged / recall / precision | 2019–23 flagged / recall / precision | state-month KS (2019–23) |
+  |---|---|---|---|
+  | earlier, last 12 months (rows above) | 37 / 0.78 / 0.78 | 103 / 0.92 / 0.57 | 0.47 |
+  | earlier, level36 (baseline entry) | not measured | 91 / 0.91 / 0.64 | 0.39 |
+  | level36 + φ_extra (`history="level36"`) | 20 / 0.49 / 0.90 | 69 / 0.81 / 0.75 | 0.33 |
+  | **regimes (default)** | 10 / 0.22 / 0.80 | 37 / 0.48 / 0.84 | 0.15 |
+
+  The calibrated predictive is a worse epidemic alarm: observed/expected falls from 2.8 to 1.3 (2019–23) because past epidemics are regimes, so an epidemic that repeats one is inside the predictive (33 of 64 epidemic state-years missed: 17 in the Centro-Oeste, 5 in Acre, 4 in São Paulo). Its state-month KS improves 0.33 → 0.15. φ_extra alone moves the point baseline along the same trade (recall 0.91 → 0.81, precision 0.64 → 0.75 at 2019–23; at 2015–16 recall 0.78 → 0.49). The alarm for "an epidemic by incidence" reads `history="level36"` (ADR-0004; ADR-0009 keeps the point baselines as options); the regimes predictive is for calibration and for departures from all the past. The state lift sums independent cells, so the regimes' common shift inside a state is not in its variance: the recall of the default is, if anything, overstated.
+
 ## What φ = 0.235 means for ADR-0004
 
 With Var = μ + μ²/φ and φ = 0.235, a cell's coefficient of variation never falls below 1/√φ ≈ 2.1, however large μ: one municipality-month cannot show a plausible outbreak (a cell must exceed μ by many times to leave the predictive, and the 474 municipal B2s hits are 0.05% of cells). Detection has to come from clusters (the space-time lens, whose Poisson scan sums cells) and from BP, where a whole state's level departs from the past: at state-month the BP lens flagged 630 of 1,620 cells in 2019–23. A single-cell outbreak lens is not a dengue instrument.

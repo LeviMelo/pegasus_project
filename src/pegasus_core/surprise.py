@@ -28,6 +28,8 @@ DENOMINATOR = 1      # events where the population is zero (denominator tension)
 CALIBRATION = 2      # the field failed calibration at this tier even with its own φ
 RECORDING = 4        # pegasus_data marks the recording unreliable (not yet served)
 NO_INFORMATION = 8   # μ ≈ 0: the cell carries no information
+NEW_CATEGORY = 16    # BP: events of a category the training fit never saw, out of the node (ADR-0011)
+NEW_CATEGORY_ALARM = 5   # events in a year at which a category unseen by the fit is reported (ADR-0011)
 
 # a field is calibrated when its PIT's KS distance is below these, whatever the p-value
 # (with 10⁵ cells any departure is "significant"; P5: test against a relevant effect). A
@@ -146,8 +148,14 @@ class Expectations:
         point = "level36" if regime == "climatology" else regime
         tm, x_point = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test,
                                                                     **self._reader()), point)
-        leaves = np.array([tm.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in tm.data.leaves])
-        li = np.array([model.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in model.data.leaves])
+        names = [c for c in self.registry.leaves(f.node) if c in tm.data.leaves]
+        trained = np.bincount(model.data.e, weights=model.data.y, minlength=len(model.data.leaves))
+        new = [c for c in names if trained[model.data.leaves.index(c)] == 0]       # unseen by the fit (ADR-0011)
+        names = [c for c in names if c not in new]
+        if not names:
+            raise LookupError(f"{f.id}: no category of the node has events in the fit up to {train_last}")
+        leaves = np.array([tm.data.leaves.index(c) for c in names])
+        li = np.array([model.data.leaves.index(c) for c in names])
         macro = self.macroregions(tm.data.places)
         extra = prospective.insample_extra(model, li, _dispersion_levels(tm.data.places, macro),
                                            self._exposure(model, li, True))
@@ -179,9 +187,20 @@ class Expectations:
         flags = np.zeros(y.shape, dtype=np.int8)
         flags[(pop <= 0) & (y > 0)] |= DENOMINATOR
         flags[mean < 1e-6] |= NO_INFORMATION
+        unseen = {c: tm.observed(np.array([tm.data.leaves.index(c)])) for c in new}
+        for ev in unseen.values():
+            flags[ev > 0] |= NEW_CATEGORY
         w_info = np.where(np.isinf(phi), mean, mean / (1 + mean / phi))
         out = Surprise(f, "BP", tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
+        if unseen:
+            # a category the fit never saw has no expectation: it is out of the node (it would break the chapter's
+            # calibration) and is reported by its own count, per year, with an alarm at NEW_CATEGORY_ALARM events
+            years = np.asarray(out.years) // (100 if tm.data.grain == "month" else 1)
+            per_year = {c: {int(yr): float(ev[:, years == yr].sum()) for yr in np.unique(years)} for c, ev in unseen.items()}
+            out.extras["new_category"] = {c: v for c, v in per_year.items() if sum(v.values()) > 0}
+            out.extras["new_category_alarm"] = [(c, yr, n) for c, v in per_year.items() for yr, n in v.items()
+                                                if n >= NEW_CATEGORY_ALARM]
         return out
 
     def place_effects(self, node: str | fields.Field) -> tuple[np.ndarray, np.ndarray]:

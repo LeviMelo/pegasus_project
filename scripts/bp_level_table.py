@@ -31,3 +31,10 @@ for n in names:
     print(f"{n:44s} {sum(r['ll'] for r in rows):12.0f} {stats.kstest(u, 'uniform').statistic:9.3f} "
           f"{np.mean([r['ks'] for r in rows]):8.3f} {np.mean([r['worst'] for r in rows]):10.3f} "
           f"{np.mean([r['obs_exp'] for r in rows]):8.2f}")
+regions = sorted({r for k in pairs for v in data[k].values() for r in v.get("by_region", {})})
+if regions:
+    print("mean KS per macro-region (1 N, 2 NE, 3 SE, 4 S, 5 CO):", *regions)
+    for n in names:
+        rows = [data[k][n] for k in pairs if n in data[k] and "by_region" in data[k][n]]
+        if rows:
+            print(f"{n:44s}", *[f"{np.mean([r['by_region'][g] for r in rows if g in r['by_region']]):.3f}" for g in regions])

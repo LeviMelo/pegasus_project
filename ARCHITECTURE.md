@@ -313,7 +313,8 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
   - **its predictive is a mixture of NBs** (`prospective.py`, ADR-0009), the cell's φ_agg combined with the *training fit's* φ_extra (estimated on the fit's own B1 cells, so no departure leaks into it);
   - **annual grain:** h is the RW2's last slope damped by 0.5 per year, and each place carries its own B2 trend over the fit, damped by 0.5, with the coefficients' posterior variance;
   - **monthly grain:** the regimes are the fit's own years (each year's twelve months of h, equal weights), the epidemic years of the history being normal ones;
-  - a category without a past has no expectation in BP, so the excess is read at its group or chapter.
+  - **a category the fit never saw has no expectation** (ADR-0011): it leaves the node, its events are counted per year (`extras["new_category"]`, flag `NEW_CATEGORY`) and it alarms at five events in a year. A known category that explodes (B34 in SIM, 802 training deaths against 714,782 later) is not unseen: it is the lens's positive;
+  - **alarm baseline.** The regimes predictive is calibrated, not an epidemic alarm: past epidemics are regimes (dengue 2019–23, recall of state epidemic-years 0.48 against 0.81 for `history="level36"`, evaluation 2026-10-05, dengue note). The outbreak lens for "an epidemic by incidence" reads `history="level36"`.
 
 ### 6.2 Calibration
 

@@ -21,6 +21,9 @@ SIM_NODES = {"IX": ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"], "X": ["X"], "
 GH_NODES, GH_WEIGHTS = np.polynomial.hermite_e.hermegauss(7)
 GH_WEIGHTS = GH_WEIGHTS / GH_WEIGHTS.sum()
 HORIZON = 5                                  # years
+TAG = next((a[6:] for a in sys.argv if a.startswith("--tag=")), "")   # a suffix on the artefact's name
+BLOCKS = next((a[9:].split(",") for a in sys.argv if a.startswith("--blocks=")), None)
+LEAN = "--lean" in sys.argv                  # only the earlier BP and the adopted one (the rolling origins of the break)
 
 
 def mixture(y, comps, seed=1):
@@ -85,7 +88,10 @@ def evaluate(case, lf, ing, y, variants):
         inf = (mean > 1e-6) & case.keep[None, :]
         regs = [stats.kstest(u[(case.macro[:, None] == r) & inf], "uniform").statistic for r in np.unique(case.macro)
                 if ((case.macro[:, None] == r) & inf).sum() >= 50]
+        reg_ks = {str(r): float(stats.kstest(u[(case.macro[:, None] == r) & inf], "uniform").statistic)
+                  for r in np.unique(case.macro) if ((case.macro[:, None] == r) & inf).sum() >= 50}
         out[name] = {"ks": float(stats.kstest(u[inf], "uniform").statistic), "worst": float(max(regs, default=0.0)),
+                     "by_region": reg_ks,
                      "ll": float(lp[inf].sum()), "obs_exp": float(y[:, case.keep].sum() / mean[:, case.keep].sum()),
                      "cells": int(inf.sum()), "u": np.round(u[inf], 4).tolist()}
     return out
@@ -108,7 +114,7 @@ def annual_variants(case, lf, ing, y):
     fit's place-year component and the course coefficients' variance; and the block's-φ reference."""
     m = case.m
     _, mui, mu2i, yi, extra = ing
-    fc = {h: case.forecast(h) for h in ("linear", "damped8", "damped5", "level")}
+    fc = {h: case.forecast(h) for h in (("linear", "damped5") if LEAN else ("linear", "damped8", "damped5", "level"))}
     v = {"ref: linear, block phi": [(1.0, fc["linear"], 0.0, 0.0, False)]}
     n = len(m.data.years)
     s = (np.arange(n) - (n - 1) / 2) / max(np.arange(n).std(), 1e-9)
@@ -117,9 +123,11 @@ def annual_variants(case, lf, ing, y):
     _, b, _, _, _, _, pv = surprise.refit_place(yi, mui, ph, np.stack([np.ones(n), s], 1), variance=True,
                                                 X_new=np.stack([np.ones(case.T), s_new], 1))
     for h, x in fc.items():
-        for d in (0.0, 0.25, 0.5, 1.0):
+        for d in ((0.5,) if LEAN and h == "damped5" else () if LEAN else (0.0, 0.25, 0.5, 1.0)):
             shift = b[:, [0]] + d * b[:, [1]] * s_new[None, :]
             v[f"H={h} d={d}" + (" (extra only)" if d == 0.0 else "")] = [(1.0, x, shift if d else 0.0, pv if d else 0.0, True)]
+    if LEAN:
+        return {k: v[k] for k in ("ref: linear, block phi", "H=damped5 d=0.5")} if "H=damped5 d=0.5" in v else v
     # the national level: a random walk with the variance of the fitted history's yearly increments
     dh = np.diff((m.effects()["h_all"] + m.effects()["h_grp"].mean(0, keepdim=True))[0].detach().cpu().numpy())
     sigma = float(np.sqrt(np.mean(dh ** 2)))
@@ -133,10 +141,10 @@ def dengue_variants(case, lf, ing, y):
     l36 = case.forecast("level36")
     v = {"M0 level36, block phi": [(1.0, l36, 0.0, 0.0, False)],
          "M1 level36 + in-sample extra": [(1.0, l36, 0.0, 0.0, True)]}
-    for name in ("median", "robust"):
+    for name in () if LEAN else ("median", "robust"):
         v[f"M1 {name} + extra"] = [(1.0, case.forecast(name), 0.0, 0.0, True)]
     J = case.m.data.N.shape[1] // 12
-    for tag, js in (("M2 climatology of the fit's years", range(J)), ("M2 last 5 years", range(max(J - 5, 0), J))):
+    for tag, js in (("M2 climatology of the fit's years", range(J)),) + (() if LEAN else (("M2 last 5 years", range(max(J - 5, 0), J)),)):
         js = list(js)
         spec = []
         for j in js:
@@ -151,7 +159,8 @@ def dengue_variants(case, lf, ing, y):
 def run(kind, origins):
     res = {}
     if kind == "annual":
-        cases = [("SIM.DO", "death", b, {}, annual_variants, nodes) for b, nodes in SIM_NODES.items()]
+        cases = [("SIM.DO", "death", b, {}, annual_variants, nodes) for b, nodes in SIM_NODES.items()
+                 if BLOCKS is None or b in BLOCKS]
     else:
         cases = [("SINAN-DENG", "probable_case", "*", {"grain": "month"}, dengue_variants, ["*"])]
     for dataset, event, block, source, variants, nodes in cases:
@@ -170,10 +179,10 @@ def run(kind, origins):
                 res[f"{node}@{t0}"] = r
                 print(kind, node, t0, {k: (round(v["ks"], 3), round(v["worst"], 3), round(v["ll"])) for k, v in r.items()},
                       flush=True)
-                with open(f"data/logs/bp_level_{kind}_{'_'.join(map(str, origins))}.json", "w", encoding="utf-8") as fh:
+                with open(f"data/logs/bp_level_{kind}_{'_'.join(map(str, origins))}{TAG}.json", "w", encoding="utf-8") as fh:
                     json.dump(res, fh)
     return res
 
 
 if __name__ == "__main__":
-    run(sys.argv[1], [int(a) for a in sys.argv[2:]])
+    run(sys.argv[1], [int(a) for a in sys.argv[2:] if a.isdigit()])
