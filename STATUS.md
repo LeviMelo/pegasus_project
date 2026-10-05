@@ -80,6 +80,8 @@
     - intervals on every cell.
     The old engine's tensor (140.7M rows, municipality × year × single age × sex × race) is the floor to match.
     Also: a FORECAST to at least 2030, with intervals calibrated by horizon on pseudo-forecasts (base 2000 → h = 1…10; base 2010 → 2022), and a BACKCAST before 2000 (Census 1991, Contagem 1996; 1996 held out). Cells flagged census / intercensal / backcast / forecast.
+26. **Exposure, re-asked on population-account-3/4** (pegasus_data decision 0151: all 5,570 municipalities, single ages including age 0, race, 2000–2030). Account v2 lost to POPSVS (ADR-0010) partly for lacking age 0 and pooling 16 municipalities; v3 removes both. Re-run the ADR-0010 comparison (chapter IX, births BP).
+27. **Race in the groups g is unblocked by v3's race dimension:** births by the mother's declared race; infant deaths via `race_confusion_infant`; adult deaths kept as recorded race (backlog 24).
 | | queue |
 
 **Next:**
