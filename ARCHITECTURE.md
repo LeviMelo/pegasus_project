@@ -682,6 +682,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
+| `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
 | `cli` | the `pegasus-core` command | tools |
 
 **Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it.
@@ -738,7 +739,7 @@ Every random draw is seeded from (object, cell, purpose).
 | **0** | harness (§10); `gateway`; `store`; `control` (ledger) | aggregates; event types for SIM, SINASC, SIH | the harness runs end to end on surrogates |
 | **1** | `fields`; `structures`; `monolith` (annual; SIM, SINASC, SIH); `surprise`; lenses; subset scanning | roles and event types; code structures; contiguity and distance graphs; POPSVS | univariate positives recovered; false-lead rates; measured compute budgets; **first measurements:** tree pooling by chapter, graph choice |
 | **2** | pairs (E_b, E_w, E_b\|Z); FDR across families; replication; explaining away; decomposition; cohort scans; SINAN; sub-annual grain for dense families | care-flow graph; population account v1 (2022 hold-out); linked cohorts | pair positives; negatives; calibrated δ and admission |
-| **3** | patterns across blocks; dependency maps; tools over MCP (paused: its use and integration are to be planned with the author); institution lattice; agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
+| **3** | patterns across blocks; dependency maps; tools over MCP (built, ADR-0008; paused: its use and integration are to be planned with the author); institution lattice; agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
 | **4** | prospective surveillance (ADR-0004): weekly grain; an outbreak-robust alarm baseline; a nowcast from in-record delays; alarms controlled by a false-alarm rate; syndromic scans across SIM, SIH and SINAN | dates of notification, entry and processing typed in every family; snapshots of the preliminary files (for revisions) | a benchmark against published alerts (InfoDengue) and confirmed epidemics: timeliness, false alarms, hits |
 
 ---

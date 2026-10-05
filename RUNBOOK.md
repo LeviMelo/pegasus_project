@@ -21,3 +21,10 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | held-out model choice | `scripts/measure_heldout.py DATASET EVENT TRAIN_FIRST TRAIN_LAST TEST_LAST BLOCK GRAPH/PROFILE...` | e.g. `contiguity/group knn6/group contiguity/category`; one `HELDOUT` line per configuration |
 | the harness for a lens | `pegasus-core harness SIM.DO death I60-I69 space_time --graph knn6` | surrogates (own ledger) and, for subset lenses, the power curve; stored under `pegasus_home/harness` |
 | a non-default source | `PEGASUS_SOURCE='{"source": "mark", "mark": "PESO", "bounds": [200, 7000]}'` before `fit_blocks.py` | also `{"source": "code_list", "column": "CODANOMAL"}`; block `*` for an event type without a tree |
+
+**Tools over MCP (paused, ADR-0008):**
+
+| task | command | notes |
+|---|---|---|
+| serve the tools over MCP (paused, ADR-0008) | `$PY -m pip install -e .[mcp]` once, then `pegasus-core mcp` (stdio, read-only) | not registered with any client; `--allow-confirm` lets `confirm_claim` spend the reserve |
+| exercise the MCP server | `$PY scripts/mcp_demo.py [--spend]` | a real stdio client against `pegasus_home`; `--spend` uses a copy of the ledger |

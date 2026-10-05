@@ -29,10 +29,12 @@ dependencies = [
 
 [project.scripts]
 pegasus-core = "pegasus_core.cli:app"
+pegasus-mcp = "pegasus_core.mcp_server:main"
 
 [project.optional-dependencies]
 sparse = ["scikit-sparse>=0.4"]
 dev = ["ruff>=0.6", "mypy>=1.10"]
+mcp = ["mcp>=2"]   # the tools over MCP (ADR-0008, paused)
 
 [tool.setuptools.packages.find]
 where = ["src"]

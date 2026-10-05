@@ -58,7 +58,7 @@
 7. Lead triage: the SIM survey's leads, the coding-substitution and artefact classes.
 8. The low-rank interaction ψωτ and patterns across blocks (§4.2, §7.4).
 9. The horseshoe on tree levels (§4.3).
-10. Phase 3: the institution lattice (CNES); APAC families; dependency maps. **Tools over MCP: PAUSED by the author (2026-10-05).** How they are used and integrated is to be planned together; a first build is parked, uncommitted, in data/parked/mcp/.
+10. Phase 3: the institution lattice (CNES); APAC families; dependency maps. **Tools over MCP: built (ADR-0008) and PAUSED by the author (2026-10-05).** How they are used and integrated is to be planned together.
 11. The adult race bridge (SIM women ↔ SINASC mothers).
 12. Phase 4: the weekly grain and the nowcast (ADR-0004).
 13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.

@@ -102,13 +102,7 @@ class Session:
         return graphs.edges(places, self.graph)
 
     def _blocks(self) -> list[str]:
-        fitted = []
-        for d in (store.address("monolith", {}).parent).glob("*/manifest.json"):
-            k = json.loads(d.read_text(encoding="utf-8"))["key"]
-            if (k.get("dataset"), k.get("event"), k.get("graph"), k.get("years")) == \
-                    (self.dataset, self.event, self.graph, self.years):
-                fitted.append(k["block"])
-        return sorted(set(fitted))
+        return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)})
 
     # ---- scanning ----------------------------------------------------------------
 
@@ -460,14 +454,17 @@ class Session:
 
     # ---- agents ---------------------------------------------------------------------
 
-    def confirm(self, node: str, lens: str, locus: dict[str, Any], q: float = 0.05) -> dict[str, Any]:
+    def confirm(self, node: str, lens: str, locus: dict[str, Any], q: float = 0.05, actor: str = "agent",
+                caller: str | None = None) -> dict[str, Any]:
         """One claim, tested once on the reserve (side R) under LOND."""
-        return self.confirm_many([(node, lens, locus)], q)[0]
+        return self.confirm_many([(node, lens, locus)], q, actor, caller)[0]
 
-    def confirm_many(self, claims: list[tuple[str, str, dict[str, Any]]], q: float = 0.05) -> list[dict[str, Any]]:
+    def confirm_many(self, claims: list[tuple[str, str, dict[str, Any]]], q: float = 0.05, actor: str = "agent",
+                     caller: str | None = None) -> list[dict[str, Any]]:
         """Claims (field node, lens, locus with ``places`` and ``years``, and ``direction`` "up"/"down") tested in the
         order given, which must be fixed before the reserve is read, on side R: each locus at its lens's minimum
-        effect, the p-values entering the LOND stream of the ledger (`control.Reserve`)."""
+        effect, the p-values entering the LOND stream of the ledger (`control.Reserve`). ``actor`` (agent | person)
+        and ``caller`` (who asked: an MCP client's name, a user) are written with the hypothesis."""
         r, a = self.side("R"), self.side("A")
         edges = self.edges() if any(lens == "trend_divergence" for _, lens, _ in claims) else None
         spend, out = [], []
@@ -477,7 +474,8 @@ class Session:
                                          edges, None, a.surprise(node, tier), replication.RATIO["R"])
             out.append(res)
             if res["tested"]:
-                spend.append((control.Hypothesis("confirm", "agent", {"field": node, "lens": lens, "locus": locus}),
+                spec = {"field": node, "lens": lens, "locus": locus, **({"caller": caller} if caller else {})}
+                spend.append((control.Hypothesis("confirm", actor, spec),
                               res["p"], res.get("effect"), {k: v for k, v in res.items() if k != "p"}))
         verdicts = iter(control.Reserve(self.ledger, q).spend(spend))
         return [{**res, **next(verdicts)} if res["tested"] else res for res in out]
@@ -495,3 +493,162 @@ def kinds_of(x: leads.Lead) -> set[str]:
     if (r.get("corroboration") or {}).get("ok"):
         kinds.add("corroborated")
     return kinds
+
+
+# ---- reading the stores, for the tools over MCP (`mcp_server`) -------------------------------------------
+
+
+def fitted(dataset: str | None = None, event: str | None = None, graph: str | None = None,
+           years: list[int] | None = None) -> list[dict[str, Any]]:
+    """The fitted monolith blocks in the store (their manifests' keys), optionally narrowed."""
+    out = []
+    for d in sorted(store.address("monolith", {}).parent.glob("*/manifest.json")):
+        k = json.loads(d.read_text(encoding="utf-8"))["key"]
+        if k.get("block") is None or any(want is not None and k.get(name) != want for name, want in
+                                         (("dataset", dataset), ("event", event), ("graph", graph), ("years", years))):
+            continue
+        out.append({"dataset": k["dataset"], "event": k["event"], "graph": k.get("graph"), "years": k.get("years"),
+                    "block": k["block"], "model": d.parent.name})
+    return out
+
+
+def lead_row(x: leads.Lead) -> dict[str, Any]:
+    """A lead, compact: where, what, how large, how well controlled, how replicated."""
+    span, direction = replication.span_direction(x)
+    return {"id": x.id, "rank": round(x.rank, 3), "kind": x.kind, "estimand": x.estimand, "field": x.fields[0],
+            "node": x.fields[0].split(":")[-1], "tier": x.tier, "places": list(x.locus.get("places", []))[:20],
+            "n_places": len(x.locus.get("places", [])), "years": span,
+            "direction": {1: "up", -1: "down", 0: "pattern"}[direction], "effect": x.effect, "scale": x.scale,
+            "q": x.q, "family": x.family, "replication": x.replication, "status": x.status,
+            "triage": x.robustness.get("triage", {}).get("class"), "calibrated": x.calibrated}
+
+
+def _ancestors(node: str) -> set[str]:
+    seen, cur = {node}, node
+    while (up := leads._parent(cur)) != cur and up not in seen:
+        seen.add(up)
+        cur = up
+    return seen
+
+
+def find_leads(register: list[leads.Lead], *, cls: str | None = None, tier: str | None = None,
+               place: int | None = None, code: str | None = None, estimand: str | None = None,
+               min_replication: str | None = None, status: str | None = None, direction: str | None = None,
+               year: int | None = None, min_effect: float | None = None, max_q: float | None = None,
+               dataset: str | None = None) -> list[leads.Lead]:
+    """The leads of ``register`` (best rank first) that satisfy every filter given. ``code`` matches a lead whose
+    field is that ICD-10 node or lies under it; ``min_effect`` is on the effect's own scale (a rate ratio r counts
+    as max(r, 1/r)); ``min_replication`` is a tier R0..R3."""
+    out = []
+    for x in register:
+        if not x.fields:
+            continue
+        span, d = replication.span_direction(x)
+        size = max(x.effect, 1 / max(x.effect, 1e-12)) if x.scale == "rate_ratio" else abs(x.effect)
+        node = x.fields[0].split(":")[-1]
+        keep = (
+            (dataset is None or x.fields[0].startswith(f"{dataset}:"))
+            and (cls is None or x.robustness.get("triage", {}).get("class") == cls)
+            and (tier is None or x.tier == tier)
+            and (place is None or place in x.locus.get("places", []))
+            and (code is None or code in _ancestors(node))
+            and (estimand is None or x.estimand == estimand)
+            and (min_replication is None or x.replication >= min_replication)
+            and (status is None or x.status == status)
+            and (direction is None or {1: "up", -1: "down", 0: "pattern"}[d] == direction)
+            and (year is None or not span or span[0] <= year <= span[-1])
+            and (min_effect is None or size >= min_effect)
+            and (max_q is None or x.q <= max_q)
+        )
+        if keep:
+            out.append(x)
+    return out
+
+
+def explain_lead(x: leads.Lead, register: list[leads.Lead]) -> dict[str, Any]:
+    """Everything the stores hold about one lead: the lens's statistics, the triage verdict and its evidence,
+    each replication, the siblings (same field, or the same single place) and the story it belongs to."""
+    places = x.locus.get("places", [])
+    siblings = [lead_row(y) for y in register if y.id != x.id and y.fields
+                and (y.fields[0] == x.fields[0]
+                     or (len(places) == 1 and y.locus.get("places", []) == places))]
+    story = next((st for st in leads.stories(register) if any(m.id == x.id for m in st.leads)), None)
+    return {"lead": lead_row(x), "locus": x.locus,
+            "test": {"p": x.p, "q": x.q, "family": x.family, "null": x.null, "stats": x.provenance.get("stats", {})},
+            "triage": x.robustness.get("triage"), "replications": x.replications,
+            "confirmations": sorted(kinds_of(x)),
+            "siblings": sorted(siblings, key=lambda r: -r["rank"])[:15], "n_siblings": len(siblings),
+            "story": None if story is None else {"key": story.key, "fields": story.fields, "flags": story.flags,
+                                                  "leads": len(story.leads), "rank": story.rank},
+            "provenance": {k: v for k, v in x.provenance.items() if k != "stats"}}
+
+
+def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict[str, Any]:
+    """Tests per family and actor in the ledger, and the confirmation reserve: tests spent, rejections, and the
+    level the next claim would be tested at."""
+    ledger = ledger or control.Ledger()
+    pending = [r for r in ledger.table().to_pylist() if r["kind"] == "pending"]
+    reserve = control.Reserve(ledger, q)
+    tested, rejected = reserve.state()
+    by_family: dict[str, int] = {}
+    actors: dict[str, int] = {}
+    for r in pending:
+        by_family[r["family"]] = by_family.get(r["family"], 0) + 1
+        actors[r["actor"]] = actors.get(r["actor"], 0) + 1
+    claims = [r for r in pending if r["split"] == control.Reserve.SPLIT]
+    return {"tests": len(pending), "n_families": len(by_family), "actors": actors,
+            "families": dict(sorted(by_family.items(), key=lambda kv: -kv[1])[:25]),
+            "reserve": {"split": control.Reserve.SPLIT, "q": q, "spent": tested, "rejections": rejected,
+                        "next_level": reserve.level(),
+                        "last_claims": [{"id": r["id"], "at": r["at"], "actor": r["actor"], "spec": json.loads(r["spec"])}
+                                        for r in claims[-10:]]}}
+
+
+def gate_status(lens: str | None = None) -> dict[str, Any]:
+    """The validation harness's standing per lens (ARCHITECTURE §10.5), from the records in the store: the
+    false-lead shares on the surrogate and negative worlds (``gate_lenses`` section ``fl``, and production
+    ``gate`` runs), where a power curve was recorded, and the known positives declared for the lens
+    (`harness.POSITIVES`). Recovery of a positive is written up in an evaluation entry, not stored."""
+    import pyarrow.parquet as pq
+
+    from . import harness
+
+    false_leads: dict[str, dict[str, list[int]]] = {}
+    power: dict[str, set[str]] = {}
+    for d in sorted((config.home() / "harness").glob("*/manifest.json")):
+        key = json.loads(d.read_text(encoding="utf-8"))["key"]
+        kind = key.get("kind")
+        if kind not in ("gate_lenses", "gate"):
+            continue
+        res = json.loads(pq.read_table(d.parent / "table.parquet").column("result")[0].as_py())
+        if kind == "gate":
+            power.setdefault(res["lens"], set()).add(res["field"])
+            n = int(res["false_leads"]["surrogates"])
+            acc = false_leads.setdefault(res["lens"], {}).setdefault("production surrogates", [0, 0])
+            acc[0] += round(res["false_leads"]["share_with_any"] * n)
+            acc[1] += n
+        elif key.get("section") == "fl":
+            for name, v in res["lenses"].items():
+                lens_name, world = name.split("|")[:2]
+                acc = false_leads.setdefault(lens_name, {}).setdefault(world, [0, 0])
+                acc[0] += int(v["any"])
+                acc[1] += int(res["worlds"])
+        elif key.get("section") == "pow":
+            for lens_name in res.get("power", {}):
+                power.setdefault(lens_name, set()).add(res["field"])
+    out = {}
+    for name in sorted(set(false_leads) | set(power) | set(LENS_TIERS)):
+        if lens and name != lens:
+            continue
+        worlds = false_leads.get(name, {})
+        # the rule is on the NB surrogates and the MSR negatives; the raw time shifts keep the field's own shocks
+        worst = max((a / b for w, (a, b) in worlds.items() if b and w in ("nb", "space", "production surrogates")),
+                    default=None)
+        out[name] = {"tier": LENS_TIERS.get(name), "q": harness.Q,
+                     "worlds_with_a_false_lead": {w: f"{a}/{b}" for w, (a, b) in worlds.items()},
+                     "worst_world_share": worst,
+                     "false_leads_within_q": None if worst is None else worst <= harness.Q,
+                     "power_recorded_on": sorted(power.get(name, [])),
+                     "declared_positives": [p.name for p in harness.POSITIVES if p.lens == name],
+                     "positive_recovery": "not stored: docs/evaluation/2026-10-05-harness-gate.md"}
+    return out

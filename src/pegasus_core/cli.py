@@ -176,5 +176,14 @@ def split_survey(dataset: str, event: str, years: str = Years, graph: str = "con
     console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on side B")
 
 
+@app.command("mcp")
+def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_claim spend the confirmation reserve"),
+                ledger: str = typer.Option(None, help="a ledger directory other than PEGASUS_HOME/ledger")) -> None:
+    """Serve the tools over MCP on stdio (needs the `mcp` extra); read-only unless --allow-confirm."""
+    from . import mcp_server
+
+    mcp_server.main((["--allow-confirm"] if allow_confirm else []) + (["--ledger", ledger] if ledger else []))
+
+
 if __name__ == "__main__":
     app()
