@@ -510,13 +510,14 @@ Until the curves exist, the provisional rule: at least 1,000 events over the win
 
 **Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
 
-This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far (ADR-0005): δ_E = 0.03 for E_b, 0.05 for E_b|Z.
+This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far: δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate).
 
 **Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
 
 | lens | H0 (boundary) | provisional |
 |---|---|---|
-| outbreak, change point, space–time, spatial cluster | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
+| outbreak, change point, space–time | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
+| spatial cluster (B0) | the same | θ0 = 1.5, calibrated on the MSR negatives (evaluation 2026-10-05, lens gate) |
 | trend divergence | \|β_u − β̄_N(u)\| ≤ δ, with δ a ratio of 1.2 between the period's first and last year | 1.2 |
 | group disparity | the groups' log-SIRs spread with sd ≤ 0.2: G² against non-central χ²(df, 0.2²·Σμ) | 0.2 |
 | marks (all lenses) | \|mean log departure\| ≤ 0.03 | 3% |
@@ -732,3 +733,4 @@ Every random draw is seeded from (object, cell, purpose).
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
 | 2.1 | meaning comes from pegasus_data | `gateway._date_sql` parses raw date text (YYYYMMDD, DDMMYYYY), and `_residence_sql` maps the Federal District's administrative-region codes in SIH-RD 2008–2017 to 530010 | interim; pegasus_data now derives `<COL>_date` and `MUNIC_RES_municipio` (pegasus_data c893b69, 1f88401). Binding the roles to them changes every gateway cache key, so the switch waits for the next re-warm |
+| 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | spatial cluster θ0 = 1.5 (pooled negatives 0.04, worst family 5/30), where the family rule gives 2.0; single-field negatives are MSR of the residuals on a knn8 graph and a per-place shift, with a normal-scores variant | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |

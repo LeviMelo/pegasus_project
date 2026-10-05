@@ -19,6 +19,7 @@ from . import subset
 # Minimum relevant effects (P5, ARCHITECTURE §8.4): every lens tests against an effect worth
 # reporting, not against zero. Provisional until the harness calibrates them on negative controls.
 RATE_RATIO = 1.2         # cell lenses: H0 is "the rate is at most 1.2 × expected"
+SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0): calibrated on the MSR negatives, the largest value that keeps Chagas (harness gate)
 TREND_PERIOD = 1.2       # trend divergence: H0 is "the place's course diverges by at most 20% over the period"
 GROUP_SD = 0.2           # group disparity: H0 is "the groups' log-SIRs spread by at most this sd"
 MARK_LOG = 0.03          # marks: H0 is "the mean log mark departs by at most 3%"
@@ -44,7 +45,8 @@ class Finding:
 def spatial_cluster(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
                     replicates: int = 200, alpha: float = 0.05) -> list[Finding]:
     """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan."""
-    return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True)
+    return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True,
+                  rate_ratio=SPATIAL_RATE_RATIO)
 
 
 def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
@@ -54,7 +56,9 @@ def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, 
 
 
 def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int, replicates: int,
-           alpha: float, full_period: bool = False, max_window: int | None = None) -> list[Finding]:
+           alpha: float, full_period: bool = False, max_window: int | None = None,
+           rate_ratio: float | None = None) -> list[Finding]:
+    rr = RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"{lens}|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": lens, "field": s.field.id, "tier": s.tier,
                                                                "k": k, "max_window": max_window,
@@ -72,8 +76,8 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
     else:
         # counts: the null's boundary is θ0·μ for an excess and μ/θ0 for a deficit (§8.4)
         y = np.where(usable, s.y, 0.0)
-        m = np.where(usable, RATE_RATIO * s.mu, 0.0)
-        m_low = np.where(usable, s.mu / RATE_RATIO, 0.0)
+        m = np.where(usable, rr * s.mu, 0.0)
+        m_low = np.where(usable, s.mu / rr, 0.0)
     if not usable.any():
         ledger.complete(test, 1.0, None, {"subsets": 0, "reason": "no usable cell"})
         return []
@@ -102,10 +106,10 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
                         {"places": s.places[f.places].tolist(),
                          "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])], "direction": name},
                         float(np.exp(sign * f.observed / f.expected + sign * MARK_LOG)) if mark
-                        else _rr(f.observed, f.expected / (RATE_RATIO if name == "up" else 1 / RATE_RATIO)),
+                        else _rr(f.observed, f.expected / (rr if name == "up" else 1 / rr)),
                         min(1.0, f.p * len(directions)),
                         {"score": f.score, "observed": f.observed,
-                         "expected": f.expected if mark else f.expected / (RATE_RATIO if name == "up" else 1 / RATE_RATIO),
+                         "expected": f.expected if mark else f.expected / (rr if name == "up" else 1 / rr),
                          "p_empirical": f.p_empirical, "null": "minimum effect",
                          "calibrated": bool(s.calibration.get("calibrated", True))}) for f in found]
     out = [f for f in out if f.p <= alpha]   # α after the two directions' doubling

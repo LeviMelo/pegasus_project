@@ -52,7 +52,7 @@
 1. Laplace uncertainty layer: **done** (evaluation 2026-10-05, Laplace): cheap draws (block-Jacobi, 40–90 CG iterations), off by default; the verdict: parameter uncertainty is not what miscalibrates; next is OQ 6 (φ_extra per region; an epidemic-level effect).
 2. SIH readout: winter respiratory B2s, calibration, the survey leads.
 3. SINAN: arbovirus → microcephaly E_w; an outbreak-robust BP.
-4. The harness re-run under ADR-0005 negatives: false-lead rates and power curves per lens, the §10.5 gate for every lens.
+4. The lens gate: **done** (evaluation 2026-10-05, lens gate): false leads ≤ q on surrogates; outbreak, space–time, E_b pass; spatial cluster fails the negatives (θ0 1.5 set); change point, trend divergence, group disparity and marks have no declared positive. Next: declare positives for them.
 5. Race in the groups g (infant through the bridge; the adult sensitivity band).
 6. The SUS-dependent population (ANS) and completeness by system (modelled tier).
 7. Lead triage: the SIM survey's leads, the coding-substitution and artefact classes.

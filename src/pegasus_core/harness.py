@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
+from scipy import special, stats
 
 from . import config, store, surprise
 from .scans import pairs, subset
@@ -79,7 +80,8 @@ def spike(y: np.ndarray, mu: np.ndarray, locus: np.ndarray, theta: float, rng: n
     return out
 
 
-def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: list[float]) -> dict[str, Any]:
+def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: list[float], mark: bool = False
+                ) -> dict[str, Any]:
     """Recovery of planted signals by the production lens itself, per θ (§10.3). A locus is a
     boolean [U, T] mask; the signal y' = y* + Poisson((θ − 1)μ) is planted into a null background
     y* ~ NB(μ, φ), so recovery measures power, not real signals. A locus is recovered when some
@@ -95,9 +97,16 @@ def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: 
         hits = 0
         for locus in loci:
             hit = False
-            y = spike(_null_draw(s, rng), s.mu, locus, theta, rng)
-            planted = surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, s.u, s.z, s.w,
-                                        s.flags, s.calibration, s.extras)
+            if mark:        # a mark: the locus's mean log mark shifted by log θ (θ a weight ratio)
+                y = mark_surrogate(s, rng.standard_normal(s.y.shape)).y
+                y[locus] += np.log(theta)
+                zz = np.where(s.w > 0, (y - s.mu) * np.sqrt(s.w), 0.0)
+                planted = surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, special.ndtr(zz), zz,
+                                            s.w, s.flags, s.calibration, s.extras)
+            else:
+                y = spike(_null_draw(s, rng), s.mu, locus, theta, rng)
+                planted = surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, s.u, s.z, s.w,
+                                            s.flags, s.calibration, s.extras)
             for f in run_lens(planted):
                 found = np.zeros_like(locus)
                 rows = np.isin(s.places, f.locus["places"])
@@ -109,11 +118,12 @@ def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: 
                     hit = True
                     break
             hits += hit
-            rows_out.append((float(theta), float(s.mu[locus].sum()), hit))
+            rows_out.append((float(theta), float(np.nansum(np.where(s.w > 0, s.w, 0.0)[locus]) if mark
+                                                 else s.mu[locus].sum()), hit))
         curve[float(theta)] = hits / max(len(loci), 1)
         detail[float(theta)] = hits
     # power depends on the expected count in the locus as much as on θ: report it by both
-    bins = [0, 100, 300, 1000, 3000, np.inf]
+    bins = [0, 1e5, 1e6, 1e7, 1e8, np.inf] if mark else [0, 100, 300, 1000, 3000, np.inf]
     by_mu = {}
     for theta in thetas:
         for lo, hi in zip(bins[:-1], bins[1:], strict=True):
@@ -121,7 +131,7 @@ def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: 
             if sel:
                 by_mu[f"θ={theta} μ∈[{lo},{hi})"] = (round(float(np.mean(sel)), 2), len(sel))
     return {"field": s.field.id, "tier": s.tier, "loci": len(loci), "curve": curve, "hits": detail,
-            "by_expected": by_mu}
+            "by_expected": by_mu, "rows": rows_out}
 
 
 def _null_draw(s: surprise.Surprise, rng: np.random.Generator) -> np.ndarray:
@@ -276,6 +286,213 @@ def pair_power(mu: np.ndarray, signal_sd: float, template_outcome: np.ndarray, t
 def shifted(z: np.ndarray, k: int) -> np.ndarray:
     """A within-place negative: the series moved k periods (circularly) within each place."""
     return np.roll(z, k, axis=1)
+
+
+# ---------------------------------------------------------------------- negatives for one field
+
+
+def _nb_quantile(u: np.ndarray, mu: np.ndarray, phi: np.ndarray | float) -> np.ndarray:
+    """The count with cumulative probability u under NB(μ, φ) (Poisson where φ is infinite)."""
+    phi = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
+    out = np.zeros(mu.shape)
+    live = mu > 0
+    pois = live & ~np.isfinite(phi)
+    out[pois] = stats.poisson.ppf(u[pois], mu[pois])
+    nb = live & np.isfinite(phi)
+    out[nb] = stats.nbinom.ppf(u[nb], phi[nb], phi[nb] / (phi[nb] + mu[nb]))
+    return out
+
+
+def negative_scores(z: np.ndarray, kind: str, rng: np.random.Generator, gen_basis: pairs.MoranBasis | None = None
+                    ) -> np.ndarray:
+    """A negative control for a single-field lens, made of the field's own standardised residuals
+    z [U, T, ...] (§10.2). ``space``: MSR across places on the symmetric-normalised graph of
+    ``gen_basis`` (a graph other than the lens's own), one sign vector shared by every year, so the
+    spatial spectrum and the years' joint dependence stay and the places of compact clusters do not.
+    ``time``: each place's series moved by its own k ∈ [2, T−2] years (circularly), so each place's
+    dependence over time stays and its alignment with the other places does not."""
+    U, T = z.shape[:2]
+    if kind == "space":
+        return gen_basis.randomise(z.reshape(U, -1), rng, shared=True).reshape(z.shape)
+    if kind == "time":
+        k = rng.integers(2, T - 1, size=U)
+        idx = (np.arange(T)[None, :] + k[:, None]) % T
+        return z[np.arange(U)[:, None], idx]
+    raise ValueError(kind)
+
+
+def counts_from_scores(s: surprise.Surprise, z: np.ndarray, seed_parts: tuple) -> surprise.Surprise:
+    """The field with counts y* whose cumulative probability under its own predictive is Φ(z)."""
+    y = _nb_quantile(special.ndtr(z), s.mu, s.phi)
+    y = np.where(s.mu > 0, y, s.y)
+    return with_counts(s, y, seed_parts)
+
+
+def mark_surrogate(s: surprise.Surprise, z: np.ndarray) -> surprise.Surprise:
+    """A mark field with y* = μ + z/√w on its informative cells (a Gaussian surrogate: z ~ N(0,1))."""
+    has = s.w > 0
+    y = np.where(has, s.mu + np.divide(z, np.sqrt(np.where(has, s.w, 1.0))), np.nan)
+    zz = np.where(has, z, 0.0)
+    return surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, special.ndtr(zz), zz, s.w, s.flags,
+                             s.calibration, s.extras)
+
+
+def scores_of(s: surprise.Surprise) -> np.ndarray:
+    """Standardised residuals of a field, zero where a cell carries nothing."""
+    ok = np.isfinite(s.z) & (s.w > 0) if s.extras.get("kind") == "mark" else np.isfinite(s.z)
+    return np.where(ok, s.z, 0.0)
+
+
+def lens_world(s: surprise.Surprise, kind: str, i: int, gen_basis: pairs.MoranBasis | None = None
+               ) -> surprise.Surprise:
+    """The i-th world for a lens on field ``s``: ``nb`` (y ~ NB(μ̂, φ̂), §10.4), or a negative control
+    (``space`` / ``time``, §10.2) of its residuals; ``space_ns`` / ``time_ns`` first replace the residuals by
+    their normal scores, so the real field's heavy tails (unmodelled shocks such as COVID-19) do not count
+    as the lens's false leads."""
+    parts = ("lens-world", s.field.id, s.tier, kind, i)
+    rng = np.random.default_rng(config.seed(*parts))
+    mark = s.extras.get("kind") == "mark"
+    if kind == "nb":
+        if mark:
+            return mark_surrogate(s, rng.standard_normal(s.y.shape))
+        return surrogate(s, parts)
+    z0 = scores_of(s)
+    if kind.endswith("_ns"):        # normal scores: the marginal made exactly N(0,1), the dependence kept
+        kind = kind[:-3]
+        live = z0 != 0
+        z0 = z0.copy()
+        z0[live] = special.ndtri((stats.rankdata(z0[live]) - 0.5) / live.sum())
+    z = negative_scores(z0, kind, rng, gen_basis)
+    return mark_surrogate(s, z) if mark else counts_from_scores(s, z, parts)
+
+
+def group_world(y_g: np.ndarray, mu_g: np.ndarray, phi: float, kind: str, i: int, field_id: str,
+                gen_basis: pairs.MoranBasis | None = None) -> np.ndarray:
+    """A world for group disparity: counts by (place, year, group). ``nb``: y ~ NB(μ_g, φ); ``space``:
+    MSR (shared signs over years and groups) of the field's own residuals against the B0 group pattern."""
+    parts = ("group-world", field_id, kind, i)
+    rng = np.random.default_rng(config.seed(*parts))
+    if kind == "nb":
+        return subset.replicate(mu_g, phi, rng)
+    _, z = surprise.randomised_pit(y_g.reshape(-1), mu_g.reshape(-1), np.full(mu_g.size, phi),
+                                   config.seed(*parts, "pit"))
+    z = np.where(mu_g.reshape(-1) > 0, z, 0.0).reshape(y_g.shape)
+    z2 = gen_basis.randomise(z.reshape(len(z), -1), rng, shared=True).reshape(z.shape)
+    return np.where(mu_g > 0, _nb_quantile(special.ndtr(z2), mu_g, phi), 0.0)
+
+
+def wilson_upper(k: int, n: int, conf: float = 0.95) -> float:
+    """Upper limit of the Wilson interval for k of n."""
+    if n == 0:
+        return 1.0
+    z = stats.norm.ppf(1 - (1 - conf) / 2)
+    p = k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return float(min(centre + half, 1.0))
+
+
+COUNT_BANDS = [0, 3, 10, 30, 100, 300, 1000, np.inf]
+MARK_BANDS = [0, 1e3, 3e3, 1e4, 3e4, 1e5, np.inf]
+
+
+def cell_power(s: surprise.Surprise, run_lens, thetas: list[float], per_bin: int = 40, trailing: int = 1,
+               seed_parts: tuple = ("cell-power",), mark: bool = False) -> dict[str, Any]:
+    """Power of a per-place lens on planted loci (§10.3). For each band of the locus's expected
+    count, ``per_bin`` places are planted at once into a null background: one cell (a random year)
+    or, with ``trailing`` > 1, that many years at the end of the series, as y' = y* + Poisson((θ−1)μ).
+    The field's B2 trends are refitted around the planted counts as in production (``with_counts``).
+    A locus is recovered when a finding names its place (and, for one cell, its year). Planted loci
+    are far apart in the 5,570-place field, so planting many at once does not change a locus's test.
+    For a mark, θ is the weight ratio: y' = y + log θ, in bands of information (Σ w)."""
+    rng = np.random.default_rng(config.seed(*seed_parts, s.field.id))
+    U, T = s.y.shape
+    usable = (s.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0
+    info = np.where(s.w > 0, s.w, 0.0) if mark else s.mu
+    bands = MARK_BANDS if mark else COUNT_BANDS
+    rows = []
+    for theta in thetas:
+        t_of, picks = {}, []
+        for lo, hi in zip(bands[:-1], bands[1:], strict=True):
+            tot = info[:, T - trailing:].sum(1) if trailing > 1 else info.max(1)
+            cand = np.nonzero((tot >= lo) & (tot < hi) & usable[:, T - trailing:].all(1))[0]
+            if len(cand):
+                picks += [int(u) for u in rng.choice(cand, size=min(per_bin, len(cand)), replace=False)]
+        base = mark_surrogate(s, rng.standard_normal(s.y.shape)) if mark else None
+        y = base.y.copy() if mark else subset.replicate(s.mu, s.phi, rng)
+        for u in picks:
+            t = T - trailing if trailing > 1 else int(rng.choice(np.nonzero(usable[u])[0]))
+            t_of[u] = t
+            sl = slice(t, T) if trailing > 1 else slice(t, t + 1)
+            if mark:
+                y[u, sl] += np.log(theta)
+            else:
+                y[u, sl] += rng.poisson(max(theta - 1, 0) * s.mu[u, sl])
+        if mark:
+            zz = np.where(s.w > 0, (y - s.mu) * np.sqrt(s.w), 0.0)
+            planted = surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, special.ndtr(zz), zz, s.w,
+                                        s.flags, s.calibration, s.extras)
+        else:
+            planted = with_counts(s, y, (*seed_parts, theta))
+        got: dict[int, list] = {}
+        for f in run_lens(planted):
+            for p_ in f.locus["places"]:
+                got.setdefault(int(p_), []).append(f.locus.get("years"))
+        for u in picks:
+            hit = int(s.places[u]) in got
+            if hit and trailing == 1:
+                yr = int(s.years[t_of[u]])
+                hit = any(yy is None or yy[0] <= yr <= yy[-1] for yy in got[int(s.places[u])])
+            sl = slice(t_of[u], T) if trailing > 1 else slice(t_of[u], t_of[u] + 1)
+            rows.append((float(theta), float(info[u, sl].sum()), bool(hit)))
+    return _summarise(s, rows, thetas, bands)
+
+
+def _summarise(s: surprise.Surprise, rows: list[tuple[float, float, bool]], thetas: list[float],
+               bands: list[float]) -> dict[str, Any]:
+    curve = {float(t): round(float(np.mean([h for tt, _, h in rows if tt == t])), 3) for t in thetas}
+    by = {}
+    for t in thetas:
+        for lo, hi in zip(bands[:-1], bands[1:], strict=True):
+            sel = [h for tt, m, h in rows if tt == t and lo <= m < hi]
+            if sel:
+                by[f"θ={t} [{lo:g},{hi:g})"] = (round(float(np.mean(sel)), 2), len(sel))
+    return {"field": s.field.id, "tier": s.tier, "curve": curve, "by_expected": by, "rows": rows}
+
+
+def group_power(y_g: np.ndarray, mu_g: np.ndarray, phi: float, places: np.ndarray, run_lens, thetas: list[float],
+                per_bin: int = 40, seed_parts: tuple = ("group-power",)) -> dict[str, Any]:
+    """Power of group disparity on planted places: in each, one group (drawn by its share of the
+    place's expected events) has its expectation multiplied by θ, everything else null. Recovered
+    when the lens reports the place; the curve is by θ and by the planted group's expected count."""
+    rng = np.random.default_rng(config.seed(*seed_parts))
+    Mg = mu_g.sum(1)                                              # [U, G]
+    tot = Mg.sum(1)
+    bands = [0, 30, 100, 300, 1000, 3000, np.inf]
+    rows = []
+    for theta in thetas:
+        picks = []
+        for lo, hi in zip(bands[:-1], bands[1:], strict=True):
+            cand = np.nonzero((tot >= lo) & (tot < hi))[0]
+            if len(cand):
+                picks += [int(u) for u in rng.choice(cand, size=min(per_bin, len(cand)), replace=False)]
+        mu = mu_g.copy()
+        grp = {}
+        for u in picks:
+            g = int(rng.choice(Mg.shape[1], p=Mg[u] / Mg[u].sum()))
+            grp[u] = g
+            mu[u, :, g] *= theta
+        hit_places = {p_ for f in run_lens(subset.replicate(mu, phi, rng)) for p_ in f.locus["places"]}
+        for u in picks:
+            rows.append((float(theta), float(Mg[u, grp[u]]), int(places[u]) in hit_places))
+    curve = {float(t): round(float(np.mean([h for tt, _, h in rows if tt == t])), 3) for t in thetas}
+    by = {}
+    for t in thetas:
+        for lo, hi in zip(bands[:-1], bands[1:], strict=True):
+            sel = [h for tt, m, h in rows if tt == t and lo <= m < hi]
+            if sel:
+                by[f"θ={t} [{lo:g},{hi:g})"] = (round(float(np.mean(sel)), 2), len(sel))
+    return {"curve": curve, "by_expected": by, "rows": rows}
 
 
 # ---------------------------------------------------------------------- the gate

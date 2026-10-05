@@ -125,12 +125,14 @@ class MoranBasis:
             self._gpu = torch.as_tensor(self.vectors, device=_device())
         return self._gpu
 
-    def randomise(self, x: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-        """MSR (Wagner & Dray 2015): random signs on the Moran-eigenvector coordinates of x [n] or [n, R]."""
+    def randomise(self, x: np.ndarray, rng: np.random.Generator, shared: bool = False) -> np.ndarray:
+        """MSR (Wagner & Dray 2015): random signs on the Moran-eigenvector coordinates of x [n] or [n, R].
+        ``shared``: one sign vector for all R columns, so the columns' dependence (a field's years) is kept."""
         x2 = x[:, None] if x.ndim == 1 else x
         mean = x2.mean(0)
         t = torch.as_tensor(x2 - mean, dtype=torch.float32, device=_device())
-        signs = torch.as_tensor(rng.choice([-1.0, 1.0], size=t.shape), dtype=torch.float32, device=_device())
+        size = (t.shape[0], 1) if shared else t.shape
+        signs = torch.as_tensor(rng.choice([-1.0, 1.0], size=size), dtype=torch.float32, device=_device())
         out = (self._v() @ ((self._v().T @ t) * signs)).double().cpu().numpy() + mean
         return out[:, 0] if x.ndim == 1 else out
 
