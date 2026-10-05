@@ -69,6 +69,8 @@
 18. An epidemic-level effect for BP: dengue's prospective forecast is 2.0–2.8× off whatever its variance (the Laplace evaluation, 2026-10-05). A state-year or regime component in the extrapolation.
 20. Regional dispersion: **done** (ADR-0006; evaluation 2026-10-05, dispersion): φ_extra by macro-region and state; B1 calibrates 30 of 33 fields (28 with one value). OQ 6 keeps the epidemic level and dengue's Southeast.
 19. Laplace follow-ups: an MCMC/INLA reference; a refit at the full-Hessian Fellner–Schall τ's (spatial τ about 5× lower on IX).
+21. Rebuild pegasus_data's registration/system completeness on population-account-2 (pegasus_data decision 0148 notes its births shortfall came from v1).
+22. Population account: horizons of 1–3 years from a census untested; the 2022 urban share is 2010's.
 | | queue |
 
 **Next:**
