@@ -642,10 +642,10 @@ class Session:
         return selected
 
     def corroborate(self, register: list[leads.Lead], only_signals: bool = True, replicates: int = 4999,
-                    q: float = 0.05, log=print) -> list[leads.Lead]:
+                    q: float = 0.05, log=print, refine_p: float = 0.01, refine_replicates: int = 99999) -> list[leads.Lead]:
         """Ask an independent field (S2iD, SINAN, SIH: `corroborate.RULES`) whether each lead's places and years are
         unusual there, against that field's own null (random same-size place sets of the same state and
-        population quintile; scattered, not connected: a contiguous cluster shares its neighbours' shocks, see OPEN_QUESTIONS 7). Benjamini-Hochberg within each source.
+        population quintile; a cluster of touching places is replaced by connected sets grown on the graph, `corroborate._null_sets`). Leads with p < ``refine_p`` are redrawn at ``refine_replicates`` so that Benjamini-Hochberg over many tests can reject. Benjamini-Hochberg within each source.
         Written to ``lead.replications["corroboration"]``."""
         self._prepare_grid()
         pop = self._pop.sum(1)
@@ -668,6 +668,15 @@ class Session:
             done.append((x, c))
             if len(done) % 200 == 0:
                 log(f"corroborated {len(done)}")
+        # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests needs the best
+        # to reach q / m: the promising ones are redrawn with many more replicates, so the tier is reachable
+        for i, (x, c) in enumerate(done):
+            if c.tested and c.p < refine_p and c.source:
+                node = x.fields[0].split(":")[-1]
+                span, direction = replication.span_direction(x)
+                rows = np.array([index[int(u)] for u in x.locus["places"] if int(u) in index], dtype=int)
+                done[i] = (x, corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
+                                                      f"corroborate-refine|{x.id}", refine_replicates))
         for source in {c.source for _, c in done if c.tested}:
             group = [(x, c) for x, c in done if c.tested and c.source == source]
             ps = np.array([c.p for _, c in group])
@@ -689,7 +698,7 @@ class Session:
             by_node.setdefault(a.fields[0], []).append(a)
         for x in register:
             hits = replication.match(x, by_node.get(x.fields[0], [])) if x.fields else []
-            for key in ("prospective", "spatial_unit", "honest"):
+            for key in ("prospective", "honest"):   # the verdicts of the selecting session; the spatial and corroboration verdicts belong to the register itself
                 have = [h for h in hits if h.replications.get(key, {}).get("tested", h.replications.get(key, {}).get("sized"))]
                 if have:
                     best = min(have, key=lambda h: h.replications[key].get("q", h.q))

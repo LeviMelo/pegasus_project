@@ -145,13 +145,24 @@ class Fields:
     def __init__(self, places: np.ndarray, years: np.ndarray, state_of: np.ndarray, population: np.ndarray,
                  edges: np.ndarray | None = None):
         self.places, self.years = places, np.asarray(years)
-        self.edges = edges      # the graph, for a null of connected place sets (not yet used: OPEN_QUESTIONS 7)
+        self.edges = edges      # the graph (pairs of indices into ``places``): the null of a connected lead is connected sets
+        self._adjacent: list[np.ndarray] | None = None
         self.state = state_of
         self.quintile = np.digitize(population, np.quantile(population, [0.2, 0.4, 0.6, 0.8]))
         self._index = {int(u): i for i, u in enumerate(places)}
         self._cache: dict[Any, np.ndarray] = {}
         self._sih: pa.Table | None = None
         self._s2id: pa.Table | None = None
+
+    def adjacent(self) -> list[np.ndarray]:
+        """The neighbours of every place (the graph's adjacency lists), built once."""
+        if self._adjacent is None:
+            e = np.concatenate([self.edges, self.edges[:, ::-1]])
+            order = np.argsort(e[:, 0], kind="stable")
+            e = e[order]
+            cut = np.searchsorted(e[:, 0], np.arange(len(self.places) + 1))
+            self._adjacent = [e[cut[i]:cut[i + 1], 1] for i in range(len(self.places))]
+        return self._adjacent
 
     # -- S2iD
     def s2id(self, typologies: list[str] | None) -> np.ndarray:
@@ -210,23 +221,81 @@ class Fields:
 # ---------------------------------------------------------------------- the test
 
 
-def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, replicates: int) -> np.ndarray:
-    """[replicates, len(rows)] place indices: each lead place replaced by a random place of the same state
-    and population quintile (falling back to the same state), distinct within a draw where possible."""
-    pools = []
+def _components(fields: Fields, rows: np.ndarray) -> list[np.ndarray]:
+    """The connected components of ``rows`` in the graph (a lead's places that touch form one cluster)."""
+    adj, member, comps = fields.adjacent(), {int(r) for r in rows}, []
+    seen: set[int] = set()
     for r in rows:
+        if int(r) in seen:
+            continue
+        stack, comp = [int(r)], []
+        seen.add(int(r))
+        while stack:
+            a = stack.pop()
+            comp.append(a)
+            for b in adj[a]:
+                if int(b) in member and int(b) not in seen:
+                    seen.add(int(b))
+                    stack.append(int(b))
+        comps.append(np.array(comp, dtype=np.int64))
+    return comps
+
+
+def _grow(adj: list[np.ndarray], seed: int, size: int, rng: np.random.Generator) -> list[int]:
+    """A random connected set of ``size`` places grown from ``seed`` (a random frontier place each step); it stops
+    short where the component runs out."""
+    chosen, frontier, inside = [seed], [], {seed}
+    frontier.extend(int(b) for b in adj[seed])
+    while len(chosen) < size and frontier:
+        k = int(rng.integers(len(frontier)))
+        frontier[k], frontier[-1] = frontier[-1], frontier[k]
+        a = frontier.pop()
+        if a in inside:
+            continue
+        inside.add(a)
+        chosen.append(a)
+        frontier.extend(int(b) for b in adj[a] if int(b) not in inside)
+    return chosen
+
+
+def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, replicates: int, connected: bool = True
+               ) -> np.ndarray:
+    """[replicates, len(rows)] place indices. A lead's places that touch each other are a cluster, and a cluster
+    shares its neighbours' shocks in the other field: each cluster of c places is replaced by a random connected set
+    of c places grown from a random seed of the cluster's state (``connected``; a set that cannot reach c places is
+    redrawn). Places with no neighbour in the lead, and every place when ``connected`` is False or the graph is
+    unknown, are replaced by a random place of the same state and population quintile (the state alone if fewer than
+    five), distinct within a draw where possible."""
+    out = np.empty((replicates, len(rows)), dtype=np.int64)
+    position = {int(r): j for j, r in enumerate(rows)}
+    rest = list(range(len(rows)))
+    if connected and fields.edges is not None:
+        adj = fields.adjacent()
+        for comp in _components(fields, rows):
+            if len(comp) < 2:
+                continue
+            cols = [position[int(r)] for r in comp]
+            pool = np.nonzero(fields.state == fields.state[comp[0]])[0]
+            for k in range(replicates):
+                for _ in range(20):
+                    got = _grow(adj, int(rng.choice(pool)), len(comp), rng)
+                    if len(got) == len(comp):
+                        break
+                else:
+                    got = list(rng.choice(pool, size=len(comp), replace=True))
+                out[k, cols] = got
+            rest = [j for j in rest if j not in set(cols)]
+    for j in rest:
+        r = rows[j]
         same = np.nonzero((fields.state == fields.state[r]) & (fields.quintile == fields.quintile[r]))[0]
         if same.size < 5:
             same = np.nonzero(fields.state == fields.state[r])[0]
-        pools.append(same)
-    out = np.empty((replicates, len(rows)), dtype=np.int64)
-    for j, pool in enumerate(pools):
-        out[:, j] = rng.choice(pool, size=replicates, replace=True)
+        out[:, j] = rng.choice(same, size=replicates, replace=True)
     return out
 
 
 def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarray, years: list[int], direction: int,
-                seed_text: str, replicates: int = 4999) -> Corroboration:
+                seed_text: str, replicates: int = 4999, connected: bool = True) -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
     rule = rule_for(code)
     if rule is None:
@@ -236,13 +305,15 @@ def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarr
     cols = (fields.years >= years[0]) & (fields.years <= years[-1])
     other = ~cols
     rng = np.random.default_rng(config.seed(seed_text))
-    sets = _null_sets(fields, rows, rng, replicates)
     detail: dict[str, Any] = {}
 
     if rule["source"] == "s2id":
         m = fields.s2id(rule.get("typologies"))
         obs = float((m[rows][:, cols].sum(1) > 0).sum())      # places with a registered disaster in the window
-        null = (m[sets][:, :, cols].sum(2) > 0).sum(1).astype(float)
+
+        def null_of(sets: np.ndarray) -> np.ndarray:
+            return (m[sets][:, :, cols].sum(2) > 0).sum(1).astype(float)
+
         detail["unit"] = "places with a registered disaster in the window"
     else:
         if rule["source"] == "sinan":
@@ -260,9 +331,12 @@ def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarr
             return np.log((observed + 0.5) / (expected + 0.5))
 
         obs = float(ratio(rows))
-        null = ratio(sets)
+        null_of = ratio
         detail["unit"] = "log (window count + ½) / (the places' median year × years + ½)"
         detail["observed_count"] = float(y[rows][:, cols].sum())
+    chunk = max(1, min(replicates, int(2e7 // max(len(rows) * int(cols.sum()), 1))))      # bounded memory at any replicate count
+    null = np.concatenate([null_of(_null_sets(fields, rows, rng, min(chunk, replicates - i), connected))
+                           for i in range(0, replicates, chunk)])
     p = float((1 + np.sum(null >= obs)) / (1 + len(null)))
     if rule["source"] == "s2id" and obs == 0:
         p = 1.0
