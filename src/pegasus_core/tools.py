@@ -137,7 +137,8 @@ class Session:
                           scale=SCALE[h.lens], interval=None, p=h.p, q=q, family=family,
                           null="Gumbel on NB replicates" if h.lens in ("space_time", "spatial_cluster", "change_point")
                           else "NB predictive",
-                          calibrated=True, robustness={}, provenance={"graph": self.graph, "stats": h.stats})
+                          calibrated=bool(h.stats.get("calibrated", True)), robustness={},
+                          provenance={"graph": self.graph, "stats": h.stats})
 
     # ---- on demand -------------------------------------------------------------------
 

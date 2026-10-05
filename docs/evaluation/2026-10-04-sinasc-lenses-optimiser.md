@@ -108,3 +108,27 @@ Fit on 2010–2021, scored on 2022–23. The kNN6 and contiguity rows are from `
 - KS 0.023, worst region 0.033: calibrated.
 - 40 subsets, the strongest about 2% heavier in Northeast clusters in 2010–13.
 - These are not read as leads until δ for marks is calibrated (P5).
+
+## Performance: what was slow, and what fixed it
+
+**Measured on contiguity IX** (`data/check_suffstat.py`, `data/profile_eval.py`, `data/check_gpu_null.py`):
+
+| step | before | after | how |
+|---|---|---|---|
+| objective + gradient | 457 ms | **71 ms** | Σ y·η over 2.4 M cells is linear in the effects, so it becomes ⟨x, Y_x⟩ with the sufficient statistics Y_x computed once; iid penalties skip the sparse product. Objective identical to 12 digits, gradient to 1e-12 |
+| one outer iteration (mean + τ) | ~90 s | **~18 s** | the above, plus a third of the inner iterations while the τ's move |
+| null of a space–time scan, 100 replicates | 248 s (NumPy) | **2.5 s** | the replicates batched on the GPU (float32), drawn on the device. Null maxima agree: two-sample KS p = 0.99, medians 67.1 and 64.9 |
+| harness, 20 surrogates of one field | hours | minutes | one null per field, cached and shared by its surrogates |
+
+**What remains:** the observed scan itself (NumPy, about 2.5 s per recursion step), and L-BFGS's iteration count (OQ-6).
+
+## COVID-19: the positive fails retrospectively, and why
+
+**SIM codes COVID-19 as B34.2:** 212,706 of the 2020 records have it as underlying cause, against 0 with U07. U07.1 appears in the cause lines of 173,561.
+
+**At B1 over 2010–2023, B34 matches its expectation:** 213,152 observed against 212,821 expected in 2020; Amazonas 5,942 against 4,722.
+- The space–time lens finds nothing at B1, and at B2 only Rio de Janeiro 2020 (RR 1.54, p 0.03).
+- The year effects absorb the waves.
+- The category's place effects are learned from the epidemic itself.
+
+**Consequence:** the prospective tier BP (ARCHITECTURE §6.1) is for surveillance lenses. Its run is pending the 2010–2019 fits.

@@ -289,11 +289,19 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 | **B1** | B0 + g (graph terms) | departures from the region |
 | **B2** | B1 + a place-level random intercept and slope per field: `α_{u} + β_{u}(t − t̄)`, shrunk to the region | departures from a place's own course |
 | **B2s** | B2 + season (sub-annual grains) | out-of-season events |
+| **BP** | prospective: the years after t₀ against the fit on years ≤ t₀, histories extrapolated (the RW2 forecast mean), every place and category effect as learned before t₀ | departures from the past: epidemics, new practices |
 
 - **Tiers are computed from one fit:** B0 and B1 by dropping terms, B2 by a cheap per-field refit of `(α_u, β_u)` with the rest as offset.
 - **B0 is re-levelled to the national total of each year.** Dropping centred log-scale place effects also drops E[exp(s + v)] > 1. Without the re-levelling, B0 fell 11% short on chapter IX.
 - **B2 is an exact 2 × 2 Newton per place** under NB working weights, with τ_α and τ_β by Fellner–Schall. Where B1 already carries the field's place effects, τ_α runs to its bound and only the trends β_u remain (measured on chapter IX).
 - **The interaction ψωτ is never part of a tier.** It is read as patterns (§7.4).
+- **Surveillance lenses read BP.** A fit over the whole period learns an epidemic as normal.
+  - The year effects absorb the national waves.
+  - A category that exists only during the epidemic gets its place effects from the epidemic itself.
+  - **Measured on COVID-19 in SIM** (B34.2): 213,152 deaths observed in 2020 against 212,821 expected at B1. The space–time lens found nothing at B1.
+- **BP's handling of calibration and new categories:**
+  - its calibration is recorded but never flagged, and its dispersion is the block's;
+  - a category without a past has no expectation in BP, so the excess is read at its group or chapter.
 
 ### 6.2 Calibration
 
@@ -496,6 +504,19 @@ Until the curves exist, the provisional rule: at least 1,000 events over the win
 
 This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.**
 
+**Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
+
+| lens | H0 (boundary) | provisional |
+|---|---|---|
+| outbreak, change point, space–time, spatial cluster | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
+| trend divergence | \|β_u − β̄_N(u)\| ≤ δ, with δ a ratio of 1.2 between the period's first and last year | 1.2 |
+| group disparity | the groups' log-SIRs spread with sd ≤ 0.2: G² against non-central χ²(df, 0.2²·Σμ) | 0.2 |
+| marks (all lenses) | \|mean log departure\| ≤ 0.03 | 3% |
+
+**Measured on IX** (evaluation 2026-10-04). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
+- hypertension (I10–I15): trend divergence fell from 116 to 38 places, group disparity from 121 to 7;
+- the strongest signals survived, São Borja among them.
+
 ### 8.5 Mechanical overlap
 
 ```
@@ -564,7 +585,7 @@ Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccar
 |---|---|---|
 | microcephaly and congenital anomalies | space-time, B2 | Northeast, 2015–16 |
 | arbovirus notifications → microcephaly births | E_w, lag 6–9 months (monthly) | Northeast, 2015–16 |
-| COVID-19 excess deaths | outbreak, B2 | national, 2020–21; Amazonas, January 2021 |
+| COVID-19 excess deaths | space–time and outbreak, **BP** (train ≤ 2019) on groups and chapters (SIM codes COVID-19 as B34.2) | national, 2020–21; Amazonas, January 2021 |
 | dengue epidemics; seasonality | outbreak, B2s | by state |
 | leptospirosis after the floods | space-time | Rio Grande do Sul, May–July 2024 |
 | Chagas disease, schistosomiasis | spatial cluster, B0 | known endemic areas |

@@ -187,6 +187,18 @@ class Scanner:
     # ---- the search ------------------------------------------------------------------
 
     def best(self, y: np.ndarray, m: np.ndarray) -> Subset:
+        if y.ndim == 2:
+            # places × time: the torch alternation (GPU when present), in float64 for the observed data
+            import torch
+
+            dev = _device()
+            best, P, win, W = _alternate(self, torch.as_tensor(y, dtype=torch.float64, device=dev)[None],
+                                         torch.as_tensor(m, dtype=torch.float64, device=dev))
+            c = int(best[0].argmax())
+            nb = self.nbr[c][P[0, c].cpu().numpy()]
+            t0, t1 = (int(v) for v in W[win[0, c]].cpu().numpy())
+            Y, M = float(y[nb, t0:t1 + 1].sum()), float(m[nb, t0:t1 + 1].sum())
+            return Subset(float(score(Y, M, self.kind)), c, nb, (t0, t1), [], Y, M)
         y2 = y.reshape(y.shape[0], y.shape[1], -1).sum(2)
         m2 = m.reshape(m.shape[0], m.shape[1], -1).sum(2)
         s1, P, Wb = self._stage1(y2, m2)
@@ -247,23 +259,138 @@ def replicate(m: np.ndarray, phi: np.ndarray | float, rng: np.random.Generator, 
 
 @dataclass
 class Null:
+    """The null of the maximum score: an atom at zero (no subset above expectation) with mass π0,
+    and a Gumbel fitted to the positive maxima: P(F ≥ s) = (1 − π0)·Gumbel_sf(s) for s > 0. A
+    Gumbel fitted to all maxima failed on sparse fields (at the minimum-effect null most maxima
+    are zero, survey of IX, I63, 2026-10-04). ``testable`` is False when too few maxima are
+    positive to fit the tail: the field carries too little information for the lens."""
     maxima: np.ndarray
     loc: float
     scale: float
+    pi0: float = 0.0
+    testable: bool = True
 
     def p(self, s: float) -> float:
-        return float(stats.gumbel_r.sf(s, self.loc, self.scale))
+        if not self.testable or s <= 0:
+            return 1.0
+        return float((1 - self.pi0) * stats.gumbel_r.sf(s, self.loc, self.scale))
 
     def p_empirical(self, s: float) -> float:
         return float((1 + np.sum(self.maxima >= s)) / (1 + len(self.maxima)))
 
 
+MIN_POSITIVE = 20      # positive null maxima needed to fit the tail
+MAX_REPLICATES = 2000  # replicates drawn, at most, to reach them
+
+
 def null(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int = 200,
          seed_parts: tuple = ("subset-null",)) -> Null:
-    rng = np.random.default_rng(config.seed(*seed_parts))
-    maxima = np.array([scanner.best(replicate(m, phi, rng, scanner.kind), m).score for _ in range(replicates)])
-    loc, sc = stats.gumbel_r.fit(maxima)
-    return Null(maxima, float(loc), float(sc))
+    """The maximum score over replicates drawn under the model. A places × time scan (no free
+    dimensions) runs every replicate at once on the GPU (`_maxima_batched`), drawing more (up to
+    MAX_REPLICATES) until MIN_POSITIVE maxima are positive; a scan with free dimensions runs
+    replicate by replicate."""
+    if m.ndim == 2:
+        maxima = _maxima_batched(scanner, m, phi, replicates, config.seed(*seed_parts))
+        extra = 0
+        while (maxima > 0).sum() < MIN_POSITIVE and len(maxima) < MAX_REPLICATES:
+            extra += 1
+            more = min(len(maxima), MAX_REPLICATES - len(maxima))
+            maxima = np.concatenate([maxima, _maxima_batched(scanner, m, phi, more,
+                                                             config.seed(*seed_parts, "more", extra))])
+    else:
+        rng = np.random.default_rng(config.seed(*seed_parts))
+        maxima = np.array([scanner.best(replicate(m, phi, rng, scanner.kind), m).score for _ in range(replicates)])
+    positive = maxima[maxima > 0]
+    pi0 = 1 - len(positive) / len(maxima)
+    if len(positive) < MIN_POSITIVE or np.ptp(positive) <= 0:
+        return Null(maxima, 0.0, 1.0, pi0, testable=False)
+    loc, sc = stats.gumbel_r.fit(positive)
+    return Null(maxima, float(loc), float(sc), pi0)
+
+
+def _torch_score(Y, M, kind: str):
+    import torch
+
+    if kind == "gaussian":
+        return torch.where((Y > 0) & (M > 0), Y * Y / (2 * M.clamp(min=1e-30)), torch.zeros_like(Y))
+    ratio = torch.where(M > 0, Y / M.clamp(min=1e-30), torch.ones_like(Y))
+    return torch.where((Y > M) & (M > 0), Y * torch.log(ratio.clamp(min=1e-30)) + M - Y, torch.zeros_like(Y))
+
+
+def _device():
+    import torch
+
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _alternate(scanner: Scanner, Y, M):
+    """Stage 1 in torch for a batch of datasets Y [R, U, T] against M [U, T]: places × windows by
+    alternation for every centre, a fixed number of sweeps (stopping when nothing changes).
+    Returns best [R, C], P [R, C, K] and the window index [R, C]."""
+    import torch
+
+    dev = Y.device
+    U, T = M.shape
+    W = torch.as_tensor(windows(T, scanner.max_window, scanner.full_period), device=dev)
+    valid = torch.as_tensor(scanner.valid, device=dev)
+    idx = torch.as_tensor(np.where(scanner.valid, scanner.nbr, 0), device=dev)
+    zero = torch.zeros((), device=dev, dtype=Y.dtype)
+    Mn = torch.where(valid[..., None], M[idx], zero)                                  # [C, K, T]
+    cm = torch.cat([torch.zeros(Mn.shape[:2] + (1,), device=dev, dtype=Y.dtype), Mn.cumsum(2)], 2)
+    Mw = cm[:, :, W[:, 1] + 1] - cm[:, :, W[:, 0]]                                   # [C, K, W]
+    R, C = Y.shape[0], idx.shape[0]
+    Yn = torch.where(valid[None, ..., None], Y[:, idx], zero)                         # [R, C, K, T]
+    cy = torch.cat([torch.zeros(Yn.shape[:3] + (1,), device=dev, dtype=Y.dtype), Yn.cumsum(3)], 3)
+    Yw = cy[..., W[:, 1] + 1] - cy[..., W[:, 0]]                                     # [R, C, K, W]
+    del Yn, cy
+    P = valid.expand(R, -1, -1).clone()
+    best = torch.zeros((R, C), device=dev, dtype=Y.dtype)
+    win = torch.zeros((R, C), device=dev, dtype=torch.int64)
+    for _ in range(scanner.sweeps):
+        sw = _torch_score((Yw * P[..., None]).sum(2), (Mw[None] * P[..., None]).sum(2), scanner.kind)
+        win = sw.argmax(2)
+        gi = win[..., None, None].expand(R, C, Yw.shape[2], 1)
+        Yk = Yw.gather(3, gi)[..., 0]
+        Mk = Mw[None].expand(R, -1, -1, -1).gather(3, gi)[..., 0]
+        prio = torch.where(valid[None] & (Mk > 0), Yk / Mk.clamp(min=1e-30), torch.full_like(Yk, -float("inf")))
+        order = torch.argsort(-prio, dim=2)
+        sp = _torch_score(Yk.gather(2, order).cumsum(2), Mk.gather(2, order).cumsum(2), scanner.kind)
+        sp = torch.where(torch.isfinite(prio.gather(2, order)), sp, torch.zeros_like(sp))
+        top = sp.argmax(2)
+        newP = (torch.argsort(order, dim=2) <= top[..., None]) & valid[None]
+        best = sp.gather(2, top[..., None])[..., 0]
+        if torch.equal(newP, P):
+            break
+        P = newP
+    return best, P, win, W
+
+
+def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int, seed: int,
+                    chunk: int = 8) -> np.ndarray:
+    """The null's maxima: replicates drawn on the device (gamma–Poisson for counts, Gaussian for
+    marks) and searched in batches by `_alternate`, float32."""
+    import torch
+
+    dev = _device()
+    gen = torch.Generator(device=dev).manual_seed(seed % (2 ** 63))
+    U, T = m.shape
+    M = torch.as_tensor(m, dtype=torch.float32, device=dev)
+    phi_t = torch.as_tensor(np.broadcast_to(np.asarray(phi, dtype=float), m.shape).copy(), dtype=torch.float32,
+                            device=dev)
+    out = []
+    for start in range(0, replicates, chunk):
+        R = min(chunk, replicates - start)
+        if scanner.kind == "gaussian":
+            Y = torch.randn((R, U, T), generator=gen, device=dev) * M.clamp(min=0).sqrt()
+        else:
+            finite = torch.isfinite(phi_t) & (M > 0)
+            shape = torch.where(finite, phi_t, torch.ones_like(M))
+            lam = torch.where(finite, torch._standard_gamma(shape.expand(R, U, T).contiguous(), generator=gen)
+                              * (M / shape), M.expand(R, U, T))
+            Y = torch.poisson(lam, generator=gen)
+        best, *_ = _alternate(scanner, Y, M)
+        out.append(best.max(1).values.double().cpu().numpy())
+    return np.concatenate(out)
 
 
 def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner, alpha: float = 0.05,

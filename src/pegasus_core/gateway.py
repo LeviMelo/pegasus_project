@@ -74,7 +74,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset)
     key = {"what": "event_counts", "dataset": dataset, "event": event, "year": year, "classifier": column,
-           "data": config.data_version(), "gateway": 2 if dataset != "SIM.DO" else 1}
+           "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -88,8 +88,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
-    sex = (f"""CASE WHEN "{strata['sex']}" IN ('1', 'M') THEN 1 WHEN "{strata['sex']}" IN ('2', 'F') THEN 2 END"""
-           if strata["sex"] else str(strata["implied_sex"]))
+    sex = _sex_sql(strata, dataset, raw)
     code = f'upper(trim("{column}"))' if column else "'*'"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT
             TRY_CAST(left(CAST("{strata['residence']}" AS VARCHAR), 6) AS INTEGER) AS u,
@@ -128,15 +127,42 @@ def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Tabl
     return table
 
 
-def _sex_sql(strata: dict) -> str:
+def _sex_sql(strata: dict, dataset: str, table: pa.Table) -> str:
+    """The sex stratum as 1 (male) / 2 (female), mapped from pegasus_data's labels of the codes
+    present, never from assumed codes: SIH writes female as 2 or 3, SIM as 2, SINAN as F. A code
+    labelled neither (ignored, blank, undecoded) is unallocated."""
     if strata["sex"] is None:
         return str(strata["implied_sex"])
+    codes = sorted({str(c) for c in table.column(strata["sex"]).to_pylist() if c is not None})
+    mapping = _sex_codes(dataset, strata["sex"], tuple(codes))
     col = f'CAST("{strata["sex"]}" AS VARCHAR)'
-    return f"CASE WHEN {col} IN ('1', 'M') THEN 1 WHEN {col} IN ('2', 'F') THEN 2 END"
+    male = ", ".join(f"'{c}'" for c, v in mapping.items() if v == 1) or "NULL"
+    female = ", ".join(f"'{c}'" for c, v in mapping.items() if v == 2) or "NULL"
+    return f"CASE WHEN {col} IN ({male}) THEN 1 WHEN {col} IN ({female}) THEN 2 END"
 
 
-def _cells_sql(strata: dict) -> str:
-    return (f'TRY_CAST(left(CAST("{strata["residence"]}" AS VARCHAR), 6) AS INTEGER) AS u, {_sex_sql(strata)} AS sex, '
+def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, int | None]:
+    import pegasus_data as pg
+    from pegasus_data._request import parse_dataset
+
+    system = {"SIH": "SIHSUS"}.get(parse_dataset(dataset)[0], parse_dataset(dataset)[0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        labelled = pg.translate(pa.table({column: list(codes)}), system=system).to_pylist()
+    out: dict[str, int | None] = {}
+    for row in labelled:
+        label = str(row.get(f"{column}_label") or "").strip().lower()
+        out[str(row[column])] = 1 if label in ("m", "masculino", "male") else 2 if label in ("f", "feminino", "female") \
+            else None
+    if not any(v == 1 for v in out.values()) or not any(v == 2 for v in out.values()):
+        raise LookupError(f"{dataset}.{column}: pegasus_data labels no male and female codes among {codes} "
+                          f"(system {system}): {labelled}")
+    return out
+
+
+def _cells_sql(strata: dict, dataset: str, table: pa.Table) -> str:
+    return (f'TRY_CAST(left(CAST("{strata["residence"]}" AS VARCHAR), 6) AS INTEGER) AS u, '
+            f'{_sex_sql(strata, dataset, table)} AS sex, '
             f'CAST(least(floor(TRY_CAST(CAST("{strata["age"]}" AS VARCHAR) AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age')
 
 
@@ -156,11 +182,12 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     cols = [strata["residence"], strata["age"], mark] + ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else [])
     con = duckdb.connect()
-    con.register("r", _records(dataset, event, year, cols))
+    raw = _records(dataset, event, year, cols)
+    con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
-    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata)}, {code} AS code,
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
             TRY_CAST(CAST("{mark}" AS VARCHAR) AS DOUBLE) AS m FROM r""")
     reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                       WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
@@ -191,10 +218,11 @@ def code_list_counts(dataset: str, event: str, year: int, column: str,
         return EventCounts(cached, cached_un, key)
     cols = [strata["residence"], strata["age"], column] + ([strata["sex"]] if strata["sex"] else [])
     con = duckdb.connect()
-    con.register("r", _records(dataset, event, year, cols))
+    raw = _records(dataset, event, year, cols)
+    con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
-    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata)},
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)},
             list_distinct(list_transform(regexp_extract_all(upper(CAST("{column}" AS VARCHAR)),
                 '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3))) AS codes
         FROM r WHERE "{column}" IS NOT NULL AND trim(CAST("{column}" AS VARCHAR)) <> ''""")

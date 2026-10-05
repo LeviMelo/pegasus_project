@@ -138,6 +138,9 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
                        + age_band(sub.column("age").to_numpy())).astype(np.int64),
                       *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
     e, u, t, g, *vals = (np.concatenate(z) for z in zip(*parts, strict=True))
+    if len(e) == 0:
+        raise LookupError(f"{dataset} {event}: block {block} has no events in {years[0]}–{years[-1]} "
+                          f"(unallocated: {unallocated})")
     # several subcategories share a category, several ages a band: sum them into one cell
     flat = ((e * len(places) + u) * len(years) + t) * (2 * N_BANDS) + g
     uniq, inv = np.unique(flat, return_inverse=True)
@@ -233,6 +236,33 @@ class Monolith:
         self.trace_log: list[tuple] = []
         self.p_e = self.grp[self.e]
         self.scale = float(data.y.sum())
+        self._sufficient_statistics()
+
+    def _sufficient_statistics(self) -> None:
+        """η is linear in the effects, so Σ_c y_c η_c = Σ_effects ⟨x, Y_x⟩ with Y_x the counts summed
+        over each effect's index. Computed once, the Poisson log-likelihood never touches the
+        non-empty cells again: an evaluation costs the factorised total only (ARCHITECTURE §5.1)."""
+        d = self.data
+        nE, nGrp, (nU, nT, nG) = len(d.leaves), len(d.groups), d.N.shape
+        pe = d.leaf_group[d.e]
+        y = d.y
+
+        def acc(shape: tuple[int, ...], *index: np.ndarray) -> torch.Tensor:
+            out = np.zeros(shape)
+            np.add.at(out, index, y)
+            return torch.as_tensor(out, dtype=self.dtype, device=self.device)
+
+        zero = np.zeros(len(y), dtype=np.int64)
+        self.Y = {
+            "b0": torch.as_tensor([float(y.sum())], dtype=self.dtype, device=self.device),
+            "th_grp": acc((1, nGrp), zero, pe), "th_cat": acc((1, nE), zero, d.e),
+            "f_all": acc((1, nG), zero, d.g), "f_grp": acc((nGrp, nG), pe, d.g),
+            "h_all": acc((1, nT), zero, d.t), "h_grp": acc((nGrp, nT), pe, d.t),
+            "s_all": acc((1, nU), zero, d.u), "v_all": acc((1, nU), zero, d.u),
+            "s_grp": acc((nGrp, nU), pe, d.u), "v_grp": acc((nGrp, nU), pe, d.u),
+            "v_cat": acc((nE, nU), d.e, d.u),
+        }
+        self.y_offset = float(np.sum(y * np.log(d.N[d.u, d.t, d.g])))   # Σ y log N, constant
 
     # ---- effects (centred) -------------------------------------------------
 
@@ -295,13 +325,18 @@ class Monolith:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
         for name, c in self.components.items():
             v = x[name].reshape(c.batch, -1)
-            out = out + 0.5 * c.tau * (v * torch.sparse.mm(self._Q[name], v.T).T).sum()
+            if c.shape.name.startswith("iid"):   # Q = I: no sparse product
+                out = out + 0.5 * c.tau * (v * v).sum()
+            else:
+                out = out + 0.5 * c.tau * (v * torch.sparse.mm(self._Q[name], v.T).T).sum()
         return out
 
     def objective(self) -> torch.Tensor:
-        """−log L + penalty, divided by the number of events so gradients are of order one."""
+        """−log L + penalty, divided by the number of events so gradients are of order one.
+        Σ y·η comes from the sufficient statistics; only Λ is computed per evaluation."""
         x = self.effects()
-        loglik = (self.y * self.eta_nnz(x)).sum() - self.total(x)
+        linear = sum((x[k] * self.Y[k]).sum() for k in self.Y) + self.y_offset
+        loglik = linear - self.total(x)
         return (-loglik + self.penalty(x)) / self.scale
 
     # ---- fitting ----------------------------------------------------------------
@@ -455,11 +490,13 @@ class Monolith:
 
     # ---- prediction ---------------------------------------------------------------
 
-    def expected(self, leaves: np.ndarray, spatial: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    def expected(self, leaves: np.ndarray, spatial: bool = True,
+                 x: dict[str, torch.Tensor] | None = None) -> tuple[np.ndarray, np.ndarray]:
         """For a set of leaves (a node of the tree): μ[u,t] summed over the leaves and groups,
-        and Σμ²[u,t] over the underlying cells (for the aggregate's dispersion)."""
+        and Σμ²[u,t] over the underlying cells (for the aggregate's dispersion). ``x`` overrides
+        the fitted effects (a forecast, `extrapolate`)."""
         with torch.no_grad():
-            x = self.effects()
+            x = self.effects() if x is None else x
             lp = self._leaf_place(x, spatial)
             pt = self._place_time(x, spatial)
             sel = torch.as_tensor(leaves, device=self.device)
@@ -667,12 +704,12 @@ class MarkModel(Monolith):
 # ---------------------------------------------------------------------- model choice
 
 
-def heldout(model: Monolith, test: BlockData) -> dict:
-    """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
-    h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
-    Returns the Poisson deviance over every test cell (empty cells through the factorised
-    total) and the NB log-likelihood of the non-empty cells at the fitted φ."""
-    if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves             or test.groups != model.data.groups:
+def extrapolate(model: Monolith, test: BlockData) -> tuple[Monolith, dict[str, torch.Tensor]]:
+    """A fit carried to later years: every effect as fitted, the histories h extrapolated as the
+    RW2's forecast mean (linear from the last two fitted years). Returns a model over the test
+    data (for its exposure and cells) and the forecast effects."""
+    if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
+            or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
     tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
     with torch.no_grad():
@@ -683,6 +720,17 @@ def heldout(model: Monolith, test: BlockData) -> dict:
             h = x[name]
             slope = h[:, -1:] - h[:, -2:-1]
             x[name] = h[:, -1:] + slope * steps[None, :]
+    tm.phi = model.phi
+    return tm, x
+
+
+def heldout(model: Monolith, test: BlockData) -> dict:
+    """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
+    h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
+    Returns the Poisson deviance over every test cell (empty cells through the factorised
+    total) and the NB log-likelihood of the non-empty cells at the fitted φ."""
+    tm, x = extrapolate(model, test)
+    with torch.no_grad():
         eta = tm.eta_nnz(x)
         lam = float(tm.total(x))
         mu = torch.exp(eta).cpu().numpy()

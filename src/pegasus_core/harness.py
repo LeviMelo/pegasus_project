@@ -31,7 +31,6 @@ from . import config, store, surprise
 from .scans import subset
 
 Q = 0.05
-LOCUS_JACCARD = 0.5
 
 
 @dataclass(frozen=True)
@@ -50,8 +49,9 @@ class Positive:
 
 
 POSITIVES: tuple[Positive, ...] = (
-    Positive("COVID-19 excess deaths, Amazonas", "SIM.DO", "death", "U07", "space_time", "B2", "uf:13",
-             (2020, 2021), note="Manaus, January 2021; national 2020–21"),
+    Positive("COVID-19 deaths, Amazonas", "SIM.DO", "death", "B34", "space_time", "B2", "uf:13",
+             (2020, 2021), note="SIM codes COVID-19 as underlying cause B34.2 (U07.1 only as a marker); "
+                                "Manaus, January 2021; national 2020–21"),
     Positive("COVID-19 respiratory excess", "SIM.DO", "death", "J00-J99", "space_time", "B2", "ibge_macroregion:1",
              (2020, 2021), note="ill-coded COVID deaths in the respiratory chapter, North"),
     Positive("Chagas disease geography", "SIM.DO", "death", "B57", "spatial_cluster", "B0", "uf:52,31,29,17",
@@ -78,35 +78,49 @@ def spike(y: np.ndarray, mu: np.ndarray, locus: np.ndarray, theta: float, rng: n
     return out
 
 
-def jaccard(a: set, b: set) -> float:
-    return len(a & b) / max(len(a | b), 1)
+def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: list[float]) -> dict[str, Any]:
+    """Recovery of planted signals by the production lens itself, per θ (§10.3). A locus is a
+    boolean [U, T] mask; the signal y' = y* + Poisson((θ − 1)μ) is planted into a null background
+    y* ~ NB(μ, φ), so recovery measures power, not real signals. A locus is recovered when some
+    finding of the lens holds at least half of the locus's cells (recall) and at least half of its
+    own cells are planted (precision). The lens's null is computed once per field and cached.
 
-
-def power_curve(s: surprise.Surprise, edges: np.ndarray, loci: list[np.ndarray], thetas: list[float],
-                k: int = 30, max_window: int | None = 4, replicates: int = 100, alpha: float = Q,
-                full_period: bool = False) -> dict[str, Any]:
-    """Recovery of planted subsets by the space–time scan, per θ. A locus is a boolean [U, T]
-    mask; recovered when the top subset reaches α and its cells overlap the locus with
-    Jaccard ≥ 0.5. One null serves every injection (it depends on μ and φ only)."""
-    scanner = subset.Scanner(subset.neighbourhoods(edges, len(s.places), k), max_window=max_window,
-                             full_period=full_period)
-    nul = subset.null(scanner, s.mu, s.phi, replicates, ("power", s.field.id, s.tier))
+    An earlier version re-implemented the scan beside the lens (its own scanner, no minimum effect)
+    and scored by cell Jaccard ≥ 0.5, which a correct two-year window over a one-year locus
+    fails; it reported 10% power at θ = 2 for stroke (2026-10-04)."""
     rng = np.random.default_rng(config.seed("power", s.field.id, s.tier))
-    curve = {}
+    curve, detail, rows_out = {}, {}, []
     for theta in thetas:
         hits = 0
         for locus in loci:
+            hit = False
             y = spike(_null_draw(s, rng), s.mu, locus, theta, rng)
-            best = scanner.best(y, s.mu)
-            if nul.p(best.score) > alpha:
-                continue
-            found = np.zeros_like(locus)
-            found[np.ix_(best.places, np.arange(best.window[0], best.window[1] + 1))] = True
-            hits += jaccard(set(zip(*np.nonzero(found), strict=True)), set(zip(*np.nonzero(locus), strict=True))) \
-                >= LOCUS_JACCARD
+            planted = surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, s.u, s.z, s.w,
+                                        s.flags, s.calibration, s.extras)
+            for f in run_lens(planted):
+                found = np.zeros_like(locus)
+                rows = np.isin(s.places, f.locus["places"])
+                years = f.locus.get("years", [int(s.years[0]), int(s.years[-1])])
+                cols = (s.years >= years[0]) & (s.years <= years[-1])
+                found[np.ix_(rows, cols)] = True
+                inter = (found & locus).sum()
+                if inter >= 0.5 * locus.sum() and inter >= 0.5 * found.sum():
+                    hit = True
+                    break
+            hits += hit
+            rows_out.append((float(theta), float(s.mu[locus].sum()), hit))
         curve[float(theta)] = hits / max(len(loci), 1)
-    return {"field": s.field.id, "tier": s.tier, "loci": len(loci), "curve": curve,
-            "null": {"loc": nul.loc, "scale": nul.scale}}
+        detail[float(theta)] = hits
+    # power depends on the expected count in the locus as much as on θ: report it by both
+    bins = [0, 100, 300, 1000, 3000, np.inf]
+    by_mu = {}
+    for theta in thetas:
+        for lo, hi in zip(bins[:-1], bins[1:], strict=True):
+            sel = [h for t, mu, h in rows_out if t == theta and lo <= mu < hi]
+            if sel:
+                by_mu[f"θ={theta} μ∈[{lo},{hi})"] = (round(float(np.mean(sel)), 2), len(sel))
+    return {"field": s.field.id, "tier": s.tier, "loci": len(loci), "curve": curve, "hits": detail,
+            "by_expected": by_mu}
 
 
 def _null_draw(s: surprise.Surprise, rng: np.random.Generator) -> np.ndarray:
@@ -220,8 +234,7 @@ def run(session: Any, node: str, lens: str, surrogates: int = 20, loci: int = 40
         rng = np.random.default_rng(config.seed("loci", s.field.id, lens))
         chosen = [candidates[i] for i in rng.choice(len(candidates), size=min(loci, len(candidates)), replace=False)]
         log(f"  power on {len(chosen)} loci")
-        out["power"] = power_curve(s, edges, chosen, list(thetas), max_window=None if full else 4,
-                                   replicates=replicates, full_period=full)
+        out["power"] = power_curve(s, runners[lens], chosen, list(thetas))
         log(f"  power {out['power']['curve']}")
     record("gate", {"field": s.field.id, "lens": lens, "tier": tier, "graph": session.graph,
                     "surrogates": surrogates, "loci": loci}, out)

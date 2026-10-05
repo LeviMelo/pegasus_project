@@ -76,14 +76,16 @@ def fit(y: np.ndarray, mu: np.ndarray, rank: int, iterations: int = 500, tol: fl
         A *= s
     full = M * torch.einsum("ur,tr,fr->utf", A, B, C)
     d_full = _dev(Y, full)
-    shares = []
-    for r in range(rank):
+    # each departure component's share: the deviance its removal costs, against the deviance all
+    # the factors explain. Component 0 started constant and carries the level: removing it removes
+    # the model, so it gets no share (NaN). Shares need not sum to one (components overlap).
+    d0 = _dev(Y, M)
+    shares = [float("nan")]
+    for r in range(1, rank):
         keep = [k for k in range(rank) if k != r]
         part = M * torch.einsum("ur,tr,fr->utf", A[:, keep], B[:, keep], C[:, keep])
-        shares.append(_dev(Y, part) - d_full)
-    d0 = _dev(Y, M)
-    return Factorisation(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy(), d_full, d0,
-                         np.array(shares) / max(d0 - d_full, 1e-12))
+        shares.append((_dev(Y, part) - d_full) / max(d0 - d_full, 1e-12))
+    return Factorisation(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy(), d_full, d0, np.array(shares))
 
 
 def congruence(x: np.ndarray, y: np.ndarray) -> np.ndarray:

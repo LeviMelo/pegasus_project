@@ -20,8 +20,8 @@ from scipy import optimize, special, stats
 
 from . import config, fields, gateway, monolith, store
 
-TIERS = ("B0", "B1", "B2", "B2s")
-SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True}
+TIERS = ("B0", "B1", "B2", "B2s", "BP")
+SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True}
 
 # flags, a bitmask per cell
 DENOMINATOR = 1      # events where the population is zero (denominator tension)
@@ -85,6 +85,27 @@ class Expectations:
     def field(self, node: str) -> fields.Field:
         return self.registry.field(node)
 
+    def prospective(self, node: str | fields.Field, train_last: int) -> Surprise:
+        """Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
+        extrapolated (`monolith.extrapolate`). Surveillance needs it: a fit over the whole period
+        learns an epidemic as normal (COVID-19 in SIM: B34 deaths 2020 observed 213,152 against
+        212,821 expected at B1, evaluation 2026-10-04). Calibration is recorded, never flagged:
+        departing from the past is what this tier exists to show."""
+        f = node if isinstance(node, fields.Field) else self.field(node)
+        train = [y for y in self.years if y <= train_last]
+        test = [y for y in self.years if y > train_last]
+        cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
+        if cls is monolith.MarkModel:
+            raise NotImplementedError("the prospective tier is for counts")
+        model = cls.load(self.dataset, self.event, f.block, train, self.graph, **self.source)
+        tm, x = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test, **self.source))
+        leaves = np.array([tm.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in tm.data.leaves])
+        mu, mu2 = tm.expected(leaves, spatial=True, x=x)
+        y = tm.observed(leaves)
+        out = _assemble(f, "BP", tm, y, mu, mu2, model.phi, self.macroregions(tm.data.places), flag_calibration=False)
+        out.extras = {"train": [int(train[0]), int(train[-1])]}
+        return out
+
     def place_effects(self, node: str | fields.Field) -> tuple[np.ndarray, np.ndarray]:
         """E_b's input: the field's own place intercept over B0 (shrunk), with its posterior sd."""
         s = self.surprise(node, "B0")
@@ -139,7 +160,7 @@ class Expectations:
 
 
 def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, mu: np.ndarray, mu2: np.ndarray,
-              phi_block: float, macro: np.ndarray) -> Surprise:
+              phi_block: float, macro: np.ndarray, flag_calibration: bool = True) -> Surprise:
     """PIT and calibration with the block's φ; if miscalibrated, with the field's own φ; if
     still miscalibrated, flagged (ARCHITECTURE §6.2)."""
     pop = m.data.N.sum(axis=2)
@@ -156,8 +177,13 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
     flags = np.zeros(y.shape, dtype=np.int8)
     flags[(pop <= 0) & (y > 0)] |= DENOMINATOR
     flags[mu < 1e-6] |= NO_INFORMATION
-    if not cal["calibrated"]:
+    if flag_calibration and not cal["calibrated"]:
         flags |= CALIBRATION
+    if not flag_calibration:
+        # prospective: the block's φ only; the field's place-year component would be estimated
+        # from the very departures the tier is meant to show
+        phi_agg = cells
+        u, z = randomised_pit(y, mu, phi_agg, seed)
     w = np.where(np.isinf(phi_agg), mu, mu / (1 + mu / phi_agg))
     return Surprise(f, tier, m.data.places, m.data.years, y, mu, phi_agg, u, z, w, flags, cal)
 
