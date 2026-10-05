@@ -240,7 +240,7 @@ def with_counts(s: surprise.Surprise, y: np.ndarray, seed_parts: tuple) -> surpr
         _, b, sd, tau = surprise.refit_place(y, s.mu, s.phi, np.stack([np.ones_like(st), st], axis=1),
                                              tau=s.extras["tau"])
         extras = {**s.extras, "alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
-                  "tau": tau}
+                  "tau": tau, "offset": s.mu}     # the trends are departures from the generating mean
     return surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, u, z, s.w, s.flags,
                              s.calibration, extras)
 

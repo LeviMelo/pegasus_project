@@ -84,3 +84,27 @@ The gate requires positives declared before the lens runs (§10.5). Measured aga
 ## E_w dengue (exploratory only)
 
 `data/p2/ew_dengue.py` (dengue against temperature and precipitation anomalies, lags 0 to 4; heavy label `ew-dengue`) was queued at 09:52 and had not been admitted when this section was written (`data/logs/p2_ew_dengue.log` holds the queue line only). It was **not declared in `harness.POSITIVES`** before it was queued; any result of it is exploratory and cannot gate E_w. E_w stays not gated.
+
+## Lens redesign (third round, 2026-10-05)
+
+**Regime.** `scans/lenses.py` (scales, observed-total reference, NB-adjusted deviance, per-scale minimum effects), `scans/scales.py`; scripts and logs in `data/p4/` (`score4.py`, `cal_gd.py`, `cal_td.py`, `cal_marks.py`; gitignored); SIM.DO chapter XX 2010–2023 contiguity fit (B2 pickled; block φ 1.218), `X85-Y09`. The positives are those of 86d6895, loci unchanged (re-derived and compared). One estimand was added and declared (commit 83fde72) before it was scored: the trend against the national course, loci from the same Atlas tables (the national lens had been looked at once against the first loci: 4 states).
+
+**Diagnoses.**
+1. **The reference defect.** `Session.by_group` re-levelled the B0 group pattern to the fitted model's own national expected totals per year and group, not to the observed ones. The model's sex-age profile is smoothed and shrunk: its national expected women's share is 9.95% (observed 8.28% over 2010–23; 8.20% over 2013–23), girls aged 0–14 are expected at 2.1 times their count. Re-levelled to the observed totals the national expected share equals the observed one (8.198%, young men 48.85%). Alone this did not recover the positives (municipality: weighted recall 0.05 women, 0.03 young men): the scale was the second cause.
+2. **Scale.** A state-wide trend cancels between a municipality and its neighbours, and a sex-age pattern too thin for a municipality is large in a state. Both lenses now read municipality, immediate region and state, BH within each scale at q/3. The group lens divides each group's deviance by its NB variance factor 1 + Σμ²/(φΣμ): without it the lens found 1–9 places in every NB surrogate (20/20 worlds at sd 0.2, G²/df median 1.6, from the large cells' overdispersion at φ = 1.2); with it 0 in 15 worlds at every sd from 0.2 to 0.03.
+3. **Marks.** The floor was never calibrated below 3%. On the PESO negatives space–time gives 30/30 worlds at 0.5%, 6/30 at 1%, 0/30 at 1.5%; outbreak at most 1/30 throughout. The floor is **1.5%** (30 worlds, upper limit 0.11). The regional gap in mean birth weight, Northeast 3,287 g against Southeast 3,210 g (2005, 2.4%; [Rev Saúde Pública 2010](https://scielo.br/j/rsp/a/fk576YyQDps7pGLQC3F6XsR/?lang=en)), is now above the floor but is a level difference B1 absorbs, from 2005 against the fitted 2010–23: **no positive declared** (needs a B0 mark scan and a 2010+ source).
+
+**Results on the declared positives** (weighted recall; Jaccard; found places in the documented set / found places):
+
+| lens, estimand | municipality only | + region, state | verdict |
+|---|---|---|---|
+| trend, `neighbours` (30 municipalities) | 0 (0 findings at ratio 1.5) | 0.048; Jaccard 0.10; 3 of 257 (Alagoas) | **fails** |
+| trend, `national` (2,289 municipalities) | 0.08; 0.02 | **0.66; 0.77; 1,754 of 3,532** (regions and states only) | **recovered**, flagged: declared after one look |
+| group, women (1,943) | 0.05; 0.003 | 0.97; 0.99 at sd 0.05 | recovered only at a minimum effect the negatives reject |
+| group, young men (807) | 0.03; 0.005 | 0.94; 0.98 at sd 0.05 | idem |
+
+The neighbours contrast at the state scale is power-limited, not misplaced: Bahia, Paraíba, Pará, Amapá, Rio de Janeiro and São Paulo reach excess t 3.1–3.5 (p 0.006–0.011) against a per-scale BH level of 0.001–0.004; the t is on 10 df with the dispersion around a cubic course (κ up to 5). It was not tuned further. The group lens at sd 0.05 flags 22 of 27 states: the minimum effect is far below the field's own spatial structure.
+
+**Calibration.** Trend divergence (30 worlds each, three scales, both references): NB 0, MSR normal scores 0, time-shift normal scores 0 except `national` at the municipality (5/30; the shift of a trending series is a trend change), so the municipality takes ratio 1.5 and the `national` estimand is read at region and state. Group disparity: NB surrogates 0/15 at every sd; MSR negatives (which keep the field's large-scale group structure) fire at sd 0.2 in 9/15 (municipality), 9/15 (region), 15/15 (state) worlds and hold only from sd 1.0 (0/12; 0.6: state 2/12). **Group disparity fails the negatives at every sd that recovers the positives.** The shared reading: departures of the documented size are what this field's spatial dependence produces anyway, so a lens that reads large units cannot tell them from the negatives' rearranged copies.
+
+**Gate effect.** Trend divergence: `neighbours` fails, `national` recovered at region and state (one positive, flagged), negatives hold: **not gated** until a positive declared before any look is recovered. Group disparity: **FAIL** (negatives). Marks: floor 1.5%, still no positive. `Session.survey` reads the municipality scale only (a multi-municipality locus is not yet read by the leads code; §13).

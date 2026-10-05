@@ -111,15 +111,18 @@ class Session:
 
     def by_group(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         """Observed and B0-expected counts by (place, year, group), B0 re-levelled per year and
-        group to the national totals, so a place's group pattern is read against Brazil's."""
+        group to the **observed** national totals, so a place's group pattern is read against Brazil's
+        observed one. (Re-levelled to the fitted model's own national totals it overstated women's
+        share, 9.98% against 8.2% observed: the model's sex-age profile is smoothed and shrunk, so its
+        national group totals depart from the data's; evaluation 2026-10-05, lens redesign.)"""
         f = self.expectations.field(node)
         m = self.expectations.model(f.block)
         reg = self.expectations.registry
         leaves = np.array([m.data.leaves.index(c) for c in reg.leaves(f.node) if c in m.data.leaves])
         y = m.observed_by_group(leaves)
         mu = m.expected_by_group(leaves, spatial=False)
-        ref = m.expected_by_group(leaves, spatial=True)
-        mu = mu * (ref.sum(0) / np.maximum(mu.sum(0), 1e-300))[None]
+        tot = y.sum(0)
+        mu = mu * np.divide(tot, mu.sum(0), out=np.ones_like(tot), where=mu.sum(0) > 0)[None]
         return y, mu
 
     def expected(self, node: str, tier: str = "B1") -> dict[str, Any]:
@@ -145,7 +148,9 @@ class Session:
         if lens == "group_disparity":
             y_g, mu_g = self.by_group(node)
             places = self.expectations.model(self.expectations.field(node).block).data.places
-            return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger, **kw)
+            phi = float(self.expectations.model(self.expectations.field(node).block).phi)
+            return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
+                                          **{"phi": phi, **kw})
         s = self.surprise(node, tier)
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)

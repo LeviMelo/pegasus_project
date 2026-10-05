@@ -14,15 +14,17 @@ import numpy as np
 from scipy import special, stats
 
 from .. import control, graphs, surprise
+from . import scales as scales_mod
 from . import subset
 
 # Minimum relevant effects (P5, ARCHITECTURE §8.4): every lens tests against an effect worth
 # reporting, not against zero. Provisional until the harness calibrates them on negative controls.
 RATE_RATIO = 1.2         # cell lenses: H0 is "the rate is at most 1.2 × expected"
 SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0): calibrated on the MSR negatives, the largest value that keeps Chagas (harness gate)
-TREND_PERIOD = 1.2       # trend divergence: H0 is "the place's course diverges by at most 20% over the period"
-GROUP_SD = 0.2           # group disparity: H0 is "the groups' log-SIRs spread by at most this sd"
-MARK_LOG = 0.03          # marks: H0 is "the mean log mark departs by at most 3%"
+TREND_PERIOD = {"municipality": 1.5, "region": 1.2, "state": 1.2}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; the municipality's 1.5 from the time-shift negatives (5/12 worlds at 1.2, 0/12 at 1.5), the coarser scales' 1.2 the grid's lowest value (0/12 in every world)
+GROUP_SD = {"municipality": 0.2, "region": 0.2, "state": 0.2}   # group disparity, per scale: H0 is "the groups' log-SIRs spread by at most this sd" (weighted by expected events)
+GC_MIN_UNITS = 500       # a scale with fewer units takes no genomic-control factor
+MARK_LOG = 0.015        # marks: H0 is "the mean log mark departs by at most 1.5%": calibrated on the PESO negatives (0/30 false-lead worlds at 1.5%, space-time 6/30 at 1%, 30/30 at 0.5%; evaluation 2026-10-05 lens positives)
 
 
 _NULLS: dict[tuple, subset.Null] = {}
@@ -193,49 +195,94 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
 
 
 def group_disparity(y_g: np.ndarray, mu_g: np.ndarray, places: np.ndarray, field_id: str, ledger: control.Ledger,
-                    q: float = 0.05, min_expected: float = 5.0) -> list[Finding]:
-    """Per place: does the place's excess differ across groups (sex × age bands)? A likelihood-ratio
-    heterogeneity G² of the groups' SIRs around the place's own SIR, against the national (B0)
-    group pattern. Overdispersion is absorbed by a genomic-control factor (the median G²/df over
-    places), so the reference is χ²_df after division. Groups with μ < ``min_expected`` pooled."""
+                    q: float = 0.05, min_expected: float = 5.0, scales: list[scales_mod.Scale] | None = None,
+                    sd: float | dict | None = None, phi: float = np.inf) -> list[Finding]:
+    """Per unit of each scale (default: the municipality): does the unit's excess differ across groups
+    (sex × age bands)? A likelihood-ratio heterogeneity G² of the groups' SIRs around the unit's own
+    SIR, against the national group pattern (``mu_g``: B0 re-levelled to the national observed totals
+    of every year and group, ``tools.Session.by_group``). Groups with μ < ``min_expected`` are pooled.
+
+    ``phi`` is the block's NB dispersion: a group's count in a unit has variance
+    Σ(μ + μ²/φ) over its cells, k_g = 1 + Σμ²/(φ Σμ) times the Poisson one, and each group's deviance
+    is divided by its k_g (large units, whose cells are large, carry most of it).
+
+    Overdispersion beyond that: at a scale of at least ``GC_MIN_UNITS`` units a genomic-control factor (the median
+    G²/df of the NB-adjusted deviance); a scale of fewer units (a median over 27 states would absorb the
+    departures sought) takes none, and its minimum effect is calibrated on the negatives (§8.4).
+    The H0 boundary is the groups' log-SIRs spreading with sd ``sd`` (per scale): G²/c against
+    non-central χ²(df, sd²·Σμ). All units of all scales are one family: BH within each scale at q/(number of scales)."""
+    sc = scales or [scales_mod.municipality(places)]
+    sd = GROUP_SD if sd is None else sd
+    sd_of = (lambda name: sd[name]) if isinstance(sd, dict) else (lambda name: sd)
     family = f"group_disparity|B0|{field_id.split(':')[-1]}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "group_disparity", "field": field_id,
-                                                               "tier": "B0"}))
-    Y, M = y_g.sum(1), mu_g.sum(1)                                     # over years: [U, G]
-    G2 = np.zeros(len(places))
-    df = np.zeros(len(places), dtype=int)
-    for u in range(len(places)):
+                                                               "tier": "B0", "scales": [s.name for s in sc],
+                                                               "sd": {s.name: sd_of(s.name) for s in sc}}))
+    rows = []                                   # (scale, unit, G2, df, c, p, Y, M)
+    for s_ in sc:
+        Yt, Mt = s_.sum(y_g), s_.sum(mu_g)     # [n, T, G]
+        Y, M = Yt.sum(1), Mt.sum(1)
+        kfac = 1.0 + (s_.sum((mu_g ** 2).sum(1)) / np.maximum(M, 1e-300) / phi if np.isfinite(phi) else 0.0)
+        G2, df, big = _g2(Y, M, min_expected, kfac)
+        tested = df > 0
+        c = np.full(s_.n, max(float(np.median(G2[tested] / df[tested])), 1.0) if tested.any() and s_.n >= GC_MIN_UNITS
+                    else 1.0)
+        lam0 = sd_of(s_.name) ** 2 * (M / kfac).sum(1)
+        p = np.where(tested, stats.ncx2.sf(G2 / c, np.maximum(df, 1), np.maximum(lam0, 1e-9)), 1.0)
+        rows.append((s_, G2, df, c, p, Y, M))
+    pool = np.concatenate([r[4] for r in rows])
+    hit = _bh_by_scale([r[4] for r in rows], q)
+    out, off = [], 0
+    for s_, G2, df, c, p, Y, M in rows:
+        for k in np.nonzero(hit[off:off + s_.n])[0]:
+            sir_g = np.divide(Y[k], M[k], out=np.full(M.shape[1], np.nan), where=M[k] > 0)
+            overall = Y[k].sum() / M[k].sum()
+            worst = int(np.nanargmax(np.abs(np.log(np.where(M[k] >= min_expected, sir_g, np.nan) / overall))))
+            mem = s_.members(k)
+            locus = {"places": [int(places[u]) for u in mem], "groups": [worst]}
+            if s_.name != "municipality":
+                locus.update(scale=s_.name, unit=str(s_.units[k]))
+            out.append(Finding("group_disparity", field_id, "B0", locus, _rr(Y[k, worst], M[k, worst] * overall),
+                               float(p[k]), {"G2": float(G2[k]), "df": int(df[k]), "gc": float(c[k]),
+                                             "sir": float(overall), "scale": s_.name}))
+        off += s_.n
+    ledger.complete(test, float(pool.min()) if pool.size else 1.0, None,
+                    {"units": {r[0].name: int((r[2] > 0).sum()) for r in rows},
+                     "gc": {r[0].name: float(np.median(r[3])) for r in rows}, "hits": len(out)})
+    return out
+
+
+def _g2(Y: np.ndarray, M: np.ndarray, min_expected: float, k: np.ndarray | float = 1.0
+        ) -> tuple[np.ndarray, np.ndarray, list]:
+    """G² and its df per unit (rows of Y, M [n, G]); the groups kept (μ ≥ min_expected, the rest pooled in
+    one); each group's deviance divided by its variance factor ``k`` (the pooled group: M-weighted mean)."""
+    n, G = Y.shape
+    k = np.broadcast_to(k, Y.shape)
+    G2, df, big = np.zeros(n), np.zeros(n, dtype=int), [np.zeros(G, dtype=bool)] * n
+    for u in range(n):
         yy, mm = Y[u], M[u]
-        big = mm >= min_expected
-        if big.sum() < 2:
+        b = mm >= min_expected
+        big[u] = b
+        if b.sum() < 2:
             continue
-        yy = np.append(yy[big], yy[~big].sum())
-        mm = np.append(mm[big], mm[~big].sum())
+        kk = np.append(k[u][b], (k[u][~b] * mm[~b]).sum() / max(mm[~b].sum(), 1e-300) if (~b).any() else 1.0)
+        yy = np.append(yy[b], yy[~b].sum())
+        mm = np.append(mm[b], mm[~b].sum())
         keep = mm > 0
-        yy, mm = yy[keep], mm[keep]
+        yy, mm, kk = yy[keep], mm[keep], kk[keep]
         sir = yy.sum() / mm.sum()
         e = mm * sir
         with np.errstate(divide="ignore", invalid="ignore"):
-            G2[u] = 2 * np.sum(np.where(yy > 0, yy * np.log(yy / e), 0) - (yy - e))
+            G2[u] = 2 * np.sum((np.where(yy > 0, yy * np.log(yy / e), 0) - (yy - e)) / kk)
         df[u] = len(yy) - 1
-    tested = df > 0
-    c = max(float(np.median(G2[tested] / df[tested])), 1.0) if tested.any() else 1.0
-    # H0 boundary: the groups' log-SIRs spread with sd GROUP_SD; G² is then about non-central
-    # χ²(df, λ0) with λ0 ≈ GROUP_SD² · Σ_g μ_g (the place's expected events in the tested groups)
-    lam0 = GROUP_SD ** 2 * M.sum(1)
-    p = np.where(tested, stats.ncx2.sf(G2 / c, np.maximum(df, 1), np.maximum(lam0, 1e-9)), 1.0)
-    hits = np.nonzero(control.bh(p, q))[0]
-    out = []
-    for u in hits:
-        sir_g = np.divide(Y[u], M[u], out=np.full(M.shape[1], np.nan), where=M[u] > 0)
-        overall = Y[u].sum() / M[u].sum()
-        worst = int(np.nanargmax(np.abs(np.log(np.where(M[u] >= min_expected, sir_g, np.nan) / overall))))
-        out.append(Finding("group_disparity", field_id, "B0", {"places": [int(places[u])], "groups": [worst]},
-                           _rr(Y[u, worst], M[u, worst] * overall), float(p[u]),
-                           {"G2": float(G2[u]), "df": int(df[u]), "gc": c, "sir": float(overall)}))
-    ledger.complete(test, float(p.min()) if p.size else 1.0, None, {"places": int(tested.sum()), "gc": c,
-                                                                    "hits": len(out)})
-    return out
+    return G2, df, big
+
+
+def _bh_by_scale(ps: list[np.ndarray], q: float) -> np.ndarray:
+    """One BH per scale at q / (number of scales), their rejections concatenated: the FDR of the family is
+    then at most q (the sum of the scales' shares), and the 27 states are not tested at the price of the 5,570
+    municipalities, as one BH over all units would charge them."""
+    return np.concatenate([control.bh(p, q / len(ps)) for p in ps])
 
 
 def _rr(observed: float, expected: float) -> float:
@@ -260,11 +307,28 @@ def trend_scores(s: surprise.Surprise, edges: np.ndarray) -> tuple[np.ndarray, n
     """Each place's trend β_u less its graph neighbours' mean, with the sd of that difference, the minimum
     divergence δ (a ratio TREND_PERIOD between the period's first and last year, in β's standardised units),
     and which places have neighbours."""
-    b, sd = s.extras["beta"], s.extras["beta_sd"]
+    diff, sd, has = _contrast(s.extras["beta"], s.extras["beta_sd"], edges, "neighbours")
+    return diff, sd, _trend_delta(s, "municipality"), has
+
+
+def _trend_delta(s: surprise.Surprise, scale: str = "municipality") -> float:
+    # β is per standard deviation of the years: a divergence δ_β over the standardised range of
+    # the period is a ratio TREND_PERIOD between its first and last year
+    yrs = s.years.astype(float)
+    span = (yrs.max() - yrs.min()) / max(yrs.std(), 1e-9)
+    ratio = TREND_PERIOD[scale] if isinstance(TREND_PERIOD, dict) else TREND_PERIOD
+    return float(np.log(ratio) / span)
+
+
+def _contrast(b: np.ndarray, sd: np.ndarray, edges: np.ndarray, reference: str
+              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The estimand's contrast of units' trends and its sd. ``neighbours``: β_u less the mean β of the
+    unit's graph neighbours; ``national``: β_u itself (B1 already carries the national course of the
+    field, so β is the departure from it)."""
     n = len(b)
-    A = np.zeros(n)
-    S = np.zeros(n)
-    V = np.zeros(n)
+    if reference == "national":
+        return b, sd, np.ones(n, dtype=bool)
+    A, S, V = np.zeros(n), np.zeros(n), np.zeros(n)
     for i, j in edges:
         A[i] += b[j]
         A[j] += b[i]
@@ -275,34 +339,94 @@ def trend_scores(s: surprise.Surprise, edges: np.ndarray) -> tuple[np.ndarray, n
     has = S > 0
     mean = np.divide(A, S, out=np.zeros(n), where=has)
     var = sd ** 2 + np.divide(V, S ** 2, out=np.zeros(n), where=has)
-    # β is per standard deviation of the years: a divergence δ_β over the standardised range of
-    # the period is a ratio TREND_PERIOD between its first and last year
-    yrs = s.years.astype(float)
-    span = (yrs.max() - yrs.min()) / max(yrs.std(), 1e-9)
-    return b - mean, np.sqrt(var), float(np.log(TREND_PERIOD) / span), has
+    return b - mean, np.sqrt(var), has
 
 
-def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05
+def _offset(s: surprise.Surprise) -> np.ndarray:
+    """The expectation B2's trends are departures from: B1's (the stored ``offset`` of a surrogate, the
+    generating mean; for fitted data B2's μ' without its place course)."""
+    if "offset" in s.extras:
+        return s.extras["offset"]
+    st = (s.years - s.years.mean()) / max(float(s.years.std()), 1e-9)
+    return s.mu / np.exp(s.extras["alpha"][:, None] + s.extras["beta"][:, None] * st[None, :])
+
+
+def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The trend β (per sd of the years) of each unit of ``scale`` as a departure from the field's
+    offset, its sd, and the unit's quasi-likelihood dispersion κ (≥ 1; its Pearson χ² per df around a smooth (cubic)
+    course; 1 at the municipality, whose β is B2's shrunk estimate). A coarser unit is one NB
+    cell series (Σy against Σμ, Var = Σ(μ + μ²/φ)), refitted by the same Newton as B2 with a vague prior."""
+    b, sd = s.extras["beta"], s.extras["beta_sd"]
+    if scale.name == "municipality":
+        return b, sd, np.ones(len(b))
+    off = _offset(s)
+    y, o = scale.sum(s.y), scale.sum(off)
+    inv = scale.sum(np.where(np.isfinite(s.phi) & (s.phi > 0), off ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
+    phi = np.divide(o ** 2, inv, out=np.full(o.shape, np.inf), where=inv > 0)
+    st = (s.years - s.years.mean()) / max(float(s.years.std()), 1e-9)
+    vague = lambda k: np.full(k, 1e-6)  # noqa: E731
+    _, bb, sdd, _ = surprise.refit_place(y, o, phi, np.stack([np.ones_like(st), st], axis=1), tau=vague(2))
+    # κ from a cubic course, not the line: the curvature of a real course is the estimand's own business (the
+    # slope is a functional of the course), only the scatter around a smooth course is noise
+    m, *_ = surprise.refit_place(y, o, phi, np.stack([st ** k for k in range(4)], axis=1), tau=vague(4))
+    var = m + np.where(np.isfinite(phi), m ** 2 / np.where(np.isfinite(phi), phi, 1.0), 0.0)
+    chi = np.divide((y - m) ** 2, var, out=np.zeros_like(m), where=var > 0).sum(1) / max(len(st) - 4, 1)
+    kappa = np.maximum(chi, 1.0)
+    return bb[:, 1], sdd[:, 1] * np.sqrt(kappa), kappa
+
+
+def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05,
+                     scales: list[scales_mod.Scale] | None = None, reference: str = "neighbours"
                      ) -> list[Finding]:
-    """From B2: a place's trend β_u against its graph neighbours' mean, in posterior sd. Two-sided."""
+    """From B2: a unit's trend β against ``reference`` (two declared estimands, P4): ``neighbours``, the
+    mean of its graph neighbours' β (a divergence from the surroundings), or ``national``, β itself (a
+    divergence from the field's national course). Units are those of each of ``scales`` (default: the
+    municipality): a trend shared by a whole state is a divergence only at the state's scale (municipality
+    against neighbouring municipality, it cancels). Two-sided against the minimum divergence δ, in posterior
+    sd (a coarser unit: Student t on T − 4 df, its sd inflated by its quasi-likelihood dispersion); all
+    units of all scales are one family, BH within each scale at q/(number of scales), so the scales are paid
+    for in the multiplicity."""
     if s.tier != "B2" or "beta" not in s.extras:
         raise ValueError("trend divergence reads B2's place trends")
-    family = f"trend_divergence|B2|{s.field.block}"
-    test = ledger.register(control.Hypothesis(family, "scan", {"lens": "trend_divergence", "field": s.field.id}))
-    b = s.extras["beta"]
-    n = len(b)
-    diff, sd, delta, has = trend_scores(s, edges)
-    var = sd ** 2
-    mean = b - diff
-    d = np.divide(diff, sd, out=np.zeros(n), where=has & (var > 0))
-    excess = np.divide(np.abs(diff) - delta, sd, out=np.zeros(n), where=has & (var > 0))
-    p = np.where(has, np.minimum(1.0, 2 * special.ndtr(-excess)), 1.0)
-    hits = np.nonzero(control.bh(p, q))[0]
-    out = [Finding("trend_divergence", s.field.id, "B2", {"places": [int(s.places[u])]}, float(d[u]), float(p[u]),
-                   {"beta": float(b[u]), "neighbours": float(mean[u]), "rate_ratio_per_sd_year": float(np.exp(b[u]))})
-           for u in hits]
-    ledger.complete(test, float(p.min()), None, {"places": int(has.sum()), "hits": len(out)})
+    if reference not in ("neighbours", "national"):
+        raise ValueError(reference)
+    sc = scales or [scales_mod.municipality(s.places)]
+    family = f"trend_divergence|B2|{s.field.block}" + ("" if reference == "neighbours" else "|national")
+    test = ledger.register(control.Hypothesis(family, "scan", {"lens": "trend_divergence", "field": s.field.id,
+                                                               "reference": reference,
+                                                               "scales": [x.name for x in sc]}))
+    dof = max(len(s.years) - 4, 1)
+    rows = []
+    for x in sc:
+        b, sd, kappa = unit_trends(s, x)
+        delta = _trend_delta(s, x.name)
+        diff, sdd, has = _contrast(b, sd, x.edges(edges) if x.name != "municipality" else edges, reference)
+        ok = has & (sdd > 0)
+        d = np.divide(diff, sdd, out=np.zeros(len(b)), where=ok)
+        excess = np.divide(np.abs(diff) - delta, sdd, out=np.zeros(len(b)), where=ok)
+        tail = special.ndtr(-excess) if x.name == "municipality" else stats.t.sf(excess, dof)
+        p = np.where(has, np.minimum(1.0, 2 * tail), 1.0)
+        rows.append((x, b, mean_ref(b, diff), d, p, kappa))
+    pool = np.concatenate([r[4] for r in rows])
+    hit = _bh_by_scale([r[4] for r in rows], q)
+    out, off = [], 0
+    for x, b, ref, d, p, kappa in rows:
+        for k in np.nonzero(hit[off:off + x.n])[0]:
+            locus = {"places": [int(s.places[u]) for u in x.members(k)]}
+            if x.name != "municipality":
+                locus.update(scale=x.name, unit=str(x.units[k]))
+            out.append(Finding("trend_divergence", s.field.id, "B2", locus, float(d[k]), float(p[k]),
+                               {"beta": float(b[k]), "neighbours" if reference == "neighbours" else "reference":
+                                float(ref[k]), "rate_ratio_per_sd_year": float(np.exp(b[k])),
+                                "scale": x.name, "dispersion": float(kappa[k])}))
+        off += x.n
+    ledger.complete(test, float(pool.min()), None, {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
     return out
+
+
+def mean_ref(b: np.ndarray, diff: np.ndarray) -> np.ndarray:
+    """The reference trend the contrast was taken against (β less the contrast)."""
+    return b - diff
 
 
 def default_graph(places: np.ndarray) -> np.ndarray:

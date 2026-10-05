@@ -115,7 +115,7 @@ The passes above for trend divergence and group disparity were seen before they 
 | lens / estimand | 1. positives | gate |
 |---|---|---|
 | change point | COVID-19 as a new cause, BP (declared beforehand): weighted recall 1.00 | **PASS at BP**, flagged (one positive) |
-| trend divergence | homicide divergence across UF borders (30 municipalities, ratio ≥ 1.5 over 2010–23): 7 findings, none documented; recall 0 | **FAIL**: declared positive not recovered |
-| group disparity | women's share by UF (10 UFs): weighted recall 0.048; young men's share (5 UFs): 0.003, Jaccard under 0.01 | **FAIL**: not recovered; the reference overstates women's share (9.98% against 8.2% observed) |
-| marks | no primary source for a shift of 3% or more | **FAIL**: no positive |
+| trend divergence | homicide divergence across UF borders (30 municipalities, ratio ≥ 1.5 over 2010–23): 7 findings, none documented; recall 0. **Redesigned over three scales (third round, lens-positives entry):** `neighbours` 0.048 (fails); `national` (2,289 municipalities, declared after one look) 0.66 at region and state, negatives 0 | **FAIL** for `neighbours`; `national` recovered, flagged: **not gated** |
+| group disparity | women's share by UF (10 UFs): weighted recall 0.048; young men's share (5 UFs): 0.003, Jaccard under 0.01 | **FAIL**: not recovered; the reference overstated women's share (9.98% against 8.2% observed), now re-levelled to the observed totals. Over three scales at sd 0.05 recall 0.97 and 0.94, but the spatial negatives reject every sd below 1.0: **FAIL** (negatives) |
+| marks | no primary source for a shift of 3% or more; floor recalibrated to 1.5% (PESO negatives); the 2005 Northeast–Southeast gap (2.4%) is B1-absorbed and of another period | **FAIL**: no positive |
 | E_w | the dengue–climate run is queued, not declared: exploratory | **not gated** |
