@@ -31,6 +31,24 @@
 
 **pegasus_data is developed from this session too** (since 2026-10-04): branch `pegasus-core-fixes` (ICD-10 COVID categories, border lengths, `logmoments`, pegasus_data's ADR on GBD).
 
+**Architecture learned from results** (each row: what a measurement showed, and where it now lives).
+
+| finding | architectural consequence | where |
+|---|---|---|
+| parameter uncertainty is ≤ 10% of the overdispersion | the uncertainty layer is not the calibration fix | ADR-0006, Laplace evaluation |
+| dispersion differs by region | φ_extra hierarchy (field → macro-region → state) | ADR-0006 |
+| BP misses the place's level, not the national one | BP is a mixture over regimes with the place's damped course | ADR-0009 |
+| raw-graph MSR is liberal; Dutilleul is slightly liberal | null and negatives on the normalised graph; δ_E calibrated | ADR-0005 |
+| replication split after selection measures homogeneity | event sides A/B/R; a conditional test; corroboration as a tier | ADR-0007 |
+| trend and disparity positives are state-level; the lenses were municipal | multi-scale lenses; the survey runs gated combinations only | §7.1, 9ee7774 |
+| post-hoc positives and criteria | positives declared and committed before running | lens-positives review |
+| epidemics and winters sit inside B2s | an epidemic is an outbreak at BP; a season is a calibration positive | §10.1 |
+| SIM race ≠ declared race; the infant matrix does not transport | race is a modelled confusion per population; adults stay "recorded race" | pegasus_data decisions 0143, 0149 |
+| the raw 2022 Census undercounts; POPSVS is IBGE's corrected projection | coverage is latent per census; POPSVS is modelled | census-coverage evaluation |
+| exposure variance double-counts φ | no exposure-variance term by default | ADR-0010 |
+| SIH leads are dominated by one hospital's coding | a facility triage class now; the institution lattice is raised in priority | facility triage (running) |
+| surveys ran on one core for hours | threaded surveys, a single model load | bef4b70 |
+
 **Fronts (2026-10-04).** Development runs as parallel fronts. Each front is owned end to end by one agent: code, live validation, evaluation entry. This file is where the fronts are coordinated.
 
 | front | ARCHITECTURE | state |
