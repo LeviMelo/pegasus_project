@@ -100,3 +100,23 @@ beta in log rate per sd-year (sd of 2010-19 = 2.87 years), survey / direct (att)
   4. *The offset's own misfit* (8, and five more in other tags). It lies in both halves and in later years because it lies in the model; a sensitivity against the year's observed national rate (as `relevel` does for the held-out years) removes it.
   5. *Completeness and denominators* produced no claim here; they remain possible above the 1.2x threshold and would show as a co-movement of the unit's all-cause slope, which should be a mandatory column of a unit claim.
 - **Not done / limits.** The 13 U are not substantive, only unseparated; certificate-level data (underlying against contributing causes) or the coding software versions by state would separate them, neither read. The direct standardisation uses the nation, which contains the unit; the survey's beta is kept as the claim, mine as the check. Completeness after 2011 is modelled. The reserve was not read and the 2 S need no spend; 54 of 57 keep their direction in 2020-23 under direct standardisation (W18 RN, W18 PE, R98 BA do not, all already A).
+
+## Correction (coordinator, 2026-10-05): "reclassification" here is a bound, not a measurement
+
+**The São Paulo case.** The X95 row's "about 60% moved to undetermined intent" was computed as (−0.19 − (−0.07)) / −0.19:
+- the assault family's slope is −0.19;
+- the slope after pooling with Y10–Y34 (undetermined intent) is −0.07.
+
+That is an **upper bound**, valid only if every additional undetermined-intent death were a hidden assault. The same aggregate numbers fit a real fall in assaults alongside an independent rise in undetermined deaths, for example from a decline in death investigation.
+
+**What the data show** is that combined violent deaths (assaults plus undetermined intent) still fall in São Paulo. Telling hidden homicides from other undetermined deaths needs individual-level evidence: whether undetermined deaths resemble homicides in weapon, place, age and sex. It was not done here.
+
+**The same caution applies to every "A-comp" / composition label in this entry,** which are of three kinds:
+
+| label | what it says | what it is not |
+|---|---|---|
+| composition | the family-level trend is flat while a code inside it moves | evidence that individual deaths were relabelled |
+| sibling substitution | two codes moving in opposite directions, with a conserved total | proof of who recoded what |
+| ill-defined to defined | the R group falling while defined causes rise | a measurement of recoding |
+
+**These labels are recording explanations that the aggregate data CANNOT EXCLUDE.** They are not established recodings. The claim's own effect remains possible.
