@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
-from . import control, fields, gateway, graphs, leads, store, surprise
+from . import config, control, fields, gateway, graphs, leads, monolith, store, surprise
 from .scans import explain, lenses
 
 LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
@@ -166,6 +166,182 @@ class Session:
         r1 = np.divide(mu[:, t1], N1, out=np.zeros_like(N1), where=N1 > 0)
         return explain.decompose(N0, r0, N1, r1)
 
+    # ---- triage and replication (§7.7, §8.3) ---------------------------------------------
+
+    def triage(self, register: list[leads.Lead] | None = None, replicate: bool = True, write: bool = True,
+               log=print) -> list[leads.Lead]:
+        """Classify every open lead of the session's dataset by the data's own evidence (substitution, system
+        artefact, noise, signal; `explain.triage`) and run the replication of §8.3 on the same arrays. The
+        verdict goes to ``lead.robustness["triage"]``, the tier to ``lead.replication``; leads read as
+        artefacts are marked `explained`. With ``write`` the new states are appended to the register."""
+        mine = [x for x in (register if register is not None else self.register.current())
+                if x.fields and x.fields[0].startswith(f"{self.dataset}:")]
+        by_node: dict[str, list[leads.Lead]] = {}
+        for x in mine:
+            by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
+        edges = self.edges() if replicate else None
+        for i, (node, group) in enumerate(sorted(by_node.items())):
+            ev = self._evidence(node)
+            index = {int(p): j for j, p in enumerate(self._grid_places)}
+            s = self.surprise(node, "B1") if replicate else None
+            half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
+            for x in group:
+                rows = np.array([index[int(p)] for p in x.locus.get("places", []) if int(p) in index], dtype=int)
+                span, direction = _span_direction(x)
+                st = x.provenance.get("stats", {})
+                if x.estimand == "group_disparity":
+                    ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
+                verdict = explain.triage(x.estimand, rows, span, direction, ev, st.get("observed"), st.get("expected"))
+                x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
+                                                           **verdict.evidence}}
+                if verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
+                    x.status = "explained"
+                if replicate:
+                    x.replications, x.replication = self._replicate(x, s, rows, span, direction, half, edges)
+            log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
+        if write:
+            self.register.add(mine)
+        return mine
+
+    def _prepare_grid(self) -> None:
+        """Every fitted block's observed counts (all causes, the ill-defined chapter) on one grid."""
+        if getattr(self, "_total", None) is not None:
+            return
+        blocks = self._blocks()
+        total = ill = pop = None
+        for b in blocks:
+            d = self._data(b)
+            n = self._counts(d, np.arange(len(d.leaves)))
+            total = n if total is None else total + n
+            if b == "XVIII":
+                ill = n
+            pop = d.N.sum(2)
+            self._grid_places, self._grid_years = d.places, d.years
+        self._total, self._ill, self._pop = total, ill, pop
+
+    def _data(self, block: str) -> monolith.BlockData:
+        """A block's cells, cached on disk: assembling one takes about a minute."""
+        cache = self.__dict__.setdefault("_blocks_data", {})
+        if block not in cache:
+            key = {"dataset": self.dataset, "event": self.event, "block": block, "years": self.years,
+                   "data": config.data_version(), "triage_block": 1}
+            hit = store.get_arrays("triage_block", key)
+            if hit is not None:
+                meta = store.manifest("triage_block", key)
+                cache[block] = monolith.BlockData(self.dataset, self.event, block, hit["years"], hit["places"],
+                                                  meta["leaves"], meta["groups"], hit["leaf_group"], hit["N"], hit["e"],
+                                                  hit["u"], hit["t"], hit["g"], hit["y"], key=key)
+            else:
+                d = monolith.assemble(self.dataset, self.event, block, self.years)
+                store.put_arrays("triage_block", key, {k: getattr(d, k) for k in
+                                 ("years", "places", "leaf_group", "N", "e", "u", "t", "g", "y")},
+                                 {"leaves": d.leaves, "groups": d.groups})
+                cache[block] = d
+        return cache[block]
+
+    @staticmethod
+    def _counts(d: monolith.BlockData, leaves: np.ndarray, by_group: bool = False) -> np.ndarray:
+        m = np.isin(d.e, leaves)
+        U, T, G = d.N.shape
+        if by_group:
+            return np.bincount((d.u[m] * T + d.t[m]) * G + d.g[m], weights=d.y[m], minlength=U * T * G).reshape(U, T, G)
+        return np.bincount(d.u[m] * T + d.t[m], weights=d.y[m], minlength=U * T).reshape(U, T)
+
+    def _leaves(self, node: str) -> tuple[monolith.BlockData, np.ndarray]:
+        reg = self.expectations.registry
+        d = self._data(reg.chapter(node))
+        pos = {c: i for i, c in enumerate(d.leaves)}
+        return d, np.array([pos[c] for c in reg.leaves(node) if c in pos], dtype=int)
+
+    def _evidence(self, node: str) -> explain.Evidence:
+        self._prepare_grid()
+        reg = self.expectations.registry
+        d, leaves = self._leaves(node)
+        y = self._counts(d, leaves)
+        parent = leads._parent(node)
+        sib = None
+        if reg.level.get(node) != "chapter" and parent != node and parent in reg.children:
+            others = [c for c in reg.children[parent] if c != node]
+            sl = np.concatenate([self._leaves(c)[1] for c in others]) if others else np.array([], dtype=int)
+            sib = self._counts(d, sl) if sl.size else None
+        return explain.Evidence(self._grid_years, y, sib, self._ill, self._total, self._pop, chapter=reg.chapter(node),
+                                residual=explain.residual_label(reg.label.get(node, "")))
+
+    def _by_group_cells(self, node: str) -> tuple[np.ndarray, np.ndarray]:
+        d, leaves = self._leaves(node)
+        return self._counts(d, leaves, by_group=True), d.N
+
+    def _trend_halves(self, s: surprise.Surprise, edges: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Per temporal half: every place's divergence from its neighbours' mean slope, per year, with its sd."""
+        out = []
+        for yrs in control.temporal_halves(s.years):
+            cols = np.isin(s.years, yrs)
+            x = (yrs - yrs.mean()) / max(yrs.std(), 1e-9)
+            _, b, sd, _ = surprise.refit_place(s.y[:, cols], s.mu[:, cols], s.phi[:, cols], np.stack([np.ones_like(x), x], 1))
+            n = len(b)
+            A, S, V = np.zeros(n), np.zeros(n), np.zeros(n)
+            for a, c in ((edges[:, 0], edges[:, 1]), (edges[:, 1], edges[:, 0])):
+                np.add.at(A, a, b[c, 1])
+                np.add.at(V, a, sd[c, 1] ** 2)
+                np.add.at(S, a, 1)
+            has = S > 0
+            diff = (b[:, 1] - np.divide(A, S, out=np.zeros(n), where=has)) / max(yrs.std(), 1e-9)
+            var = (sd[:, 1] ** 2 + np.divide(V, S ** 2, out=np.zeros(n), where=has)) / max(yrs.std(), 1e-9) ** 2
+            out.append((np.where(has, diff, 0.0), np.sqrt(var)))
+        return out
+
+    def _replicate(self, x: leads.Lead, s: surprise.Surprise, rows: np.ndarray, span: list[int] | None,
+                   direction: int, half, edges: np.ndarray) -> tuple[dict[str, Any], str]:
+        """R1: the effect in the temporal half the window does not touch (a trend: in both halves); R2: in both
+        spatial halves of a subset's places. Same sign, at least half the effect, one-sided p < 0.05 (`control.replication_tier`).
+        The expectation is B1 from the fit on all years, so these are splits of the evidence, not refits.
+        Neighbour support (the contiguous places outside the lead, same window) is recorded, not tiered."""
+        out: dict[str, Any] = {}
+        p_other: dict[str, tuple[float, float]] = {}
+        if x.estimand == "group_disparity" or direction == 0:
+            return {"untested": "no direction"}, "R0"
+        if x.estimand == "trend_divergence" and rows.size:
+            st = x.provenance["stats"]
+            yrs = s.years.astype(float)
+            full = (st["beta"] - st["neighbours"]) / max(yrs.std(), 1e-9)
+            ps = []
+            for (diff, sd), name in zip(half, ("first", "second"), strict=True):
+                z = direction * diff[rows[0]] / max(sd[rows[0]], 1e-12)
+                ps.append((direction * diff[rows[0]], float(stats.norm.sf(z))))
+                out[name] = {"per_year": float(diff[rows[0]]), "p": ps[-1][1]}
+            weak = min(ps, key=lambda t: t[0])
+            p_other["temporal"] = weak
+            out["ok"] = control.replicates(float(abs(full)), *weak)
+            out["full_per_year"] = float(full)
+            return out, control.replication_tier(float(abs(full)), p_other)
+        sign, full = direction, abs(np.log(max(x.effect, 1e-12)))
+        win = (s.years >= span[0]) & (s.years <= span[-1])
+        first, second = control.temporal_halves(s.years)
+        other = [np.isin(s.years, h) for h in (first, second) if not np.isin(s.years[win], h).any()]
+        if other:
+            eff, p = explain.split_effect(s.y, s.mu, s.phi, rows, other[0], sign)
+            out["temporal"] = {"log_rr": eff, "p": p, "ok": control.replicates(full, sign * eff, p)}
+            p_other["temporal"] = (sign * eff if np.isfinite(eff) else 0.0, p)
+        if len(rows) >= 2:
+            if getattr(self, "_region_of", None) is None:       # 8 s a call: once per session
+                self._region_of = dict(zip(s.places.tolist(), gateway.regions(s.places, "ibge_immediate_region"), strict=True))
+            region = self._region_of
+            a, b = control.spatial_halves(s.places[rows], region)
+            ia, ib = (np.nonzero(np.isin(s.places, h))[0] for h in (a, b))
+            if ia.size and ib.size:
+                parts = [explain.split_effect(s.y, s.mu, s.phi, r, win, sign) for r in (ia, ib)]
+                out["spatial"] = {"log_rr": [p[0] for p in parts], "p": [p[1] for p in parts], "ok": False}
+                weak = min(parts, key=lambda t: sign * t[0] if np.isfinite(t[0]) else -1e9)
+                p_other["spatial"] = (sign * weak[0] if np.isfinite(weak[0]) else 0.0, weak[1])
+                out["spatial"]["ok"] = control.replicates(full, *p_other["spatial"])
+        near = np.unique(np.concatenate([edges[edges[:, 0] == r, 1] for r in rows] +
+                                        [edges[edges[:, 1] == r, 0] for r in rows] + [np.array([], dtype=int)]))
+        near = near[~np.isin(near, rows)]
+        if near.size:
+            eff, p = explain.split_effect(s.y, s.mu, s.phi, near, win, sign)
+            out["neighbours"] = {"log_rr": eff, "p": p}
+        return out, control.replication_tier(float(full), p_other)
+
     # ---- agents ---------------------------------------------------------------------
 
     def confirm(self, node: str, lens: str, locus: dict[str, Any], q: float = 0.05) -> dict[str, Any]:
@@ -181,15 +357,7 @@ class Session:
         cols = (s.years >= yrs[0]) & (s.years <= yrs[-1])
         Y = float(s.y[np.ix_(rows, cols)].sum())
         M = float(s.mu[np.ix_(rows, cols)].sum())
-        mu_c, phi_c = s.mu[np.ix_(rows, cols)], s.phi[np.ix_(rows, cols)]
-        extra = float(np.sum(np.where(np.isfinite(phi_c), mu_c ** 2 / phi_c, 0.0)))
-        if M <= 0:
-            p = 1.0
-        elif extra <= 0:
-            p = float(stats.poisson.sf(Y - 1, M))
-        else:
-            n = M ** 2 / extra          # a sum of NB cells, moment-matched: Var = M + M²/n
-            p = float(stats.nbinom.sf(Y - 1, n, n / (n + M)))
+        p = explain.tail_p(Y, s.mu[np.ix_(rows, cols)], s.phi[np.ix_(rows, cols)])
         test = self.ledger.register(control.Hypothesis("confirm", "agent", {"field": node, "lens": lens,
                                                                             "locus": locus}, split="spatial:B"))
         lond = control.LOND(q)
@@ -201,3 +369,14 @@ class Session:
         self.ledger.complete(test, p, Y / M if M > 0 else None, {"lond": True, "rejected": hit, "observed": Y,
                                                                "expected": M})
         return {"tested": True, "p": p, "rejected": hit, "observed": Y, "expected": M, "places": places.tolist()}
+
+
+def _span_direction(x: leads.Lead) -> tuple[list[int] | None, int]:
+    """A lead's years (first, last) and its direction: +1 up, -1 down, 0 a pattern."""
+    span = x.locus.get("years")
+    if x.estimand == "group_disparity":
+        return span, 0
+    if x.estimand == "space_time":
+        return span, 1 if x.locus.get("direction") == "up" else -1
+    size = np.log(max(x.effect, 1e-12)) if x.scale == "rate_ratio" else x.effect
+    return span, int(np.sign(size))

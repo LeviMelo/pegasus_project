@@ -87,6 +87,23 @@ def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 
 @app.command()
+def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
+           replicate: bool = True) -> None:
+    """Classify the open leads (substitution, system, noise, signal) and replicate them (§7.7, §8.3)."""
+    from . import leads as register
+
+    s = _session(dataset, event, years, graph)
+    done = s.triage(replicate=replicate, log=lambda m: None)
+    counts = register.triage_counts(done)
+    t = Table("class", "leads", "R1", "R2", "R3", "top chapters")
+    for cls, row in sorted(counts.items(), key=lambda kv: -sum(v for k, v in kv[1].items() if not k.startswith("R"))):
+        ch = sorted(((k, v) for k, v in row.items() if not (k.startswith("R") and len(k) == 2)), key=lambda kv: -kv[1])
+        t.add_row(cls, str(sum(v for _, v in ch)), *(str(row.get(f"R{i}", 0)) for i in (1, 2, 3)),
+                  ", ".join(f"{k} {v}" for k, v in ch[:5]))
+    console.print(t)
+
+
+@app.command()
 def harness(dataset: str, event: str, node: str, lens: str, years: str = Years, graph: str = "contiguity",
             surrogates: int = 20, loci: int = 40, replicates: int = 100) -> None:
     """A lens's false-lead rate on surrogates and its power curve on planted signals (§10)."""

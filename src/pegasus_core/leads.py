@@ -190,4 +190,25 @@ def _parent(code: str) -> str:
     return _PARENTS.get(code) or code
 
 
+def chapter(code: str) -> str:
+    """The ICD-10 chapter above a code (the code itself for a chapter or an unknown code)."""
+    _parent("")
+    seen = 0
+    while _PARENTS.get(code) and seen < 10:
+        code, seen = _PARENTS[code], seen + 1
+    return code
+
+
+def triage_counts(register: list[Lead]) -> dict[str, dict[str, int]]:
+    """Triaged leads counted by class and by ICD chapter (``counts[class][chapter]``) and by replication tier
+    (``counts[class]["R1"]`` ...). Leads without a verdict are class ``untriaged``."""
+    out: dict[str, dict[str, int]] = {}
+    for x in register:
+        cls = x.robustness.get("triage", {}).get("class", "untriaged")
+        row = out.setdefault(cls, {})
+        for key in (chapter(x.fields[0].split(":")[-1]), x.replication):
+            row[key] = row.get(key, 0) + 1
+    return out
+
+
 _PARENTS: dict[str, str | None] | None = None

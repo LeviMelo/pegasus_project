@@ -221,18 +221,18 @@ def spatial_halves(places: np.ndarray, region_of: dict[int, str], seed_text: str
     return places[in_a], places[~in_a]
 
 
+def replicates(effect_full: float, effect: float, p: float, alpha: float = 0.05) -> bool:
+    """One split replicates the full-data effect: same sign, at least half its size, one-sided p below alpha."""
+    return bool(np.isfinite(effect) and np.sign(effect) == np.sign(effect_full)
+                and abs(effect) >= abs(effect_full) / 2 and p < alpha)
+
+
 def replication_tier(effect_full: float, p_other: dict[str, tuple[float, float]], alpha: float = 0.05) -> str:
     """The highest tier reached: R1 temporal, R2 spatial, R3 system (ARCHITECTURE §8.3).
     ``p_other`` maps split name → (effect, one-sided p) in that split."""
-    def ok(name: str) -> bool:
-        if name not in p_other:
-            return False
-        eff, p = p_other[name]
-        return np.sign(eff) == np.sign(effect_full) and abs(eff) >= abs(effect_full) / 2 and p < alpha
-
     tier = "R0"
     for name, label in (("temporal", "R1"), ("spatial", "R2"), ("system", "R3")):
-        if ok(name):
+        if name in p_other and replicates(effect_full, *p_other[name], alpha):
             tier = label
         else:
             break
