@@ -28,6 +28,7 @@ parser.add_argument("--prior", default="gaussian", help="the tree levels' prior:
 parser.add_argument("--tag", default="", help="a label kept in the row")
 parser.add_argument("--profile", default="block", help="the profile carrier: group (outermost ICD group), block (innermost) or category")
 parser.add_argument("--geography", default="group", help="the carrier of history and place effects, at or above --profile")
+parser.add_argument("--geo-pool", type=float, default=0.0, help="pool the geography carriers below this share of the block's events")
 parser.add_argument("--event", default="", help="the event (default by dataset: death, hospitalisation, birth, notification)")
 parser.add_argument("--mean-tol", type=float, default=1.0, help="fit(mean_tol=): the outers' Newton steps end below this predicted decrease")
 args = parser.parse_args()
@@ -46,7 +47,7 @@ for spec in args.blocks.split(","):
     dataset, block = spec.split(":")
     t0 = time.time()
     event = args.event or EVENTS.get(dataset, "notification")
-    data = monolith.assemble(dataset, event, block, years, profile=args.profile, geography=args.geography, grain=args.grain)
+    data = monolith.assemble(dataset, event, block, years, profile=args.profile, geography=args.geography, geo_pool=args.geo_pool, grain=args.grain)
     t_asm = time.time() - t0
     model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity", likelihood=args.likelihood, prior=args.prior,
                               **({"rank": args.rank} if args.rank else {}))
@@ -55,7 +56,7 @@ for spec in args.blocks.split(","):
               log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
-    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "likelihood": args.likelihood, "prior": args.prior, "tag": args.tag, "profile": args.profile, "geography": args.geography, "solver": "v1", "start": "warm" if args.warm else "cold", "mean_tol": args.mean_tol,
+    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "likelihood": args.likelihood, "prior": args.prior, "tag": args.tag, "profile": args.profile, "geography": args.geography, "geo_pool": args.geo_pool, "solver": "v1", "start": "warm" if args.warm else "cold", "mean_tol": args.mean_tol,
            "commit": commit, "seconds": round(secs, 2), "assemble_seconds": round(t_asm, 2),
            "outers": len(model.history), "newton": len(model.newton_log),
            "objective": float(model.objective()) * model._objective_norm(), "phi": model.phi,
@@ -66,7 +67,7 @@ for spec in args.blocks.split(","):
     row["history"] = [{"mean_s": round(h.get("mean_seconds", 0), 2), "tau_s": round(h.get("tau_seconds", 0), 2),
                         "newton": h.get("newton"), "change": round(h.get("change", 0), 4)} for h in model.history]
     if args.heldout:
-        test = monolith.assemble(dataset, event, block, range(last + 1, args.heldout + 1), profile=args.profile, geography=args.geography, grain=args.grain)
+        test = monolith.assemble(dataset, event, block, range(last + 1, args.heldout + 1), profile=args.profile, geography=args.geography, geo_pool=args.geo_pool, grain=args.grain)
         h = monolith.heldout(model, test)
         row["heldout"] = {"years": [last + 1, args.heldout], "deviance_per_event": h["deviance_per_event"],
                           "nb_loglik_per_event": h["nb_loglik_all"] / h["events"], "events": h["events"]}

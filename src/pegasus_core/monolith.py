@@ -19,6 +19,7 @@ cell is ever formed. φ is estimated afterwards by moments (§5.2).
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import hashlib
 import inspect
@@ -139,7 +140,7 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
              source: str = "events", grain: str = "year", population: str | None = None, cache: bool = True,
-             geography: str | None = "group", **source_args) -> BlockData:
+             geography: str | None = "group", geo_pool: float = 0.0, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway, memoised in the store (kind ``blockdata``).
 
     The 10.7 M cells of SIH chapter X monthly took 467 s to assemble, and every variant of a fit (train and
@@ -152,7 +153,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     if block == "*":
         profile, geography = "group", None          # no classifier tree: one leaf, nothing to carry
     if not cache:
-        return _assemble(dataset, event, block, years, profile, source, grain, population, geography, **source_args)
+        return _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool,
+                         **source_args)
     ys = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, ys.tolist(), source, **source_args)
@@ -161,7 +163,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     for name in pop.column_names:
         h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
     key = {"what": "blockdata", "dataset": dataset, "event": event, "block": block, "years": ys.tolist(),
-           "profile": profile, "geography": geography, "source": source, "grain": grain, "args": source_args,
+           "profile": profile, "geography": geography, **({"geo_pool": geo_pool} if geo_pool else {}),
+           "source": source, "grain": grain, "args": source_args,
            "data": config.data_version(),
            **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code(),
            **({} if block == "*" else {"tree": config.resource_version("code_trees.parquet"),
@@ -169,7 +172,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     arrays, meta = store.get_arrays("blockdata", key), store.manifest("blockdata", key)
     if arrays is not None and meta is not None:
         return _blockdata_from(arrays, meta)
-    data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, **source_args)
+    data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool, **source_args)
     store.put_arrays("blockdata", key, *_blockdata_to(data))
     return data
 
@@ -226,7 +229,7 @@ def _blockdata_from(a: dict[str, np.ndarray], m: dict) -> BlockData:
 
 def _assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
               source: str = "events", grain: str = "year", population: str | None = None, geography: str | None = "group",
-              **source_args) -> BlockData:
+              geo_pool: float = 0.0, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
@@ -235,6 +238,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     C51-C58: ICD-10 groups nest, pegasus_data's tree since 2026-10-06) or ``category`` (each category its own).
     ``geography`` is the level that carries history and the place effects (h, s, v and season by group), a level at
     or above ``profile`` (None: the same; ``chapter``: one for the block): each profile carrier lies in one.
+    ``geo_pool`` > 0 pools the geography carriers holding less than that share of the block's events into one (their
+    place effects are shrunk to nothing, and each costs two unknowns at every place).
     ``source`` chooses the gateway reader, each giving cells of (u, year, sex, age, code):
 
         events       counts of the event type (y)
@@ -376,7 +381,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            **({} if source == "events" else {"source": source, **source_args}),
            **({} if grain == "year" else {"grain": grain}),
            **({"admissible": 2} if not group_cells.all() or never else {}),
-           **({} if group_outer is None else {"geography": geography})}
+           **({} if group_outer is None else {"geography": geography}),
+           **({"geo_pool": geo_pool} if geo_pool and group_outer is not None else {})}
     y = sums[CELL_MEAN[source]] / sums["n"] if source in CELL_VALUES else sums["y"]
     lg = np.array([gidx[carrier[c]] for c in categories])
     excluded = ~group_cells[lg[e], g]
@@ -399,6 +405,17 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         unallocated["no population in the cell"] = unallocated.get("no population in the cell", 0) + int(w.sum())
         e, u, t, g, y = e[live], u[live], t[live], g[live], y[live]
         sums = {v: x[live] for v, x in sums.items()}
+    if geo_pool and group_outer is not None:
+        w = sums["n"] if source in CELL_VALUES else y
+        lg_e = np.array([gidx[carrier[c]] for c in categories])[e]
+        share = np.bincount(group_outer[lg_e], weights=w, minlength=len(outer_groups)) / max(float(w.sum()), 1e-300)
+        small = share < geo_pool
+        if small.sum() >= 2:
+            keep_o = [o for o in range(len(outer_groups)) if not small[o]]
+            remap = {o: i for i, o in enumerate(keep_o)}
+            pooled = len(keep_o)
+            group_outer = np.array([remap.get(int(o), pooled) for o in group_outer], dtype=np.int64)
+            outer_groups = [outer_groups[o] for o in keep_o] + ["(pooled)"]
     data = BlockData(dataset, event, block, years, places, categories, groups,
                      np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key,
                      S=S, population=population, group_cells=None if group_cells.all() else group_cells,
@@ -1051,6 +1068,15 @@ class Monolith:
         exposed_t, exposed_g = Ntg.sum(axis=1) > 0, Ntg.sum(axis=0) > 0
         sm = np.ones((nK, nG)) if self._emask is None else self._emask.cpu().numpy()
         ok = exposed_g[None, :] & (sm > 0)                                   # [K, G]: a group's exposed cells
+        # the margins made consistent: a margin with no events counts half an event, so each group's course and profile
+        # margins are rescaled to its leaves' total; inconsistent margins have no IPF solution, and a small restricted
+        # group's scale ran to overflow (F53, SIM V, 2026-10-06)
+        tot_k = np.bincount(grp, weights=O_e, minlength=nK)
+        O_kt = np.where(exposed_t[None, :], O_kt, 0.0)
+        O_kt = O_kt * (tot_k / np.maximum(O_kt.sum(axis=1), 1e-300))[:, None]
+        O_kg = np.where(ok, O_kg, 0.0)
+        O_kg = O_kg * (tot_k / np.maximum(O_kg.sum(axis=1), 1e-300))[:, None]
+        O_kt, O_kg = np.where(exposed_t[None, :], O_kt, 1.0), np.where(ok, O_kg, 1.0)
         a, b, c = np.zeros(nE), np.zeros((nK, nT)), np.zeros((nK, nG))
         for _ in range(200):
             a_old = a.copy()
@@ -1061,6 +1087,9 @@ class Monolith:
             b = np.where(exposed_t[None, :], np.log(O_kt) - np.log(np.where(exposed_t[None, :], den, 1.0)), 0.0)
             den = A[:, None] * (np.exp(b) @ Ntg)                                 # [K, G]
             c = np.where(ok, np.log(O_kg) - np.log(np.where(ok, den, 1.0)), 0.0)
+            # the per-group scale held fixed every sweep (the leaves' a takes it at the next): profile and course at mean 0
+            c = np.where(ok, c - ((c * ok).sum(axis=1) / np.maximum(ok.sum(axis=1), 1))[:, None], 0.0)
+            b = b - b.mean(axis=1, keepdims=True)
             if np.abs(a - a_old).max() < 1e-10:
                 break
         # the IPF fixes each group's leaves × profile × course only up to a scale per group: put each profile's mean over
@@ -1628,13 +1657,13 @@ class Monolith:
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
              graph_kind: str = "contiguity", profile: str = "block", device: str = "cpu", rank: int = 0,
-             geography: str | None = "group",
+             geography: str | None = "group", geo_pool: float = 0.0,
              prior: str = "gaussian", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
         interaction's R (0: the base model)."""
         from . import graphs
 
-        data = assemble(dataset, event, block, years, profile, geography=geography, **source)
+        data = assemble(dataset, event, block, years, profile, geography=geography, geo_pool=geo_pool, **source)
         model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device, **({"rank": rank} if rank else {}),
                     **({"prior": prior} if prior != "gaussian" else {}))
         arrays = store.get_arrays("monolith", model.key())
@@ -2002,6 +2031,9 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
     if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
             or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
+    if test.outer_groups != model.data.outer_groups:
+        # the geography carriers are the fit's: a pooled carrier (`geo_pool`) is decided on the fitted years' shares
+        test = dataclasses.replace(test, group_outer=model.data.group_outer, outer_groups=model.data.outer_groups)
     tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device), rank=model.rank)
     if model.ix_on:
         tm._enable_interaction(model.ixl.cpu().numpy())

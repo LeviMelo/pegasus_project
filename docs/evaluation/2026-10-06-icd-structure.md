@@ -119,6 +119,12 @@ The table gives held-out NB log-likelihood per death. The geography carrier keep
 
 Starts with the rules on now match those with the rules off (I: 227,124 against 213,350; IV: 1,155,821 against 1,152,722), and the fitted objective is lower with the rules on.
 
+**A third defect showed on chapter V in the refits.**
+- A small restricted group (F53, women 10–54) has margins that are mutually inconsistent once a margin with no events counts half an event.
+- The IPF then has no solution, and its free scale overflowed before the gauge was fixed.
+- Each group's course and profile margins are now rescaled to its leaves' total, and the gauge is fixed at every sweep.
+- V now starts at 540,775 and reaches 494,625 after eight Newton steps. The starts of I, IV and IX are unchanged (227,100; 1,155,819; 2,616,540).
+
 ## The adopted configuration, held out (`data/q_final.log`)
 
 ADR-0024's defaults (block profiles, group geography, admissibility, the corrected start), fitted one block at a time on a calm machine. The table gives held-out NB log-likelihood per death, 2022–23.
@@ -165,7 +171,7 @@ The low-rank interaction (ADR-0021) failed its first factorisation on XIII (66 k
 
 **Verification:**
 - IX at rank 1 under the group carrier converged in 12 outers, held-out −1.62539 against the morning's −1.62807 (`data/ix_r1_regress.log`).
-- XIII at rank 1 with both fixes (`data/ix_radius.log`): no factorisation fails. The ω strengths wander along their own s/v ridge for a dozen outers, then the objective falls monotonically (282,425 → 282,360 → 282,317 by outer 15). Whether rank 1 earns its place on a sparse block is O2's question.
+- XIII at rank 1 with both fixes (`data/ix_radius.log`): no factorisation fails. The ω strengths wander along their own s/v ridge for a dozen outers, then settle. The fit converges in 36 outers (891 s beside five other jobs), held-out −4.44605 against rank 0's −4.44564: on this sparse block the term does not pay, which is O2's question to answer across blocks.
 
 ## The strengths' stopping tolerance
 
@@ -178,3 +184,15 @@ The outers stop when the strengths' predicted LAML gain falls below `PEGASUS_LAM
 | XIII | 11 → 11 | −4.44564 → −4.44564 |
 
 The default is now 1.0. XIII's outers end on the strengths' change, not on the gain.
+
+## Geography by chapter: not adopted
+
+`geography="chapter"` gives one place effect and one course per block, with each leaf's own place deviation, and a place system of 2 unknowns per place. Held out against group geography (`data/q_geo_chapter.log`):
+
+| block | NB loglik per death, change | outers |
+|---|---|---|
+| II | −0.0009 | 8 |
+| IX | −0.0016 | 4 (21 s against 37 s) |
+| XX | −0.0116 | 6 |
+
+XX loses about 3,500 units over 304 k deaths: transport accidents, falls and homicides do not share a geography. The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
