@@ -28,7 +28,7 @@ def main(dataset: str, event: str, first: int, last: int, graph: str, blocks: li
             data = monolith.assemble(dataset, event, block, range(first, last + 1), **source)
             events = data.n.sum() if data.n is not None else data.y.sum()
             print(f"ASSEMBLED {block} nnz {len(data.y)} events {events:.0f} {time.time() - start:.0f}s", flush=True)
-            cls = monolith.MarkModel if source.get("source") == "mark" else monolith.Monolith
+            cls = monolith.model_class(source)
             model = cls(data, graphs.graph(data.places, graph), graph,
                                       device=os.environ.get("PEGASUS_DEVICE", "cpu"))
             # warm start from the best related stored fit and a mean fit that stops at one log-likelihood unit per outer

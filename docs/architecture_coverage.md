@@ -10,9 +10,9 @@
 
 | status | items |
 |---|---|
-| BM built and measured | 114 |
+| BM built and measured | 116 |
 | BU built, unmeasured | 12 |
-| P partial | 48 |
+| P partial | 46 |
 | NB not built | 41 |
 | SS superseded | 1 |
 | total | 216 |
@@ -21,15 +21,15 @@
 
 | # | gap | ARCH | why it ranks here | §13 |
 |---|---|---|---|---|
-| 1 | **No completeness term κ and no SUS-dependent population variant.** Every block is per resident of POPSVS; SIH and SIA are not rates of the people they serve. pegasus_data ships `system-completeness-1/2` (SIM, SINASC × UF × 2000-2023) and `sus-dependent-1` (2021-22 only) | 4.1, 3.1 | SIH rates are per resident, not per SUS-dependent person, and SIH geography is two utilization factors (50 % of the variance, ADR-0018); whether the missing exposure explains part of the first is untested (ADR-0018 ties it weakly to SUS beds). Completeness was tried only as an explanation of the 57 replicated SIM claims and explained none (`E:replicated-claims-read`), never as a term. `sus-dependent-1` covers 2021-22; the fits cover 2010-2023 | no |
-| 2 | **Race is not in the groups g.** No recorded-race confusion Σ C(k\|j) μ; groups are sex × age band only. pegasus_data has `race_confusion_infant`, `race_confusion_women` (ADR-0143, 0149) and the account's race dimension (account-3+). PegaSUS only measured the bridge (`E:race-bridge-infant`) | 4.1, 3.1 | The author asked for it by name; race is the one stratum whose raw rates invert the ordering (2022 infant mortality per 1,000, Preta: 5.5 raw, 15.8 bridged, 15.1 truth; STATUS race-bridge row). No lens or pair can see a racial disparity | no |
+| 1 | **Completeness κ and the SUS-dependent population are built as opt-in exposure modifiers (ADR-0020, 2026-10-05); their refits are not read.** (Original gap: no completeness term κ and no SUS-dependent population variant.) Every block is per resident of POPSVS; SIH and SIA are not rates of the people they serve. pegasus_data ships `system-completeness-1/2` (SIM, SINASC × UF × 2000-2023) and `sus-dependent-1` (2021-22 only) | 4.1, 3.1 | SIH rates are per resident, not per SUS-dependent person, and SIH geography is two utilization factors (50 % of the variance, ADR-0018); whether the missing exposure explains part of the first is untested (ADR-0018 ties it weakly to SUS beds). Completeness was tried only as an explanation of the 57 replicated SIM claims and explained none (`E:replicated-claims-read`), never as a term. `sus-dependent-1` covers 2021-22; the fits cover 2010-2023 | no |
+| 2 | **Race groups are built as race-stratified blocks (ADR-0020), unmeasured.** (Original gap: race is not in the groups g.) No recorded-race confusion Σ C(k\|j) μ; groups are sex × age band only. pegasus_data has `race_confusion_infant`, `race_confusion_women` (ADR-0143, 0149) and the account's race dimension (account-3+). PegaSUS only measured the bridge (`E:race-bridge-infant`) | 4.1, 3.1 | The author asked for it by name; race is the one stratum whose raw rates invert the ordering (2022 infant mortality per 1,000, Preta: 5.5 raw, 15.8 bridged, 15.1 truth; STATUS race-bridge row). No lens or pair can see a racial disparity | no |
 | 3 | **The low-rank place × time interaction ψωτ is not built.** Patterns across blocks (CP-APR) are a stand-in that never reached the survey | 4.2, 4.3, 7.4 | The only model term for a shared place-time factor; without it SIH relations are patched in Z (ADR-0018) and the dependency map is read net of factors by hand | yes (4.2) |
 | 4 | **The horseshoe on tree levels is not built:** iid Gaussian per level, per block | 4.3 | Tree pooling is the model's main device for sparse categories; the shrinkage is not the one declared and pooling per chapter was never measured (`P` row 5.4) | yes (4.3) |
 | 5 | **No top model, no two-level fit, no model-choice loop.** Blocks are fitted independently; nothing shares hyperpriors or offsets; held-out choice is a script run on chapter IX twice (graph, then profile) | 5.4 | The profile=category fit on IX scores 2.143 deviance per event held out against 2.218 for the default (profile=group): 3.4 % better, in `data/logs/heldout_ix.log` only, in no evaluation, with OQ-3 still open and the default unchanged | **no** |
 | 6 | **Marks: one type, one field.** Only the log-normal mark and only SINASC `PESO`. SIH length of stay, cost, ICU days, death in hospital (declared `model: mark` in pegasus_data), SINASC gestational weeks, Apgar, prenatal visits: not fitted. No case-mix, no institution effect on a mark, no count / ordinal / beta-binomial mark | 4.4 | The P2 principle (events *and marks* are modelled) holds for one field. The lenses that would catch an institution's practice (stay, cost) have no input | no (only the missing positive, 10.1) |
 | 7 | **The institution layer stops at a first stage:** facility steps and an opt-in supply term for SIH annual; no E_i pair, no crossed place × facility effects in the likelihood, no SIM `CODESTAB` lattice, SIH leads only for chapter X | 4.5, 7.5 | 34 % of chapter X signals were one hospital's coding (ADR-0014/0016); the 15 strongest left are sole-provider hospitals the rule cannot tell from the place. Surveys of the other SIH chapters are running detached in separate ledgers (`E:sih-full-readout`, not yet in the register); chapter XV fails calibration by a dispersion that does not fall with place size | yes (4.5) |
 | 8 | **Replication has found almost nothing, and the reserve is unspent:** 333 of 7,496 SIM leads R1, none R2/R3, no SIM signal corroborated; SIH leads (25,732) all R0; the SIM.DO 2024 reserve held for the author | 8.3 | The pipeline can state no confirmed lead. Corroboration needs independent systems: SIA/APAC is declared in pegasus_data (ADR-0147) and never read | no (open question 7) |
-| 9 | **The admission rule and the δ are provisional, and their text is gone.** §8.4 is missing from the document; admission is still `1,000 events / 5 % of units`, not the power-curve rule; θ0 = 1.2 for outbreak, change point, space-time is the uncalibrated provisional value; a miscalibrated field is not kept out of pair scans (invariant 8) | 8.4, 11.4 | Every survey count in this document depends on the admission rule; P5 and P7 say no unmeasured constant is a gate | partly (8.4 row only for spatial cluster) |
+| 9 | **The admission rule is now the power-curve rule (ADR-0022, 2026-10-05); θ0 below 1.2 and the map under invariant 8 are still to be read.** Admission: lens power for a rate ratio planted over a macro-region and window, outbreak, space-time and spatial cluster at 2.0 (they never reach 0.5 at 1.5), change point at 1.5; pairs by E_b power at ρ = 0.3; a field miscalibrated at B1 (map) or at its tier (E_w) is excluded from pair scans in code. Open: the θ0 calibration (queued), the map re-run, the survey counts below, trend and group power at the reference | 8.4, 11.4 | Every survey count in this document predates the rule and is measured with the former 1,000 events / 5 %; P5 and P7 lose the admission constant | yes (8.4, 11.4 rows) |
 | 10 | **Coverage of the data is narrow and stale in places.** Fitted: SIM 19 chapters, SIH 20 chapters (production survey: X; the rest running detached), SINASC 3, SINAN DENG and LEPT. Never read: SIA (APAC AQ/AR/AN/ATD, PA), CIHA, CNES-ST events, 54 of 58 SINAN agravos, REGIC and the care-flow graph, the climate field in the gateway (read only by `data/p2` scripts), the SIH-SIM link. `SIM.DO` chapter XVII has no fit under the current exposure key (`Session.fields("XVII")` raises `LookupError`: since `3e5c9fb` the default exposure of a newborn-exposure block is `hybrid` and the stored fit predates it, as the SIH XVI readout found) | 3.1, 12 | The "all the data it reads through pegasus_data" of §1 is four systems and two infections | no |
 
 Also silent in §13 and ranked below these: the imports of `pegasus_data` outside `gateway` (config, corroborate, facility, fields; invariant 1); no survey-per-data-update trigger (§9.3); no `Session.compare`/`subset_scan`/`cohort`/`records`; the `RECORDING` flag is not served; the population-scaled iid part of BYM2; list effects and graph mixtures; scan across fields (§7.3); the observation lens.
@@ -50,7 +50,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | P4 estimands declared | P | E_b, E_b\|Z, E_w ledgered apart; two trend references | E_i and across-system estimands not built (7.5) |
 | P5 test against a minimum relevant effect | BM | ADR-0005 (δ_E), `E:harness-gate` (θ0), `E:lens-positives` | θ0 = 1.2 provisional for three lenses; group disparity not calibratable |
 | P6 structure priors on levels, never on relations | BU | no relation prior exists in the code | no check beyond reading the code |
-| P7 every strength learned or measured | P | τ's by Fellner-Schall; δ by negatives | admission 1,000/5 %, KS .03, `FAC_K` 3, `FAC_SHARE` 70 %, `NEW_CATEGORY_ALARM` 5, θ0 1.2 remain set constants |
+| P7 every strength learned or measured | P | τ's by Fellner-Schall; δ by negatives | KS .03, `FAC_K` 3, `FAC_SHARE` 70 %, `NEW_CATEGORY_ALARM` 5, θ0 1.2 remain set constants |
 | P8 observed stays observed; modelled typed with uncertainty | P | `E:exposure` (accounts 2-6 carry σ), ADR-0010 | default is POPSVS (no uncertainty); κ, race, SUS-dependent not read |
 | P9 nothing trusted before the harness | P | `E:harness-gate`: outbreak, space-time, E_b pass | change point has a positive at BP only; trend (neighbours), group disparity fail; marks, E_w, E_i without positives; SIH survey leads exist |
 | P10 no dense object larger than the population tensor | BM | `E:fit-throughput`, `E:survey-throughput` | none |
@@ -59,7 +59,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 
 | item | status | evidence | gap |
 |---|---|---|---|
-| rule 1: every input through `gateway`, the only importer | P | `gateway.py` is the reader; invariant 1 | `config.py`, `corroborate.py` (S2iD, SINAN direct), `facility.py`, `fields.py` import `pegasus_data` themselves; §13 silent |
+| rule 1: every input through `gateway`, the only importer | BM | `gateway.py` is the only module importing `pegasus_data` (checked by `grep`); `config.py`, `corroborate.py`, `facility.py`, `fields.py` reach it through `gateway.package_version`, `package_dir`, `nothing_published`, `roles`, `event_type`, `raw_event_counts`, `raw_field` | fixed 2026-10-05 (was four direct importers) |
 | rule 2: meaning and data belong in pegasus_data, requested by handoff | BU | `docs/handoffs/`, `data/handoffs/` | enforced by practice only |
 | rule 3: never write into pegasus_data's home | BU | `config.population_root` reads only | none observed |
 | pegasus_view presents leads later | NB | | no export of leads to the frontend |
@@ -76,8 +76,8 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | structure: ordinal, cyclic | BM | `structures.random_walk` | none |
 | graph | P | contiguity (border length), contiguity01, distanceH, knnK in `graphs.py` | care-flow, REGIC, health-region graphs and mixtures unused |
 | population: POPSVS and accounts | BM | `E:exposure`, `E:census-coverage`, ADR-0010 | POPSVS default; the account loses to it except at age 0 (`hybrid`) |
-| population: SUS-dependent variant | NB | pegasus_data `sus-dependent-1` (2021-22) | not read |
-| population: completeness by system, place, year | NB | pegasus_data `system-completeness-1/2` | not read as a term; diagnostic in `E:replicated-claims-read` |
+| population: SUS-dependent variant | BU | `gateway.sus_share` (`sus-dependent-2`, 2021-23) | unmeasured, see 4.1 row |
+| population: completeness by system, place, year | P | `gateway.completeness` (`system-completeness-2`, UF × year) | read as a modifier, opt-in; no municipal completeness exists |
 | aggregates: sparse counts, mark accumulators | P | `gateway.event_counts`, `mark_moments` (own DuckDB SQL) | pegasus_data's `logmoments` aggregate not used |
 | records and linked persons | P | `scans/cohort.py`; links used in `data/cohort_infant.py`, `data/agent_race/` | no API: `cohort()` and `records()` of §9.3 absent |
 | lattice cell (u, t, g) | BM | `monolith.BlockData` | none |
@@ -92,11 +92,11 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | item | status | evidence | gap |
 |---|---|---|---|
 | 4.1 NegBin with block dispersion φ_b | BM | `E:chapter-ix-first-fit` (φ 5.98), ADR-0006 | none |
-| 4.1 κ_{s,u,t} completeness of the system | NB | no `kappa` in `monolith.py` | not in §13 |
+| 4.1 κ_{s,u,t} completeness of the system | P | `gateway.completeness`, `popsvs+kappa` (ADR-0020); `E:exposure-41` refit-free: IX NLL -0.12 %, residual slope 2.3 | opt-in; refits `popsvs+kappa` queued; SIH, SINAN have none | yes (4.1) |
 | 4.1 N^(v): all residents | BM | `E:exposure` | none |
-| 4.1 N^(v): SUS-dependent for SIH, SIA | NB | | not in §13 (gap 1) |
+| 4.1 N^(v): SUS-dependent for SIH, SIA | BU | `gateway.sus_share`, `popsvs+sus` (ADR-0020) | 2021-23 only (earlier: frozen share with measured σ); SIH IX fit queued; ANS TabNet 2008-2020 needed in pegasus_data | yes (4.1) |
 | 4.1 exposure variance of N | BM | `Monolith.exposure_variance`; ADR-0010 (double counts φ, off by default) | §13 row open |
-| 4.1 race in groups, μ^rec = Σ_j C(k\|j) μ_j | NB | | not in §13 (gap 2); pegasus_data bridges exist |
+| 4.1 race in groups, μ^rec = Σ_j C(k\|j) μ_j | BU | `race=` blocks, `+confusion`, `declared_ratios` (ADR-0020) | race-stratified, not an axis of G; fits and the ratio check against the linked truth not run | yes (4.1) |
 | 4.2 θ_e along the tree path | P | `th_grp`, `th_cat` | two levels (ICD block, category); no deeper path |
 | 4.2 list terms θ_L | NB | | not in §13 |
 | 4.2 g_e(u) carried to ℓ_g | P | `s_all, v_all, s_grp, v_grp, v_cat` | §13 row 4.2 (v_cat added) |
@@ -220,7 +220,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 8.3 event split for sizes | BM | `E:replication` | |
 | 8.3 reserved period SIM.DO 2024 | BU | `control.RESERVED_PERIODS`, `ReservedPeriod` guard | never opened; three `confirm`-family rows are declarations, not spends |
 | 8.3 tiers R0..R3 | BM | `E:replication-independent-units` (333 of 7,496 R1; 0 R2/R3) | SIH register untiered beyond R0 (25,732) |
-| 8.4 admission rule and minimum effects | P | `fields.admission` (1,000 events, 5 % of units), `lenses.py` θ0, `pairs.MIN_EFFECT` | **section lost from ARCHITECTURE.md**; power-curve admission not applied; θ0 1.2 provisional |
+| 8.4 admission rule and minimum effects | P | `fields.admission` (power curves, `admission_curves.json`), `lenses.py` θ0, `pairs.MIN_EFFECT` | section restored; power-curve admission applied (ADR-0022); θ0 1.2 provisional until the calibration below 1.2 is read |
 | 8.5 mechanical overlap | BM | `fields.overlap`, `gateway.field_overlap`, `maps` | **section lost**; the 0.05 rule stated in 7.6 and 11.4 |
 
 ## §9 Leads, the ledger, use
@@ -275,7 +275,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 11.2 Python first, Arrow at boundaries | BM | | `control`, `leads` read their own Parquet |
 | 11.3 homes and artefact layout | BM | `pegasus_home/` | ten ledger and eleven register variants beside the production ones |
 | 11.3 keys hash data versions; stale never served | P | §13 row 11.3 | key is the package version; the stale-key rule works (SIM XVII not served) but leaves the block unservable until refit |
-| inv. 1 every input through gateway | P | | four modules (§2) |
+| inv. 1 every input through gateway | BM | | the four direct importers now go through `gateway` (§2 rule 1) |
 | inv. 2 no statistic without expectation and weight | BM | | |
 | inv. 3 context never in a default tier | BM | | |
 | inv. 4 taxonomic structure never in a relation prior | BU | | |
@@ -300,7 +300,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | phase 2: pairs, FDR across families, replication, explaining away | BM | `E:pairs-gate`, `E:replication-independent-units` | |
 | phase 2: decomposition, cohort scans | BU | | no evaluation |
 | phase 2: SINAN, sub-annual grain | BM | `E:dengue-monthly`, `E:positive-leptospirosis-rs` | DENG, LEPT only |
-| phase 2 gate: calibrated δ and admission | P | ADR-0005 | admission not calibrated |
+| phase 2 gate: calibrated δ and admission | P | ADR-0005, ADR-0022 | admission read from the power curves; θ0 below 1.2 not yet calibrated |
 | phase 2 needs: care-flow graph | NB | pegasus_data ADR-0144 | `graphs.py` has no care-flow kind; `facility.py` rebuilds a kernel from SIH |
 | phase 2 needs: linked cohorts, population account v1 | P | accounts 2-6 in `E:exposure` | linked cohorts through scripts only |
 | phase 3: patterns across blocks | P | see 7.4 | |
@@ -362,7 +362,7 @@ Each row is a recorded departure; none has closed. The departures **not** record
 
 ## Scan coverage
 
-**Admission rule** (`fields.admission`, §8.4 as it was: at least 1,000 events and events in at least 5 % of the units; descent only into admissible children). Nodes are the block's tree nodes down to the 3-character category.
+**Admission rule** (the table below was counted under the former rule, at least 1,000 events and events in 5 % of the units; since ADR-0022 `fields.admission` reads the power curves, outbreak at 920, change point 11,300, space-time 6,700 and spatial cluster 1,200 events in the median region's locus, so these counts overstate the nodes the lenses now scan; recount with `scripts/measure_admission.py coverage`; descent only into admissible children). Nodes are the block's tree nodes down to the 3-character category.
 
 Counted with `Session.fields(block)` on 2010-2023 on the audit day (`nodes` = chapter, ICD blocks and 3-character categories of the tree; XVII of SIM could not be loaded, see gap 10).
 

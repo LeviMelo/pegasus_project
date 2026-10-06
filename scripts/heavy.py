@@ -26,17 +26,29 @@ if not command:
 
 child_env = dict(os.environ)
 os.environ.update(
-    PEGASUS_DECODE_SLOT_DIR=str(Path(tempfile.gettempdir()) / "pegasus_heavy_slots"),
-    PEGASUS_DECODE_SLOTS=os.environ.get("PEGASUS_HEAVY_SLOTS", "6"),
     PEGASUS_MIN_FREE_GB=os.environ.get("PEGASUS_HEAVY_MIN_FREE_GB", "4"),
     PEGASUS_ADMISSION_WAIT=os.environ.get("PEGASUS_HEAVY_WAIT", "21600"),
 )
-from pegasus_data.decode.admission import admitted  # noqa: E402 - reads the environment set above
+from contextlib import nullcontext  # noqa: E402
+
+from pegasus_data.decode.admission import admitted  # noqa: E402 - reads the environment at each call
 
 label = args.label or " ".join(command)[:80]
+# Surveys hold a slot for hours on one core and about 4 GB each (2026-10-05: five at once starved
+# fourteen fits and left 0.3 GB free). They first take one of PEGASUS_SURVEY_SLOTS (default 2)
+# slots of their own pool, then a general slot, so they never hold more than two of the six.
+survey = "survey" in label.lower() or any("survey" in part for part in command)
+
+
+def pool(directory: str, slots: str):
+    os.environ.update(PEGASUS_DECODE_SLOT_DIR=str(Path(tempfile.gettempdir()) / directory), PEGASUS_DECODE_SLOTS=slots)
+    return admitted(label)
+
+
 queued = time.time()
-print(f"[heavy] queued: {label}", flush=True)
-with admitted(label):
+print(f"[heavy] queued{' (survey pool)' if survey else ''}: {label}", flush=True)
+with pool("pegasus_survey_slots", os.environ.get("PEGASUS_SURVEY_SLOTS", "2")) if survey else nullcontext(), \
+        pool("pegasus_heavy_slots", os.environ.get("PEGASUS_HEAVY_SLOTS", "6")):
     print(f"[heavy] admitted after {time.time() - queued:.0f}s: {label}", flush=True)
     code = subprocess.call(command, env=child_env)
 print(f"[heavy] exit {code}: {label}", flush=True)

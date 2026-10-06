@@ -1,0 +1,677 @@
+{
+ "primary_310900": {
+  "J20-J22": {
+   "total": 16,
+   "n_facilities": 4,
+   "facilities": [
+    {
+     "facility": "2124289",
+     "n": 11,
+     "share": 0.6875,
+     "hospital_municipality": "310900",
+     "by_year": {
+      "2016": 2,
+      "2017": 5,
+      "2018": 4
+     },
+     "months_with_admissions": 8,
+     "top3_months_share": 0.5454545454545454
+    },
+    {
+     "facility": "2126494",
+     "n": 3,
+     "share": 0.1875,
+     "hospital_municipality": "310670",
+     "by_year": {
+      "2016": 0,
+      "2017": 1,
+      "2018": 2
+     },
+     "months_with_admissions": 3,
+     "top3_months_share": 1.0
+    },
+    {
+     "facility": "2192896",
+     "n": 1,
+     "share": 0.0625,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 0,
+      "2017": 1,
+      "2018": 0
+     },
+     "months_with_admissions": 1,
+     "top3_months_share": 1.0
+    },
+    {
+     "facility": "0026948",
+     "n": 1,
+     "share": 0.0625,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 0,
+      "2017": 0,
+      "2018": 1
+     },
+     "months_with_admissions": 1,
+     "top3_months_share": 1.0
+    }
+   ],
+   "burst_flagged": [
+    "2124289"
+   ],
+   "months_with_any_admission": 10
+  },
+  "XI_K": {
+   "total": 546,
+   "n_facilities": 26,
+   "facilities": [
+    {
+     "facility": "2124289",
+     "n": 282,
+     "share": 0.5164835164835165,
+     "hospital_municipality": "310900",
+     "by_year": {
+      "2016": 86,
+      "2017": 91,
+      "2018": 105
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.1595744680851064
+    },
+    {
+     "facility": "2126494",
+     "n": 112,
+     "share": 0.20512820512820512,
+     "hospital_municipality": "310670",
+     "by_year": {
+      "2016": 33,
+      "2017": 41,
+      "2018": 38
+     },
+     "months_with_admissions": 32,
+     "top3_months_share": 0.1875
+    },
+    {
+     "facility": "0027014",
+     "n": 37,
+     "share": 0.06776556776556776,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 11,
+      "2017": 8,
+      "2018": 18
+     },
+     "months_with_admissions": 24,
+     "top3_months_share": 0.2702702702702703
+    },
+    {
+     "facility": "0026840",
+     "n": 37,
+     "share": 0.06776556776556776,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 4,
+      "2017": 11,
+      "2018": 22
+     },
+     "months_with_admissions": 17,
+     "top3_months_share": 0.2972972972972973
+    },
+    {
+     "facility": "7866801",
+     "n": 15,
+     "share": 0.027472527472527472,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 0,
+      "2017": 1,
+      "2018": 14
+     },
+     "months_with_admissions": 9,
+     "top3_months_share": 0.6
+    },
+    {
+     "facility": "2695324",
+     "n": 12,
+     "share": 0.02197802197802198,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 2,
+      "2017": 10,
+      "2018": 0
+     },
+     "months_with_admissions": 9,
+     "top3_months_share": 0.5
+    },
+    {
+     "facility": "0027049",
+     "n": 7,
+     "share": 0.01282051282051282,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 2,
+      "2017": 1,
+      "2018": 4
+     },
+     "months_with_admissions": 7,
+     "top3_months_share": 0.42857142857142855
+    },
+    {
+     "facility": "4034236",
+     "n": 5,
+     "share": 0.009157509157509158,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 3,
+      "2017": 0,
+      "2018": 2
+     },
+     "months_with_admissions": 5,
+     "top3_months_share": 0.6
+    },
+    {
+     "facility": "0027022",
+     "n": 5,
+     "share": 0.009157509157509158,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 0,
+      "2017": 0,
+      "2018": 5
+     },
+     "months_with_admissions": 4,
+     "top3_months_share": 0.8
+    },
+    {
+     "facility": "0026808",
+     "n": 4,
+     "share": 0.007326007326007326,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 4,
+      "2017": 0,
+      "2018": 0
+     },
+     "months_with_admissions": 4,
+     "top3_months_share": 0.75
+    },
+    {
+     "facility": "2200422",
+     "n": 4,
+     "share": 0.007326007326007326,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 3,
+      "2017": 0,
+      "2018": 1
+     },
+     "months_with_admissions": 4,
+     "top3_months_share": 0.75
+    },
+    {
+     "facility": "2200473",
+     "n": 4,
+     "share": 0.007326007326007326,
+     "hospital_municipality": "311860",
+     "by_year": {
+      "2016": 1,
+      "2017": 2,
+      "2018": 1
+     },
+     "months_with_admissions": 4,
+     "top3_months_share": 0.75
+    },
+    {
+     "facility": "0026921",
+     "n": 3,
+     "share": 0.005494505494505495,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 1,
+      "2017": 1,
+      "2018": 1
+     },
+     "months_with_admissions": 3,
+     "top3_months_share": 1.0
+    },
+    {
+     "facility": "0026964",
+     "n": 3,
+     "share": 0.005494505494505495,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 2,
+      "2017": 1,
+      "2018": 0
+     },
+     "months_with_admissions": 2,
+     "top3_months_share": 1.0
+    },
+    {
+     "facility": "2200457",
+     "n": 2,
+     "share": 0.003663003663003663,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 2,
+      "2017": 0,
+      "2018": 0
+     },
+     "months_with_admissions": 1,
+     "top3_months_share": 1.0
+    }
+   ],
+   "burst_flagged": [],
+   "months_with_any_admission": 36
+  }
+ },
+ "secondary_25_pooled": {
+  "J20-J22": {
+   "total": 698,
+   "n_facilities": 31,
+   "facilities": [
+    {
+     "facility": "2126494",
+     "n": 222,
+     "share": 0.31805157593123207,
+     "hospital_municipality": "310670",
+     "by_year": {
+      "2016": 60,
+      "2017": 54,
+      "2018": 108
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.22522522522522523
+    },
+    {
+     "facility": "3048675",
+     "n": 143,
+     "share": 0.20487106017191978,
+     "hospital_municipality": "312410",
+     "by_year": {
+      "2016": 39,
+      "2017": 46,
+      "2018": 58
+     },
+     "months_with_admissions": 30,
+     "top3_months_share": 0.3076923076923077
+    },
+    {
+     "facility": "2178559",
+     "n": 68,
+     "share": 0.09742120343839542,
+     "hospital_municipality": "312090",
+     "by_year": {
+      "2016": 2,
+      "2017": 30,
+      "2018": 36
+     },
+     "months_with_admissions": 21,
+     "top3_months_share": 0.3088235294117647
+    },
+    {
+     "facility": "2206064",
+     "n": 62,
+     "share": 0.08882521489971347,
+     "hospital_municipality": "314710",
+     "by_year": {
+      "2016": 22,
+      "2017": 19,
+      "2018": 21
+     },
+     "months_with_admissions": 24,
+     "top3_months_share": 0.3387096774193548
+    },
+    {
+     "facility": "0026948",
+     "n": 45,
+     "share": 0.06446991404011461,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 19,
+      "2017": 14,
+      "2018": 12
+     },
+     "months_with_admissions": 20,
+     "top3_months_share": 0.4222222222222222
+    },
+    {
+     "facility": "2206528",
+     "n": 27,
+     "share": 0.03868194842406877,
+     "hospital_municipality": "316720",
+     "by_year": {
+      "2016": 7,
+      "2017": 12,
+      "2018": 8
+     },
+     "months_with_admissions": 18,
+     "top3_months_share": 0.2962962962962963
+    },
+    {
+     "facility": "2109867",
+     "n": 25,
+     "share": 0.03581661891117478,
+     "hospital_municipality": "316720",
+     "by_year": {
+      "2016": 5,
+      "2017": 11,
+      "2018": 9
+     },
+     "months_with_admissions": 14,
+     "top3_months_share": 0.28
+    },
+    {
+     "facility": "2796112",
+     "n": 20,
+     "share": 0.02865329512893983,
+     "hospital_municipality": "316935",
+     "by_year": {
+      "2016": 3,
+      "2017": 4,
+      "2018": 13
+     },
+     "months_with_admissions": 12,
+     "top3_months_share": 0.55
+    },
+    {
+     "facility": "2127091",
+     "n": 11,
+     "share": 0.015759312320916905,
+     "hospital_municipality": "310990",
+     "by_year": {
+      "2016": 4,
+      "2017": 0,
+      "2018": 7
+     },
+     "months_with_admissions": 9,
+     "top3_months_share": 0.45454545454545453
+    },
+    {
+     "facility": "2126796",
+     "n": 11,
+     "share": 0.015759312320916905,
+     "hospital_municipality": "310020",
+     "by_year": {
+      "2016": 1,
+      "2017": 4,
+      "2018": 6
+     },
+     "months_with_admissions": 6,
+     "top3_months_share": 0.7272727272727273
+    },
+    {
+     "facility": "2178591",
+     "n": 10,
+     "share": 0.014326647564469915,
+     "hospital_municipality": "315200",
+     "by_year": {
+      "2016": 5,
+      "2017": 3,
+      "2018": 2
+     },
+     "months_with_admissions": 9,
+     "top3_months_share": 0.4
+    },
+    {
+     "facility": "2191164",
+     "n": 8,
+     "share": 0.011461318051575931,
+     "hospital_municipality": "311860",
+     "by_year": {
+      "2016": 0,
+      "2017": 1,
+      "2018": 7
+     },
+     "months_with_admissions": 5,
+     "top3_months_share": 0.75
+    },
+    {
+     "facility": "0027014",
+     "n": 7,
+     "share": 0.01002865329512894,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 1,
+      "2017": 5,
+      "2018": 1
+     },
+     "months_with_admissions": 5,
+     "top3_months_share": 0.7142857142857143
+    },
+    {
+     "facility": "2192896",
+     "n": 7,
+     "share": 0.01002865329512894,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 2,
+      "2017": 3,
+      "2018": 2
+     },
+     "months_with_admissions": 7,
+     "top3_months_share": 0.42857142857142855
+    },
+    {
+     "facility": "2200473",
+     "n": 3,
+     "share": 0.004297994269340974,
+     "hospital_municipality": "311860",
+     "by_year": {
+      "2016": 1,
+      "2017": 2,
+      "2018": 0
+     },
+     "months_with_admissions": 2,
+     "top3_months_share": 1.0
+    }
+   ],
+   "burst_flagged": [],
+   "months_with_any_admission": 36
+  },
+  "XI_K": {
+   "total": 13137,
+   "n_facilities": 101,
+   "facilities": [
+    {
+     "facility": "2126494",
+     "n": 2811,
+     "share": 0.21397579356017354,
+     "hospital_municipality": "310670",
+     "by_year": {
+      "2016": 877,
+      "2017": 944,
+      "2018": 990
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.1031661330487371
+    },
+    {
+     "facility": "2206064",
+     "n": 1334,
+     "share": 0.10154525386313466,
+     "hospital_municipality": "314710",
+     "by_year": {
+      "2016": 368,
+      "2017": 332,
+      "2018": 634
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.18140929535232383
+    },
+    {
+     "facility": "2148293",
+     "n": 998,
+     "share": 0.07596863819745757,
+     "hospital_municipality": "312090",
+     "by_year": {
+      "2016": 327,
+      "2017": 308,
+      "2018": 363
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.125250501002004
+    },
+    {
+     "facility": "2178559",
+     "n": 666,
+     "share": 0.050696506051609955,
+     "hospital_municipality": "312090",
+     "by_year": {
+      "2016": 264,
+      "2017": 163,
+      "2018": 239
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.12462462462462462
+    },
+    {
+     "facility": "2109867",
+     "n": 663,
+     "share": 0.05046814341173784,
+     "hospital_municipality": "316720",
+     "by_year": {
+      "2016": 204,
+      "2017": 219,
+      "2018": 240
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.12066365007541478
+    },
+    {
+     "facility": "7866801",
+     "n": 635,
+     "share": 0.048336758772931414,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 6,
+      "2017": 297,
+      "2018": 332
+     },
+     "months_with_admissions": 26,
+     "top3_months_share": 0.2078740157480315
+    },
+    {
+     "facility": "0026840",
+     "n": 607,
+     "share": 0.04620537413412499,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 196,
+      "2017": 248,
+      "2018": 163
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.15980230642504117
+    },
+    {
+     "facility": "2796112",
+     "n": 592,
+     "share": 0.04506356093476441,
+     "hospital_municipality": "316935",
+     "by_year": {
+      "2016": 164,
+      "2017": 174,
+      "2018": 254
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.13513513513513514
+    },
+    {
+     "facility": "3048675",
+     "n": 488,
+     "share": 0.03714698941919769,
+     "hospital_municipality": "312410",
+     "by_year": {
+      "2016": 167,
+      "2017": 199,
+      "2018": 122
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.15163934426229508
+    },
+    {
+     "facility": "0027014",
+     "n": 463,
+     "share": 0.03524396742026338,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 170,
+      "2017": 137,
+      "2018": 156
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.1490280777537797
+    },
+    {
+     "facility": "2178591",
+     "n": 397,
+     "share": 0.030219989343076806,
+     "hospital_municipality": "315200",
+     "by_year": {
+      "2016": 99,
+      "2017": 131,
+      "2018": 167
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.15365239294710328
+    },
+    {
+     "facility": "2127091",
+     "n": 345,
+     "share": 0.026261703585293446,
+     "hospital_municipality": "310990",
+     "by_year": {
+      "2016": 131,
+      "2017": 115,
+      "2018": 99
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.18840579710144928
+    },
+    {
+     "facility": "2126796",
+     "n": 337,
+     "share": 0.025652736545634467,
+     "hospital_municipality": "310020",
+     "by_year": {
+      "2016": 124,
+      "2017": 122,
+      "2018": 91
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.1572700296735905
+    },
+    {
+     "facility": "0027049",
+     "n": 273,
+     "share": 0.02078100022836264,
+     "hospital_municipality": "310620",
+     "by_year": {
+      "2016": 95,
+      "2017": 88,
+      "2018": 90
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.15384615384615385
+    },
+    {
+     "facility": "2115654",
+     "n": 266,
+     "share": 0.020248154068661033,
+     "hospital_municipality": "310670",
+     "by_year": {
+      "2016": 86,
+      "2017": 70,
+      "2018": 110
+     },
+     "months_with_admissions": 36,
+     "top3_months_share": 0.14661654135338345
+    }
+   ],
+   "burst_flagged": [],
+   "months_with_any_admission": 36
+  }
+ }
+}

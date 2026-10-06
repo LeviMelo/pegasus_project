@@ -22,7 +22,7 @@ Results are tables in the store (``harness``), written up as evaluation entries.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -158,6 +158,27 @@ POSITIVES: tuple[Positive, ...] = (
              note="Lead-triage entry item 14: I21 112 against 20 a year, neighbours flat, ill-defined share 8.0% -> 1.8%. The "
                   "same rule applies to the other leads in the 'unexplained' top 15 of that entry; the supply fields are "
                   "2008-2023 December stocks. A supply step explains a detection or recording change, not incidence"),
+    # SINAN breadth wave 1: declared BEFORE the families were fitted or surveyed (commit order is the evidence)
+    Positive("Congenital syphilis rise of the 2010s", "SINAN.SIFC", "notification", "*", "outbreak", "BPA", "uf:*",
+             (2014, 2023),
+             criterion="alarm baseline fitted to 2010-2013: national observed/expected in 2018 >= 1.5 and at least 20 of the "
+                       "27 UFs flagged (outbreak lens, state level) in 2018",
+             note="Ministry of Health syphilis bulletins (SINAN): congenital syphilis incidence 2.4 per 1,000 live births in "
+                  "2010, 9.0 in 2018 (26,219 notifications); read through secondary articles that cite the bulletins, not at "
+                  "the source. A national rise, so a prospective positive: B2 absorbs a trend"),
+    Positive("Visceral leishmaniasis geography", "SINAN.LEIV", "notification", "*", "spatial_cluster", "B0",
+             "uf:21,31,15,23,29", (2010, 2023),
+             criterion="as the Chagas and schistosomiasis positives: observed/expected above 1 in each named UF; every spatial "
+                       "cluster inside the named UFs (precision >= 0.8); share of the named UFs' excess captured reported",
+             note="Ministry of Health, visceral leishmaniasis cases by UF 2018-2022: Maranhão, Minas Gerais, Pará, Ceará, Bahia "
+                  "each above 1,000 (read through a search summary of the Ministry's table and of a 2007-2021 review, not at the "
+                  "source)"),
+    Positive("Chikungunya epidemic, Ceará 2017", "SINAN.CHIK", "case", "*", "space_time", "B1", "uf:23", (2017, 2017),
+             grain="month",
+             criterion="as the leptospirosis positive: the space-time findings of 2017 lie inside Ceará (>= 80% of in-window "
+                       "findings) and capture >= 50% of Ceará's 2017 excess",
+             note="Ceará reported the largest chikungunya epidemic of 2017 (105,232 confirmed cases in the state, 61,718 in "
+                  "Fortaleza; Fortaleza and state bulletins, read through search summaries, not at the source)"),
 )
 
 
@@ -235,6 +256,50 @@ def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: 
                 by_mu[f"θ={theta} μ∈[{lo},{hi})"] = (round(float(np.mean(sel)), 2), len(sel))
     return {"field": s.field.id, "tier": s.tier, "loci": len(loci), "curve": curve, "hits": detail,
             "by_expected": by_mu, "rows": rows_out}
+
+
+def region_power(s: surprise.Surprise, run_lens, region_of: np.ndarray, theta: float, windows: list[tuple[int, int]],
+                 thin: float = 1.0, seed_parts: tuple = ("region-power",)) -> list[tuple[float, bool]]:
+    """Power for a rate ratio ``theta`` over one macro-region and window of years (the admission reference of
+    ARCHITECTURE §8.4), by the production lens itself: [(expected count of the locus, detected)].
+
+    ``windows`` are year-index ranges [t0, t1). Every region meets every window once, the regions of a round on
+    different windows, all planted at once into one null background y* ~ NB(thin · μ, φ) (``thin`` < 1 is a rarer
+    field of the same shape: a thinned negative binomial keeps its size φ, so the curve reaches small counts).
+    **Detected** = a finding of the lens lies at least half inside the locus (its cells). A region-year at 1.5 is
+    far larger than any one cell or the scanner's 30-place neighbourhood, so the criterion of `power_curve`
+    (half the locus recovered) would measure the scanner's size, not whether the lens sees the effect; false
+    findings elsewhere are the lens's FDR, not power."""
+    rng = np.random.default_rng(config.seed(*seed_parts, s.field.id, s.tier, thin))
+    base = replace(s, mu=s.mu * thin)
+    regions = sorted(set(region_of.tolist()))
+    in_region = {r: region_of == r for r in regions}
+    T = s.y.shape[1]
+    out: list[tuple[float, bool]] = []
+    for k in range(len(windows)):
+        loci = {}
+        for i, r in enumerate(regions):
+            t0, t1 = windows[(k + i) % len(windows)]
+            m = np.zeros(s.y.shape, dtype=bool)
+            m[np.ix_(in_region[r], np.arange(t0, t1))] = True
+            loci[r] = (m, t0, t1)
+        union = np.any([m for m, _, _ in loci.values()], axis=0)
+        y = _null_draw(base, rng)
+        y[union] += rng.poisson((theta - 1) * base.mu[union])
+        findings = run_lens(with_counts(base, y, (*seed_parts, s.field.id, thin, k)))
+        for r, (m, t0, t1) in loci.items():
+            hit = False
+            for f in findings:
+                rows = np.isin(base.places, f.locus["places"])
+                yrs = f.locus.get("years", [int(s.years[0]), int(s.years[-1])])
+                cols = (s.years >= yrs[0]) & (s.years <= yrs[-1])
+                total = rows.sum() * cols.sum()
+                inside = (rows & in_region[r]).sum() * (cols & (np.arange(T) >= t0) & (np.arange(T) < t1)).sum()
+                if total and inside >= 0.5 * total:
+                    hit = True
+                    break
+            out.append((float(base.mu[m].sum()), hit))
+    return out
 
 
 def _null_draw(s: surprise.Surprise, rng: np.random.Generator) -> np.ndarray:

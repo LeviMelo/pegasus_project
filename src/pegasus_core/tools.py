@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
 from scipy import stats
 
 from . import (
@@ -80,6 +81,7 @@ def lens_tier(lens: str, prospective: bool = False) -> str:
 UNGATED = "|ungated"                # suffix of the survey family of the failing combinations
 
 
+FIT_YEARS = list(range(2010, 2024))      # the years of the production fits (the dependency map reads their calibration)
 SURVEY_THREAD_GB = 0.5      # host memory one scanning thread adds over the loaded model (measured, evaluation 2026-10-05)
 
 
@@ -119,24 +121,45 @@ class Session:
 
     # ---- reading ---------------------------------------------------------------
 
-    def fields(self, block: str) -> list[fields.Field]:
-        """The admissible fields of a fitted block, top-down (§8.4 provisional rule)."""
+    def admission(self, block: str) -> dict[str, dict[str, tuple[bool, str]]]:
+        """Per node of a fitted block, the lenses that scan it (ARCHITECTURE §8.4: the power of the lens for a rate ratio
+        of 1.5 over a macro-region-year at the node's counts, `fields.admission`) and why not for the others."""
         m = self.expectations.model(block)
         reg = self.expectations.registry
         leaf_index = {c: i for i, c in enumerate(m.data.leaves)}
         # admission reads all the events even when the model is a side's (`replication.load_a`): the same fields
         # are scanned on A as on all the data, and the choice does not depend on which events landed on A
         e, u, y = getattr(m, "full_counts", (m.data.e, m.data.u, m.data.y))
-        totals = np.bincount(e, weights=y, minlength=len(m.data.leaves))
+        macro = self.expectations.macroregions(m.data.places)
+        codes, region = np.unique(macro, return_inverse=True)
+        by_leaf = np.zeros((len(m.data.leaves), len(codes)))
+        np.add.at(by_leaf, (e, region[u]), y)
+        years = len(m.data.years)
 
-        def admissible(node: str) -> bool:
+        def verdict(node: str) -> dict[str, tuple[bool, str]]:
             idx = [leaf_index[c] for c in reg.leaves(node) if c in leaf_index]
             if not idx:
-                return False
-            units = int(np.unique(u[np.isin(e, idx)]).size)
-            return fields.admission(float(totals[idx].sum()), units, len(m.data.places))[0]
+                return dict.fromkeys(fields.COUNT_LENSES, (False, "no leaf in the fit"))
+            return {lens: fields.admission(lens, by_leaf[idx].sum(0), years) for lens in fields.COUNT_LENSES}
 
-        return reg.walk(block, admissible)
+        out, stack = {}, [block]
+        while stack:
+            node = stack.pop()
+            out[node] = verdict(node)
+            stack.extend(reg.children.get(node, []))
+        return out
+
+    def fields(self, block: str, lens: str | None = None) -> list[fields.Field]:
+        """The admissible fields of a fitted block, top-down (§8.4): a node is a field of ``lens`` when that lens's power
+        for the reference effect reaches 0.5 at its counts, of the block when some lens scan reaches it (trend
+        divergence and group disparity, which have no curve at the reference effect, read the fields any lens admits).
+        The tree is descended only while children stay admissible."""
+        verdict = self.admission(block)
+        if lens is not None and lens not in fields.COUNT_LENSES:
+            lens = None
+        return self.expectations.registry.walk(
+            block, lambda node: node in verdict and (any(v[0] for v in verdict[node].values()) if lens is None
+                                                     else verdict[node][lens][0]))
 
     def surprise(self, node: str, tier: str = "B1", train_last: int | None = None) -> surprise.Surprise:
         """The field's expectation at ``tier``; the prospective tiers (BP the expectation, BPA the alarm baseline,
@@ -155,6 +178,18 @@ class Session:
         if memo is not None:
             memo[key] = s
         return s
+
+    def calibration_of(self, node: str, tier: str = "B1") -> dict:
+        """The field's calibration record at a tier (§6.2), kept in the store under the fit's key so a map need not
+        refit the block's expectation to read it again."""
+        m = self.expectations.model(self.expectations.field(node).block)
+        key = {**m.key(), "field": f"{self.dataset}:{self.event}:{node}", "tier": tier, "what": "calibration", "v": 1}
+        hit = store.manifest("calibration", key)
+        if hit is not None and "calibration" in hit:
+            return hit["calibration"]
+        cal = self.surprise(node, tier).calibration
+        store.put_table("calibration", key, pa.table({"ks": [float(cal["ks"])]}), {"calibration": cal})
+        return cal
 
     def institutions(self, node: str) -> dict:
         """The institution lattice of a field (E_i, ADR-0016): its facilities' steps against their catchment's expectation
@@ -253,11 +288,15 @@ class Session:
             if ungated and failing:
                 calls.append((lens, reference, failing, tag + UNGATED))
 
+        admitted_by = {b: self.admission(b) for b in blocks or self._blocks()}
+
         def one(block: str, f: fields.Field) -> list[tuple[str, list[lenses.Finding]]]:
             self._local.memo = {}      # B2 serves three lenses: computed once per field
             out = []
             try:
                 for lens, reference, scale_names, tag in calls:
+                    if lens in fields.COUNT_LENSES and not admitted_by[block][f.node][lens][0]:
+                        continue        # the lens's power at the reference effect is below 0.5 at this field's counts
                     kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster", "change_point") else {}
                     if lens in ("trend_divergence", "group_disparity"):
                         kw["scales"] = scale_names
@@ -948,15 +987,26 @@ def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only:
     from .scans import map_inputs, maps, pairs
 
     years = years or map_inputs.YEARS
-    key = {"what": "map_inputs", "years": years, "v": 1}
+    key = {"what": "map_inputs", "years": years, "v": 2}     # v2: admission by power at rho 0.3 (ADR-0022)
     inp = maps.MapInputs.load(key)
     if inp is None:
         inp = map_inputs.build(years)
         inp.save(key)
+    # §11.4: a chapter whose count expectation failed calibration at B1 (the first tier with geography, whose field
+    # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones
+    calibration = {}
+    for dataset, event, group in (("SIM.DO", "death", "SIM"), ("SIH-RD", "hospitalisation", "SIH")):
+        session = Session(dataset, event, FIT_YEARS)
+        for name in inp.names:
+            if name.startswith(group + ":"):
+                calibration[name] = session.calibration_of(name.split(":", 1)[1], "B1")
+    inp = maps.exclude_miscalibrated(inp, calibration, "B1")
     basis, gen = pairs.MoranBasis(inp.places), pairs.MoranBasis(inp.places, "knn8")
     dm = maps.dependency_map(inp, basis, ledger or control.Ledger(), tag="-".join(map(str, (years[0], years[-1]))))
     out: dict[str, Any] = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
-                           "admitted": dm.controlled, "seconds": dm.seconds, "left_out": inp.meta.get("left_out", {})}
+                           "admitted": dm.controlled, "seconds": dm.seconds, "left_out": inp.meta.get("left_out", {}),
+                           "admission_power": inp.meta.get("admission_power", {}),
+                           "excluded_calibration": inp.meta.get("excluded_calibration", {})}
     if worlds:
         neg = harness.map_negatives(inp, basis, gen, worlds, health_only)
         out["negatives"] = {"worlds": neg["worlds"], "delta_marginal": harness.map_delta(neg, "marginal"),

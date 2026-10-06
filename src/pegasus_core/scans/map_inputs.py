@@ -5,7 +5,7 @@ five-year age band; SINASC: the national share of births), its place effect b̂(
 ``surprise.refit_place`` over that expectation, with its posterior sd (the pair weight is 1/sd², §7.5). SIH is the
 admissions that did not end in death: the in-hospital deaths are SIM records (§8.5), so no SIM and SIH field shares an
 event. A context is a complete count or a rate over a registered denominator, z-scored, with the constant sd 0.05 the
-gate used (it cannot change ρ). A field below the provisional admission rule (§8.4) is left out and reported.
+gate used (it cannot change ρ). A field whose power to see a shared latent of correlation 0.3 is below 0.5 (§8.4, ADR-0022) is left out and reported.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import numpy as np
 import pyarrow as pa
 
 from .. import gateway, surprise
+from . import pairs
 from .maps import MapInputs
 
 CONTEXT_SD = 0.05
@@ -25,7 +26,7 @@ SINASC = {"lbw": "PESO > 0 and PESO < 2500", "preterm": "SEMAGESTAC > 0 and SEMA
 SINASC_LABEL = {"lbw": "birth weight < 2,500 g", "preterm": "gestation < 37 weeks", "cesarean": "caesarean delivery",
                 "teen_mother": "mother under 20", "prenatal_lt7": "fewer than 7 prenatal visits",
                 "twin": "multiple pregnancy", "apgar5_lt7": "Apgar at 5 minutes < 7"}
-MIN_EVENTS, MIN_UNIT_SHARE = 1000, 0.05
+POWER_REPS = 30        # planted-latent replicates behind a field's admission power (Monte-Carlo se of the power 0.09)
 
 
 def _population(places: np.ndarray, years: list[int]) -> np.ndarray:
@@ -179,18 +180,26 @@ def build(years: list[int] | None = None, places: np.ndarray | None = None) -> M
     tree = gateway.code_structure("ICD10")
     title = dict(zip(tree.column("code").to_pylist(), tree.column("label").to_pylist(), strict=True))
 
-    def admit(tag: str, y_total: float, y_units: int) -> bool:
-        ok = y_total >= MIN_EVENTS and y_units >= MIN_UNIT_SHARE * U
-        if not ok:
-            left[tag] = f"{y_total:.0f} events in {y_units} places"
-        return ok
+    from .. import fields, harness  # imported here: harness imports the scans
+    test_basis, gen_basis = pairs.MoranBasis(places), pairs.MoranBasis(places, "knn8")
+    powers: dict[str, float] = {}
+
+    def admit(tag: str, y: np.ndarray, mu: np.ndarray, b: np.ndarray, tau: float) -> bool:
+        """Admission to the pair scan (§8.4): the power of E_b at its minimum effect to see a latent of correlation
+        0.3 shared by this field and a partner of its own spatial spectrum, the field refitted as in production."""
+        pw = harness.pair_power(mu, 1 / np.sqrt(tau), b, b, b, gen_basis, test_basis, rhos=(fields.PAIR_RHO,),
+                                reps=POWER_REPS, seed=("admission", tag))[fields.PAIR_RHO]["power"]
+        powers[tag] = pw
+        if pw < fields.MIN_POWER:
+            left[tag] = f"power {pw:.2f} at rho {fields.PAIR_RHO} ({y.sum():.0f} events in {int((y > 0).sum())} places)"
+        return pw >= fields.MIN_POWER
 
     for group, system, survivors in (("SIM", ("SIM.DO", "death"), False), ("SIH", ("SIH-RD", "hospitalisation"), True)):
         for ch, Y in sorted(_chapter_counts(system, places, years, survivors).items(), key=lambda kv: _roman(kv[0])):
             y, mu = _standardised(Y, PA)
-            if not admit(f"{group}:{ch}", y.sum(), int((y > 0).sum())):
+            b, sd, tau = place_effect(y, mu)
+            if not admit(f"{group}:{ch}", y, mu, b, tau):
                 continue
-            b, sd, _ = place_effect(y, mu)
             names.append(f"{group}:{ch}")
             groups.append(group)
             labels.append(title.get(ch, ch).split(" - ", 1)[-1][:60] + (" (admissions surviving)" if survivors else " (deaths)"))
@@ -208,9 +217,9 @@ def build(years: list[int] | None = None, places: np.ndarray | None = None) -> M
             overlap_n[k] = overlap_n.get(k, 0) + v
     for k in SINASC:
         mu = births * ind[k].sum() / births.sum()
-        if not admit(f"SINASC:{k}", ind[k].sum(), int((ind[k] > 0).sum())):
+        b, sd, tau = place_effect(ind[k], mu)
+        if not admit(f"SINASC:{k}", ind[k], mu, b, tau):
             continue
-        b, sd, _ = place_effect(ind[k], mu)
         names.append(f"SINASC:{k}")
         groups.append("SINASC")
         labels.append(SINASC_LABEL[k])
@@ -234,7 +243,7 @@ def build(years: list[int] | None = None, places: np.ndarray | None = None) -> M
                 m = min(ind[ka].sum(), ind[kb].sum())
                 overlap[a, b] = overlap[b, a] = np.nan if n is None else n / m
     return MapInputs(places, names, groups, labels, np.stack(B, 1), np.stack(SD, 1), overlap,
-                     {"years": years, "left_out": left, "missing_context": {n: int(np.isnan(B[i]).sum())
+                     {"years": years, "left_out": left, "admission_power": powers, "missing_context": {n: int(np.isnan(B[i]).sum())
                                                                             for i, n in enumerate(names) if groups[i] == "context"}})
 
 

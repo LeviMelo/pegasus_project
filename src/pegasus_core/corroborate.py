@@ -21,14 +21,12 @@ The rules (which field corroborates which codes) are data: `RULES`.
 from __future__ import annotations
 
 import re
-import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import duckdb
 import numpy as np
 import pyarrow as pa
-from pegasus_data._request import NothingPublished
 
 from . import config, gateway, store
 
@@ -86,15 +84,11 @@ def rule_for(code: str, dataset: str = "SIM.DO") -> dict[str, Any] | None:
 
 def s2id_events() -> pa.Table:
     """Every S2iD event, 2010 on: u (6 digits), year, typology, group, deaths."""
-    import pegasus_data as pg
-
     key = {"what": "s2id", "data": config.data_version()}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        raw = pg.load_field("disasters", years=list(range(2010, 2025)), settings=pg.load_settings(root=config.data_root()))
+    raw = gateway.raw_field("disasters", list(range(2010, 2025)))
     con = duckdb.connect()
     con.register("r", raw)
     t = con.execute("""SELECT CAST(municipality AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, typology,
@@ -105,17 +99,11 @@ def s2id_events() -> pa.Table:
 
 def sih_year(year: int) -> pa.Table:
     """SIH-RD admissions of a year by residence × ICD-10 category (3 characters) × in-hospital death."""
-    import pegasus_data as pg
-
     key = {"what": "sih", "year": year, "data": config.data_version(), "v": 1}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        raw = pg.count_events("SIH-RD", "hospitalisation", period=year, geography="BR",
-                              by=["MUNIC_RES", "DIAG_PRINC", "MORTE"], root=config.data_root(),
-                              allow_partial=False, max_download=8 * 1024**3)
+    raw = gateway.raw_event_counts("SIH-RD", "hospitalisation", year, ["MUNIC_RES", "DIAG_PRINC", "MORTE"])
     con = duckdb.connect()
     con.register("r", raw)
     t = con.execute(f"""SELECT CAST({gateway._residence_sql('MUNIC_RES')} AS INTEGER) AS u,
@@ -128,16 +116,11 @@ def sih_year(year: int) -> pa.Table:
 
 def sim_year(year: int) -> pa.Table:
     """SIM.DO deaths of a year by residence × ICD-10 category (3 characters) × death in a hospital (LOCOCOR = 1)."""
-    import pegasus_data as pg
-
     key = {"what": "sim", "year": year, "data": config.data_version(), "v": 1}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        raw = pg.count_events("SIM.DO", "death", period=year, geography="BR", by=["CODMUNRES", "CAUSABAS", "LOCOCOR"],
-                              root=config.data_root(), allow_partial=False, max_download=8 * 1024**3)
+    raw = gateway.raw_event_counts("SIM.DO", "death", year, ["CODMUNRES", "CAUSABAS", "LOCOCOR"])
     con = duckdb.connect()
     con.register("r", raw)
     t = con.execute("""SELECT TRY_CAST(left(CAST(CODMUNRES AS VARCHAR), 6) AS INTEGER) AS u,
@@ -155,7 +138,7 @@ def sinan_matrix(dataset: str, event: str, places: np.ndarray, years: np.ndarray
     for j, year in enumerate(years):
         try:
             counts = gateway.event_counts(dataset, event, int(year), places=pa.array(places.astype(np.int64))).counts
-        except NothingPublished:      # the system is not published for the year (chikungunya before 2015): no events
+        except gateway.nothing_published():      # the system is not published for the year (chikungunya before 2015): no events
             continue
         u = counts.column("u").to_numpy()
         y = counts.column("y").to_numpy()

@@ -6,7 +6,8 @@ Usage:
 
 TARGET  ix      SIM.DO death, chapter IX, nodes IX, I20-I25, I60-I69, I10-I15
         births  SINASC-DN birth, the total
-POP     popsvs | popsvs-5y (POPSVS summed into the account's bands: the control that separates source from bands)
+POP     popsvs | popsvs+kappa | popsvs+sus | hybrid+kappa ... (exposure modifiers: system completeness, SUS-dependent share; ADR-0020)
+        | popsvs-5y (POPSVS summed into the account's bands: the control that separates source from bands)
         | account-2 (17 bands) | account-3 (population-account-3 summed onto POPSVS's 18 bands; account-4 is the same plus 2024-2030)
 
 eval, per POP, tiers B0/B1/B2 (in-sample, 2010-2023) and BP (fitted to 2019, 2020-2023 held out): the PIT's KS overall and
@@ -27,20 +28,31 @@ from pegasus_core import config, graphs, laplace, monolith, prospective, surpris
 TARGETS = {
     "ix": ("SIM.DO", "death", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),
     "births": ("SINASC-DN", "birth", "*", ["*"]),
+    "sih_ix": ("SIH-RD", "hospitalisation", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),   # SUS-dependent exposure (ADR-0020)
     "xvi": ("SIM.DO", "death", "XVI", ["XVI"]),     # perinatal conditions: the infant field (age 0 exposure)
 }
 GRAPH = "contiguity"
 FULL, TRAIN = list(range(2010, 2024)), list(range(2010, 2020))
+# race groups (ADR-0020): the mother's declared race for births, the race recorded on the infant death (perinatal chapter XVI);
+# SINASC's mother-race column starts in 2012 and the matrix is measured on 2021-22, so the fits span 2014-2023
+for _k, _name in (("1", "Branca"), ("2", "Preta"), ("4", "Parda")):
+    TARGETS[f"births_r{_k}"] = ("SINASC-DN", "birth", "*", ["*"], {"race": _k})
+    TARGETS[f"xvi_r{_k}"] = ("SIM.DO", "death", "XVI", ["XVI"], {"race": _k})
+
+
+def spans(extra: dict) -> tuple[list[int], list[int]]:
+    return (list(range(2014, 2024)), list(range(2014, 2020))) if "race" in extra else (FULL, TRAIN)
 MACRO = {"1": "Norte", "2": "Nordeste", "3": "Sudeste", "4": "Sul", "5": "Centro-Oeste"}
 
 
 def fit(target: str, pop: str, span: str) -> None:
-    dataset, event, block, _ = TARGETS[target]
-    years = FULL if span == "full" else TRAIN
-    data = monolith.assemble(dataset, event, block, years, population=pop)
+    dataset, event, block, _, *extra = TARGETS[target]
+    extra = extra[0] if extra else {}
+    years = spans(extra)[0 if span == "full" else 1]
+    data = monolith.assemble(dataset, event, block, years, population=pop, **extra)
     model = monolith.Monolith(data, graphs.graph(data.places, GRAPH), GRAPH)
     try:
-        monolith.Monolith.load(dataset, event, block, years, GRAPH, population=pop)
+        monolith.Monolith.load(dataset, event, block, years, GRAPH, population=pop, **extra)
         print("already fitted", target, pop, span)
         return
     except LookupError:
@@ -128,14 +140,15 @@ def score(c: dict, common: np.ndarray | None = None) -> dict:
 
 
 def evaluate(target: str, pops: list[str]) -> dict:
-    dataset, event, block, nodes = TARGETS[target]
+    dataset, event, block, nodes, *extra = TARGETS[target]
+    extra = extra[0] if extra else {}
     res: dict = {}
     keep: dict = {}
     for pop in pops:
         rhos = [None if r == "none" else float(r) for r in os.environ.get("EXPOSURE_RHOS", "none").split(",")]             if pop.startswith("account") else [None]
         for rho in rhos:
             name = pop if rho is None else f"{pop}|rho={rho}"
-            ex = surprise.Expectations(dataset, event, FULL, GRAPH, population=pop, exposure_rho=rho)
+            ex = surprise.Expectations(dataset, event, spans(extra)[0], GRAPH, population=pop, exposure_rho=rho, source=extra)
             for node in nodes:
                 for tier in os.environ.get("EXPOSURE_TIERS", "B0,B1,B2,BP").split(","):
                     cap.clear()
@@ -157,7 +170,7 @@ def evaluate(target: str, pops: list[str]) -> dict:
                           f"{res[f'{node}|{tier}'][name]['field_phi']['ks']:.3f} nll {res[f'{node}|{tier}'][name]['block_phi']['nll']:.0f}"
                           f"/{res[f'{node}|{tier}'][name]['field_phi']['nll']:.0f}  {time.time() - t:.0f}s", flush=True)
     # common places, then every score again over them
-    acc = next((p for p in pops if p.startswith("account")), None)
+    acc = next((p for p in pops if p != "popsvs" and not p.endswith("-5y")), None)
     if "popsvs" in pops and acc:
         acc_name = next(n for (nd, tr, n) in keep if n.startswith(acc) and (nd, tr) == (nodes[0], "B1"))
         common = np.intersect1d(keep[(nodes[0], "B1", "popsvs")]["places"], keep[(nodes[0], "B1", acc_name)]["places"])
@@ -195,6 +208,15 @@ def shifts(keep: dict, nodes: list[str], common: np.ndarray, acc_name: str) -> d
                                       "median_abs_dz": float(np.median(np.abs(zb[sel] - za[sel]))),
                                       "share_cells_changing_by_over_1_sd": float(np.mean(np.abs(zb[sel] - za[sel]) > 1))})
         out_node = {"by_size": d["size_classes"]}
+        # by macro-region: how the expectation moves, and where the 200 strongest upward surprises lie under each
+        macro = a["macro"][ia]
+        out_node["by_macro"] = {MACRO.get(str(m), str(m)): {
+            "places": int((macro == m).sum()), "median_log_ratio_expected": float(np.median(ratio[macro == m])),
+            "z_over_3_popsvs": int((za[macro == m] > 3).sum()), "z_over_3_other": int((zb[macro == m] > 3).sum()),
+            "mean_z_popsvs": float(za[macro == m].mean()), "mean_z_other": float(zb[macro == m].mean())} for m in np.unique(macro)}
+        for lab, zz in (("popsvs", za), ("other", zb)):
+            top = np.argsort(-zz.ravel())[:200] // zz.shape[1]
+            out_node[f"top200_by_macro_{lab}"] = {MACRO.get(str(m), str(m)): int((macro[top] == m).sum()) for m in np.unique(macro)}
         # leads: the 50 most surprising place-years upward (z) under each source, and how many are shared
         for lab, zz in (("popsvs", za), ("account", zb)):
             top = np.argsort(-zz.ravel())[:200]

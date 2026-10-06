@@ -12,7 +12,6 @@ beside its verdict, and a place whose deaths have no facility cannot be judged h
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 
 import duckdb
@@ -28,9 +27,7 @@ CODE_CHARS = 3     # the classifier's category level; subcodes are not kept (a 4
 
 def facility_column(dataset: str) -> tuple[str, str | None]:
     """(facility column, the facility's own municipality column or None) from pegasus_data's roles."""
-    import pegasus_data as pg
-
-    roles = pg.roles(dataset)
+    roles = gateway.roles(dataset)
     fac = [r for r in roles if r.get("model") == "institution" and r.get("property") == "facility"]
     if not fac:
         raise LookupError(f"{dataset}: no facility among its institution roles")
@@ -41,10 +38,8 @@ def facility_column(dataset: str) -> tuple[str, str | None]:
 def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     """Events of one year by (u residence, facility, code3). ``facility`` is the CNES code as text, '' when the
     record names none; ``fm`` the facility's municipality as the data gives it ('' if the dataset has none)."""
-    import pegasus_data as pg
-
     strata = gateway._strata(dataset)
-    spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    spec = gateway.event_type(dataset, event)
     classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
     if classifier is None:
         raise LookupError(f"{dataset}/{event}: no primary classifier, no facility cube")
@@ -55,10 +50,7 @@ def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     if hit is not None:
         return hit
     by = [strata["residence"], fcol, classifier] + ([mcol] if mcol else [])
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        raw = pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
-                              allow_partial=False, max_download=8 * 1024**3)
+    raw = gateway.raw_event_counts(dataset, event, year, by)
     con = duckdb.connect()
     con.register("r", raw)
     fm = f"coalesce(left(trim(CAST(\"{mcol}\" AS VARCHAR)), 6), '')" if mcol else "''"
