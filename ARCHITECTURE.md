@@ -1007,6 +1007,8 @@ For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a kn
 | field sparsity | expected events per place-year in five quantile bins of the real fields |
 
 - **Fields are real.** The backgrounds are fitted fields of every system: SIM, SIH, SINASC, SINAN, monthly and annual.
+- **Worlds are refitted.** A refit absorbs part of every planted departure: 9–21 % of a place-year, about 40 % of a macro-region-year, 45–63 % of a regional step to the series' end, and all of a national year (evaluation 2026-10-06, absorption). A curve read against the fit that never saw the signal overstates power. Each world's mean is refitted at the fit's strengths. Disjoint small loci share a world; a large locus has its own.
+- **Leads are sized with their locus held out.** In-sample surprise sees a lasting regional departure at about half its size, which is the masking that outbreak baselines correct by down-weighting past excesses (Farrington; Noufaily et al. 2013). A lead's effect is re-estimated from a fit with the locus's exposure masked.
 - **The outputs:**
   - each method's **power surface**;
   - the **calibration of its posterior probabilities** (departure models): do 90 % exceedances hold 90 % of the time;
@@ -1155,8 +1157,8 @@ A solver change is measured on the benchmark before it is adopted.
 | component | § | maturity | raised by |
 |---|---|---|---|
 | model (§4): levels, profiles, geography, history, season | 4 | v1 (the established LGM), BYM instead of BYM2 | O1 |
-| tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
-| low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
+| tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1; the horseshoe measured and not adopted: held out equal to 2·10⁻⁵ on SIM I, XVII and SIH IX (ADR-0025) | — |
+| low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); off by default, rank per block (ADR-0025: IX +0.015 per death at rank 4, SIH X +0.001 at rank 1) | O10 (the model-choice loop) |
 | marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
 | mean solver | 5.3 | v1, **the default for every model** since 2026-10-06 (exact Newton; IX cold 59 s against v0's 501 s, a better optimum and held-out; monthly grain, the interaction, marks and shares verified against autodiff); v0 retired (the horseshoe reads exact Laplace variances) | O1 |
 | strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
@@ -1182,7 +1184,7 @@ A solver change is measured on the benchmark before it is adopted.
 
 | § | the document says | the code does | why |
 |---|---|---|---|
-| 4.3 | horseshoe on tree levels, one variance per level per top branch | the default stays iid Gaussian per level; the horseshoe is built as `prior="horseshoe"` (a reweighted penalty, the closed mean-field fixed point of the half-Cauchy's auxiliary form, 2026-10-06) | the default changes only if held-out deviance favours it (O2); on XVII it made no difference (leaf-total deviance 949.3 against 949.8) |
+| 4.3 | horseshoe on tree levels, one variance per level per top branch | the default stays iid Gaussian per level; the horseshoe is built as `prior="horseshoe"` (a reweighted penalty, the closed mean-field fixed point of the half-Cauchy's auxiliary form, 2026-10-06) | held out it equals the Gaussian to 2·10⁻⁵ per event on SIM I, XVII and SIH IX, at 15–40 % more time; the block carrier (ADR-0024) already gives each innermost group its level (ADR-0025) |
 | 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the two τ's form a ridge that stalls the solver (§5.3); BYM2 comes with the v1 solver (O1) |
 | 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
 | 4.2, 5.4 | the low-rank interaction ψωτ for every leaf, ψ, ω, τ all learned scales | built (ADR-0021) on the active leaves (≥ 0.1 % of the block's events), ψ and τ strengths fixed, ω ICAR + iid, annual grain, no Laplace draws, no top-model sharing of ω across blocks; the rank is chosen per block by held-out deviance on a script, not by a model-choice loop | the cube's cost is E·U·T per Hessian-vector product; fixing two of the three scales identifies the product; the cross-block shared factor needs the top model (§5.4), not built |

@@ -10,21 +10,21 @@
 
 The rows below audit the v1 text; their section numbers still hold, because revision 2 inserted sections instead of renumbering. What the revision changes:
 
-**New items, all `NB`:**
+**New items** (all `NB` when the revision landed; statuses as of 2026-10-06's end):
 
 | § | item |
 |---|---|
-| 5.3 | exact Newton on the assembled arrowhead Hessian |
-| 5.3, 4.3 | BYM2 |
-| 5.4 | the strengths by LAML |
-| 5.5 | selected inversion and exact draws |
-| 5.8 | the benchmark (`bench`, O1) and the time budgets |
+| 5.3 | exact Newton on the assembled arrowhead Hessian: **BM** (`solver.StructuredNewton`, E:2026-10-06-solver-v1) |
+| 5.3, 4.3 | BYM2: **P**. Its coordinates for the strengths' step were measured and not adopted (ARCHITECTURE §5.4); the parametrisation waits on the PC priors |
+| 5.4 | the strengths by LAML: **BM** (safeguarded Newton on log τ, probes 8/16; E:2026-10-06-solver-v1) |
+| 5.5 | selected inversion and exact draws: **P**. The draws are exact (`laplace.Posterior`, one triangular solve); traces are by Hutchinson probes, with no selected inversion |
+| 5.8 | the benchmark (`bench`, O1) and the time budgets: **BM** (`scripts/bench.py`, held out; IX 32 s, XX 107 s; docs/plans/2026-10-06-optimization.md) |
 | 7.0 | departure models per estimand, with Bayesian FDR |
 | 7.5 | relation models: distributed lag, shared component, endemic–epidemic; negative controls |
 | 8.4 | IHW weights and minimum detectable effects |
 | 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term: **P** since 2026-10-06 (`Registry.conserved`, fields across blocks; E:2026-10-06-icd-structure). Not built: the lenses' reading beside each lead, rule versions, the coding-regime term |
 | 10.3 | the designed grid of planted signals |
-| 10.6 | simulation-based calibration |
+| 10.6 | simulation-based calibration: **BU** (`scripts/sbc.py`; VII and XIII running) |
 | 3.3, 4.2 | the ICD ontology consumed (subcategory leaves, list effects, structural zeros, relations for the conserved levels): **P** since 2026-10-06 (ADR-0024: the nested tree, profiles by block with geography by group, structural zeros by sex and absolute age, underlying-cause eligibility; E:2026-10-06-icd-structure). Not built: list effects θ_L, relations; subcategory leaves declined by the author. Built since: list fields and conserved levels across blocks, chapter XX's axis fields |
 | 3.4, 4.1, 4.2, 7.0 | race as an axis of G, the recording model, the race terms, race disparities |
 
@@ -36,7 +36,8 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 - the Fellner–Schall fixed point and the autodiff Newton–CG as the end state of §5.3–5.4 (v0, replaced in O1).
 
 **Built on 2026-10-06, `BU` until O2 measures them:**
-- the horseshoe tree prior (`prior="horseshoe"`; XVII held out: no difference);
+- the horseshoe tree prior (`prior="horseshoe"`): **BM** since 2026-10-06. Held out under ADR-0024, SIM I, SIM XVII and SIH IX are equal to the Gaussian's to 2·10⁻⁵ per event, at 15–40 % more time; the Gaussian stays the default (E:2026-10-06-solver-v1, O2);
+- the low-rank interaction ψωτ: **BM** since 2026-10-06. On SIM IX it gains 0.0153 per death up to rank 4; on SIH X, 0.0012 at rank 1, after which it loses. The rank is chosen per block and defaults to 0 (same entry);
 - `surprise.lift`;
 - `pairs.within(prewhiten=)`, which failed the microcephaly positive at the state grain (a screen).
 
@@ -49,7 +50,7 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 6. **Breadth (O9)**: the old gaps 6 and 10.
 7. **The top model (O10)**: the old gap 5.
 
-The old gaps 1–3 (κ and SUS, race, the low-rank term) are measurement work inside O2. The old gap 4 (the horseshoe) is built. The ten-gap table below is the 2026-10-05 ranking, kept for its reasons.
+The old gaps 1–3 (κ and SUS, race, the low-rank term) are measurement work inside O2. The low-rank term, κ and SUS are measured (ADR-0025: κ and SUS stay opt-in, with no held-out gain); race is not yet. The old gap 4 (the horseshoe) is built and measured. The ten-gap table below is the 2026-10-05 ranking, kept for its reasons.
 
 ## Counts
 

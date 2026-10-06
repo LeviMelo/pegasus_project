@@ -22,6 +22,7 @@ Results are tables in the store (``harness``), written up as evaluation entries.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -714,6 +715,274 @@ def group_power(y_g: np.ndarray, mu_g: np.ndarray, phi: float, places: np.ndarra
             if sel:
                 by[f"θ={t} [{lo:g},{hi:g})"] = (round(float(np.mean(sel)), 2), len(sel))
     return {"curve": curve, "by_expected": by, "rows": rows}
+
+
+# ---------------------------------------------------------------------- the designed grid (§10.3, O5)
+
+GRID_KINDS = ("place", "cluster", "region", "state", "macro")
+GRID_SHAPES = ("spike", "step", "trend", "group")
+GRID_THETAS = (1.1, 1.2, 1.5, 2.0, 3.0)
+GRID_LOAD = 0.05     # a world's planted excess in any period, at most this share of the field's expected events then (beyond its first plant)
+GRID_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence", "group_disparity")
+
+
+@dataclass(frozen=True)
+class Plant:
+    """One planted departure: the field's mean multiplied by θ over ``places`` (indices) in periods [t0, t1).
+    ``spike`` and ``step`` multiply by θ; ``trend`` rises log-linearly to θ at t1 − 1; ``group`` multiplies one
+    age–sex cell ``group`` only."""
+    kind: str
+    shape: str
+    theta: float
+    places: tuple[int, ...]
+    t0: int
+    t1: int
+    group: int | None = None
+
+    def multiplier(self, T: int) -> np.ndarray:
+        """[T] the multiplier's course over the series (1 outside the window)."""
+        m = np.ones(T)
+        if self.shape == "trend":
+            n = self.t1 - self.t0
+            m[self.t0:self.t1] = np.exp(np.log(self.theta) * np.arange(1, n + 1) / n)
+        else:
+            m[self.t0:self.t1] = self.theta
+        return m
+
+    def cells(self, U: int, T: int) -> np.ndarray:
+        out = np.zeros((U, T), dtype=bool)
+        out[np.ix_(np.asarray(self.places), np.arange(self.t0, self.t1))] = True
+        return out
+
+
+def _neighbours(U: int, edges: np.ndarray) -> list[list[int]]:
+    nb: list[list[int]] = [[] for _ in range(U)]
+    for a, b in edges:
+        nb[int(a)].append(int(b))
+        nb[int(b)].append(int(a))
+    return nb
+
+
+def grid_units(places: np.ndarray, edges: np.ndarray, kind: str) -> list[np.ndarray]:
+    """The candidate loci of a kind, as arrays of place indices: every municipality, every municipality with its
+    graph neighbours, every immediate region, state and macro-region."""
+    from . import gateway
+
+    U = len(places)
+    if kind == "place":
+        return [np.array([u]) for u in range(U)]
+    if kind == "cluster":
+        return [np.unique([u, *n]) for u, n in enumerate(_neighbours(U, edges))]
+    code = {"region": lambda: np.asarray(gateway.regions(places, "ibge_immediate_region")),
+            "state": lambda: places // 10000, "macro": lambda: places // 100000}[kind]()
+    return [np.nonzero(code == c)[0] for c in np.unique(code)]
+
+
+def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarray, mu_g: np.ndarray,
+                edges: np.ndarray, rng: np.random.Generator, thetas: tuple[float, ...] = GRID_THETAS,
+                load: float = GRID_LOAD) -> list[Plant]:
+    """One world's plants of one kind and shape: disjoint loci, each kept a graph edge away from the others, θ cycled
+    over ``thetas``, loci taken round-robin over five quantile bins of their expected events (so the sparsity axis is
+    covered), while the planted excess in every period stays within ``load`` of the field's expected events in that
+    period (so the plants move the shared national history little). The first plant is always
+    taken, so a macro-region has a world of its own. Spikes last one period or three; steps and trend changes start
+    in the series' second half and run to its end; a group plant is a one-period spike in one age–sex cell drawn by
+    its share of the locus's expected events."""
+    U, T = mu_ut.shape
+    tot = np.array([mu_ut[r].sum() for r in units])
+    ok = np.nonzero(tot > 0)[0]
+    queues = [list(rng.permutation(b)) for b in np.array_split(ok[np.argsort(tot[ok])], min(5, len(ok))) if len(b)]
+    nb = _neighbours(U, edges)
+    taken = np.zeros(U, dtype=bool)
+    budget, used, plants, q = load * mu_ut.sum(0), np.zeros(T), [], 0
+    while any(queues):
+        queue = queues[q % len(queues)]
+        q += 1
+        if not queue:
+            continue
+        rows = units[queue.pop()]
+        if taken[rows].any():
+            continue
+        theta = float(thetas[len(plants) % len(thetas)])
+        group = None
+        if shape == "spike":
+            dur = int(rng.choice([1, 3])) if T >= 3 else 1
+            t0 = int(rng.integers(0, T - dur + 1))
+            t1 = t0 + dur
+        elif shape in ("step", "trend"):
+            t0, t1 = int(rng.integers(T // 2, max(T // 2 + 1, T - 1))), T
+        else:
+            t0 = int(rng.integers(0, T))
+            t1 = t0 + 1
+            share = mu_g[rows, t0].sum(0)
+            group = int(rng.choice(len(share), p=share / share.sum()))
+        window = mu_ut[rows].sum(0) if group is None else mu_g[rows, :, group].sum(0)
+        excess = (Plant(kind, shape, theta, (), t0, t1).multiplier(T) - 1.0) * window      # [T]
+        if plants and np.any(used + excess > budget):
+            continue
+        plants.append(Plant(kind, shape, theta, tuple(int(r) for r in rows), t0, t1, group))
+        used += excess
+        taken[rows] = True
+        taken[[v for r in rows for v in nb[int(r)]]] = True
+    return plants
+
+
+def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.Generator) -> Any:
+    """The block's counts drawn from its fit, y ~ NB(μ', φ) cell by cell (leaf × place × period × age–sex), where μ'
+    is the fit's mean with the plants' multipliers on the field's ``leaves``. The background is the model's own
+    world, so what a lens finds outside the plants is a false lead."""
+    import dataclasses
+
+    import torch
+
+    d = m.data
+    U, T, G = d.N.shape
+    mult = np.ones((U, T, G))
+    for p in plants:
+        rows = np.asarray(p.places)
+        course = p.multiplier(T)[None, :]
+        if p.group is None:
+            mult[rows] *= course[:, :, None]
+        else:
+            mult[rows, :, p.group] *= course
+    inside = {int(e) for e in leaves}
+    parts = []
+    with torch.no_grad():
+        for e in range(len(d.leaves)):
+            mu = m.expected_by_group(np.array([e]))
+            if e in inside:
+                mu = mu * mult
+            y = subset.replicate(mu, m.phi, rng)
+            u, t, g = np.nonzero(y)
+            parts.append((np.full(len(u), e), u, t, g, y[u, t, g]))
+    e, u, t, g, y = (np.concatenate(z) for z in zip(*parts, strict=True))
+    return dataclasses.replace(d, e=e, u=u, t=t, g=g, y=y, key={**d.key, "world": True})
+
+
+def grid_refit(m: Any, data: Any) -> Any:
+    """The world's mean refitted from the fit's MAP at the fit's strengths and dispersion (a fixed-hyperparameter
+    parametric bootstrap). A refit absorbs part of every departure (evaluation 2026-10-06, absorption), so a lens
+    must read the refitted world, never the fit that never saw the plant."""
+    import torch
+
+    from . import monolith, solver
+
+    if getattr(m, "rank", 0):
+        raise NotImplementedError("the grid refits the base model; the interaction's world is not built")
+    m2 = monolith.Monolith(data, m.graph, m.graph_kind, prior=m.prior)
+    for n, c in m2.components.items():
+        c.tau = m.components[n].tau
+    with torch.no_grad():
+        for n, v in m.params.items():
+            m2.params[n].copy_(v)
+    solver.fit_mean(m2, iterations=30, loglik_tol=1e-3)
+    m2.phi = m.phi
+    return m2
+
+
+def _overlap(f: Any, plant_cells: np.ndarray, places: np.ndarray, periods: np.ndarray) -> tuple[float, float]:
+    """(precision, recall) of a finding's cells against a plant's: the share of the finding inside the plant, and of
+    the plant inside the finding."""
+    rows = np.isin(places, f.locus.get("places", []))
+    yrs = f.locus.get("years") or [int(periods[0]), int(periods[-1])]
+    cols = (periods >= yrs[0]) & (periods <= yrs[-1])
+    found = np.outer(rows, cols)
+    inter = (found & plant_cells).sum()
+    return (inter / found.sum() if found.sum() else 0.0, inter / plant_cells.sum() if plant_cells.sum() else 0.0)
+
+
+def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: tuple[str, ...] = GRID_SHAPES,
+         lens_names: tuple[str, ...] = GRID_LENSES, worlds: int = 4, thetas: tuple[float, ...] = GRID_THETAS,
+         replicates: int = 100, null_worlds: int = 0, log=print) -> dict[str, Any]:
+    """The designed grid of ARCHITECTURE §10.3 for one field: for each (kind, shape), ``worlds`` worlds of disjoint
+    plants (`grid_design`), each drawn from the fit (`grid_world`), refitted (`grid_refit`) and read by the production
+    lenses (`tools.Session.scan` on a sandbox ledger); and ``null_worlds`` worlds with no plant. Per plant and lens:
+    whether a finding lies at least half inside it (detected), the best finding's precision and recall, the plant's
+    expected events, and the effect the refitted B1 expectation leaves there against the planted one. Per world and
+    lens: the findings that touch no plant (false leads). Kept in the store (kind ``grid``)."""
+    from . import control, tools
+
+    ex = session.expectations
+    f = ex.field(node)
+    m = ex.model(f.block)
+    leaves = np.array([m.data.leaves.index(c) for c in ex.registry.leaves(f.node) if c in m.data.leaves])
+    places = m.data.places
+    edges = session.edges()
+    mu_g = m.expected_by_group(leaves)                                    # [U, T, G]
+    mu_ut = mu_g.sum(2)
+    U, T = mu_ut.shape
+    sess = tools.Session(session.dataset, session.event, session.years, session.graph, source=session.source,
+                         ledger=control.Ledger(config.home() / "harness" / "grid_ledger"))
+    rows, false_rows = [], []
+    plans = [(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
+    for kind, shape, n in plans:
+        units = [] if kind == "null" else grid_units(places, edges, kind)
+        for w in range(n):
+            rng = np.random.default_rng(config.seed("grid", f.id, kind, shape, w))
+            plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas)
+            t0 = time.time()
+            sess.expectations._models = {f.block: grid_refit(m, grid_world(m, leaves, plants, rng))}
+            s1 = sess.surprise(node, "B1")
+            periods = np.asarray(s1.years)
+            cells = [p.cells(U, T) for p in plants]
+            for lens in lens_names:
+                kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster") else {}
+                try:
+                    found = sess.scan(node, lens, **kw)
+                except (ValueError, NotImplementedError) as err:
+                    log(f"  {lens}: {err}")
+                    continue
+                touched = np.zeros(len(found), dtype=bool)
+                for p, c in zip(plants, cells, strict=True):
+                    best = (0.0, 0.0)
+                    for i, fd in enumerate(found):
+                        pr, rc = _overlap(fd, c, places, periods)
+                        touched[i] |= rc > 0
+                        best = max(best, (pr, rc))
+                    base = mu_ut if p.group is None else mu_g[..., p.group]
+                    true = float(np.log((base * p.multiplier(T)[None, :])[c].sum() / base[c].sum()))
+                    obs, exp_ = s1.y[c].sum(), s1.mu[c].sum()
+                    rows.append({"lens": lens, "kind": kind, "shape": shape, "world": w, "theta": p.theta,
+                                 "periods": p.t1 - p.t0, "places": len(p.places), "group": p.group,
+                                 "expected": float(base[c].sum()), "detected": bool(best[0] >= 0.5),
+                                 "precision": round(float(best[0]), 3), "recall": round(float(best[1]), 3),
+                                 "true_log_ratio": round(true, 4),
+                                 "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
+                false_rows.append({"lens": lens, "kind": kind, "shape": shape, "world": w, "findings": len(found),
+                                   "false": int((~touched).sum())})
+            log(f"{f.id} {kind}/{shape} world {w}: {len(plants)} plants, {time.time() - t0:.0f}s")
+    out = {"field": f.id, "block": f.block, "kinds": list(kinds), "shapes": list(shapes), "lenses": list(lens_names),
+           "worlds": worlds, "null_worlds": null_worlds, "thetas": list(thetas), "load": GRID_LOAD, "rows": rows,
+           "false": false_rows}
+    record("grid", {"field": f.id, "kinds": list(kinds), "shapes": list(shapes), "lenses": list(lens_names),
+                    "worlds": worlds, "null_worlds": null_worlds, "years": list(session.years)}, out)
+    return out
+
+
+def surface(rows: list[dict], power: float = 0.8, at: tuple[float, ...] = (10, 100, 1000, 10000)) -> dict[str, Any]:
+    """Each (lens, kind, shape)'s power surface: a logistic regression of detection on log(θ − 1) and the plant's log
+    expected events, and from it the minimum detectable rate ratio at ``power`` for the expected counts ``at``.
+    A cell where every plant was detected, or none, reports its counts only."""
+    import statsmodels.api as sm
+
+    out: dict[str, Any] = {}
+    for key in sorted({(r["lens"], r["kind"], r["shape"]) for r in rows}):
+        sel = [r for r in rows if (r["lens"], r["kind"], r["shape"]) == key and r["expected"] > 0]
+        det = np.array([r["detected"] for r in sel], dtype=float)
+        rec: dict[str, Any] = {"plants": len(sel), "detected": int(det.sum())}
+        if 0 < det.sum() < len(det):
+            X = sm.add_constant(np.column_stack([np.log([r["theta"] - 1 for r in sel]),
+                                                 np.log([r["expected"] for r in sel])]))
+            try:
+                a, b, c = sm.Logit(det, X).fit(disp=0).params
+            except Exception as err:  # noqa: BLE001 -- perfect separation and the like: the counts stand alone
+                rec["fit"] = str(err)[:80]
+            else:
+                logit = np.log(power / (1 - power))
+                rec["coef"] = [round(float(x), 3) for x in (a, b, c)]
+                rec["mde"] = {str(n): round(float(1 + np.exp((logit - a - c * np.log(n)) / b)), 3) for n in at} if b > 0 else {}
+        out["|".join(key)] = rec
+    return out
 
 
 # ---------------------------------------------------------------------- the gate
