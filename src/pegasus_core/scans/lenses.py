@@ -24,6 +24,7 @@ from . import subset
 # SIM I00-I02 and SIH-RD J09-J18. v0's 1.2 cost the outbreak lens half its power (place doublings 0.38 against 0.72).
 RATE_RATIO = 1.1         # cell lenses (outbreak, change point, space-time): H0 is "the rate is at most 1.1 × expected"
 SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0) on SIM: model worlds 2/20 at 1.2, 0/20 at 1.5
+REFERENCE_EFFECT = 1.5   # the rate ratio a hypothesis's power is read at for its weight (§8.4)
 TREND_PERIOD = {"municipality": 1.1, "region": 1.1, "state": 1.1}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; v0's municipal 1.5 came from raw-score time shifts, whose single real shock cell the normal scores remove
 
 
@@ -154,10 +155,13 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
 # ---------------------------------------------------------------------- per place
 
 
-def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None
-             ) -> list[Finding]:
+def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
+             weighted: bool = True) -> list[Finding]:
     """Cells above their predictive (B1, ADR-0027: B2's place trends took in part of the spike): the upper tail P(Y ≥ y) under θ0 × μ is the
-    one-sided p; BH across the field's cells. ``rate_ratio`` overrides θ0 (`RATE_RATIO`)."""
+    one-sided p; BH across the field's cells. ``rate_ratio`` overrides θ0 (`RATE_RATIO`). ``weighted`` (the default,
+    ADR-0028) makes it the weighted BH with Roeder–Wasserman weights from each cell's standardised effect at
+    `REFERENCE_EFFECT`, its own μ and dispersion (ARCHITECTURE §8.4; `control.optimal_weights`): on the grid, place- and
+    region-year doublings found 0.01–0.03 more often on stroke and SIH, the null worlds clean."""
     rr = RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"outbreak|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "outbreak", "field": s.field.id,
@@ -171,7 +175,13 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
     else:
         p = _upper_tail(s.y, rr * s.mu, s.phi)
     flat = np.where(ok, p, 1.0).ravel()
-    hits = np.nonzero(control.bh(flat, q))[0]
+    w = None
+    if weighted and s.extras.get("kind") != "mark":
+        alt = REFERENCE_EFFECT * s.mu
+        phi = np.where(np.isfinite(s.phi), s.phi, np.inf)
+        xi = np.where(ok & (s.mu > 0), (REFERENCE_EFFECT - rr) * s.mu / np.sqrt(alt + alt ** 2 / phi), 0.0).ravel()
+        w = control.optimal_weights(xi, q)
+    hits = np.nonzero(control.bh(flat, q, weights=w))[0]
     U, T = s.y.shape
     out = [Finding("outbreak", s.field.id, s.tier, {"places": [int(s.places[i // T])], "years": [int(s.years[i % T])]},
                    _rr(s.y.flat[i], s.mu.flat[i]), float(flat[i]),

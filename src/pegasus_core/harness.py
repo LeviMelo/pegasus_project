@@ -643,7 +643,8 @@ def _score(plants: list[Plant], found: list, places: np.ndarray, periods: np.nda
 def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: tuple[str, ...] = GRID_SHAPES,
          lens_names: tuple[str, ...] = GRID_LENSES, worlds: int = 4, thetas: tuple[float, ...] = GRID_THETAS,
          replicates: int = 100, null_worlds: int = 0, minimum_effects: dict[str, tuple] | None = None,
-         tiers: dict[str, tuple] | None = None, sink: str | None = None, log=print) -> dict[str, Any]:
+         tiers: dict[str, tuple] | None = None, weighted: tuple[bool, ...] = (True,), sink: str | None = None,
+         log=print) -> dict[str, Any]:
     """The designed grid of ARCHITECTURE §10.3 for one field: for each (kind, shape), ``worlds`` worlds of disjoint
     plants (`grid_design`), each drawn from the fit (`grid_world`), refitted (`monolith.Monolith.refit`) and read by the production
     lenses (`tools.Session.scan` on a sandbox ledger); and ``null_worlds`` worlds with no plant. Per plant and lens:
@@ -692,14 +693,16 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                                   # on the field's total, like the seen ratio (a group plant's own ratio is θ itself)
                                   "true_log_ratio": round(float(np.log(planted[c].sum() / mu_ut[c].sum())), 4),
                                   "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
-            runs = [(x, t, tr) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
-                    for tr in (tiers or {}).get(x, (None,))]
-            for lens, theta0, tier in runs:
+            runs = [(x, t, tr, wt) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
+                    for tr in (tiers or {}).get(x, (None,)) for wt in (weighted if x == "outbreak" else (False,))]
+            for lens, theta0, tier, wt in runs:
                 kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster") else {}
                 if theta0 is not None:
                     kw[MINIMUM_EFFECT_ARG[lens]] = theta0
                 if tier is not None:
                     kw["tier"] = tier
+                if lens == "outbreak":
+                    kw["weighted"] = wt
                 try:
                     found = sess.scan(node, lens, **kw)
                 except (ValueError, NotImplementedError) as err:
@@ -707,9 +710,9 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                     continue
                 prec, rec, touched = _score(plants, found, places, periods, U)
                 for pc, pr_, rc in zip(per_plant, prec, rec, strict=True):
-                    rows.append({"lens": lens, "theta0": theta0, "tier": tier, "kind": kind, "shape": shape, "world": w, **pc,
+                    rows.append({"lens": lens, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, **pc,
                                  "detected": bool(pr_ >= 0.5), "precision": round(float(pr_), 3), "recall": round(float(rc), 3)})
-                false_rows.append({"lens": lens, "theta0": theta0, "tier": tier, "kind": kind, "shape": shape, "world": w, "findings": len(found),
+                false_rows.append({"lens": lens, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, "findings": len(found),
                                    "false": int((~touched).sum())})
             sess.expectations._models, sess._local.memo = {}, None
             gc.collect()

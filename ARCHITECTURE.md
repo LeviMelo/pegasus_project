@@ -842,7 +842,7 @@ A lead is selected on data and confirmed only by **units that took no part in th
 **Built (ADR-0028, 2026-10-06).**
 - Every field with an event is scanned, and every lead carries its method's record (`tools.method_record`): tier, θ0, whether its false-discovery rate is calibrated where it ran, and the evidence.
 - The v0 admission curves and power functions are removed; the grid of §10.3 replaces them as the measurement of power.
-- Weighted BH and Roeder–Wasserman weights are in `control` and are not yet applied.
+- Weighted BH and Roeder–Wasserman weights are in `control`. The outbreak lens weights its cells by default (ADR-0028 amendment); the other lenses and the across-field weights are not yet built.
 - `harness.pair_power` stays as the pair screens' power.
 
 **Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the **negative controls and null worlds** stays ≤ q (§10.2–10.4). It is the empirical-calibration idea of observational-health research networks, applied to the search itself. It is the region of practical equivalence of the departure models (§7.0) and of the pair screens.
