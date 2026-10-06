@@ -79,3 +79,16 @@ Hence a baseline built from the years before the window (`data/lens_course.py`; 
 | B1, past level, Poisson | 0/10, 0/20, 1/20; 0.90 | model 2/10, space 20/20, time 20/20 |
 | **B1, past level and slope, NB (adopted)** | 0/10, 0/20, 0/20; 0.47 | 0/10, 3/20, 0/20; 0.40 |
 | B0, past level and slope, NB | 0/10, 0/20, 3/20; 0.94 | 0/10, 3/20, 20/20; 0.01 |
+
+**The course's level prior** (`data/queue_lens_course.py`; `data/probes/grid/*_course_B1*.json`). The adopted course keeps the tier's level, because the between-place excess over B1 is about zero and the prior is floored. A variant freed the level to the model's own prior variance of a place's effect (Σ 1/τ of the place terms: 0.078 on stroke), so that a place's other years could move back what the fit absorbed.
+
+| lens (variant) | stroke: nulls; place ×2 / ×3 | SIH: nulls; place ×2 / ×3 |
+|---|---|---|
+| change point, level pinned (adopted) | clean; 0.16 / 0.47 | space 3/20; 0.07 / 0.40 |
+| change point, level freed | **time 8/20**; 0.39 / 0.92 | **space 20/20, time 20/20**; 0.54 / 0.96 |
+| outbreak, every-other-year course, level pinned | clean; 0.44 / 0.92 | space 1/20; 0.15 / 0.73 |
+| outbreak, every-other-year course, level freed | clean; 0.37 / 0.83 | **time 18/20**; 0.22 / 0.80 |
+
+The freed level buys power and fails the time negatives: the residuals are serially correlated, and a baseline that follows a place's recent level reads them as steps. The level stays pinned. With it pinned, the outbreak's course is B1 with negligible extra variance, so the outbreak lens reads B1 as it is (checked directly below).
+
+Checked directly: the outbreak lens on B1 as it is gives what the pinned course gave. Stroke and the sparse field are clean, and SIH has space 1/20 and time 0/20. Place ×2 / ×3: 0.44 / 0.92 on stroke, 0.15 / 0.73 on SIH.

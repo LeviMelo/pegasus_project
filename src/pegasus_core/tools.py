@@ -79,7 +79,7 @@ METHOD_EVIDENCE = (
     ("spatial_cluster", None, None, True, "θ0 1.5 on SIM, 2.0 on SIH: model worlds within q (ADR-0026)"),
     ("change_point", None, None, True, "the past course on B1, calibrated on three fields; sparse fields' time "
                                        "negatives fail (ADR-0027)"),
-    ("outbreak", None, None, True, "every other year's course on B1, calibrated on three fields (ADR-0027)"),
+    ("outbreak", None, None, True, "B1, calibrated on three fields (ADR-0027)"),
 )
 
 

@@ -20,10 +20,10 @@ def _years(text: str) -> list[int]:
     return list(range(int(a), int(b) + 1))
 
 
-def _session(dataset: str, event: str, years: str, graph: str):
+def _session(dataset: str, event: str, years: str, graph: str, grain: str = "year"):
     from . import tools
 
-    return tools.Session(dataset, event, _years(years), graph)
+    return tools.Session(dataset, event, _years(years), graph, source={"grain": grain} if grain != "year" else {})
 
 
 @app.command()
@@ -107,7 +107,7 @@ def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 @app.command()
 def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "contiguity",
-         kinds: str = "place,cluster,region,state,macro", shapes: str = "spike,step,trend,group",
+         kinds: str = "place,cluster,region,state,macro", shapes: str = "spike,step,trend,group", grain: str = "year",
          lenses: str = ",".join(("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence",
                                 "group_disparity")),
          worlds: int = 4, null_worlds: int = 4, replicates: int = 100, out: str = typer.Option(None),
@@ -118,7 +118,7 @@ def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "
     false leads of null worlds, and each lens's power surface (minimum detectable rate ratio by expected events)."""
     from . import harness as h
 
-    res = h.grid(_session(dataset, event, years, graph), node, kinds=tuple(kinds.split(",")),
+    res = h.grid(_session(dataset, event, years, graph, grain), node, kinds=tuple(kinds.split(",")),
                  shapes=tuple(shapes.split(",")), lens_names=tuple(lenses.split(",")), worlds=worlds,
                  null_worlds=null_worlds, replicates=replicates, log=console.print,
                  sink=str(Path(out).with_suffix(".jsonl")) if out else None,

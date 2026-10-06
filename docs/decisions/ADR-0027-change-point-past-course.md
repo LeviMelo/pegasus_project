@@ -1,4 +1,4 @@
-# ADR-0027: The cell lenses read each place against its own course outside the period under test
+# ADR-0027: The change point reads each place against its own past course; the outbreak lens reads B1
 
 **Date.** 2026-10-06. **Status.** Active. O6's first departure baselines: the change point and the outbreak estimands.
 
@@ -28,7 +28,7 @@
    - Stroke: clean on the model worlds (0/10) and both negatives (0/20). A place step ×3 is found 0.47 of the time and a state step ×2 always.
    - SIH: clean on the model worlds and time negatives; space negatives 3/20. A place step ×3 is found 0.40 of the time.
 
-4. **The outbreak lens** reads B1 (was B2), each place-year against the place's course fitted on every other year (`_course(past_only=False)`), so the year under test never enters its own baseline. Prospective tiers keep their alarm baseline.
+4. **The outbreak lens** reads B1 as it is (was B2). Prospective tiers keep their alarm baseline. A course fitted on every other year adds nothing once the level is pinned: B1 alone gives the same numbers. A level freed to the model's place-effect prior failed SIH's time negatives (18/20): see the evaluation, level prior.
    - Calibrated: model worlds 0/10 and both negatives at most 1/20 on all three fields (`data/lens_course.py B1 outbreak`).
    - Place spikes at 30 or more expected events, ×2 / ×3, against B2 at θ0 1.1: stroke 0.44 / 0.92 against 0.36 / 0.81; SIH 0.15 / 0.73 against 0.07 / 0.55.
    - State-years: SIH 0.50 at ×1.5 and 1.0 at ×2 against 0.25 and 0.75. Stroke reads 0.5 against 1.0 at ×2, on 4 plants a size, which is noise at that count.
