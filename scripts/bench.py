@@ -60,7 +60,7 @@ for spec in args.blocks.split(","):
               log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
-    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "likelihood": args.likelihood, "prior": args.prior, "tag": args.tag, "profile": args.profile, "geography": args.geography, "history": args.history, "geo_pool": args.geo_pool, "solver": "v1", "start": "warm" if args.warm else "cold", "mean_tol": args.mean_tol,
+    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "likelihood": args.likelihood, "prior": args.prior, "tag": args.tag, "profile": args.profile, "geography": args.geography, "forecast": args.history, "geo_pool": args.geo_pool, "solver": "v1", "start": "warm" if args.warm else "cold", "mean_tol": args.mean_tol,
            "commit": commit, "seconds": round(secs, 2), "assemble_seconds": round(t_asm, 2),
            "outers": len(model.history), "newton": len(model.newton_log),
            "objective": float(model.objective()) * model._objective_norm(), "phi": model.phi,
