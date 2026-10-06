@@ -481,11 +481,6 @@ class StructuredNewton:
         self._fmap = out
         return out
 
-    def _fmap_dense(self) -> list[np.ndarray]:
-        if getattr(self, "_fd", None) is None:
-            self._fd = [mk.toarray() for mk in self._feature_map()]
-        return self._fd
-
     def _features(self, f: Factors) -> np.ndarray:
         """ω's feature values per (k, u): [K, U, nf] = [Pu, Pk[t], R[g] (, Pk summed by month)]."""
         parts = [f.Pu[:, :, None], f.Pk, f.R]
@@ -531,12 +526,16 @@ class StructuredNewton:
         # ---- γγ: data (design over (e,t,g) cells weighted by Σ_u μ), minus Σ_k Mkᵀ(Σ_u q φφᵀ)Mk, θc terms
         D = self._global_design()
         Hgg = (D.T @ sp.diags(f.mubar.ravel()) @ D).toarray()
-        fd = self._fmap_dense()
+        # the feature map sends each feature to its own columns with weight 1, so Mₖᵀ S Mₖ and B's G_k = vecₖ·Mₖ are
+        # index scatters over a group's ~100 columns, not products over all of them (SIM XX: 1,863 columns, 37 groups;
+        # the products took 3.4 of each Newton step's 5.4 s, 2026-10-06)
+        rc = [(fm.tocoo().row, fm.tocoo().col) for fm in self._feature_map()]
         for k in range(K):
             Sk = (feat[k] * q[k][:, None]).T @ feat[k]
             if ix:
                 Sk = Sk + feat[k].T @ G1[k] + G1[k].T @ feat[k] + AA[k]
-            Hgg -= fd[k].T @ Sk @ fd[k]
+            r, c = rc[k]
+            Hgg[np.ix_(c, c)] -= Sk[np.ix_(r, r)]
         # θc[e] (coupling m_e at each place) with the shared features: −Σ_u m_e ζ_e φ_{k(e),u}, and with the active
         # leaves' deviations; θc–θc: −Σ_u (m_e m_e' (δ_ee'/d_e − 1/(d_e d_e' s)))
         eta = zeta * f.m                                           # [E, U]
@@ -551,9 +550,9 @@ class StructuredNewton:
                 if len(act_k):
                     pos = np.searchsorted(leaves, f.act[act_k])
                     cross[pos] += np.einsum("au,auf->af", md[f.act[act_k]] * f.LP[f.act[act_k]], df[act_k])
-            cross = cross @ fd[k]                                      # [n_k, ng]
-            Hgg[oc + leaves, :] -= cross
-            Hgg[:, oc + leaves] -= cross.T
+            r, c = rc[k]
+            Hgg[np.ix_(oc + leaves, c)] -= cross[:, r]
+            Hgg[np.ix_(c, oc + leaves)] -= cross[:, r].T
             diag = (md[leaves] * f.m[leaves]).sum(1)
             off = (md[leaves] / s[k][None, :]) @ md[leaves].T
             Hgg[np.ix_(oc + leaves, oc + leaves)] -= np.diag(diag) - off
@@ -599,10 +598,25 @@ class StructuredNewton:
             thc = thc + md * (H1[self.grp][:, :, 0] / s[self.grp])
             thc[f.act] -= md[f.act] * f.LP[f.act] * f.dPu
         oc = self.goff["th_cat"]
-        ng, C = self.ng, self.C
-        members = [np.nonzero(self.grp == k)[0] for k in range(K)]
-        # the feature map sends each feature to its own columns with weight 1: G_k = vec_k·M_k is a column copy
-        rc = [(fm.tocoo().row, fm.tocoo().col) for fm in self._feature_map()]
+        ng, Ko = self.ng, self.Ko
+        E = len(self.grp)
+        # each global column is either owned by one geography carrier (θ_grp, f_grp, h_grp, c_grp, θ_cat: its
+        # contrast row is that carrier's) or read by every group (b0, h_all, f_all, c_all: its contrast sums are
+        # taken over per-carrier sums of the features)
+        owner = np.full(ng, -1)
+        owner[oc + np.arange(E)] = self.outer[self.grp]
+        for k in range(K):
+            c = rc[k][1]
+            seen = owner[c]
+            owner[c] = np.where((seen == -1) | (seen == self.outer[k]), self.outer[k], -2)
+        mixc = np.nonzero(owner == -2)[0]
+        r0, c0 = rc[0]
+        srt = np.argsort(c0)
+        mixr = r0[srt[np.searchsorted(c0, mixc, sorter=srt)]] if len(mixc) else mixc
+        own = [(r[owner[c] >= 0], c[owner[c] >= 0]) for r, c in rc]
+        Cc = _contrast(Ko)
+        W = np.zeros((Ko - 1, ng))
+        W[:, owner >= 0] = Cc[owner[owner >= 0]].T
 
         def build(p: np.ndarray) -> np.ndarray:
             """B (reduced place rows × x-space globals) written straight into the factor's row order P·B, a chunk of
@@ -615,15 +629,23 @@ class StructuredNewton:
             step = max(1, int(2.5e8 // (8 * ng * (K + npr))))          # places per chunk: about 250 MB of temporaries
             for a in range(0, U, step):
                 z = min(U, a + step)
-                Gc = np.zeros((K, z - a, ng))
-                for k in range(K):
-                    Gc[k][:, rc[k][1]] = vec[k, a:z][:, rc[k][0]]
-                    Gc[k][:, oc + members[k]] += thc[members[k], a:z].T
+                V = vec[:, a:z]                                                       # [K, places, nf]
                 blk = np.empty((z - a, npr, ng))
-                blk[:, 0] = blk[:, 1] = Gc.sum(0)
-                cg = np.tensordot(C, Gc, axes=([0], [0])).transpose(1, 0, 2)    # [places, K−1, ng]
-                blk[:, 2:2 + self.Ko - 1] = cg
-                blk[:, 2 + self.Ko - 1:] = cg
+                tot = blk[:, 0]
+                tot[:] = 0.0
+                for k in range(K):
+                    r, c = own[k]
+                    tot[:, c] += V[k][:, r]
+                tot[:, oc:oc + E] = thc[:, a:z].T
+                tot[:, mixc] = V.sum(0)[:, mixr]
+                blk[:, 1] = tot
+                if Ko > 1:
+                    np.multiply(tot[:, None, :], W[None], out=blk[:, 2:Ko + 1])
+                    Vo = np.zeros((Ko, z - a, len(mixr)))
+                    for k in range(K):
+                        Vo[self.outer[k]] += V[k][:, mixr]
+                    blk[:, 2:Ko + 1, mixc] = np.einsum("oj,opf->pjf", Cc, Vo)
+                    blk[:, Ko + 1:] = blk[:, 2:Ko + 1]
                 out[pinv[a * npr:z * npr]] = blk.reshape(-1, ng)
             return out
 
@@ -727,7 +749,7 @@ class StructuredNewton:
         U, K, npl = self.U, self.K, self.npl
         xl = self.Tplace @ x_r[: self.nl_red]
         xg = self.Cg @ x_r[self.nl_red:]
-        fd = self._fmap_dense()
+        fd = self._feature_map()                          # sparse: each feature reads its own columns
         df = self._dfeatures(f)
         rows = np.arange(U) * npl
         base = xl[rows + 0] + xl[rows + 1]
@@ -749,7 +771,7 @@ class StructuredNewton:
         U, K, npl = self.U, self.K, self.npl
         xl = self.Tplace @ x_r[: self.nl_red]
         xg = self.Cg @ x_r[self.nl_red:]
-        fd = self._fmap_dense()
+        fd = self._feature_map()                          # sparse: each feature reads its own columns
         dot = np.empty((K, U, x_r.shape[1]))
         rows = np.arange(U) * npl
         base = xl[rows + 0] + xl[rows + 1]

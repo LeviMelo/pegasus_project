@@ -249,6 +249,7 @@ B's construction became a column copy (the feature map has weight-1 entries only
 - The 20 s target needs the core's ~2 s Newton step and 2.4 s strengths update halved, which is to be profiled on a calm machine.
 - Scoring probes 16 → 8 on blocks of 100 k events or more (`data/probes_*.log`): IX 48 → 31 s and XX 197 → 186 s, held-out equal to 1e-5. VII kept at 16: with 8 its held-out fell by 0.17 per death.
 - The interaction's Hessian terms (`_active_terms`) by per-group sums and BLAS Gram products: 1.38 → 0.29 s a call. Rank-1 IX takes 178 s (36 Newton steps); a chord start after its sweeps was slower (228 s) and was dropped.
+- The Hessian's group terms and B's group couplings are written by index over each group's own columns, never as products over every global. B's contrasts are taken per geography carrier: a column owned by one carrier is that carrier's contrast row times the total, and the columns every group reads (b0, h_all, f_all) take per-carrier sums. On XX, assembly went 1.67 → 0.56 s a call and B 1.78 → 0.77 s; the fit went 197 → 107 s on a calm machine. The Newton step is equal to HEAD's to 4·10⁻¹³ on XIII.
 
 **SIH-RD 2010–2023 refits under ADR-0024** (warm-started, beside three to five other jobs; `data/logs/refit3_sih_2023.log`):
 - 16 chapters took 1,013 s; most took 8–80 s, I 133 s and XIX 282 s (23 groups, none under the pooling share);
