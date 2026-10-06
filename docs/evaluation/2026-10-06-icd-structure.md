@@ -294,3 +294,18 @@ One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of 
 - A node's conserved level is its family (the outermost group), plus R00–R99, plus Y10–Y34 for an external cause.
 - C53 → `CONS[C00-C97]` (II + XVIII, 178 categories); X95 → `CONS[X85-Y09]` (+ Y10–Y34).
 - `CONS[I20-I25]` at B1: 2,631,335 deaths observed and expected, calibrated (KS 0.006, the field's φ).
+
+**Chapter XX's axis fields end to end** (B1 on the refitted XX, SIM 2010–2023; `data/axis_field_check.json`):
+
+| field | deaths | KS |
+|---|---|---|
+| mechanism = firearm | 557,582 | 0.012 |
+| intent = homicide | 729,108 | 0.008 |
+| intent = suicide | 174,553 | 0.004 |
+| XX itself | 2,087,787 | 0.027 |
+
+About 40 k firearm, 52 k homicide and 12.5 k suicide deaths a year.
+
+**Refit pass 3 is complete** (`data/logs/refit3_complete.out`): SIM 2010–2023, SIH-RD 2010–2023 and SIM 2010–2019, every block under ADR-0024's defaults with pooling.
+- V failed once on the IPF start and was refitted.
+- Twelve SIM blocks fitted before pooling became the default were refitted once it did.
