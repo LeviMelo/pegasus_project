@@ -910,15 +910,15 @@ class Monolith:
         grp = np.asarray(d.leaf_group)
         W = np.einsum("utg,kt,kg->ku", d.N, np.exp(b), np.exp(c))                             # [K, U]
         E = np.exp(a)[:, None] * W[grp]
-        O = np.bincount(d.e.astype(np.int64) * nU + d.u, weights=d.y, minlength=nE * nU).reshape(nE, nU)
+        Obs = np.bincount(d.e.astype(np.int64) * nU + d.u, weights=d.y, minlength=nE * nU).reshape(nE, nU)
         nK = int(grp.max()) + 1
         # the place strengths' start: Marshall's (1991) moment estimate of the between-unit variance of observed over
         # expected (less its Poisson part) at each level, each level's expectation carrying the level above; the
         # ICAR and iid parts of a level share its variance equally. At τ = 1 the first outer moved s_grp by 14 and
         # then the strengths jumped ×100
-        O_u, E_u = O.sum(0), E.sum(0)
+        O_u, E_u = Obs.sum(0), E.sum(0)
         O_ku, E_ku = np.zeros((nK, nU)), np.zeros((nK, nU))
-        np.add.at(O_ku, grp, O)
+        np.add.at(O_ku, grp, Obs)
         np.add.at(E_ku, grp, E)
         def moment(o, e):
             m = o.sum() / e.sum()
@@ -935,14 +935,14 @@ class Monolith:
         t_all = moment(O_u, E_u)
         t_grp = moment(O_ku, E_ku * ratio_u[None, :])
         ratio_ku = np.divide(O_ku, E_ku, out=np.ones_like(E_ku), where=E_ku > 0)
-        t_cat = moment(O, E * ratio_ku[grp])
+        t_cat = moment(Obs, E * ratio_ku[grp])
         for n, t in (("s_all", 2 * t_all), ("v_all", 2 * t_all), ("s_grp", 2 * t_grp), ("v_grp", 2 * t_grp), ("v_cat", t_cat)):
             self.components[n].tau = float(np.clip(t, 1.0, 1e3))
         tau = self.components["v_cat"].tau
         w = np.zeros_like(E)
         for _ in range(40):
             ew = E * np.exp(w)
-            dw = np.clip((O - ew - tau * w) / (ew + tau), -1.0, 1.0)
+            dw = np.clip((Obs - ew - tau * w) / (ew + tau), -1.0, 1.0)
             w += dw
             if np.abs(dw).max() < 1e-8:
                 break
