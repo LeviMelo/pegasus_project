@@ -26,7 +26,8 @@ from scipy import optimize, stats
 @dataclass
 class LagCurve:
     """A fitted lag–response curve: β(ℓ) per lag with its standard error, the cumulative effect Σβ with its own, the
-    lags where the 95 % interval excludes zero, the penalty's strength and the deviance explained."""
+    lags where the simultaneous 95 % band excludes zero (``band``: its critical |z|), the penalty's strength and the
+    deviance explained."""
     lags: np.ndarray
     beta: np.ndarray
     se: np.ndarray
@@ -34,6 +35,7 @@ class LagCurve:
     cumulative_se: float
     tau: float
     window: list[int]
+    band: float
     deviance_gain: float
     cells: int
 
@@ -41,7 +43,7 @@ class LagCurve:
         return {"lags": self.lags.tolist(), "beta": np.round(self.beta, 5).tolist(), "se": np.round(self.se, 5).tolist(),
                 "cumulative": round(self.cumulative, 5), "cumulative_se": round(self.cumulative_se, 5),
                 "rr_per_unit": round(float(np.exp(self.cumulative)), 4), "tau": round(self.tau, 4),
-                "window": self.window, "deviance_gain": round(self.deviance_gain, 3), "cells": self.cells}
+                "window": self.window, "band_z": round(self.band, 3), "deviance_gain": round(self.deviance_gain, 3), "cells": self.cells}
 
 
 def lag_matrix(x: np.ndarray, max_lag: int) -> np.ndarray:
@@ -112,5 +114,11 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
     def dev(lam: np.ndarray) -> float:
         return float(2 * np.sum(np.where(yv > 0, yv * np.log(np.maximum(yv, 1e-300) / lam), 0.0) - (yv - lam)))
 
-    window = [int(ell) for ell in range(n) if abs(b[ell]) > 1.96 * se[ell]]
-    return LagCurve(np.arange(n), b, se, cum, cum_se, float(np.exp(res.x)), window, dev(lam0) - dev(lam1), int(sel.sum()))
+    # the window from a simultaneous band (the max |z| over lags under the curve's own covariance; mgcv's simulated
+    # band): per-lag 95 % intervals marked a lag in 22 of 100 null worlds, the band in its 5
+    corr = cov / np.outer(se, se)
+    draws = np.random.default_rng(0).multivariate_normal(np.zeros(n), corr, size=20000, method="cholesky")
+    band = float(np.quantile(np.abs(draws).max(1), 0.95))
+    window = [int(ell) for ell in range(n) if abs(b[ell]) > band * se[ell]]
+    return LagCurve(np.arange(n), b, se, cum, cum_se, float(np.exp(res.x)), window, band, dev(lam0) - dev(lam1),
+                    int(sel.sum()))
