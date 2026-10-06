@@ -203,6 +203,17 @@ Chapter I goes the other way: −4.22388 against −6.01338, in 53 s and 4 outer
 
 Chapter I's held-out figures therefore measure the history's extrapolation across a shock, not the carriers (OPEN_QUESTIONS 9). The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
 
+## The defaults on SIH (`data/q_sih_adopted.log`, `data/q_sih_group.log`)
+
+SIH-RD fitted 2010–2021 and held out 2022–23. The adopted configuration (block profiles, pooled group geography, admissibility) is set against the group carrier:
+
+| block | group carrier | adopted | change per admission | seconds |
+|---|---|---|---|---|
+| II | −1.93451 | −1.87749 | +0.057 | 70 → 57 |
+| XV | −0.53066 | −0.53066 | 0 | 67 → 72 |
+
+XV is all female, so its blocks and groups split alike.
+
 ## Small geography carriers pooled (adopted)
 
 `geo_pool=0.01` sends the geography carriers that hold less than 1 % of the block's events to one pooled carrier. Their place effects are shrunk to nothing, and each costs two unknowns at every place. Held out against unpooled group geography (`data/q_geo_pool.log`; seconds beside other jobs):
@@ -232,6 +243,6 @@ One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of 
 | IV | -2.04785 (207,753) | -2.04770 (193,396) | **-2.04295** (201,530) | -2.04821 (193,072) | 181,759 |
 | X | -1.67901 (280,500) | -1.65476 (359,688) | -1.66976 (295,880) | **-1.65419** (362,986) | 345,919 |
 
-- The flat forecasts beat the linear one on every block. `level`, flat at the fitted years' mean, is best on six of seven; X prefers `robust` and `median`.
+- The flat forecasts beat the linear one on every block. `level`, which at the annual grain is flat at the course's last fitted value (a damped slope with d = 0; the twelve-period mean is the monthly grain's), is best on six of seven; X prefers `robust` and `median`.
 - **This window follows COVID-19:** every chapter's 2020–21 rose, and the linear continuation overshoots (IX 849,703 expected against 787,877).
 - A window without a shock (fitted 2010–2017, held out 2018–19, `data/history_compare_2018.json`) decides before any default changes: PENDING.
