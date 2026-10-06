@@ -613,19 +613,24 @@ class Monolith:
         params = self.params if params is None else params
         out = {"b0": params["b0"]}
         for name in self.components:
-            v = _centre(params[name], self._labels[name]) if self.components[name].shape.centred else params[name]
-            # group deviations sum to zero across groups; a leaf's place effect within its group
-            if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
-                v = v - v.mean(dim=0, keepdim=True)
-            elif name == "f_grp":
-                v = (v.reshape(-1, 2, self.nB) - v.reshape(-1, 2, self.nB).mean(dim=0, keepdim=True)).reshape(v.shape)
-            elif name == "v_cat":
-                v = _centre(v.T.contiguous(), self.grp).T
-            out[name] = v
+            out[name] = self._centred(name, params[name])
         nGrp = len(self.data.groups)
         out["f_all"] = out["f_all"].reshape(1, 2 * self.nB)
         out["f_grp"] = out["f_grp"].reshape(nGrp, 2 * self.nB)
         return out
+
+    def _centred(self, name: str, raw: torch.Tensor) -> torch.Tensor:
+        """One component's centring (linear): along its structure's components, then group deviations summing to zero
+        across groups and a leaf's place effect centred within its group. `effects` and the v1 solver's projectors
+        (`solver.StructuredNewton`) both read it."""
+        v = _centre(raw, self._labels[name]) if self.components[name].shape.centred else raw
+        if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
+            v = v - v.mean(dim=0, keepdim=True)
+        elif name == "f_grp":
+            v = (v.reshape(-1, 2, self.nB) - v.reshape(-1, 2, self.nB).mean(dim=0, keepdim=True)).reshape(v.shape)
+        elif name == "v_cat":
+            v = _centre(v.T.contiguous(), self.grp).T
+        return v
 
     def _place_time(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         """[groups, U, T] of exp(h + g) · M: the factor every leaf of a group shares."""
@@ -972,6 +977,16 @@ class Monolith:
         grads = self._fisher_diagonals(x, list(self.components))
         if self.prior == "horseshoe":
             self._update_horseshoe(x, dict(zip(self.components, grads, strict=True)))
+        # v1: tr(ΣQ_j) from the true constrained Laplace covariance (solver.StructuredNewton.traces), not the
+        # per-effect Fisher diagonal
+        exact = None
+        if self._uses_v1():
+            from . import solver
+            nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
+            self._solver_v1 = nw
+            if os.environ.get("PEGASUS_STRENGTHS", "scoring") == "scoring":
+                return self._score_taus(nw)
+            exact = nw.traces(probes=int(os.environ.get("PEGASUS_TRACE_PROBES", "32")))
         changes, proposals = [], {}
         for (name, c), d in zip(self.components.items(), grads, strict=True):
             if c.rank <= 0 or c.fixed:
@@ -981,7 +996,10 @@ class Monolith:
             v = x[name].detach().reshape(c.batch, -1).cpu().numpy()
             Q = c.shape.Q
             quad = float(sum(v[b] @ (Q @ v[b]) for b in range(c.batch)))
-            trace = c.free * sum(_trace_inv_times(D[b], c.tau, Q) for b in range(c.batch))
+            if exact is not None and name in exact:
+                trace = exact[name]
+            else:
+                trace = c.free * sum(_trace_inv_times(D[b], c.tau, Q) for b in range(c.batch))
             new = (c.rank - c.tau * trace) / max(quad, 1e-12)
             new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
             new = float(np.clip(new, *TAU_BOUNDS))
@@ -1024,6 +1042,47 @@ class Monolith:
         w = np.clip(np.asarray(w, dtype=float), 1e-6, 1e8)
         c.shape = structures.Shape("horseshoe", sp.diags(w, format="csr"), c.shape.rank, c.shape.centred, c.shape.components)
         self._Q[name] = _torch_sparse(c.shape.Q, self.dtype, self.device)
+
+    def _score_taus(self, nw) -> list[float]:
+        """A Newton step on ρ = log τ (v1; ARCHITECTURE §5.4) for the Laplace marginal likelihood, W's dependence on
+        the mean dropped: the gradient g_j = ½(r_j − τ_j xᵀQ_jx − τ_j tr(ΣQ_j)) with exact traces, and the observed
+        negative Hessian −H_ij = ½δ_ij τ_j(tr(ΣQ_j) + xᵀQ_jx) − ½τ_iτ_j tr(ΣQ_iΣQ_j) − τ_iτ_j xᵀQ_iΣQ_jx (zero, as it
+        must be, for a component the data do not inform). Away from the optimum −H can be indefinite: its spectrum
+        is shifted to positive before the solve, and each step is clipped to ×10. The fixed point is Fellner–Schall's
+        (g = 0)."""
+        tr, quad, T, R, names = nw.scoring(probes=int(os.environ.get("PEGASUS_SCORING_PROBES", "16")))
+        tau = np.array([self.components[n].tau for n in names])
+        rank = np.array([self.components[n].rank for n in names])
+        q = np.array([quad[n] for n in names])
+        t = np.array([tr[n] for n in names])
+        g = 0.5 * (rank - tau * q - tau * t)
+        tt = np.outer(tau, tau)
+        negH = np.diag(0.5 * tau * (t + q)) - 0.5 * tt * T - tt * R
+        negH = (negH + negH.T) / 2
+        # the spectrum floored on each component's own scale (the matrix scaled by its diagonal), not on the largest
+        # eigenvalue's, which belongs to the best-informed component and would flatten the weakly informed ones
+        dg = np.sqrt(np.maximum(np.abs(np.diag(negH)), 1e-12))
+        w, v = np.linalg.eigh(negH / np.outer(dg, dg))
+        w = np.maximum(w, 1e-2)
+        step = (v @ ((v.T @ (g / dg)) / w)) / dg
+        # where Fellner–Schall (a convergent map) points the same way and further, take its step: the flat directions
+        # of a weakly identified strength are where Newton's curvature is least reliable
+        fs = np.log(np.maximum(rank - tau * t, 1e-12) / np.maximum(tau * q, 1e-300))
+        bolder = (np.sign(fs) == np.sign(step)) & (np.abs(fs) > np.abs(step))
+        step = np.where(bolder, fs, step)
+        step = np.clip(step, -MAX_TAU_STEP, MAX_TAU_STEP)
+        # the step's own predicted gain in the marginal likelihood: along the BYM ridge (s against v) the likelihood
+        # is flat and τ can wander without changing the fit, so convergence is read from the gain, not from Δρ
+        self.laml_gain = float(0.5 * g @ step)
+        if self.laml_gain < float(os.environ.get("PEGASUS_LAML_TOL", "0.1")):
+            return [0.0] * len(self.components)
+        out = {}
+        for n, tau_n, d in zip(names, tau, step, strict=True):
+            new = float(np.clip(tau_n * np.exp(d), *TAU_BOUNDS))
+            out[n] = 0.0 if min(new, tau_n) > SHRUNK else abs(np.log(new / tau_n))
+            self.trace_log.append((n, self.components[n].rank, quad[n], tr[n], tau_n, new))
+            self.components[n].tau = new
+        return [out.get(n, 0.0) for n in self.components]
 
     def nb_loglik(self, phi: float | np.ndarray, x: dict[str, torch.Tensor] | None = None,
                   places: np.ndarray | None = None) -> float:
