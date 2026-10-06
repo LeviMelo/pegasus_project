@@ -42,6 +42,12 @@ What the grid says of power on births: outbreak finds 0.48 of place-year doublin
 
 The SINAN values rest on one notifiable disease and are applied to every SINAN dataset until others are gridded.
 
+## Amendment (2026-10-06, relevance): θ0 is the larger of a relevance floor and the calibrated floor
+
+ARCHITECTURE §8.4 makes the minimum effect a statement of relevance, not of detectability. Item 2's rule took the smallest calibrated value only. For trend divergence that gave 1.1 over the period: a 10 % divergence across fourteen years, about 0.7 % a year. The first v1 survey (`data/survey_v1_sim.py`) showed what that does: chapter IX produced 5,130 leads, of which 3,257 were trend divergences, and IV produced 2,340, of which 1,560 were.
+
+The trend's relevance floors are v0's, kept for their own reason: 1.5 over the period at the municipality, 1.2 at region and state. The cell lenses keep 1.1, because a 10 % excess in one place-year or window is worth reporting and is where the grid's power gain lies. A lens's θ0 is now max(relevance floor, system floor) (`lenses.minimum_effect`).
+
 ## Limits
 
 - Three fields, annual grain. SINASC, SINAN, the monthly grain and the mark lenses keep their v0 values until their grids run.

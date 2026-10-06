@@ -25,7 +25,11 @@ from . import subset
 RATE_RATIO = 1.1         # cell lenses (outbreak, change point, space-time): H0 is "the rate is at most 1.1 × expected"
 SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0) on SIM: model worlds 2/20 at 1.2, 0/20 at 1.5
 REFERENCE_EFFECT = 1.5   # the rate ratio a hypothesis's power is read at for its weight (§8.4)
-TREND_PERIOD = {"municipality": 1.1, "region": 1.1, "state": 1.1}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; v0's municipal 1.5 came from raw-score time shifts, whose single real shock cell the normal scores remove
+# trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period". These are
+# relevance floors (§8.4: the minimum effect is a statement of relevance): the grid calibrates 1.1 on SIM, but a 10 %
+# divergence over fourteen years (0.7 % a year) relevant to no one filled the v1 survey (IX: 3,257 of 5,130 leads;
+# ADR-0026 amendment). θ0 is the larger of this and the system's calibrated floor (`MINIMUM_EFFECT_BY`).
+TREND_PERIOD = {"municipality": 1.5, "region": 1.2, "state": 1.2}
 
 
 #: Where a system needs a larger θ0 than the default (ADR-0026): (lens, dataset prefix) → θ0. The first match wins.
@@ -40,13 +44,17 @@ _DEFAULT_EFFECT = {"spatial_cluster": SPATIAL_RATE_RATIO, "trend_divergence": TR
 
 
 def minimum_effect(lens: str, field_id: str) -> Any:
-    """A lens's θ0 for a field (its dataset is the id's first part): `MINIMUM_EFFECT_BY`, else the lens's default
-    (`RATE_RATIO`; `SPATIAL_RATE_RATIO`; `TREND_PERIOD` per scale)."""
+    """A lens's θ0 for a field (its dataset is the id's first part): the larger of the lens's default (`RATE_RATIO`;
+    `SPATIAL_RATE_RATIO`; `TREND_PERIOD`, a relevance floor per scale) and the system's calibrated floor
+    (`MINIMUM_EFFECT_BY`)."""
     dataset = field_id.split(":")[0]
+    default = _DEFAULT_EFFECT.get(lens, RATE_RATIO)
     for ln, prefix, value in MINIMUM_EFFECT_BY:
         if ln == lens and dataset.startswith(prefix):
-            return value
-    return _DEFAULT_EFFECT.get(lens, RATE_RATIO)
+            if isinstance(default, dict):
+                return {scale: max(v, value) for scale, v in default.items()}
+            return max(default, value)
+    return default
 
 
 GROUP_SD = {"municipality": 0.2, "region": 0.2, "state": 0.2}   # group disparity, per scale: H0 is "the groups' log-SIRs spread by at most this sd" (weighted by expected events)
