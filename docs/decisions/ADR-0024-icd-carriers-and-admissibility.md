@@ -19,7 +19,9 @@
    - Carriers split by admissibility class. Each group's exposure is zero outside its cells. The profile is fixed at zero only on an excluded whole sex.
 3. **Conditional edits** (highly improbable, not impossible) are not zeros. They are kept as attributes for recording-quality fields.
 4. **Underlying cause.** For SIM's underlying cause, codes that cannot be one (asterisk codes, chapters XIX and XXI: the release's rule) are not leaves.
-5. **Records are counted, not dropped.** A record in an excluded cell, or under an ineligible code, is counted as unallocated by reason ("sex the code excludes", "age the code excludes", "not an underlying cause") and is never modelled.
+5. **The low-rank interaction's loadings ψ are centred within each geography carrier's active leaves** (ADR-0021 had each group's). The term must be orthogonal to the place and history effects, which the geography carrier holds. The interaction runs under the new defaults once two older defects are fixed (evaluation 2026-10-06, ICD structure): its start's scale is chosen on the objective, and its strengths step with the base strengths' radius.
+6. **The ICD family stays the outermost group** (`leads.family`). The family is the pool codes are exchanged within (C80's unspecified site against the specified ones, across C00-C97), and it is read by the substitution flags, the siblings and `replication.block_of`. The tree's parent is now the innermost block and would have narrowed it silently. Ancestry still follows the tree.
+7. **Records are counted, not dropped.** A record in an excluded cell, or under an ineligible code, is counted as unallocated by reason ("sex the code excludes", "age the code excludes", "not an underlying cause") and is never modelled.
 
 ## Limits
 

@@ -234,7 +234,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     under the chapter, pooling its categories: C00-C97, all malignant neoplasms), ``block`` (the innermost group,
     C51-C58: ICD-10 groups nest, pegasus_data's tree since 2026-10-06) or ``category`` (each category its own).
     ``geography`` is the level that carries history and the place effects (h, s, v and season by group), a level at
-    or above ``profile`` (None: the same): each profile carrier lies in one geography carrier.
+    or above ``profile`` (None: the same; ``chapter``: one for the block): each profile carrier lies in one.
     ``source`` chooses the gateway reader, each giving cells of (u, year, sex, age, code):
 
         events       counts of the event type (y)
@@ -297,11 +297,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     group_cells = np.array([next(cls[c][0] for c in categories if carrier[c] == k) for k in groups])
     group_outer = outer_groups = None
     if geography is not None and geography != profile:
-        if geography not in ("group", "block", "category"):
-            raise ValueError(f"geography {geography!r}: group, block or category")
+        if geography not in ("chapter", "group", "block", "category"):
+            raise ValueError(f"geography {geography!r}: chapter, group, block or category")
         outer_of = {}
         for c in categories:
-            o = _carrier(c, geography, parent_of, level_of)
+            o = block if geography == "chapter" else _carrier(c, geography, parent_of, level_of)
             if outer_of.setdefault(carrier[c], o) != o:
                 raise ValueError(f"geography {geography!r} is finer than profile {profile!r}: {carrier[c]} spans two")
         outer_groups = sorted(set(outer_of.values()))
@@ -677,7 +677,9 @@ class Monolith:
         pos[np.asarray(active)] = np.arange(len(active))
         self.ixpos = torch.as_tensor(pos, device=self.device)
         self.ixp = self.ixpos[self.e]                                  # per non-empty cell: its leaf's position, -1 if inactive
-        groups = np.unique(d.leaf_group[np.asarray(active)], return_inverse=True)[1]
+        # ψ is centred within each geography carrier's active leaves: the place and history effects the term must be
+        # orthogonal to are the carrier's
+        groups = np.unique(self.outer.cpu().numpy()[d.leaf_group[np.asarray(active)]], return_inverse=True)[1]
         rw = structures.random_walk(nT, order=1)
         level = structures.Shape("rw1+level", (rw.Q + sp.csr_matrix(np.ones((nT, nT)) / nT)).tocsr(), nT, centred=False)
         self.components.update({
@@ -766,10 +768,20 @@ class Monolith:
                                   / (torch.einsum("eut,e,t->u", S, psi ** 2, tm ** 2) + ridge))[None], places)[0]
                     tm = torch.einsum("eut,e,u->t", num, psi, om) / (torch.einsum("eut,e,u->t", S, psi ** 2, om ** 2) + ridge)
                     tm = tm / tm.pow(2).mean().sqrt().clamp_min(1e-12)
-                num = num - S * psi[:, None, None] * om[None, :, None] * tm[None, None, :]
                 self.params["ix_psi"][r].copy_(psi)
-                self.params["ix_ov"][r].copy_(om)
                 self.params["ix_t"][r].copy_(tm)
+                # the component's scale by the model's own objective (ω carries it; the term is linear in ω): the least
+                # squares' ratio (y − μ)/μ is unbounded where μ is tiny, and on a sparse block (XIII) it gave ω = 32 and
+                # an interaction of 438 on the log scale, whose Hessian (10²⁰⁶) no factorisation survives (2026-10-06)
+                best, best_a = float("inf"), 0.0
+                for a in (0.0, 0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0):
+                    self.params["ix_ov"][r].copy_(a * om)
+                    obj = float(self.objective())
+                    if np.isfinite(obj) and obj < best:
+                        best, best_a = obj, a
+                om = best_a * om
+                self.params["ix_ov"][r].copy_(om)
+                num = num - S * psi[:, None, None] * om[None, :, None] * tm[None, None, :]
 
     # ---- effects (centred) -------------------------------------------------
 
@@ -1358,7 +1370,9 @@ class Monolith:
         # the step's own predicted gain in the marginal likelihood: along the BYM ridge (s against v) the likelihood
         # is flat and τ can wander without changing the fit, so convergence is read from the gain, not from Δρ
         self.laml_gain = float(0.5 * g @ step)
-        if self.laml_gain < float(os.environ.get("PEGASUS_LAML_TOL", "0.1")):
+        # one LAML unit: at 0.1 the BYM ridge's outers changed no held-out figure (II 11 → 7, VI 14 → 10 outers, the
+        # held-out NB log-likelihood equal to five decimals, 2026-10-06)
+        if self.laml_gain < float(os.environ.get("PEGASUS_LAML_TOL", "1.0")):
             return [0.0] * len(self.components)
         self._laml_prev = {"rho": rho_now, "laml": laml, "step": step, "halvings": 0, "accurate": accurate}
         out = {}

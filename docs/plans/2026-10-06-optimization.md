@@ -230,6 +230,19 @@ Each step's measurement goes into one evaluation entry for O1, written when O1 c
 1. **Leaf-place terms only where identifiable: measured and rejected.** v_cat restricted to leaves with ≥ 0.1 % of the block's events and ≥ 100 events kept 42 of IX's 77 leaves (99.4 % of deaths). Held-out deviance went 2.21828 → 2.21934 (worse by about 840 units over 788 k deaths), and the time 169 → 160 s: the rare codes' place deviations predict, and the per-outer cost is the probes, not E·U. On VII (none qualify) held-out went 18.21 → 19.95. The option was removed.
 2. **A weak prior on log τ.** N(0, 3²) on each ρ, which barely moves the identified strengths and keeps the flat ones from wandering.
 
+**IX under ADR-0024** (block profiles, group geography): 37 s cold on a calm machine, 5 outers, 11 Newton steps (from 59–71 s by the group carrier). Profiled at 4 threads beside a fit (72 s):
+
+| part | share |
+|---|---|
+| factorisations (9) | 43 % |
+| – their rank-k update | 1.5 s each |
+| – B's construction | 1.1 s each (0.3 s of it the write in factor order) |
+| the strengths' probe solves | 25 % |
+| the arrowhead's dense Y products | 16 % |
+| the closing dispersion | 8 % |
+
+B's construction became a column copy (the feature map has weight-1 entries only; the Newton step is unchanged to 10⁻⁹). The supernodal solves had rescanned the process's libraries through `threadpool_limits` at every call (36 ms each, 2 s per fit); one cached controller removes it. The next levers are the factorisation count (9 for 11 steps) and the probes.
+
 ## 9. Risks and their fallbacks
 
 - **Selected inversion in Python.** No maintained Python binding exposes it. The fallback is Hutchinson probes with exact factor solves: the LAML gradient's noise is then √(2/S) of the trace, and BFGS tolerates it with S = 30.

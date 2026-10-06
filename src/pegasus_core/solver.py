@@ -593,6 +593,8 @@ class StructuredNewton:
         oc = self.goff["th_cat"]
         ng, C = self.ng, self.C
         members = [np.nonzero(self.grp == k)[0] for k in range(K)]
+        # the feature map sends each feature to its own columns with weight 1: G_k = vec_k·M_k is a column copy
+        rc = [(fm.tocoo().row, fm.tocoo().col) for fm in self._feature_map()]
 
         def build(p: np.ndarray) -> np.ndarray:
             """B (reduced place rows × x-space globals) written straight into the factor's row order P·B, a chunk of
@@ -605,9 +607,9 @@ class StructuredNewton:
             step = max(1, int(2.5e8 // (8 * ng * (K + npr))))          # places per chunk: about 250 MB of temporaries
             for a in range(0, U, step):
                 z = min(U, a + step)
-                Gc = np.empty((K, z - a, ng))
+                Gc = np.zeros((K, z - a, ng))
                 for k in range(K):
-                    Gc[k] = vec[k, a:z] @ fd[k]
+                    Gc[k][:, rc[k][1]] = vec[k, a:z][:, rc[k][0]]
                     Gc[k][:, oc + members[k]] += thc[members[k], a:z].T
                 blk = np.empty((z - a, npr, ng))
                 blk[:, 0] = blk[:, 1] = Gc.sum(0)
@@ -1486,7 +1488,22 @@ def ix_strengths(model, probes: int = 32, seed: int = 0) -> list[float]:
     step = (evec @ ((evec.T @ (g / dg)) / np.maximum(ev, 1e-2))) / dg
     fs = np.log(np.maximum(rank - tau * tr, 1e-12) / np.maximum(tau * q, 1e-300))
     bolder = (np.sign(fs) == np.sign(step)) & (np.abs(fs) > np.abs(step))
-    step = np.clip(np.where(bolder, fs, step), -np.log(100.0), np.log(100.0))
+    step = np.where(bolder, fs, step)
+    # each strength's own step radius, as the base strengths' (`Monolith._score_taus`, Rprop): halved when its step
+    # reverses. Clipped at ×100 alone, XIII rank 1's ω strengths flipped 71 ↔ 0.7 every outer (2026-10-06)
+    radius = getattr(m, "_tau_radius", None) or {}
+    last = getattr(m, "_tau_sign", None) or {}
+    for i, c in enumerate(comps):
+        r0 = radius.get(c.name, np.log(100.0))
+        sg = float(np.sign(step[i]))
+        if last.get(c.name, 0.0) * sg < 0:
+            r0 = r0 / 2
+        elif last.get(c.name, 0.0) * sg > 0:
+            r0 = min(r0 * 1.2, np.log(100.0))
+        r0 = max(r0, 1e-3)
+        radius[c.name], last[c.name] = r0, sg
+        step[i] = np.clip(step[i], -r0, r0)
+    m._tau_radius, m._tau_sign = radius, last
     out = []
     for c, d in zip(comps, step, strict=True):
         new = float(c.tau * np.exp(d))
@@ -1509,10 +1526,9 @@ class Supernodal:
 
     def _run(self, B: np.ndarray, transpose: bool, overwrite: bool = False) -> np.ndarray:
         from numba import get_num_threads
-        from threadpoolctl import threadpool_limits
         Y = np.array(B, dtype=np.float64, order="C", copy=not overwrite)
         chunk = max(1, -(-Y.shape[1] // get_num_threads()))
-        with threadpool_limits(1, user_api="blas"):      # the products run inside numba's threads
+        with _blas_pool().limit(limits=1, user_api="blas"):   # the products run inside numba's threads
             return _sn_kernels()[2 if transpose else 1](*self.parts, Y, chunk)
 
     def lower(self, B: np.ndarray, overwrite: bool = False) -> np.ndarray:
@@ -1525,6 +1541,17 @@ class Supernodal:
 
 
 _SN = None
+_TPC = None
+
+
+def _blas_pool():
+    """One threadpoolctl controller for the process: `threadpool_limits` rescans the loaded libraries at every call
+    (36 ms each on Windows; 2 s of an IX fit's 55 supernodal solves, 2026-10-06)."""
+    global _TPC
+    if _TPC is None:
+        from threadpoolctl import ThreadpoolController
+        _TPC = ThreadpoolController()
+    return _TPC
 
 
 def _sn_kernels():

@@ -273,9 +273,7 @@ def test_lead(sp: surprise.Surprise, x: leads.Lead, level: str = "state") -> dic
 
 CHAPTER_R = ("R00", "R99")
 INTENT = ("Y10", "Y34")              # events of undetermined intent
-# transport accidents: siblings across victim types (V89, unspecified, against V40-V49 …), wider than the tree's group.
-# W00-W19 and W75-W84 were here while the tree hung categories on its outermost group; it nests them since 2026-10-06
-WIDE_BLOCKS = (("V01", "V99"),)
+WIDE_BLOCKS = (("V01", "V99"), ("W00", "W19"), ("W75", "W84"))   # blocks the ICD family holds too wide for siblings
 AGE_CUTS = (0, 15, 30, 45, 60, 75)   # coarse ages of the profile cells
 #: ICD-10 gives the intent chapters one mechanism list: an assault X85-Y09 and an event of undetermined intent
 #: Y10-Y34 are the same mechanism at the same position (X93-X95 firearm / Y22-Y24, X99 sharp object / Y28 ...).
@@ -300,14 +298,16 @@ def node_codes(node: str, known) -> list[str]:
 
 
 def block_of(node: str, known, tree=None) -> list[str]:
-    """The ICD-10 block that holds the node's siblings: V by `WIDE_BLOCKS`, else the tree's
-    parent (``tree``: the ICD-10 code structure with a ``parent`` column indexed by code)."""
+    """The ICD-10 block that holds the node's siblings: V, W00-W19 and W75-W84 by `WIDE_BLOCKS`, else the node's
+    family (`leads.family`: the outermost group below the chapter; the tree nests groups since 2026-10-06, and
+    its parent would narrow the pool)."""
     first = (node_codes(node, known) or [node])[0]
     for lo, hi in WIDE_BLOCKS:
         if lo <= first <= hi:
             return code_range(lo, hi, known)
-    p = tree.loc[node, "parent"] if tree is not None and node in tree.index else None
-    return node_codes(p, known) if isinstance(p, str) and "-" in p else []
+    from . import leads
+    p = leads.family(node) if tree is None or node in tree.index else None
+    return node_codes(p, known) if isinstance(p, str) and "-" in p and p != node else []
 
 
 class Strata:

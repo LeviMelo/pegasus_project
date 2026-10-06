@@ -102,6 +102,10 @@ The table gives held-out NB log-likelihood per death. The geography carrier keep
 - Records in excluded cells are counted by reason. The counts per chapter are in `data/admissible_counts.txt`.
   - Over SIM 2010–2021's 15.9 M deaths in 19 chapters, 233 records are left out: 212 by age (199 in XVIII), 18 as not an underlying cause, 3 by sex.
   - SIM's own critiques enforce these rules at entry. The rules' effect is on the expectation, which no longer places a category's deaths in cells it cannot occur in, not on the records.
+  - SIH-RD 2010–2023 (principal diagnosis) breaks them more often (`data/admissible_counts_sih.txt`): XV 332 records (men with pregnancy diagnoses), XIV 438 and II 225 by sex, IV 164 by age. Hospital records pass no critique of the kind.
+- **End to end on XIV** (genitourinary; three single-sex blocks):
+  - expected deaths are zero in the excluded sex: N40–N51 16,519 men and 0 women; N70–N77 and N80–N98 0 men;
+  - the Laplace draws run under the new carriers: 64 draws, total 454,517 ± 852 against the MAP's 443,783.
 
 **The start (`_initialise`) was wrong under age masks, and was corrected before any fit was read.**
 - Centring the profile over whole sex rows read the masked ages' zeros as data: IV started at 2.7 times its optimum.
@@ -115,6 +119,26 @@ The table gives held-out NB log-likelihood per death. The geography carrier keep
 
 Starts with the rules on now match those with the rules off (I: 227,124 against 213,350; IV: 1,155,821 against 1,152,722), and the fitted objective is lower with the rules on.
 
+## The adopted configuration, held out (`data/q_final.log`)
+
+ADR-0024's defaults (block profiles, group geography, admissibility, the corrected start), fitted one block at a time on a calm machine. The table gives held-out NB log-likelihood per death, 2022–23.
+
+| block | group carrier, rules on | adopted (block profile, group geography) | difference per death | seconds (adopted) |
+|---|---|---|---|---|
+| IX | -1.63715* | -1.63487 | +0.0023 | 37 (5 outers) |
+| II | -2.45893 | -2.38341 | +0.0755 | 88 (11 outers) |
+| I | — | -6.01338 | — | 574 (10 outers) |
+| IV | — | -2.04721 | — | 97 (9 outers) |
+| XV | -8.10559 | -8.09767 | +0.0079 | 77 (10 outers) |
+| XIII | -4.49440 | -4.44564 | +0.0488 | 95 (11 outers) |
+| VI | — | -2.08184 | — | 179 (14 outers) |
+| VII | -10.32000* | -10.22396 | +0.0960 | 101 (9 outers) |
+| XX | -3.33967 | -3.22976 | +0.1099 | 257 (7 outers) |
+
+- `*` marks the group carrier's earlier fit, before the admissibility rules, which leave out at most two of the block's records.
+- I, IV and VI have no matched baseline yet.
+- I's held-out years span the fall of COVID-19 deaths (B34: 425,098 in 2021, 66,088 in 2022, 10,444 in 2023), which no course fitted to 2010–2021 anticipates. How much of its −6.01 per death (deviance 26.5) that accounts for is not measured.
+
 ## BYM2 coordinates for the strengths: not adopted
 
 The strengths' Newton step was taken in (log σ², logit φ) for each place pair and mapped back exactly. Results:
@@ -126,3 +150,31 @@ The strengths' Newton step was taken in (log σ², logit φ) for each place pair
 | II, IX | unchanged | — |
 
 The code was removed.
+
+## The interaction's start on sparse blocks (a defect before today)
+
+The low-rank interaction (ADR-0021) failed its first factorisation on XIII (66 k deaths) under every carrier, the group carrier included.
+
+**The cause** is its start. The weighted least squares of the base fit's residual cube divides (y − μ) by μ with a unit ridge. Where μ is tiny and deaths occur, that set ω to 32 and the interaction to 438 on the log scale, and the Hessian (10²⁰⁶) is beyond any factorisation. IX (788 k deaths) never met it.
+
+**Now** each component's scale is chosen on the model's own objective, from 0 to 1 times the least-squares start (ω carries it). The start can then only improve on the base fit.
+
+**Also changed:** ψ is now centred within each geography carrier's active leaves (ADR-0024 item 5).
+
+**The interaction's strengths had no step radius.** ix_os and ix_ov were clipped at ×100 only, while the base strengths have Rprop's radius. On XIII they flipped 71 ↔ 0.7 every outer, and the objective with them (281 k ↔ 290 k; `data/ix_init_fix.log`). They now share the base strengths' radius rule.
+
+**Verification:**
+- IX at rank 1 under the group carrier converged in 12 outers, held-out −1.62539 against the morning's −1.62807 (`data/ix_r1_regress.log`).
+- XIII at rank 1 with both fixes (`data/ix_radius.log`): no factorisation fails. The ω strengths wander along their own s/v ridge for a dozen outers, then the objective falls monotonically (282,425 → 282,360 → 282,317 by outer 15). Whether rank 1 earns its place on a sparse block is O2's question.
+
+## The strengths' stopping tolerance
+
+The outers stop when the strengths' predicted LAML gain falls below `PEGASUS_LAML_TOL`. At 0.1 units, chapters on the BYM ridge ran 11–14 outers. At 1.0, held out on the same code (`data/laml_tol_1.log`):
+
+| block | outers 0.1 → 1.0 | held-out NB loglik per death 0.1 → 1.0 |
+|---|---|---|
+| II | 11 → 7 | −2.38341 → −2.38341 |
+| VI | 14 → 10 | −2.08184 → −2.08184 |
+| XIII | 11 → 11 | −4.44564 → −4.44564 |
+
+The default is now 1.0. XIII's outers end on the strengths' change, not on the gain.

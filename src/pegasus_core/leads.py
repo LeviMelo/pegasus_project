@@ -186,7 +186,7 @@ def stories(register: list[Lead], max_subset: int = 1) -> list[Story]:
             size = np.log(max(m.effect, 1e-12)) if m.scale == "rate_ratio" else m.effect
             if size == 0:
                 continue
-            moves.setdefault(_parent(node), {}).setdefault(int(np.sign(size)), []).append(node)
+            moves.setdefault(family(node), {}).setdefault(int(np.sign(size)), []).append(node)
         for parent, by_sign in moves.items():
             if len(by_sign) == 2:
                 flags.append(f"substitution in {parent}: up {','.join(sorted(set(by_sign[1])))} / "
@@ -208,6 +208,18 @@ def _parent(code: str) -> str:
         tree = gateway.code_structure("ICD10")
         _PARENTS = dict(zip(tree.column("code").to_pylist(), tree.column("parent").to_pylist(), strict=True))
     return _PARENTS.get(code) or code
+
+
+def family(code: str) -> str:
+    """The ICD-10 family a code exchanges within: the outermost group below its chapter (C53 -> C00-C97, where coders
+    trade C80's unspecified site for the specified ones). pegasus_data nests the groups since 2026-10-06, so this is
+    no longer the tree parent (C51-C58); the conservation and substitution rules read the family as they did before
+    (a node that is itself an outermost group, a chapter or unknown is its own family)."""
+    _parent("")
+    node, up = code, _PARENTS.get(code)
+    while up and _PARENTS.get(up):                      # stop below the chapter (the chapter has no parent)
+        node, up = up, _PARENTS.get(up)
+    return node
 
 
 def chapter(code: str) -> str:

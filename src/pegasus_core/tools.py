@@ -483,11 +483,11 @@ class Session:
         reg = self.expectations.registry
         d, leaves = self._leaves(node)
         y = self._counts(d, leaves)
-        parent = leads._parent(node)
+        fam = leads.family(node)
         sib = None
-        if reg.level.get(node) != "chapter" and parent != node and parent in reg.children:
-            others = [c for c in reg.children[parent] if c != node]
-            sl = np.concatenate([self._leaves(c)[1] for c in others]) if others else np.array([], dtype=int)
+        if reg.level.get(node) != "chapter" and fam != node and fam in reg.children:
+            # the siblings: the family's other leaves (the family is the outermost group, `leads.family`)
+            sl = np.setdiff1d(self._leaves(fam)[1], leaves)
             sib = self._counts(d, sl) if sl.size else None
         return explain.Evidence(self._grid_years, y, sib, self._ill, self._total, self._pop, chapter=reg.chapter(node),
                                 residual=explain.residual_label(reg.label.get(node, "")), per_year=self._per_year)
