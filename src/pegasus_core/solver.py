@@ -126,17 +126,17 @@ class StructuredNewton:
             self.goff[n] = o
             o += sizes[n]
         self.ng = o
-        # the projector of the global effects: the Jacobian of each component's own centring (`Monolith._centred`)
-        P = np.zeros((self.ng, self.ng))
-        P[0, 0] = 1.0
+        # the projector of each global effect: the Jacobian of its own centring (`Monolith._centred`), and the basis of its
+        # range per component (block-diagonal; kept dense: the f_grp and h_grp blocks fill 40 % of it, and SciPy's
+        # dense-by-sparse product took 11 s per factor on IX where the dense one takes 0.3 s)
         m = self.m
+        blocks = [np.ones((1, 1))]
         for n in names[1:]:
             p = m.params[n].detach()
-            J = torch.autograd.functional.jacobian(lambda r, n=n: m._centred(n, r).reshape(-1), p)
-            o = self.goff[n]
-            P[o:o + sizes[n], o:o + sizes[n]] = _np(J.reshape(sizes[n], sizes[n]))
-        w, v = np.linalg.eigh((P + P.T) / 2)
-        self.Cg = v[:, w > 0.5]                       # orthonormal basis of range(P)
+            J = _np(torch.autograd.functional.jacobian(lambda r, n=n: m._centred(n, r).reshape(-1), p).reshape(sizes[n], sizes[n]))
+            w, v = np.linalg.eigh((J + J.T) / 2)
+            blocks.append(v[:, w > 0.5])               # orthonormal basis of range(P_n)
+        self.Cg = sp.block_diag(blocks).toarray()
         self.ng_red = self.Cg.shape[1]
 
     def _place_layout(self) -> None:

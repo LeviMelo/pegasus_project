@@ -335,6 +335,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **Empty cells enter through log p(0) = −φ log(1 + μ/φ).** The sum over every cell is streamed one leaf at a time: a [U, T, G] slab, the size of the population tensor (P10). One evaluation over chapter IX's 216 M implicit cells takes about a second; the one-dimensional optimum needs about 14.
 - **This text replaces a Pearson moment equation, measured wrong on chapter IX 2010–2023** (2026-10-04). Cells with tiny μ and y ≥ 1 dominate the Pearson sum, which gave φ = 0.013. A power-series expansion of the empty cells' term also fails: empty cells hold 1.95 M of the 4.99 M expected events, so μ/φ is not small there. The ML estimate is φ = 5.98.
 - **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
+- **The search for φ bins the cells once** (`_nb_loglik_binned`): the non-empty cells exactly, the sum over every cell from one pass that bins μ by its log (8,192 bins, count, Σμ, Σμ² with a second-order correction). It agrees with the exact streamed likelihood to 10⁻⁶ log-likelihood units and gives the same φ. On IX it takes about 4 s against 14 (2026-10-06).
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
 ### 5.3 The mean: structured Newton (v1, the default for count blocks without the interaction since 2026-10-06; `PEGASUS_SOLVER=v0` restores v0; evaluation 2026-10-06, solver v1)
@@ -367,7 +368,11 @@ H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP
 3. **Schur complement onto γ:** dense, a few hundred to a few thousand, factored densely.
 4. **Back-substitute.** The Newton step is exact, and the iteration converges quadratically under the line search.
 
-**The start** is the Poisson maximum likelihood of the main effects leaf + year + age–sex, by iterative proportional fitting (the ML of a log-linear model), written into the centred parametrisation: 0.06 s. The earlier start (each margin against the flat rate, then centred) began IX at an objective of 4.3·10⁸ against the optimum's 2.6·10⁶ (2026-10-06).
+**The start** (`Monolith._initialise`, 0.3 s on IX; evaluation 2026-10-06, solver v1):
+- **The mean.** The Poisson maximum likelihood of leaf + group × year + group × age–sex, by iterative proportional fitting (the ML of a log-linear model), written into the centred parametrisation. Then one backfitting pass gives each (leaf, place) its penalised Poisson deviation, split into the place, group-place and leaf-place parts.
+- **The level, profile and course strengths** start at Fellner–Schall's value for a well-identified effect, rank / x̂ᵀQx̂.
+- **The place strengths** start at Marshall's (1991) moment estimate of the between-unit variance at each level, shared equally by the ICAR and iid parts. A level whose variance cannot be told from its Poisson part starts shrunk (τ = 10³).
+- **Measured on IX:** the first start (each margin against the flat rate, then centred) began at an objective of 4.3·10⁸ against the optimum's 2.6·10⁶. From the main effects alone, the first Newton step moved a leaf-place deviation by 66 and later steps undid it. At τ = 1 everywhere, the first outer pulled the leaf levels to their group's and moved s_grp by 14.
 
 **Constraints.** Constraints local to a place (groups' deviations summing to zero, leaves centred within groups) and to the globals (h_grp over groups) are imposed by contrast bases inside the blocks. The few constraints across places (ICAR sum-to-zero per connected component) are imposed by conditioning by kriging on the factor (Rue & Held 2005, §2.3.3).
 
@@ -465,7 +470,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
 | SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
-| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 104 s cold (6 outers, safeguarded strengths, sex-centred profile), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 67 s cold (6 outers, 12 Newton steps; IPF and moment start, safeguarded strengths, binned φ)** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
 | IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |

@@ -762,7 +762,11 @@ class Monolith:
             t0 = time.time()
             # the first outer's strengths step is clipped far from the optimum anyway: its mean needs few steps (4 against
             # 10 saved 12 s on IX cold, 2026-10-06)
-            steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10), loglik_tol=mean_tol)
+            # v1's outers stop their Newton steps below 100 log-likelihood units of predicted decrease: the step taken
+            # last leaves only its quadratic remainder, which the strengths' LAML test absorbs (IX 104 → 96 s, VII 93 →
+            # 62 s, held-out unchanged; 2026-10-06); the mean after the loop converges fully
+            steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10),
+                               loglik_tol=max(mean_tol, 100.0) if self._uses_v1() else mean_tol)
             t1 = time.time()
             changes = self._update_taus(accel)
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
@@ -842,36 +846,115 @@ class Monolith:
         return {"from": cand["key"], "carried": carried, "shifted": partial}
 
     def _initialise(self) -> None:
-        """Starting values: the Poisson maximum likelihood of the main-effects model leaf + year + age–sex, by iterative
+        """Starting values: the Poisson maximum likelihood of the model leaf + group × year + group × age–sex, by iterative
         proportional fitting (the ML of a log-linear model; Bishop, Fienberg and Holland 1975, ch. 3), written into the
-        centred parametrisation so that the effects reproduce it: the profiles' means and the leaves' mean level go to
-        b0, the group levels to θ_grp, the rest to θ_cat. A margin with no events counts half an event. The earlier
-        start (each margin against the flat rate, then centred) began IX at an objective of 4.3·10⁸ against 1.6·10⁷
-        with θ_cat at zero, and took ten Newton steps to reach the optimum's basin (2026-10-06)."""
+        centred parametrisation so that the effects reproduce it (the profiles' and levels' means to b0, the group
+        levels and each group profile's own level to θ_grp, the rest to θ_cat, f_all, f_grp and h_all), then one
+        backfitting pass for the place deviations (`_backfit_places`). A margin with no events counts half an event.
+        The first start (each margin against the flat rate, then centred) began IX at an objective of 4.3·10⁸; the
+        overall profile alone left the first Newton step moving f_grp by 13; this one begins within 1.5 % of the
+        optimum (2026-10-06)."""
         d = self.data
         nE, (nT, nG) = len(d.leaves), d.N.shape[1:]
-        Ntg = d.N.sum(axis=0).astype(np.float64)                       # [T, G]: every leaf shares the exposure
-        obs = [np.maximum(np.bincount(idx, weights=d.y, minlength=n), 0.5) for idx, n in ((d.e, nE), (d.t, nT), (d.g, nG))]
-        exposed_t, exposed_g = Ntg.sum(axis=1) > 0, Ntg.sum(axis=0) > 0
-        a, b, c = np.zeros(nE), np.zeros(nT), np.zeros(nG)
-        for _ in range(100):
-            a_old = a.copy()
-            a = np.log(obs[0]) - np.log((np.exp(b)[:, None] * np.exp(c)[None, :] * Ntg).sum())
-            den = np.exp(a).sum() * (Ntg * np.exp(c)[None, :]).sum(axis=1)
-            b = np.where(exposed_t, np.log(obs[1]) - np.log(np.where(exposed_t, den, 1.0)), 0.0)
-            den = np.exp(a).sum() * (Ntg * np.exp(b)[:, None]).sum(axis=0)
-            c = np.where(exposed_g, np.log(obs[2]) - np.log(np.where(exposed_g, den, 1.0)), 0.0)
-            if np.abs(a - a_old).max() < 1e-10:
-                break
         grp = np.asarray(d.leaf_group)
         nK = int(grp.max()) + 1
+        Ntg = d.N.sum(axis=0).astype(np.float64)                       # [T, G]: every leaf shares the exposure
+        O_e = np.maximum(np.bincount(d.e, weights=d.y, minlength=nE), 0.5)
+        O_kt = np.maximum(np.bincount(grp[d.e].astype(np.int64) * nT + d.t, weights=d.y, minlength=nK * nT), 0.5).reshape(nK, nT)
+        O_kg = np.maximum(np.bincount(grp[d.e].astype(np.int64) * nG + d.g, weights=d.y, minlength=nK * nG), 0.5).reshape(nK, nG)
+        exposed_t, exposed_g = Ntg.sum(axis=1) > 0, Ntg.sum(axis=0) > 0
+        a, b, c = np.zeros(nE), np.zeros((nK, nT)), np.zeros((nK, nG))
+        for _ in range(200):
+            a_old = a.copy()
+            S = np.einsum("kt,tg,kg->k", np.exp(b), Ntg, np.exp(c))
+            a = np.log(O_e) - np.log(S)[grp]
+            A = np.bincount(grp, weights=np.exp(a), minlength=nK)               # [K]
+            den = A[:, None] * (np.exp(c) @ Ntg.T)                               # [K, T]
+            b = np.where(exposed_t[None, :], np.log(O_kt) - np.log(np.where(exposed_t[None, :], den, 1.0)), 0.0)
+            den = A[:, None] * (np.exp(b) @ Ntg)                                 # [K, G]
+            c = np.where(exposed_g[None, :], np.log(O_kg) - np.log(np.where(exposed_g[None, :], den, 1.0)), 0.0)
+            if np.abs(a - a_old).max() < 1e-10:
+                break
         level = np.bincount(grp, weights=a, minlength=nK) / np.maximum(np.bincount(grp, minlength=nK), 1)
+        cbar, bbar = c.mean(axis=0), b.mean(axis=0)
+        F, B = c - cbar[None, :], b - bbar[None, :]
+        lv = level + F.mean(axis=1) + B.mean(axis=1)                             # each group's own profile and course levels
         with torch.no_grad():
-            self.params["b0"].fill_(float(level.mean() + b.mean() + c[exposed_g].mean()))
-            self.params["th_grp"].copy_(torch.as_tensor(level - level.mean())[None, :])
+            self.params["b0"].fill_(float(lv.mean() + bbar.mean() + cbar.mean()))
+            self.params["th_grp"].copy_(torch.as_tensor(lv - lv.mean())[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(a - level[grp])[None, :])
-            self.params["h_all"].copy_(torch.as_tensor(b - b.mean())[None, :])
-            self.params["f_all"].copy_(torch.as_tensor(np.where(exposed_g, c - c[exposed_g].mean(), 0.0)).reshape(2, -1))
+            self.params["h_all"].copy_(torch.as_tensor(bbar)[None, :])
+            self.params["h_grp"].copy_(torch.as_tensor(B))
+            self.params["f_all"].copy_(torch.as_tensor(cbar).reshape(self.params["f_all"].shape))
+            self.params["f_grp"].copy_(torch.as_tensor(F).reshape(self.params["f_grp"].shape))
+        # their strengths from the same fit: Fellner–Schall's value for a well-identified effect, rank / x̂ᵀQx̂ (its
+        # trace term is small). At τ = 1 the leaf levels (sd ≈ 4 on IX, final τ 0.06) were pulled to their group's and
+        # a chord step then moved one by 195
+        x = self.effects()
+        for n in ("th_grp", "th_cat", "f_all", "f_grp", "h_all", "h_grp"):
+            comp = self.components[n]
+            v = x[n].detach().cpu().numpy().reshape(comp.batch, -1)
+            q = float(sum(v[r] @ (comp.shape.Q @ v[r]) for r in range(comp.batch)))
+            if comp.rank > 0 and q > 0:
+                comp.tau = float(np.clip(comp.rank / q, 1e-3, 1e3))
+        self._backfit_places(a, b, c)
+
+    def _backfit_places(self, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> None:
+        """One backfitting pass for the leaf-place deviations over the main-effects fit: each (leaf, place)'s penalised
+        Poisson estimate w = argmin E·eʷ − O·w + ½τw² (τ the current v_cat strength), solved per cell, then split into
+        the place (v_all), group-place (v_grp) and leaf-place (v_cat) parts their centrings expect. From the main
+        effects alone, the first Newton step moved a v_cat by 66 (a cell with events where μ was tiny gets y/μ, not
+        log(y/μ)), and later steps spent themselves undoing it (IX, 2026-10-06)."""
+        d = self.data
+        nU, nE = d.N.shape[0], len(d.leaves)
+        grp = np.asarray(d.leaf_group)
+        W = np.einsum("utg,kt,kg->ku", d.N, np.exp(b), np.exp(c))                             # [K, U]
+        E = np.exp(a)[:, None] * W[grp]
+        O = np.bincount(d.e.astype(np.int64) * nU + d.u, weights=d.y, minlength=nE * nU).reshape(nE, nU)
+        nK = int(grp.max()) + 1
+        # the place strengths' start: Marshall's (1991) moment estimate of the between-unit variance of observed over
+        # expected (less its Poisson part) at each level, each level's expectation carrying the level above; the
+        # ICAR and iid parts of a level share its variance equally. At τ = 1 the first outer moved s_grp by 14 and
+        # then the strengths jumped ×100
+        O_u, E_u = O.sum(0), E.sum(0)
+        O_ku, E_ku = np.zeros((nK, nU)), np.zeros((nK, nU))
+        np.add.at(O_ku, grp, O)
+        np.add.at(E_ku, grp, E)
+        def moment(o, e):
+            m = o.sum() / e.sum()
+            keep = e > 0
+            s2 = float((e[keep] * (o[keep] / e[keep] - m) ** 2).sum() / e[keep].sum())
+            noise = m / e[keep].mean()
+            if s2 <= 2.0 * noise:
+                # the between-unit variance is not distinguishable from the Poisson part: start shrunk. Against τ = 1,
+                # held-out NB log-likelihood on SIM VII, VIII, XV, XVII, III: better on four, XV by 0.10 per death
+                return 1e3
+            var = (s2 - noise) / m ** 2                                        # of the log relative risk, by the delta method
+            return float(np.clip(1.0 / var, 1.0, 1e3))
+        ratio_u = np.divide(O_u, E_u, out=np.ones_like(E_u), where=E_u > 0)
+        t_all = moment(O_u, E_u)
+        t_grp = moment(O_ku, E_ku * ratio_u[None, :])
+        ratio_ku = np.divide(O_ku, E_ku, out=np.ones_like(E_ku), where=E_ku > 0)
+        t_cat = moment(O, E * ratio_ku[grp])
+        for n, t in (("s_all", 2 * t_all), ("v_all", 2 * t_all), ("s_grp", 2 * t_grp), ("v_grp", 2 * t_grp), ("v_cat", t_cat)):
+            self.components[n].tau = float(np.clip(t, 1.0, 1e3))
+        tau = self.components["v_cat"].tau
+        w = np.zeros_like(E)
+        for _ in range(40):
+            ew = E * np.exp(w)
+            dw = np.clip((O - ew - tau * w) / (ew + tau), -1.0, 1.0)
+            w += dw
+            if np.abs(dw).max() < 1e-8:
+                break
+        cnt = np.bincount(grp, minlength=nK)[:, None]
+        gmean = np.zeros((nK, nU))
+        np.add.at(gmean, grp, w)
+        gmean /= np.maximum(cnt, 1)
+        place = gmean.mean(axis=0)
+        with torch.no_grad():
+            self.params["v_cat"].copy_(torch.as_tensor(w - gmean[grp]))
+            self.params["v_grp"].copy_(torch.as_tensor(gmean - place[None, :]))
+            self.params["v_all"].copy_(torch.as_tensor(place)[None, :])
 
     def _uses_v1(self) -> bool:
         """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every count block without the interaction (the
@@ -1189,8 +1272,7 @@ class Monolith:
         Two estimators failed first, on chapter IX 2010–2023: moments (Pearson residuals of cells
         with tiny μ and y ≥ 1 dominate: φ = 0.013), and a power series for the empty cells
         (they hold 1.95 M of 4.99 M expected events, μ/φ is not small, the series diverges)."""
-        def nll(log_phi: float) -> float:
-            return -self.nb_loglik(float(np.exp(log_phi)), places=places)
+        nll = self._nb_loglik_binned(places)
 
         res = optimize.minimize_scalar(nll, bounds=(np.log(1e-3), np.log(1e6)), method="bounded",
                                        options={"xatol": 1e-3})
@@ -1199,6 +1281,66 @@ class Monolith:
             self.dispersion_check = {"phi": phi, "evaluations": int(res.nfev),
                                      "loglik_gain_over_poisson": float(nll(np.log(1e6)) - res.fun)}
         return float("inf") if phi > 0.99e6 else phi
+
+    def _nb_loglik_binned(self, places: np.ndarray | None = None, bins: int = 8192):
+        """−`nb_loglik` as a function of log φ at fixed μ, for the 1-D search of `_dispersion`: the non-empty cells
+        exactly, and the sum over every cell of φ·log(1 + μ/φ) from one streamed pass that bins the cells by log μ
+        (count, Σμ, Σμ² per bin; the bin's term at its mean plus the second-order correction ½f''·Σ(μ − μ̄)²,
+        exact to about 10⁻⁹ relative at 8,192 bins). Each evaluation then costs O(bins) instead of a pass over every
+        cell (IX: 185 M cells, about 1 s per evaluation and 14 evaluations)."""
+        with torch.no_grad():
+            x = self.effects()
+            mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
+            lp = self._leaf_place(x)
+            lin = (self._time(x)[:, None, :]
+                   + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None])
+            base = torch.exp(lin)
+            prof = torch.exp(x["f_all"] + x["f_grp"])
+            y, u = self.data.y, self.data.u
+            sel = slice(None)
+            if places is not None:
+                keep = np.asarray(places, dtype=bool)
+                cell = keep[u]
+                mu, y = mu[cell], y[cell]
+                sel = torch.as_tensor(keep, device=self.device)
+            # the edges: log μ is a sum of the factors' logs, so their extremes bound it (one pass, not two)
+            Npos = self.N[sel][self.N[sel] > 0]
+            def ext(t):
+                t = torch.log(t[t > 0])
+                return float(t.min()), float(t.max())
+            parts = [ext(lp[:, sel] if places is not None else lp), ext(base[:, sel] if places is not None else base),
+                     ext(Npos), ext(prof)]
+            lo, hi = sum(p[0] for p in parts) - 1e-6, sum(p[1] for p in parts) + 1e-6
+            slabs = range(lp.shape[0])
+            n = torch.zeros(bins, dtype=self.dtype, device=self.device)
+            s1, s2 = torch.zeros_like(n), torch.zeros_like(n)
+            for e in slabs:
+                k = int(self.grp[e])
+                m = (lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]).reshape(-1)
+                # an unexposed cell (μ = 0) goes to an extra bin that is dropped: no compaction of the slab
+                idx = torch.where(m > 0, ((torch.log(m) - lo) / (hi - lo) * bins).clamp_(0, bins - 1),
+                                  torch.full_like(m, bins)).long()
+                n += torch.bincount(idx, minlength=bins + 1)[:bins].to(self.dtype)  # bincount: 3x index_add_'s speed
+                s1 += torch.bincount(idx, weights=m, minlength=bins + 1)[:bins]
+                s2 += torch.bincount(idx, weights=m * m, minlength=bins + 1)[:bins]
+        n, s1, s2 = (t.cpu().numpy() for t in (n, s1, s2))
+        used = n > 0
+        n, s1, s2 = n[used], s1[used], s2[used]
+        mbar = s1 / n
+        spread = np.maximum(s2 - s1 * mbar, 0.0)
+        # Σ_cells lgamma(y + φ) over the distinct counts (exact)
+        vals, cnt = np.unique(y, return_counts=True)
+        const = float(special.gammaln(y + 1).sum())
+        logmu = np.log(mu)
+
+        def nll(log_phi: float) -> float:
+            ph = float(np.exp(log_phi))
+            lpm = np.log(ph + mu)
+            full = (float((cnt * special.gammaln(vals + ph)).sum()) - len(y) * special.gammaln(ph) - const
+                    + float((ph * (np.log(ph) - lpm) + y * (logmu - lpm)).sum()))
+            total = float((n * ph * np.log1p(mbar / ph) - 0.5 * ph / (ph + mbar) ** 2 * spread).sum())
+            return -(full - (total - float((ph * np.log1p(mu / ph)).sum())))
+        return nll
 
     def dispersion_by(self, labels: np.ndarray) -> np.ndarray:
         """φ per place when each group of places (``labels``, one per place) has its own, by `_dispersion`."""

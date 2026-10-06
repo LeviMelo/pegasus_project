@@ -1,6 +1,6 @@
 """The solver benchmark (ARCHITECTURE §5.8; docs/plans/2026-10-06-optimization.md §7).
 
-    python scripts/bench.py [--solver v0|v1] [--blocks SIM.DO:IX,SIM.DO:VII] [--years 2010-2021] [--warm]
+    python scripts/bench.py [--solver v0|v1] [--blocks SIM.DO:IX,SIM.DO:VII] [--years 2010-2021] [--grain month] [--warm]
 
 Fits each block from a cold start (or warm from its stored relative) without saving it, and writes one JSON line
 per block to data/bench/<date>.jsonl: wall seconds, outers, Newton steps, the final objective, φ, every τ, the
@@ -24,6 +24,9 @@ parser.add_argument("--outer", type=int, default=40)
 parser.add_argument("--threads", type=int, default=0)
 parser.add_argument("--accel", action="store_true", help="Anderson acceleration of the strengths (fit(accelerate=True))")
 parser.add_argument("--heldout", type=int, default=0, help="score the years after the fit up to this one (monolith.heldout)")
+parser.add_argument("--grain", default="year", help="year or month")
+parser.add_argument("--event", default="", help="the event (default by dataset: death, hospitalisation, birth, notification)")
+parser.add_argument("--mean-tol", type=float, default=1.0, help="fit(mean_tol=): the outers' Newton steps end below this predicted decrease")
 args = parser.parse_args()
 os.environ["PEGASUS_SOLVER"] = args.solver
 if args.threads:
@@ -40,15 +43,16 @@ EVENTS = {"SIM.DO": "death", "SIH-RD": "hospitalisation", "SINASC-DN": "birth"}
 for spec in args.blocks.split(","):
     dataset, block = spec.split(":")
     t0 = time.time()
-    data = monolith.assemble(dataset, EVENTS.get(dataset, "notification"), block, years)
+    event = args.event or EVENTS.get(dataset, "notification")
+    data = monolith.assemble(dataset, event, block, years, grain=args.grain)
     t_asm = time.time() - t0
     model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity")
     t1 = time.time()
-    model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=1.0, accelerate=args.accel,
+    model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=args.mean_tol, accelerate=args.accel,
               log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
-    row = {"block": spec, "years": args.years, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel,
+    row = {"block": spec, "years": args.years, "grain": args.grain, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel, "mean_tol": args.mean_tol,
            "commit": commit, "seconds": round(secs, 2), "assemble_seconds": round(t_asm, 2),
            "outers": len(model.history), "newton": len(model.newton_log), "cg": model.cg_iterations,
            "objective": float(model.objective()) * model._objective_norm(), "phi": model.phi,
@@ -59,7 +63,7 @@ for spec in args.blocks.split(","):
     row["history"] = [{"mean_s": round(h.get("mean_seconds", 0), 2), "tau_s": round(h.get("tau_seconds", 0), 2),
                         "newton": h.get("newton"), "change": round(h.get("change", 0), 4)} for h in model.history]
     if args.heldout:
-        test = monolith.assemble(dataset, EVENTS.get(dataset, "notification"), block, range(last + 1, args.heldout + 1))
+        test = monolith.assemble(dataset, event, block, range(last + 1, args.heldout + 1), grain=args.grain)
         h = monolith.heldout(model, test)
         row["heldout"] = {"years": [last + 1, args.heldout], "deviance_per_event": h["deviance_per_event"],
                           "nb_loglik_per_event": h["nb_loglik_all"] / h["events"], "events": h["events"]}
