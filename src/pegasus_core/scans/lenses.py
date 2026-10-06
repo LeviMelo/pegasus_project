@@ -45,16 +45,18 @@ class Finding:
 
 
 def spatial_cluster(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
-                    replicates: int = 200, alpha: float = 0.05) -> list[Finding]:
-    """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan."""
+                    replicates: int = 200, alpha: float = 0.05, rate_ratio: float | None = None) -> list[Finding]:
+    """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan.
+    ``rate_ratio`` overrides the minimum effect θ0 (the grid's calibration, §10.5)."""
     return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True,
-                  rate_ratio=SPATIAL_RATE_RATIO)
+                  rate_ratio=SPATIAL_RATE_RATIO if rate_ratio is None else rate_ratio)
 
 
 def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
-               max_window: int | None = 4, replicates: int = 200, alpha: float = 0.05) -> list[Finding]:
+               max_window: int | None = 4, replicates: int = 200, alpha: float = 0.05,
+               rate_ratio: float | None = None) -> list[Finding]:
     """Place sets × contiguous windows of at most ``max_window`` years."""
-    return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window)
+    return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window, rate_ratio=rate_ratio)
 
 
 def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int, replicates: int,
@@ -125,9 +127,11 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
 # ---------------------------------------------------------------------- per place
 
 
-def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05) -> list[Finding]:
-    """Cells above their predictive (B2: a place's own course): the upper tail P(Y ≥ y) is the
-    one-sided p; BH across the field's cells."""
+def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None
+             ) -> list[Finding]:
+    """Cells above their predictive (B2: a place's own course): the upper tail P(Y ≥ y) under θ0 × μ is the
+    one-sided p; BH across the field's cells. ``rate_ratio`` overrides θ0 (`RATE_RATIO`)."""
+    rr = RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"outbreak|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "outbreak", "field": s.field.id,
                                                                "tier": s.tier}))
@@ -138,7 +142,7 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05) -> l
         excess = np.abs(np.nan_to_num(s.y) - np.nan_to_num(s.mu)) - MARK_LOG
         p = np.minimum(1.0, 2 * special.ndtr(-np.divide(excess, sdv, out=np.zeros_like(excess), where=sdv < np.inf)))
     else:
-        p = _upper_tail(s.y, RATE_RATIO * s.mu, s.phi)
+        p = _upper_tail(s.y, rr * s.mu, s.phi)
     flat = np.where(ok, p, 1.0).ravel()
     hits = np.nonzero(control.bh(flat, q))[0]
     U, T = s.y.shape
@@ -151,7 +155,7 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05) -> l
 
 
 def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, min_years: int = 2,
-                 replicates: int | None = None) -> list[Finding]:
+                 replicates: int | None = None, rate_ratio: float | None = None) -> list[Finding]:
     """A level shift in a place's trailing years: for each window [t, T−1] (at least ``min_years``
     long), the exact upper tail of its total under the predictive, a sum of NB cells
     moment-matched to NB(M, M²/Σ μ²/φ); the place's p is the smallest window p times the number
@@ -165,11 +169,12 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
     family = f"change_point|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "change_point", "field": s.field.id,
                                                                "tier": s.tier, "null": "exact NB, Bonferroni"}))
+    rr = RATE_RATIO if rate_ratio is None else rate_ratio
     U, T = s.y.shape
     starts = T - min_years + 1
     Y = np.cumsum(s.y[:, ::-1], 1)[:, ::-1][:, :starts]
-    M = RATE_RATIO * np.cumsum(s.mu[:, ::-1], 1)[:, ::-1][:, :starts]   # H0 boundary: θ0 × expected
-    extra_cells = np.where(np.isfinite(s.phi), (RATE_RATIO * s.mu) ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
+    M = rr * np.cumsum(s.mu[:, ::-1], 1)[:, ::-1][:, :starts]   # H0 boundary: θ0 × expected
+    extra_cells = np.where(np.isfinite(s.phi), (rr * s.mu) ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
     E = np.cumsum(extra_cells[:, ::-1], 1)[:, ::-1][:, :starts]
     p_win = np.ones((U, starts))
     up = (Y > M) & (M > 0)
@@ -188,8 +193,8 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
         t = int(start[u])
         out.append(Finding("change_point", s.field.id, s.tier, {"places": [int(s.places[u])],
                                                                 "years": [int(s.years[t]), int(s.years[-1])]},
-                           _rr(Y[u, t], M[u, t] / RATE_RATIO), float(p[u]),
-                           {"observed": float(Y[u, t]), "expected": float(M[u, t] / RATE_RATIO), "windows": starts}))
+                           _rr(Y[u, t], M[u, t] / rr), float(p[u]),
+                           {"observed": float(Y[u, t]), "expected": float(M[u, t] / rr), "windows": starts}))
     ledger.complete(test, float(p.min()), None, {"places": int(ok.sum()), "hits": len(out)})
     return out
 
@@ -311,12 +316,13 @@ def trend_scores(s: surprise.Surprise, edges: np.ndarray) -> tuple[np.ndarray, n
     return diff, sd, _trend_delta(s, "municipality"), has
 
 
-def _trend_delta(s: surprise.Surprise, scale: str = "municipality") -> float:
+def _trend_delta(s: surprise.Surprise, scale: str = "municipality", ratio: float | dict | None = None) -> float:
     # β is per standard deviation of the years: a divergence δ_β over the standardised range of
     # the period is a ratio TREND_PERIOD between its first and last year
     yrs = s.years.astype(float)
     span = (yrs.max() - yrs.min()) / max(yrs.std(), 1e-9)
-    ratio = TREND_PERIOD[scale] if isinstance(TREND_PERIOD, dict) else TREND_PERIOD
+    ratio = TREND_PERIOD if ratio is None else ratio          # ``ratio`` overrides the minimum divergence (the grid)
+    ratio = ratio[scale] if isinstance(ratio, dict) else ratio
     return float(np.log(ratio) / span)
 
 
@@ -376,8 +382,8 @@ def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarr
 
 
 def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05,
-                     scales: list[scales_mod.Scale] | None = None, reference: str = "neighbours"
-                     ) -> list[Finding]:
+                     scales: list[scales_mod.Scale] | None = None, reference: str = "neighbours",
+                     ratio: float | dict | None = None) -> list[Finding]:
     """From B2: a unit's trend β against ``reference`` (two declared estimands, P4): ``neighbours``, the
     mean of its graph neighbours' β (a divergence from the surroundings), or ``national``, β itself (a
     divergence from the field's national course). Units are those of each of ``scales`` (default: the
@@ -399,7 +405,7 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
     rows = []
     for x in sc:
         b, sd, kappa = unit_trends(s, x)
-        delta = _trend_delta(s, x.name)
+        delta = _trend_delta(s, x.name, ratio)
         diff, sdd, has = _contrast(b, sd, x.edges(edges) if x.name != "municipality" else edges, reference)
         ok = has & (sdd > 0)
         d = np.divide(diff, sdd, out=np.zeros(len(b)), where=ok)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import gc
 import json
 import time
 from pathlib import Path
@@ -101,6 +102,8 @@ def main() -> None:
         drawn = [tracked(m2, x) for x in draws]
         for q, val in truth.items():
             ranks.setdefault(q, []).append(int(sum(dq[q] < val for dq in drawn)))
+        m2._solver_v1, draws = None, None            # break the model–solver cycle: 0.4 GB a replicate otherwise
+        gc.collect()
         print(f"replicate {r}: {time.time() - t1:.0f}s, {int(sim.y.sum())} events", flush=True)
     bins = 10
     out = {"dataset": args.dataset, "block": args.block, "years": [args.first, args.last],

@@ -216,6 +216,28 @@ class Session:
         mu = mu * np.divide(tot, mu.sum(0), out=np.ones_like(tot), where=mu.sum(0) > 0)[None]
         return y, mu
 
+    def held_out(self, node: str, places: list[int], years: list[int]) -> dict[str, Any]:
+        """A locus's effect read against the fit with the locus held out (`monolith.Monolith.without`): observed
+        against expected there, beside the in-sample ratio, and the upper tail of the observed total under the
+        held-out NB predictive. In-sample, a fit absorbs 9–63 % of a departure's log ratio by its locus (ARCHITECTURE
+        §10.3); this is the size a lead is reported at. ``places`` are municipality codes, ``years`` periods."""
+        f = self.expectations.field(node)
+        m = self.expectations.model(f.block)
+        reg = self.expectations.registry
+        leaves = np.array([m.data.leaves.index(c) for c in reg.leaves(f.node) if c in m.data.leaves])
+        cells = np.outer(np.isin(m.data.places, places), np.isin(m.data.periods(), years))
+        if not cells.any():
+            raise LookupError(f"{node}: no cell of {places} × {years} in block {f.block}")
+        y = m.observed(leaves)[cells].sum()
+        mu_in = m.expected(leaves)[0][cells].sum()
+        mu, mu2 = m.without(cells).expected(leaves)
+        M, M2 = mu[cells].sum(), mu2[cells].sum()
+        phi = surprise.aggregate_phi(np.array([M]), np.array([M2]), m.phi)
+        p = lenses._upper_tail(np.array([y]), np.array([M]), phi)[0]
+        return {"field": f.id, "cells": int(cells.sum()), "observed": float(y), "expected_in_sample": float(mu_in),
+                "expected_held_out": float(M), "ratio_in_sample": float(y / mu_in) if mu_in > 0 else None,
+                "ratio_held_out": float(y / M) if M > 0 else None, "p_held_out": float(p)}
+
     def expected(self, node: str, tier: str = "B1") -> dict[str, Any]:
         s = self.surprise(node, tier)
         return {"places": s.places, "years": s.years, "observed": s.y, "expected": s.mu}
@@ -380,15 +402,21 @@ class Session:
     # ---- triage and replication (§7.7, §8.3) ---------------------------------------------
 
     def triage(self, register: list[leads.Lead] | None = None, replicate: bool = True, write: bool = True,
-               log=print, facility: bool = True) -> list[leads.Lead]:
+               log=print, facility: bool = True, stale: bool = False) -> list[leads.Lead]:
         """Classify every open lead of the session's dataset by the data's own evidence (substitution, system
         artefact, noise, one institution's behaviour, signal; `explain.triage`) and run the replication of §8.3
         on the same arrays. ``facility`` reads each lead's events by recording institution (`facility`; SIH-RD
         names every admission's facility, SIM.DO only the deaths certified in one). The
         verdict goes to ``lead.robustness["triage"]``, the tier to ``lead.replication``; leads read as
-        artefacts are marked `explained`. With ``write`` the new states are appended to the register."""
+        artefacts are marked `explained`. With ``write`` the new states are appended to the register.
+
+        Each verdict carries the rules' version (`explain.RULES`). ``stale`` re-triages only the leads whose verdict
+        was made by other rules (or none); a lead a superseded rule had explained is open again unless the new verdict
+        explains it, and the old verdict is kept beside the new one."""
         mine = [x for x in (register if register is not None else self.register.current())
                 if x.fields and x.fields[0].startswith(f"{self.dataset}:")]
+        if stale:
+            mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.RULES]
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
         for x in mine:
             by_node.setdefault((x.fields[0].split(":")[-1], x.train_last or 0, x.tier if x.train_last else ""), []).append(x)
@@ -415,11 +443,15 @@ class Session:
                 if fac is not None and rows.size:
                     ev.facility = fac.tally(self.expectations.registry.chapter(node), block_codes, lead_codes, rows)
                 verdict = explain.triage(x.estimand, rows, span, direction, ev, st.get("observed"), st.get("expected"))
+                old = x.robustness.get("triage")
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
                                                            "grade": verdict.grade or None, "bound": verdict.bound,
-                                                           **verdict.evidence}}
+                                                           "rules": explain.RULES, **verdict.evidence,
+                                                           **({"superseded": old} if old and old.get("rules") != explain.RULES else {})}}
                 if verdict.grade == explain.TESTED and verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
                     x.status = "explained"      # only a tested explanation takes a lead out; bound and consistent stay attached
+                elif x.status == "explained":
+                    x.status = "open"           # explained by a verdict the current rules do not repeat
                 if replicate:
                     x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
                     x.replication = control.replication_tier(kinds_of(x))

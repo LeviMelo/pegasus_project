@@ -2,8 +2,8 @@
 
 - Known positives: signals the literature and the surveillance record establish,
   each with the lens that should find it, its locus and a pass criterion.
-- Planted signals: y' = y + Poisson((θ − 1)·μ_S) over a known locus S; recovery
-  against θ is a lens's power curve.
+- Planted signals: y' = y + Poisson((θ − 1)·μ_S) over a known locus S (v0, against a
+  fixed μ; superseded by the grid, which refits).
 - Null surrogates: y* ~ NB(μ̂, φ̂), independent across fields; whatever a lens
   finds there is its false-lead rate.
 - Negative controls for pairs: surrogates that keep each field's dependence and
@@ -13,17 +13,21 @@
   spectrum is kept exactly. The raw weight matrix is not used: its eigenvectors
   localise and the surrogates lose long-range structure (evaluation 2026-10-05).
   Within places, the field's series shifted by k ≥ 2 years.
-- The gate: a lens runs in production after recovering its positives, holding
-  its false-lead rate ≤ q on surrogates, and publishing a power curve.
+- The designed grid (§10.3, O5): planted departures by locus kind, shape and size in
+  worlds drawn from the fit and refitted, read by the production lenses; each lens's
+  power surface and the false leads of null worlds characterise it. Nothing gates
+  (ARCHITECTURE §10.5): the gate of v0 was retired with ADR-0023's revision.
 
 Results are tables in the store (``harness``), written up as evaluation entries.
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import time
-from dataclasses import dataclass, field, replace
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -724,6 +728,8 @@ GRID_SHAPES = ("spike", "step", "trend", "group")
 GRID_THETAS = (1.1, 1.2, 1.5, 2.0, 3.0)
 GRID_LOAD = 0.05     # a world's planted excess in any period, at most this share of the field's expected events then (beyond its first plant)
 GRID_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence", "group_disparity")
+MINIMUM_EFFECT_ARG = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
+                      "spatial_cluster": "rate_ratio", "trend_divergence": "ratio", "group_disparity": "sd"}
 
 
 @dataclass(frozen=True)
@@ -815,6 +821,8 @@ def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarra
             t0 = int(rng.integers(0, T))
             t1 = t0 + 1
             share = mu_g[rows, t0].sum(0)
+            if share.sum() <= 0:
+                continue
             group = int(rng.choice(len(share), p=share / share.sum()))
         window = mu_ut[rows].sum(0) if group is None else mu_g[rows, :, group].sum(0)
         excess = (Plant(kind, shape, theta, (), t0, t1).multiplier(T) - 1.0) * window      # [T]
@@ -846,60 +854,71 @@ def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.G
         else:
             mult[rows, :, p.group] *= course
     inside = {int(e) for e in leaves}
-    parts = []
-    with torch.no_grad():
-        for e in range(len(d.leaves)):
+
+    def leaf(args):
+        e, r = args
+        with torch.no_grad():
             mu = m.expected_by_group(np.array([e]))
-            if e in inside:
-                mu = mu * mult
-            y = subset.replicate(mu, m.phi, rng)
-            u, t, g = np.nonzero(y)
-            parts.append((np.full(len(u), e), u, t, g, y[u, t, g]))
+        y = subset.replicate(mu * mult if e in inside else mu, m.phi, r)
+        u, t, g = np.nonzero(y)
+        return np.full(len(u), e), u, t, g, y[u, t, g]
+
+    # leaves drawn on threads, each from its own child generator (the draws release the GIL: 4x on 8 threads)
+    with ThreadPoolExecutor(8) as pool:
+        parts = list(pool.map(leaf, zip(range(len(d.leaves)), rng.spawn(len(d.leaves)), strict=True)))
     e, u, t, g, y = (np.concatenate(z) for z in zip(*parts, strict=True))
     return dataclasses.replace(d, e=e, u=u, t=t, g=g, y=y, key={**d.key, "world": True})
 
 
-def grid_refit(m: Any, data: Any) -> Any:
-    """The world's mean refitted from the fit's MAP at the fit's strengths and dispersion (a fixed-hyperparameter
-    parametric bootstrap). A refit absorbs part of every departure (evaluation 2026-10-06, absorption), so a lens
-    must read the refitted world, never the fit that never saw the plant."""
-    import torch
+def _score(plants: list[Plant], found: list, places: np.ndarray, periods: np.ndarray, U: int
+           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every plant against every finding at once (both are a place set × a window of periods): the best finding's
+    (precision, recall) per plant, and whether each finding touches a plant. A finding over the whole series, or with
+    no periods (spatial cluster, trend divergence, group disparity: place-level lenses), is compared on places alone;
+    a cell comparison would cap its precision at the plant's share of the series."""
+    import scipy.sparse as sp
 
-    from . import monolith, solver
-
-    if getattr(m, "rank", 0):
-        raise NotImplementedError("the grid refits the base model; the interaction's world is not built")
-    m2 = monolith.Monolith(data, m.graph, m.graph_kind, prior=m.prior)
-    for n, c in m2.components.items():
-        c.tau = m.components[n].tau
-    with torch.no_grad():
-        for n, v in m.params.items():
-            m2.params[n].copy_(v)
-    solver.fit_mean(m2, iterations=30, loglik_tol=1e-3)
-    m2.phi = m.phi
-    return m2
-
-
-def _overlap(f: Any, plant_cells: np.ndarray, places: np.ndarray, periods: np.ndarray) -> tuple[float, float]:
-    """(precision, recall) of a finding's cells against a plant's: the share of the finding inside the plant, and of
-    the plant inside the finding."""
-    rows = np.isin(places, f.locus.get("places", []))
-    yrs = f.locus.get("years") or [int(periods[0]), int(periods[-1])]
-    cols = (periods >= yrs[0]) & (periods <= yrs[-1])
-    found = np.outer(rows, cols)
-    inter = (found & plant_cells).sum()
-    return (inter / found.sum() if found.sum() else 0.0, inter / plant_cells.sum() if plant_cells.sum() else 0.0)
+    P, F = len(plants), len(found)
+    if P == 0 or F == 0:
+        return np.zeros(P), np.zeros(P), np.zeros(F, dtype=bool)
+    index = {int(c): k for k, c in enumerate(places)}
+    pr = [(k, u) for k, p in enumerate(plants) for u in p.places]
+    Pm = sp.csr_matrix((np.ones(len(pr)), ([a for a, _ in pr], [b for _, b in pr])), shape=(P, U))
+    fr = [(k, index[int(c)]) for k, f in enumerate(found) for c in f.locus.get("places", []) if int(c) in index]
+    Fm = sp.csr_matrix((np.ones(len(fr)), ([a for a, _ in fr], [b for _, b in fr])), shape=(F, U))
+    inter = (Pm @ Fm.T).toarray()                                       # shared places [P, F]
+    np_, nf = np.asarray(Pm.sum(1)).ravel(), np.asarray(Fm.sum(1)).ravel()
+    p0, p1 = np.array([p.t0 for p in plants]), np.array([p.t1 for p in plants])
+    f0, f1, whole = np.zeros(F, int), np.full(F, len(periods)), np.ones(F, dtype=bool)
+    for k, f in enumerate(found):
+        yrs = f.locus.get("years")
+        if yrs and not (yrs[0] <= periods[0] and yrs[-1] >= periods[-1]):
+            f0[k], f1[k], whole[k] = np.searchsorted(periods, yrs[0]), np.searchsorted(periods, yrs[-1], "right"), False
+    ov = np.clip(np.minimum(p1[:, None], f1[None]) - np.maximum(p0[:, None], f0[None]), 0, None)
+    cells = inter * ov
+    with np.errstate(divide="ignore", invalid="ignore"):
+        prec = np.where(whole[None], inter / nf[None], cells / (nf * (f1 - f0))[None])
+        rec = np.where(whole[None], inter / np_[:, None], cells / (np_ * (p1 - p0))[:, None])
+    prec, rec = np.nan_to_num(prec), np.nan_to_num(rec)
+    best = np.argmax(prec + 1e-9 * rec, axis=1)
+    return prec[np.arange(P), best], rec[np.arange(P), best], (inter > 0).any(0)
 
 
 def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: tuple[str, ...] = GRID_SHAPES,
          lens_names: tuple[str, ...] = GRID_LENSES, worlds: int = 4, thetas: tuple[float, ...] = GRID_THETAS,
-         replicates: int = 100, null_worlds: int = 0, log=print) -> dict[str, Any]:
+         replicates: int = 100, null_worlds: int = 0, minimum_effects: dict[str, tuple] | None = None,
+         tiers: dict[str, tuple] | None = None, sink: str | None = None, log=print) -> dict[str, Any]:
     """The designed grid of ARCHITECTURE §10.3 for one field: for each (kind, shape), ``worlds`` worlds of disjoint
-    plants (`grid_design`), each drawn from the fit (`grid_world`), refitted (`grid_refit`) and read by the production
+    plants (`grid_design`), each drawn from the fit (`grid_world`), refitted (`monolith.Monolith.refit`) and read by the production
     lenses (`tools.Session.scan` on a sandbox ledger); and ``null_worlds`` worlds with no plant. Per plant and lens:
     whether a finding lies at least half inside it (detected), the best finding's precision and recall, the plant's
     expected events, and the effect the refitted B1 expectation leaves there against the planted one. Per world and
-    lens: the findings that touch no plant (false leads). Kept in the store (kind ``grid``)."""
+    lens: the findings that touch no plant (false leads). ``minimum_effects`` runs a lens at each of several minimum
+    effects θ0 (`MINIMUM_EFFECT_ARG`; None, the production value): the calibration of §10.5; ``tiers`` at several
+    expectation tiers (None, the lens's own: `tools.LENS_TIERS`), which tells a lens's weakness from its tier's
+    absorption. ``sink`` (a path) gets
+    each world's rows as a JSON line when the world ends, so a long run that fails keeps its finished worlds. Kept in
+    the store (kind ``grid``)."""
     from . import control, tools
 
     ex = session.expectations
@@ -915,61 +934,80 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                          ledger=control.Ledger(config.home() / "harness" / "grid_ledger"))
     rows, false_rows = [], []
     plans = [(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
+    done = 0
     for kind, shape, n in plans:
         units = [] if kind == "null" else grid_units(places, edges, kind)
         for w in range(n):
             rng = np.random.default_rng(config.seed("grid", f.id, kind, shape, w))
             plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas)
             t0 = time.time()
-            sess.expectations._models = {f.block: grid_refit(m, grid_world(m, leaves, plants, rng))}
+            sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng))}   # never the unseeing fit
+            sess._local.memo = {}                                           # each tier once per world
             s1 = sess.surprise(node, "B1")
             periods = np.asarray(s1.years)
-            cells = [p.cells(U, T) for p in plants]
-            for lens in lens_names:
+            per_plant = []                                                   # what does not depend on the lens
+            for p in plants:
+                c = p.cells(U, T)
+                base = mu_ut if p.group is None else mu_g[..., p.group]
+                obs, exp_ = s1.y[c].sum(), s1.mu[c].sum()
+                per_plant.append({"theta": p.theta, "periods": p.t1 - p.t0, "places": len(p.places), "group": p.group,
+                                  "expected": float(base[c].sum()),
+                                  "true_log_ratio": round(float(np.log((base * p.multiplier(T)[None, :])[c].sum() / base[c].sum())), 4),
+                                  "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
+            runs = [(x, t, tr) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
+                    for tr in (tiers or {}).get(x, (None,))]
+            for lens, theta0, tier in runs:
                 kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster") else {}
+                if theta0 is not None:
+                    kw[MINIMUM_EFFECT_ARG[lens]] = theta0
+                if tier is not None:
+                    kw["tier"] = tier
                 try:
                     found = sess.scan(node, lens, **kw)
                 except (ValueError, NotImplementedError) as err:
                     log(f"  {lens}: {err}")
                     continue
-                touched = np.zeros(len(found), dtype=bool)
-                for p, c in zip(plants, cells, strict=True):
-                    best = (0.0, 0.0)
-                    for i, fd in enumerate(found):
-                        pr, rc = _overlap(fd, c, places, periods)
-                        touched[i] |= rc > 0
-                        best = max(best, (pr, rc))
-                    base = mu_ut if p.group is None else mu_g[..., p.group]
-                    true = float(np.log((base * p.multiplier(T)[None, :])[c].sum() / base[c].sum()))
-                    obs, exp_ = s1.y[c].sum(), s1.mu[c].sum()
-                    rows.append({"lens": lens, "kind": kind, "shape": shape, "world": w, "theta": p.theta,
-                                 "periods": p.t1 - p.t0, "places": len(p.places), "group": p.group,
-                                 "expected": float(base[c].sum()), "detected": bool(best[0] >= 0.5),
-                                 "precision": round(float(best[0]), 3), "recall": round(float(best[1]), 3),
-                                 "true_log_ratio": round(true, 4),
-                                 "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
-                false_rows.append({"lens": lens, "kind": kind, "shape": shape, "world": w, "findings": len(found),
+                prec, rec, touched = _score(plants, found, places, periods, U)
+                for pc, pr_, rc in zip(per_plant, prec, rec, strict=True):
+                    rows.append({"lens": lens, "theta0": theta0, "tier": tier, "kind": kind, "shape": shape, "world": w, **pc,
+                                 "detected": bool(pr_ >= 0.5), "precision": round(float(pr_), 3), "recall": round(float(rc), 3)})
+                false_rows.append({"lens": lens, "theta0": theta0, "tier": tier, "kind": kind, "shape": shape, "world": w, "findings": len(found),
                                    "false": int((~touched).sum())})
+            sess.expectations._models, sess._local.memo = {}, None
+            gc.collect()
+            if sink:
+                with open(sink, "a", encoding="utf-8") as fh:
+                    mine = [x for x in false_rows if (x["kind"], x["shape"], x["world"]) == (kind, shape, w)]
+                    fh.write(json.dumps({"kind": kind, "shape": shape, "world": w, "rows": rows[done:], "false": mine},
+                                        default=float) + "\n")
+                done = len(rows)
             log(f"{f.id} {kind}/{shape} world {w}: {len(plants)} plants, {time.time() - t0:.0f}s")
     out = {"field": f.id, "block": f.block, "kinds": list(kinds), "shapes": list(shapes), "lenses": list(lens_names),
            "worlds": worlds, "null_worlds": null_worlds, "thetas": list(thetas), "load": GRID_LOAD, "rows": rows,
            "false": false_rows}
     record("grid", {"field": f.id, "kinds": list(kinds), "shapes": list(shapes), "lenses": list(lens_names),
-                    "worlds": worlds, "null_worlds": null_worlds, "years": list(session.years)}, out)
+                    "worlds": worlds, "null_worlds": null_worlds, "years": list(session.years),
+                    **({"minimum_effects": {k: list(v) for k, v in minimum_effects.items()}} if minimum_effects else {}),
+                    **({"tiers": {k: list(v) for k, v in tiers.items()}} if tiers else {})}, out)
     return out
 
 
 def surface(rows: list[dict], power: float = 0.8, at: tuple[float, ...] = (10, 100, 1000, 10000)) -> dict[str, Any]:
-    """Each (lens, kind, shape)'s power surface: a logistic regression of detection on log(θ − 1) and the plant's log
+    """Each (lens, θ0, tier, kind, shape)'s power surface: a logistic regression of detection on log(θ − 1) and the plant's log
     expected events, and from it the minimum detectable rate ratio at ``power`` for the expected counts ``at``.
     A cell where every plant was detected, or none, reports its counts only."""
     import statsmodels.api as sm
 
     out: dict[str, Any] = {}
-    for key in sorted({(r["lens"], r["kind"], r["shape"]) for r in rows}):
-        sel = [r for r in rows if (r["lens"], r["kind"], r["shape"]) == key and r["expected"] > 0]
+    def key_of(r: dict) -> tuple:
+        return r["lens"], str(r.get("theta0")), str(r.get("tier")), r["kind"], r["shape"]
+
+    for key in sorted({key_of(r) for r in rows}):
+        sel = [r for r in rows if key_of(r) == key and r["expected"] > 0]
         det = np.array([r["detected"] for r in sel], dtype=float)
-        rec: dict[str, Any] = {"plants": len(sel), "detected": int(det.sum())}
+        rec: dict[str, Any] = {"plants": len(sel), "detected": int(det.sum()),
+                               "by_theta": {str(t): round(float(np.mean([r["detected"] for r in sel if r["theta"] == t])), 3)
+                                            for t in sorted({r["theta"] for r in sel})}}
         if 0 < det.sum() < len(det):
             X = sm.add_constant(np.column_stack([np.log([r["theta"] - 1 for r in sel]),
                                                  np.log([r["expected"] for r in sel])]))
@@ -985,68 +1023,23 @@ def surface(rows: list[dict], power: float = 0.8, at: tuple[float, ...] = (10, 1
     return out
 
 
-# ---------------------------------------------------------------------- the gate
-
-
-@dataclass
-class GateRecord:
-    lens: str
-    positives: dict[str, bool] = field(default_factory=dict)
-    false_lead_share: float | None = None
-    power_curve: dict | None = None
-
-    @property
-    def open(self) -> bool:
-        return (bool(self.positives) and all(self.positives.values()) and self.false_lead_share is not None
-                and self.false_lead_share <= Q and self.power_curve is not None)
-
-
-def run(session: Any, node: str, lens: str, surrogates: int = 20, loci: int = 40,
-        thetas: tuple[float, ...] = (1.1, 1.25, 1.5, 2.0), replicates: int = 100, log=print) -> dict[str, Any]:
-    """One lens on one field through the harness: its false-lead rate on NB surrogates and, for the
-    subset lenses, its power curve on planted (immediate region × year) signals (§10.3–10.4).
-    Surrogate tests go to the harness's own ledger, never the production one."""
-    from . import config, control, gateway, tools
-    from .scans import lenses
-
-    tier = tools.LENS_TIERS[lens]
-    s = session.surprise(node, tier)
-    edges = session.edges()
-    sandbox = control.Ledger(config.home() / "harness" / "ledger")
-    runners = {
-        "space_time": lambda x: lenses.space_time(x, edges, sandbox, replicates=replicates),
-        "spatial_cluster": lambda x: lenses.spatial_cluster(x, edges, sandbox, replicates=replicates),
-        "outbreak": lambda x: lenses.outbreak(x, sandbox),
-        "change_point": lambda x: lenses.change_point(x, sandbox, replicates=replicates),
-        "trend_divergence": lambda x: lenses.trend_divergence(x, edges, sandbox),
-    }
-    out: dict[str, Any] = {"field": s.field.id, "lens": lens, "tier": tier, "calibration": s.calibration}
-    log(f"{s.field.id} {lens}: surrogates")
-    out["false_leads"] = false_lead_rate(runners[lens], s, surrogates)
-    log(f"  false leads {out['false_leads']}")
-    if lens == "trend_divergence":
-        rng = np.random.default_rng(config.seed("trend-loci", s.field.id))
-        tot = s.mu.sum(1)
-        candidates = np.nonzero(tot > 5)[0]
-        chosen = rng.choice(candidates, size=min(loci, len(candidates)), replace=False).tolist()
-        log(f"  trend power on {len(chosen)} places")
-        out["power"] = trend_power(s, runners[lens], chosen, [1.2, 1.5, 2.0])
-        log(f"  power {out['power']['curve']} {out['power']['by_expected']}")
-    if lens in ("space_time", "spatial_cluster"):
-        regions = gateway.regions(s.places, "ibge_immediate_region")
-        full = lens == "spatial_cluster"
-        candidates = region_year_loci(regions, len(s.years), length=len(s.years) if full else 1)
-        rng = np.random.default_rng(config.seed("loci", s.field.id, lens))
-        chosen = [candidates[i] for i in rng.choice(len(candidates), size=min(loci, len(candidates)), replace=False)]
-        log(f"  power on {len(chosen)} loci")
-        out["power"] = power_curve(s, runners[lens], chosen, list(thetas))
-        log(f"  power {out['power']['curve']}")
-    record("gate", {"field": s.field.id, "lens": lens, "tier": tier, "graph": session.graph,
-                    "surrogates": surrogates, "loci": loci}, out)
-    return out
-
-
 def record(kind: str, key: dict[str, Any], result: dict[str, Any]) -> None:
     """Keep a harness result in the store (the evaluation entry cites its address)."""
     store.put_table("harness", {"kind": kind, **key}, pa.table({"result": [json.dumps(result, default=str)]}),
                     {"kind": kind, **key})
+
+
+def absorbed(rows: list[dict]) -> dict[str, Any]:
+    """The bias of the effect a refitted world shows at each kind and shape of plant (§10.3's third output): the share
+    of the planted log ratio the refit took, 1 − seen / planted, as its median and quartiles over the plants (one
+    lens's rows: the effect does not depend on the lens)."""
+    lens = rows[0]["lens"] if rows else None
+    out: dict[str, Any] = {}
+    for key in sorted({(r["kind"], r["shape"]) for r in rows}):
+        a = np.array([1 - r["seen_log_ratio"] / r["true_log_ratio"] for r in rows
+                      if (r["kind"], r["shape"]) == key and r["lens"] == lens and r["seen_log_ratio"] is not None
+                      and r["true_log_ratio"] > 0 and r["expected"] >= 100])
+        if len(a):
+            out["|".join(key)] = {"plants": len(a), "median": round(float(np.median(a)), 3),
+                                  "quartiles": [round(float(x), 3) for x in np.percentile(a, [25, 75])]}
+    return out

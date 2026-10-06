@@ -996,7 +996,7 @@ For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a kn
 
 **v0:** power curves of four lenses on five chapter-IX fields and Q02, at one locus type (a macro-region-year), thinned to five sizes (ADR-0022).
 
-**v1 (to build): a designed grid.** Each method is characterised over:
+**v1: a designed grid** (`harness.grid`, `pegasus-core grid`; built 2026-10-06 for count blocks, annual and monthly). Each method is characterised over:
 
 | axis | levels |
 |---|---|
@@ -1008,7 +1008,19 @@ For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a kn
 
 - **Fields are real.** The backgrounds are fitted fields of every system: SIM, SIH, SINASC, SINAN, monthly and annual.
 - **Worlds are refitted.** A refit absorbs part of every planted departure: 9–21 % of a place-year, about 40 % of a macro-region-year, 45–63 % of a regional step to the series' end, and all of a national year (evaluation 2026-10-06, absorption). A curve read against the fit that never saw the signal overstates power. Each world's mean is refitted at the fit's strengths. Disjoint small loci share a world; a large locus has its own.
-- **Leads are sized with their locus held out.** In-sample surprise sees a lasting regional departure at about half its size, which is the masking that outbreak baselines correct by down-weighting past excesses (Farrington; Noufaily et al. 2013). A lead's effect is re-estimated from a fit with the locus's exposure masked.
+- **How a world is made** (`harness.grid_design`, `grid_world`):
+  - the plants of a world are of one kind and shape, disjoint, and kept a graph edge apart;
+  - θ is cycled over the sizes, and loci are taken round-robin over five quantile bins of their expected events, which is the sparsity axis;
+  - the planted excess in any period stays within 5 % of the field's expected events in that period, so the shared national history moves little;
+  - the counts are drawn NB(μ′, φ) cell by cell from the fit, with μ′ carrying the plants on the field's leaves;
+  - each lens is read through `tools.Session.scan` on a sandbox ledger; a plant is detected when a finding lies at least half inside it;
+  - null worlds carry no plant; a lens can be swept over its minimum effects θ0 (`minimum_effects`).
+- **The outputs per (lens, θ0, kind, shape)** (`harness.surface`, `harness.absorbed`):
+  - a logistic surface of detection on log(θ − 1) and log expected events, and from it the minimum detectable rate ratio at 80 % power;
+  - the detection rate by θ;
+  - the share of the planted effect the refit absorbed;
+  - the false leads per world.
+- **Leads are sized with their locus held out.** In-sample surprise sees a lasting regional departure at about half its size, which is the masking that outbreak baselines correct by down-weighting past excesses (Farrington; Noufaily et al. 2013). A lead's effect is re-estimated from a fit with the locus's exposure and counts removed (`monolith.Monolith.without`, `tools.Session.held_out`).
 - **The outputs:**
   - each method's **power surface**;
   - the **calibration of its posterior probabilities** (departure models): do 90 % exceedances hold 90 % of the time;

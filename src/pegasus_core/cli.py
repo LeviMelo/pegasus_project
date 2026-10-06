@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -90,12 +91,12 @@ def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 @app.command()
 def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
-           replicate: bool = True) -> None:
+           replicate: bool = True, stale: bool = typer.Option(False, help="only the leads whose verdict other rules made")) -> None:
     """Classify the open leads (substitution, system, noise, signal) and replicate them (§7.7, §8.3)."""
     from . import leads as register
 
     s = _session(dataset, event, years, graph)
-    done = s.triage(replicate=replicate, log=lambda m: None)
+    done = s.triage(replicate=replicate, log=lambda m: None, stale=stale)
     counts = register.triage_counts(done)
     t = Table("class", "leads", "R1", "R2", "R3", "top chapters")
     for cls, row in sorted(counts.items(), key=lambda kv: -sum(v for k, v in kv[1].items() if not k.startswith("R"))):
@@ -106,14 +107,28 @@ def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 
 @app.command()
-def harness(dataset: str, event: str, node: str, lens: str, years: str = Years, graph: str = "contiguity",
-            surrogates: int = 20, loci: int = 40, replicates: int = 100) -> None:
-    """A lens's false-lead rate on surrogates and its power curve on planted signals (§10)."""
+def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "contiguity",
+         kinds: str = "place,cluster,region,state,macro", shapes: str = "spike,step,trend,group",
+         lenses: str = ",".join(("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence",
+                                "group_disparity")),
+         worlds: int = 4, null_worlds: int = 4, replicates: int = 100, out: str = typer.Option(None),
+         minimum_effects: str = typer.Option(None, help='JSON of minimum effects (theta0) per lens, e.g. {"outbreak": [1.0, 1.2, 1.5]}'),
+         tiers: str = typer.Option(None, help='JSON of expectation tiers per lens, e.g. {"change_point": ["B1", "B2"]}')
+         ) -> None:
+    """The designed grid of planted signals (§10.3) on one field: refitted worlds read by the production lenses, the
+    false leads of null worlds, and each lens's power surface (minimum detectable rate ratio by expected events)."""
     from . import harness as h
 
-    out = h.run(_session(dataset, event, years, graph), node, lens, surrogates=surrogates, loci=loci,
-                replicates=replicates, log=console.print)
-    console.print_json(json.dumps({k: v for k, v in out.items() if k != "calibration"}, default=float))
+    res = h.grid(_session(dataset, event, years, graph), node, kinds=tuple(kinds.split(",")),
+                 shapes=tuple(shapes.split(",")), lens_names=tuple(lenses.split(",")), worlds=worlds,
+                 null_worlds=null_worlds, replicates=replicates, log=console.print,
+                 sink=str(Path(out).with_suffix(".jsonl")) if out else None,
+                 minimum_effects={k: tuple(v) for k, v in json.loads(minimum_effects).items()} if minimum_effects else None,
+                 tiers={k: tuple(v) for k, v in json.loads(tiers).items()} if tiers else None)
+    res["surface"], res["absorbed"] = h.surface(res["rows"]), h.absorbed(res["rows"])
+    if out:
+        Path(out).write_text(json.dumps(res, default=float), encoding="utf-8")
+    console.print_json(json.dumps(res["surface"], default=float))
 
 
 @app.command()

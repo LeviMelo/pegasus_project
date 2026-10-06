@@ -1636,6 +1636,41 @@ class Monolith:
         np.add.at(out, (self.data.u[m], self.data.t[m], self.data.g[m]), self.data.y[m])
         return out
 
+    def refit(self, data: BlockData) -> Monolith:
+        """This model's mean refitted on other counts of the same lattice (a planted world, a held-out locus), from
+        this fit's MAP at this fit's strengths and dispersion, to the production fit's closing tolerance. Re-learning
+        the strengths changed what a refit absorbs by under 0.001 (evaluation 2026-10-06, absorption) at 3–5 times
+        the cost."""
+        from . import solver
+
+        if self.rank:
+            raise NotImplementedError("a refit of the interaction's model is not built")
+        m2 = Monolith(data, self.graph, self.graph_kind, device=str(self.device), prior=self.prior)
+        for n, c in m2.components.items():
+            c.tau = self.components[n].tau
+        with torch.no_grad():
+            for n, v in self.params.items():
+                m2.params[n].copy_(v)
+        solver.fit_mean(m2, iterations=30, loglik_tol=1.0)
+        m2._solver_v1 = None        # the solver and the model refer to each other: a world's factor freed with it, not
+        m2.phi = self.phi           # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)
+        return m2
+
+    def without(self, cells: np.ndarray) -> Monolith:
+        """The fit with the place-period ``cells`` ([U, T] boolean) held out: their exposure and counts removed for
+        every leaf of the block, the mean refitted (`refit`), and the result predicting at the full exposure again.
+        A departure there is then read against a fit that never saw it: in-sample, a refit absorbs 9–63 % of one by
+        its locus (ARCHITECTURE §10.3; the masking that outbreak baselines correct, Farrington, Noufaily 2013)."""
+        d = self.data
+        N = d.N.copy()
+        N[cells] = 0.0
+        keep = ~cells[d.u, d.t]
+        held = dataclasses.replace(d, N=N, e=d.e[keep], u=d.u[keep], t=d.t[keep], g=d.g[keep], y=d.y[keep],
+                                   key={**d.key, "held_out": int(cells.sum())})
+        m2 = self.refit(held)
+        m2.N = self.N                       # predict at the real exposure; the counts stay the held-out ones
+        return m2
+
     def summary(self) -> dict:
         d = self.data
         bym = {}

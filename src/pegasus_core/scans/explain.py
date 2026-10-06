@@ -21,12 +21,19 @@ label's own words.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from scipy import special, stats
+
+#: The version of the triage rules: the hash of this module's source. Every verdict carries it, and a verdict of
+#: other rules is stale: its lead is re-triaged, never left explained by a rule no longer in force (ARCHITECTURE §8.6;
+#: 14,813 leads stayed `explained` by verdicts that predated graded explanations, 2026-10-06).
+RULES = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
 
 
 def deviance(y: np.ndarray, mu: np.ndarray) -> float:

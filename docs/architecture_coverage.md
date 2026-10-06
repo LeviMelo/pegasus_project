@@ -22,7 +22,7 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 | 7.0 | departure models per estimand, with Bayesian FDR |
 | 7.5 | relation models: distributed lag, shared component, endemic–epidemic; negative controls |
 | 8.4 | IHW weights and minimum detectable effects |
-| 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term: **P** since 2026-10-06 (`Registry.conserved`, fields across blocks; E:2026-10-06-icd-structure). Not built: the lenses' reading beside each lead, rule versions, the coding-regime term |
+| 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term: **P** since 2026-10-06 (`Registry.conserved`, fields across blocks; E:2026-10-06-icd-structure). Rule versions on verdicts built 2026-10-06 (`explain.RULES`, `triage --stale`; BU until the re-triage reads them). Not built: the lenses' reading beside each lead, the coding-regime term |
 | 10.3 | the designed grid of planted signals |
 | 10.6 | simulation-based calibration: **BU** (`scripts/sbc.py`; VII and XIII running) |
 | 3.3, 4.2 | the ICD ontology consumed (subcategory leaves, list effects, structural zeros, relations for the conserved levels): **P** since 2026-10-06 (ADR-0024: the nested tree, profiles by block with geography by group, structural zeros by sex and absolute age, underlying-cause eligibility; E:2026-10-06-icd-structure). Not built: list effects θ_L, relations; subcategory leaves declined by the author. Built since: list fields and conserved levels across blocks, chapter XX's axis fields |

@@ -29,3 +29,17 @@ The prediction was declared in the script before running: a national year is abs
   - the grid's worlds are refitted, at fixed strengths (seconds a world);
   - a lead's effect is re-estimated with its locus held out of the fit (exposure masked) before it is sized;
   - small disjoint loci can share a world; a large locus has its own.
+
+**At fixed strengths or re-learned** (`data/o5_absorption_tau.py`): the Northeast step and the PE state-year at θ = 2 were refitted both ways, at the fit's strengths (7–12 s) and by the full production fit with every strength re-learned (34–42 s). The share absorbed is the same to the third decimal: 0.63 and 0.183. The history's strength did loosen (log τ_h −1.36 for the step, −0.17 for the state-year), but the mean barely moved. So the grid's worlds are refitted at fixed strengths.
+
+**Held-out sizing** (`tools.Session.held_out`, `Monolith.without`): an NB world was drawn from SIM IX 2010–2023 with two plants and refitted. The plants were a Northeast step ×2 over 2020–23 and a Paraná ×1.5 in 2018.
+
+| locus | in-sample ratio | held-out ratio |
+|---|---|---|
+| Northeast step ×2 | 1.31 | 2.01 |
+| Paraná ×1.5 (observed noise included) | 1.53 | 1.64 |
+| São Paulo 2018, no plant | 1.05 | 1.07 |
+
+Each call took 7–9 s. Holding the locus out recovers the planted size.
+
+The held-out p-value is not yet usable: it sums independent cells, so a 7 % excess over 87,000 deaths reads p ≈ 0. It needs the place-year dispersion φ_extra that the surprise tiers carry before it can be read.
