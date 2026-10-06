@@ -1077,6 +1077,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |
 | `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
 | `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps`, `map_inputs` and `utilization` (§7.6), `explain` (§7.7), `cohort` (§7.8); `departures` (§7.0, to build) and `relations` (§7.5's relation models, to build) | surprise, monolith, fields, solver |
+| `relations` (O7) | relation models (§7.5): the penalised distributed-lag term on an outcome's fitted expectation (two-stage; RW2 over lag, τ by the Laplace marginal likelihood) | numpy, scipy |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
 | `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year), the per-lead facility tally for the `facility` triage class (§7.7), the supply term of a block's expectation and the institution lattice (§4.5) | gateway, store, config |
