@@ -1,6 +1,6 @@
 """The solver benchmark (ARCHITECTURE §5.8; docs/plans/2026-10-06-optimization.md §7).
 
-    python scripts/bench.py [--solver v0|v1] [--blocks SIM.DO:IX,SIM.DO:VII] [--years 2010-2021] [--grain month] [--warm]
+    python scripts/bench.py [--blocks SIM.DO:IX,SIM.DO:VII] [--years 2010-2021] [--grain month] [--warm]
 
 Fits each block from a cold start (or warm from its stored relative) without saving it, and writes one JSON line
 per block to data/bench/<date>.jsonl: wall seconds, outers, Newton steps, the final objective, φ, every τ, the
@@ -8,7 +8,6 @@ solver's own timings, and the commit. A change to the solver is measured here be
 slows by more than 10 % without a recorded reason rejects the change."""
 import argparse
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -16,20 +15,17 @@ from pathlib import Path
 import torch
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--solver", default=os.environ.get("PEGASUS_SOLVER", "v1"))
 parser.add_argument("--blocks", default="SIM.DO:VII,SIM.DO:IX")
 parser.add_argument("--years", default="2010-2021")
 parser.add_argument("--warm", action="store_true")
 parser.add_argument("--outer", type=int, default=40)
 parser.add_argument("--threads", type=int, default=0)
-parser.add_argument("--accel", action="store_true", help="Anderson acceleration of the strengths (fit(accelerate=True))")
 parser.add_argument("--heldout", type=int, default=0, help="score the years after the fit up to this one (monolith.heldout)")
 parser.add_argument("--grain", default="year", help="year or month")
 parser.add_argument("--rank", type=int, default=0, help="the low-rank interaction's R (ADR-0021)")
 parser.add_argument("--event", default="", help="the event (default by dataset: death, hospitalisation, birth, notification)")
 parser.add_argument("--mean-tol", type=float, default=1.0, help="fit(mean_tol=): the outers' Newton steps end below this predicted decrease")
 args = parser.parse_args()
-os.environ["PEGASUS_SOLVER"] = args.solver
 if args.threads:
     torch.set_num_threads(args.threads)
 
@@ -49,13 +45,13 @@ for spec in args.blocks.split(","):
     t_asm = time.time() - t0
     model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity", **({"rank": args.rank} if args.rank else {}))
     t1 = time.time()
-    model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=args.mean_tol, accelerate=args.accel,
+    model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=args.mean_tol,
               log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
-    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel, "mean_tol": args.mean_tol,
+    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "solver": "v1", "start": "warm" if args.warm else "cold", "mean_tol": args.mean_tol,
            "commit": commit, "seconds": round(secs, 2), "assemble_seconds": round(t_asm, 2),
-           "outers": len(model.history), "newton": len(model.newton_log), "cg": model.cg_iterations,
+           "outers": len(model.history), "newton": len(model.newton_log),
            "objective": float(model.objective()) * model._objective_norm(), "phi": model.phi,
            "converged": model.converged, "stop": model.stop_reason,
            "taus": {k: c.tau for k, c in model.components.items()},

@@ -1087,7 +1087,7 @@ class StructuredNewton:
 
 
 def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, solver: StructuredNewton | None = None) -> int:
-    """The mean's MAP at fixed strengths by exact Newton (the v1 replacement of `Monolith._fit_mean`): a step from
+    """The mean's MAP at fixed strengths by exact Newton (it replaced the v0 Newton–CG, retired 2026-10-06): a step from
     `StructuredNewton.step`, then Armijo backtracking on the model's own objective; stops when Newton's predicted
     decrease ½δᵀHδ falls below ``loglik_tol`` log-likelihood units. Returns the Newton steps taken."""
     nw = solver or StructuredNewton(model)
@@ -1152,9 +1152,10 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
 
 # ---------------------------------------------------------------------------------------------- the interaction's factors
 
-def _line_search(model, names: tuple[str, ...], delta: dict[str, np.ndarray], slope: float) -> float:
+def _line_search(model, names: tuple[str, ...], delta: dict[str, np.ndarray], slope: float, retract=None) -> float:
     """Armijo backtracking along ``delta`` (raw parameters of ``names``) on the model's own objective; returns the
-    step taken (0 when none decreased it, the parameters then unchanged)."""
+    step taken (0 when none decreased it, the parameters then unchanged). ``retract`` maps each trial point back onto
+    a constraint manifold before it is evaluated (a Riemannian line search)."""
     scale = model._objective_norm()
     with torch.no_grad():
         f0 = float(model.objective()) * scale
@@ -1164,6 +1165,8 @@ def _line_search(model, names: tuple[str, ...], delta: dict[str, np.ndarray], sl
             for n in names:
                 model.params[n].copy_(base[n] + step * torch.as_tensor(delta[n].reshape(base[n].shape),
                                                                         dtype=base[n].dtype, device=base[n].device))
+            if retract is not None:
+                retract()
             f1 = float(model.objective()) * scale
             if np.isfinite(f1) and f1 <= f0 + 1e-4 * step * slope:
                 return step
@@ -1173,119 +1176,168 @@ def _line_search(model, names: tuple[str, ...], delta: dict[str, np.ndarray], sl
         return 0.0
 
 
-def _constrained_solve(H: np.ndarray, g: np.ndarray, C: np.ndarray) -> np.ndarray:
-    """δ minimising ½δᵀHδ + gᵀδ subject to Cδ = 0 (a small dense KKT system; C's rows may be redundant)."""
-    n, c = H.shape[0], C.shape[0]
-    K = np.zeros((n + c, n + c))
-    K[:n, :n] = H
-    K[:n, n:] = C.T
-    K[n:, :n] = C
-    rhs = np.concatenate([-g, np.zeros(c)])
-    return np.linalg.lstsq(K, rhs, rcond=None)[0][:n]
-
-
 def ix_sweep(model, log=None) -> float:
-    """One pass of exact Newton steps over the interaction's three factors (ARCHITECTURE §4.2, ADR-0021), each given
-    the other two and the base effects: η is linear in each factor alone, so each step is Newton's for a Poisson
-    model with that factor's prior (the alternating fit of Goodman's row–column association models). ψ: an R × R
-    block per active leaf, centred within each group's active leaves; τ: an R × R block per year plus its random
-    walk and level prior; ω = os + ov: the per-place R × R data block shared by the ICAR and iid parts, a sparse
-    system over 2R·U solved by CHOLMOD with the centrings imposed by kriging. Each step is line-searched on the
-    model's objective. Returns the decrease of the objective (log-likelihood units)."""
+    """One joint Gauss–Newton step over the interaction's three factors (ARCHITECTURE §4.2, ADR-0021), given the base
+    effects, then ψ and τ normalised (`_normalise`). The data part couples every pair of factors through the expected
+    cells S[a,u,t] (∂η/∂ψ_ra = ω_ru τ_rt, ∂η/∂τ_rt = ψ_ra ω_ru, ∂η/∂ω_ru = ψ_ra τ_rt); the priors are ψ's unit iid,
+    τ's random walk and level, ω's ICAR (os) and iid (ov). The system is an arrowhead again: ω's 2R·U coordinates
+    sparse (one R × R block per place, the ICAR across places; CHOLMOD), ψ's and τ's few hundred dense, eliminated by
+    their Schur complement; the centrings (ψ within each group's active leaves, os per connected component, ov over
+    the places) by kriging. Line-searched on the model's objective. Factor-by-factor exact steps were measured first:
+    their alternation's tail (IX rank 3: 0.5, 0.2, 0.15 … units per sweep) cost 554 s of a 770 s fit.
+    Returns the decrease of the objective (log-likelihood units)."""
+    from sksparse.cholmod import cho_factor
     m = model
     scale = m._objective_norm()
     f_start = float(m.objective()) * scale
     R = m.rank
     with torch.no_grad():
-        for factor in ("ix_psi", "ix_t", "ix_om"):
-            x = m.effects()
-            S = _np(m._cells(x))                                              # [A, U, T]
-            G = S - _np(m.Y3)
-            psi, om, tm = _np(x["ix_psi"]), _np(m._om(x)), _np(x["ix_t"])
-            if factor == "ix_psi":
-                c = om[:, :, None] * tm[:, None, :]                            # [R, U, T]
-                A = psi.shape[1]
-                comp = m.components["ix_psi"]
-                g = np.einsum("aut,rut->ar", G, c) + comp.tau * psi.T            # Q = I within the groups
-                Hb = np.einsum("aut,rut,sut->ars", S, c, c) + comp.tau * np.eye(R)[None]
-                H = np.zeros((A * R, A * R))
-                for a in range(A):
-                    H[a * R:(a + 1) * R, a * R:(a + 1) * R] = Hb[a]
-                labels = _np(m._labels["ix_psi"]).astype(np.int64)
-                rows = []
-                for grp in np.unique(labels):
-                    for r in range(R):
-                        row = np.zeros(A * R)
-                        row[np.nonzero(labels == grp)[0] * R + r] = 1.0
-                        rows.append(row)
-                d = _constrained_solve(H, g.ravel(), np.array(rows)).reshape(A, R).T
-                step = _line_search(m, ("ix_psi",), {"ix_psi": d}, float(g.ravel() @ d.T.ravel()))
-            elif factor == "ix_t":
-                b = psi[:, :, None] * om[:, None, :]                           # [R, A, U]
-                T = tm.shape[1]
-                comp = m.components["ix_t"]
-                Q = comp.shape.Q.toarray()
-                g = np.einsum("aut,rau->rt", G, b) + comp.tau * (tm @ Q.T)
-                Ht = np.einsum("aut,rau,sau->trs", S, b, b)
-                H = np.kron(np.eye(R), comp.tau * Q)                             # ordered (r, t)
-                for t in range(T):
-                    H[np.ix_(np.arange(R) * T + t, np.arange(R) * T + t)] += Ht[t]
-                d = np.linalg.solve(H, -g.ravel()).reshape(R, T)
-                step = _line_search(m, ("ix_t",), {"ix_t": d}, float(g.ravel() @ d.ravel()))
-            else:
-                dfac = psi[:, :, None] * tm[:, None, :]                        # [R, A, T]
-                U = om.shape[1]
-                os_, ov = m.components["ix_os"], m.components["ix_ov"]
-                gu = np.einsum("aut,rat->ru", G, dfac)                            # [R, U] (the same for os and ov)
-                Hu = np.einsum("aut,rat,sat->urs", S, dfac, dfac)                 # [U, R, R]
-                xos, xov = _np(x["ix_os"]), _np(x["ix_ov"])
-                Qs = os_.shape.Q
-                g_os = gu + os_.tau * (Qs @ xos.T).T
-                g_ov = gu + ov.tau * xov
-                # variables ordered (u, [os_r..., ov_r...]): per place a 2R × 2R data block, ICAR coupling across places
-                blk = np.zeros((U, 2 * R, 2 * R))
-                blk[:, :R, :R] = Hu
-                blk[:, :R, R:] = Hu
-                blk[:, R:, :R] = Hu
-                blk[:, R:, R:] = Hu + ov.tau * np.eye(R)[None]
-                rr = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, :, None]).repeat(2 * R, axis=2)
-                cc = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, None, :]).repeat(2 * R, axis=1)
-                Hd = sp.csr_matrix((blk.ravel(), (rr.ravel(), cc.ravel())), shape=(2 * R * U, 2 * R * U))
-                # the ICAR penalty on each os_r: P (2RU × RU) picks os_r[u] = variable u·2R + r
-                P = sp.csr_matrix((np.ones(U * R), ((np.arange(U)[:, None] * 2 * R + np.arange(R)[None, :]).ravel(),
-                                                    (np.arange(R)[None, :] * U + np.arange(U)[:, None]).ravel())),
-                                  shape=(2 * R * U, R * U))
-                H = (Hd + P @ sp.kron(sp.identity(R), os_.tau * Qs) @ P.T).tocsc()
-                dg = H.diagonal()
-                H = (H + sp.diags(RIDGE * np.maximum(dg, dg.max() * 1e-12))).tocsc()
-                gvec = np.concatenate([g_os.T, g_ov.T], axis=1).ravel()           # (u, [os_r, ov_r])
-                # centrings: os_r over each connected component, ov_r over all places
-                comp_os = _np(m._labels["ix_os"].to(torch.float64)).astype(np.int64)
-                cons = []
-                for r in range(R):
-                    for cpt in np.unique(comp_os):
-                        idx = np.nonzero(comp_os == cpt)[0] * 2 * R + r
-                        cons.append(idx)
-                    cons.append(np.arange(U) * 2 * R + R + r)
-                from sksparse.cholmod import cho_factor
-                fa = cho_factor(H, lower=True)
-                d0 = fa.solve(-gvec)
-                At = np.zeros((2 * R * U, len(cons)))
-                for j, idx in enumerate(cons):
-                    At[idx, j] = 1.0
-                V = fa.solve(At)
-                AV = At.T @ V
-                lam = np.linalg.lstsq(AV, At.T @ d0, rcond=None)[0]
-                dvec = (d0 - V @ lam).reshape(U, 2 * R)
-                d = {"ix_os": dvec[:, :R].T.copy(), "ix_ov": dvec[:, R:].T.copy()}
-                step = _line_search(m, ("ix_os", "ix_ov"), d, float(gvec @ (d0 - V @ lam)))
-                m._ix_omega = (fa, At, V, AV, U, R)                              # for the strengths' traces
-            if factor in ("ix_psi", "ix_t") and step > 0:
-                _normalise(m, factor)
-            if log:
-                log(f"    ix {factor}: step {step:g}")
-    return f_start - float(m.objective()) * scale
+        x = m.effects()
+        S = _np(m._cells(x))                                                  # [A, U, T]
+        G = S - _np(m.Y3)
+        psi, om, tm = _np(x["ix_psi"]), _np(m._om(x)), _np(x["ix_t"])         # [R, A], [R, U], [R, T]
+        xos, xov = _np(x["ix_os"]), _np(x["ix_ov"])
+    A, U, T = S.shape
+    cp, cs, ct = (m.components[n] for n in ("ix_psi", "ix_os", "ix_t"))
+    cv = m.components["ix_ov"]
+    Qt = ct.shape.Q.toarray()
+    Qs = cs.shape.Q
+    # ---- gradients (effect space)
+    c_ = om[:, :, None] * tm[:, None, :]                                     # [R, U, T]  ∂η/∂ψ
+    b_ = psi[:, :, None] * om[:, None, :]                                    # [R, A, U]  ∂η/∂τ
+    d_ = psi[:, :, None] * tm[:, None, :]                                    # [R, A, T]  ∂η/∂ω
+    g_psi = np.einsum("aut,rut->ar", G, c_) + cp.tau * psi.T                # [A, R]
+    g_t = np.einsum("aut,rau->rt", G, b_) + ct.tau * (tm @ Qt.T)            # [R, T]
+    gu = np.einsum("aut,rat->ur", G, d_)                                     # [U, R]
+    g_os = gu + cs.tau * (Qs @ xos.T)
+    g_ov = gu + cv.tau * xov.T
+    # ---- the Gauss–Newton blocks
+    H_pp = np.einsum("aut,rut,sut->ars", S, c_, c_)                          # [A, R, R]
+    H_tt = np.einsum("aut,rau,sau->trs", S, b_, b_)                          # [T, R, R]
+    H_ww = np.einsum("aut,rat,sat->urs", S, d_, d_)                          # [U, R, R]
+    H_pt = np.einsum("aut,rut,sau->arst", S, c_, b_)                         # [A, R, R, T]
+    H_pw = np.einsum("aut,rut,sat->arus", S, c_, d_)                         # [A, R, U, R]
+    H_tw = np.einsum("aut,rau,sat->rtus", S, b_, d_)                         # [R, T, U, R]
+    # the product's second derivatives against the cells' residuals (Gauss–Newton drops them; with Poisson residuals
+    # per cell they are not small, and its steps' tail was linear): ∂²η/∂ψ_ra∂ω_ru = τ_rt, ∂²η/∂ψ_ra∂τ_rt = ω_ru,
+    # ∂²η/∂τ_rt∂ω_ru = ψ_ra, within each component r
+    ri = np.arange(R)
+    H_pw[:, ri, :, ri] += np.einsum("aut,rt->rau", G, tm)
+    H_pt[:, ri, ri, :] += np.einsum("aut,ru->art", G, om)              # adjacent advanced indices: [A, R, T]
+    H_tw[ri, :, :, ri] += np.einsum("aut,ra->rtu", G, psi)
+    ng_p, ng_t = A * R, R * T
+    ng = ng_p + ng_t
+    # dense corner: ψ ordered (a, r), τ ordered (r, t)
+    Hgg = np.zeros((ng, ng))
+    for a in range(A):
+        Hgg[a * R:(a + 1) * R, a * R:(a + 1) * R] = H_pp[a] + cp.tau * np.eye(R)
+    Htt = np.kron(np.eye(R), ct.tau * Qt)
+    for t in range(T):
+        idx = np.arange(R) * T + t
+        Htt[np.ix_(idx, idx)] += H_tt[t]
+    Hgg[ng_p:, ng_p:] = Htt
+    Hgg[:ng_p, ng_p:] = H_pt.reshape(ng_p, ng_t)
+    Hgg[ng_p:, :ng_p] = Hgg[:ng_p, ng_p:].T
+    # ω system: variables (u, [os_r, ov_r]); the data block shared by os and ov
+    blk = np.zeros((U, 2 * R, 2 * R))
+    blk[:, :R, :R] = H_ww
+    blk[:, :R, R:] = H_ww
+    blk[:, R:, :R] = H_ww
+    blk[:, R:, R:] = H_ww + cv.tau * np.eye(R)[None]
+    rr = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, :, None]).repeat(2 * R, axis=2)
+    cc = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, None, :]).repeat(2 * R, axis=1)
+    Hd = sp.csr_matrix((blk.ravel(), (rr.ravel(), cc.ravel())), shape=(2 * R * U, 2 * R * U))
+    P = sp.csr_matrix((np.ones(U * R), ((np.arange(U)[:, None] * 2 * R + np.arange(R)[None, :]).ravel(),
+                                        (np.arange(R)[None, :] * U + np.arange(U)[:, None]).ravel())),
+                      shape=(2 * R * U, R * U))
+    Hw = (Hd + P @ sp.kron(sp.identity(R), cs.tau * Qs) @ P.T).tocsc()
+    dg = Hw.diagonal()
+    Hw = (Hw + sp.diags(RIDGE * np.maximum(dg, dg.max() * 1e-12))).tocsc()
+    # coupling ω × (ψ, τ): the same data block for os and ov
+    Bw = np.zeros((U, 2 * R, ng))
+    cpw = H_pw.transpose(2, 3, 0, 1).reshape(U, R, ng_p)                      # [U, R(ω), (a, r)]
+    ctw = H_tw.transpose(2, 3, 0, 1).reshape(U, R, ng_t)                      # [U, R(ω), (r, t)]
+    Bw[:, :R, :ng_p] = cpw
+    Bw[:, R:, :ng_p] = cpw
+    Bw[:, :R, ng_p:] = ctw
+    Bw[:, R:, ng_p:] = ctw
+    Bw = Bw.reshape(2 * R * U, ng)
+    fa = cho_factor(Hw, lower=True)
+    Yw = fa.solve(Bw)                                                         # Hw⁻¹ Bw
+    Sg = Hgg - Bw.T @ Yw
+    Sg = (Sg + Sg.T) / 2
+    Sg += np.diag(RIDGE * np.maximum(np.abs(np.diag(Sg)), np.abs(np.diag(Sg)).max() * 1e-12))
+    # the exact Hessian of a product of factors is indefinite where residuals are large; ω's block is linear and stays
+    # positive, so only the dense corner's Schur complement is shifted, by just enough (a modified Newton step;
+    # Nocedal & Wright §3.4). Gauss–Newton instead left a linear tail of tens of units per step
+    lam_min = float(np.linalg.eigvalsh(Sg).min())
+    if lam_min <= 0:
+        Sg += np.eye(ng) * (-lam_min + 1e-6 * float(np.abs(np.diag(Sg)).max()))
 
+    def solve(bw: np.ndarray, bg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """The joint system's solve: [Hw Bw; Bwᵀ Hgg] [xw; xg] = [bw; bg]."""
+        yw = fa.solve(bw)
+        xg = np.linalg.solve(Sg, bg - Bw.T @ yw)
+        return yw - Yw @ xg, xg
+
+    gw = np.concatenate([g_os, g_ov], axis=1).ravel()                        # (u, [os_r, ov_r])
+    gg = np.concatenate([g_psi.ravel(), g_t.ravel()])
+    xw, xg = solve(-gw[:, None], -gg[:, None])
+    # centrings: ψ_r within each group's active leaves; os_r per connected component; ov_r over the places
+    labels = _np(m._labels["ix_psi"]).astype(np.int64)
+    comp_os = _np(m._labels["ix_os"].to(torch.float64)).astype(np.int64)
+    cons_w, cons_g = [], []
+    for r in range(R):
+        for grp in np.unique(labels):
+            row = np.zeros(ng)
+            row[np.nonzero(labels == grp)[0] * R + r] = 1.0
+            cons_g.append(row)
+            cons_w.append(np.zeros(2 * R * U))
+        for cpt in np.unique(comp_os):
+            row = np.zeros(2 * R * U)
+            row[np.nonzero(comp_os == cpt)[0] * 2 * R + r] = 1.0
+            cons_w.append(row)
+            cons_g.append(np.zeros(ng))
+        row = np.zeros(2 * R * U)
+        row[np.arange(U) * 2 * R + R + r] = 1.0
+        cons_w.append(row)
+        cons_g.append(np.zeros(ng))
+        # the tangent space of the unit-RMS spheres of ψ_r and τ_r (`_normalise`): ψ_r·δψ_r = 0, τ_r·δτ_r = 0
+        row = np.zeros(ng)
+        row[np.arange(A) * R + r] = psi[r]
+        cons_g.append(row)
+        cons_w.append(np.zeros(2 * R * U))
+        row = np.zeros(ng)
+        row[ng_p + r * T + np.arange(T)] = tm[r]
+        cons_g.append(row)
+        cons_w.append(np.zeros(2 * R * U))
+    Aw, Ag = np.array(cons_w).T, np.array(cons_g).T                           # [2RU, c], [ng, c]
+    Vw, Vg = solve(Aw, Ag)
+    AV = Aw.T @ Vw + Ag.T @ Vg
+    lam = np.linalg.lstsq(AV, Aw.T @ xw + Ag.T @ xg, rcond=None)[0]
+    xw, xg = (xw - Vw @ lam)[:, 0], (xg - Vg @ lam)[:, 0]
+    dw = xw.reshape(U, 2 * R)
+    # ψ_r and τ_r live on the unit-RMS sphere (`_normalise`): the step is Newton's in its tangent space (the
+    # constraints above), and each trial point is normalised back before it is evaluated. Normalising after a free
+    # step instead cost 5,372 units on IX rank 3 when the step had grown ψ's scale; projecting the free step onto
+    # the tangent space after the solve left an ascent direction
+    d_psi = xg[:ng_p].reshape(A, R).T.copy()
+    d_t = xg[ng_p:].reshape(R, T).copy()
+    delta = {"ix_psi": d_psi, "ix_t": d_t, "ix_os": dw[:, :R].T.copy(), "ix_ov": dw[:, R:].T.copy()}
+    slope = float(gw @ xw + g_psi.T.ravel() @ d_psi.ravel() + g_t.ravel() @ d_t.ravel())
+
+    def retract():
+        _normalise(m, "ix_psi")
+        _normalise(m, "ix_t")
+
+    step = _line_search(m, ("ix_psi", "ix_t", "ix_os", "ix_ov"), delta, slope, retract)
+    # ω's own system (conditional on ψ, τ and the base) for its strengths (`ix_strengths`)
+    At = Aw[:, np.abs(Aw).sum(0) > 0]
+    Vt = fa.solve(At)
+    m._ix_omega = (fa, At, Vt, At.T @ Vt, U, R)
+    if log:
+        log(f"    ix joint step {step:g}, predicted {-0.5 * slope:.4g}")
+    return f_start - float(m.objective()) * scale
 
 def _normalise(m, factor: str) -> None:
     """ψ_r and τ_r rescaled to unit root mean square, ω_r (os and ov) taking the scale: the likelihood is invariant to

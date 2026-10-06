@@ -32,7 +32,6 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 import torch
 from scipy import optimize, special
 
@@ -41,7 +40,6 @@ from . import config, control, gateway, store, structures
 AGE_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]  # 18 bands; last is 80+
 N_BANDS = len(AGE_EDGES)
 TAU_BOUNDS = (1e-8, 1e8)
-MAX_TAU_STEP = np.log(10.0)  # Fellner–Schall updates are damped to ×10 per outer iteration
 IX_SHARE = 1e-3                                # a leaf carries the interaction when it holds this share of the block's events
 IX = ("ix_psi", "ix_os", "ix_ov", "ix_t")     # the interaction's parameters: ψ[R,E], ω = ix_os + ix_ov [R,U], τ [R,T]
 HS = ("th_grp", "th_cat")    # the tree levels a horseshoe prior scales node by node (ARCHITECTURE §4.3)
@@ -444,7 +442,6 @@ class Monolith:
         self.n_cells = float(nE * np.count_nonzero(data.N > 0))
         self.phi: float = float("inf")
         self.forcing = 0.5               # the largest relative residual CG stops at (Eisenstat–Walker cap)
-        self.cg_iterations = 0           # conjugate-gradient iterations so far (the cost of the mean fit)
         self.newton_log: list[tuple] = []   # per Newton step: objective, gradient norm, CG iterations, step length, decrease
         self.supply: np.ndarray | None = None   # [U, T] facility-supply multiplier of the expectation (facility.attach_supply)
         self.history: list[dict] = []
@@ -578,15 +575,6 @@ class Monolith:
         pt = self._place_time(x)
         return (self._leaf_place(x)[self.ixl][:, :, None] * torch.expm1(self._I(x)) * pt[self.grp[self.ixl]]).sum()
 
-    def _ix_fisher(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """The Gauss–Newton diagonal of each interaction parameter: Σ μ (∂η/∂parameter)² over the cells it touches."""
-        with torch.no_grad():
-            S = self._cells(x)
-            psi, om, tm = x["ix_psi"], self._om(x), x["ix_t"]
-            d_om = torch.einsum("eut,re,rt->ru", S, psi ** 2, tm ** 2)
-            return {"ix_psi": torch.einsum("eut,ru,rt->re", S, om ** 2, tm ** 2), "ix_os": d_om, "ix_ov": d_om,
-                    "ix_t": torch.einsum("eut,re,ru->rt", S, psi ** 2, om ** 2)}
-
     def _init_interaction(self, ridge: float = 1.0, sweeps: int = 12) -> None:
         """Starting values of the interaction from the base fit's residual cube (a zero start is a saddle).
         Each component is a rank-one fit of (Y3 − S) by weighted least squares with weights S (the Poisson
@@ -696,19 +684,6 @@ class Monolith:
         total = (per_group[:, :, None] * self._place_time(x, spatial)).sum()
         return total + self._ix_correction(x) if self.ix_on and spatial else total
 
-    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        """A scalar whose gradient in each effect is that effect's Fisher diagonal: for Poisson
-        counts Λ = Σ μ (∂Λ/∂effect = Σ μ over the cells the effect touches)."""
-        return self.total(x)
-
-    def _fisher_diagonals(self, x: dict[str, torch.Tensor], names: list[str]) -> list[torch.Tensor]:
-        """The Fisher diagonal of each named effect: the gradient of the expected total for the linear effects, the
-        Gauss–Newton sums of `_ix_fisher` for the interaction's factors (η is not linear in them)."""
-        grads = list(torch.autograd.grad(self._fisher_mass(x), [x[k] for k in names], allow_unused=True))
-        ix = self._ix_fisher(x) if self.ix_on else {}
-        return [ix[k] if k in ix else (g if g is not None else torch.zeros_like(x[k]))
-                for k, g in zip(names, grads, strict=True)]
-
     def penalty(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
         for name, c in self.components.items():
@@ -732,59 +707,50 @@ class Monolith:
     # ---- fitting ----------------------------------------------------------------
 
     def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm: str | dict | None = None,
-            accelerate: bool = False, move_tol: float = 0.0, mean_tol: float = 0.0) -> Monolith:
-        """The outer loop: the mean at fixed τ's, then the Fellner–Schall update of every τ, until no τ moves
-        by more than ``tol`` (a log-ratio). ``warm`` ("auto", or a stored fit's key) starts from a related
-        fit (`warm_start`); ``accelerate`` mixes the last iterates of log τ by Anderson acceleration (`_Anderson`)
-        and ``move_tol`` also stops when two successive τ updates each moved the mean's MAP by less than that many
-        log-likelihood units (the refit's decrease of the penalised objective, ½ΔθᵀHΔθ: the total shift in
-        posterior standard deviations, squared and halved), however far the weakly identified τ's still wander
-        along their ridge. ``mean_tol`` ends each outer's Newton steps when one lowers the objective by less than
-        that many log-likelihood units (the parameters persist across outers, so the unfinished tail is carried
-        on; the last mean fit, after the loop, runs to the full tolerance). None of these changes what a
-        converged fit is (the fixed point of the same update); they change how many outers, and how much work
-        in each, reach it."""
+            mean_tol: float = 0.0, **_retired) -> Monolith:
+        """The outer loop: the mean at fixed strengths (`_mean`), then the strengths' update (`_update_taus`), until no
+        strength moves by more than ``tol`` (a log-ratio). ``warm`` ("auto", or a stored fit's key) starts from a
+        related fit (`warm_start`). ``mean_tol`` floors the outers' inner tolerance (log-likelihood units of predicted
+        decrease; at least 1,000 there, below), and the mean after the loop converges fully. v0's ``accelerate`` and
+        ``move_tol`` are retired with it (2026-10-06) and ignored."""
         start = time.time()
-        self._laml_prev = self.laml = None
+        self._laml_prev = self.laml = self._tau_radius = self._tau_sign = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         changes = [0.0] if self.warm_info else [np.inf]
         if self.rank and not self.ix_on:
             # the base model first (a zero interaction is a saddle), then the interaction from its residuals (ADR-0021)
-            self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
+            self._loop(outer, inner, tol, log, changes, mean_tol, start)
             self._enable_interaction()
             self._init_interaction()
             self._laml_prev = self._ix_omega = None          # the LAML changes with the model: no step is compared across
             changes = [np.inf]
             log(f"interaction rank {self.rank} started from the base fit's residuals; {time.time() - start:.0f}s")
-        self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
+        self._loop(outer, inner, tol, log, changes, mean_tol, start)
         self._mean(inner)
         self.phi = self._dispersion()
         log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
         return self
 
-    def _loop(self, outer: int, inner: int, tol: float, log, changes: list[float], accel, move_tol: float,
-              mean_tol: float, start: float) -> None:
-        """The outer iterations of `fit`: the mean at fixed τ's, then the Fellner–Schall update of every learned τ."""
-        quiet = 0
+    def _loop(self, outer: int, inner: int, tol: float, log, changes: list[float], mean_tol: float, start: float) -> None:
+        """The outer iterations of `fit`: the mean at fixed strengths, then the strengths' update."""
         self.converged, self.stop_reason = False, f"outer cap {outer}"
         for it in range(outer):
             # the mean need not be precise while the τ's still move: a few Newton steps until they settle
             t0 = time.time()
             # the first outer's strengths step is clipped far from the optimum anyway: its mean needs few steps (4 against
             # 10 saved 12 s on IX cold, 2026-10-06)
-            # v1's outers stop their Newton steps below 1,000 log-likelihood units of predicted decrease, so most end
+            # the outers stop their Newton steps below 1,000 log-likelihood units of predicted decrease, so most end
             # on one full step and the strengths read its factor, one step back (IX 67 → 59 s, XV 54 → 50 s, held-out
             # unchanged; IX's s_all ends 7 % off along the flat BYM ridge; 2026-10-06); the mean after the loop
             # converges fully
             steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10),
-                               loglik_tol=max(mean_tol, 1000.0) if self._uses_v1() else mean_tol)
+                               loglik_tol=max(mean_tol, 1000.0))
             t1 = time.time()
-            changes = self._update_taus(accel)
+            changes = self._update_taus()
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
-            quiet = quiet + 1 if move < move_tol and self.refit_converged else 0
             self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale, "newton": steps,
-                                 "change": max(changes), "move": move, "cg": self.cg_iterations, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
+                                 "change": max(changes), "move": move, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
             taus = " ".join(f"{k}={c.tau:.3g}" for k, c in self.components.items())
             laml = f", LAML {self.laml:.1f} (gain {self.laml_gain:.2g})" if getattr(self, "laml", None) is not None else ""
@@ -792,9 +758,6 @@ class Monolith:
                 f"{time.time() - start:.0f}s | {taus}")
             if max(changes) < tol:
                 self.converged, self.stop_reason = True, f"max τ change {max(changes):.3f} < {tol}"
-                break
-            if move_tol and quiet >= 2:
-                self.converged, self.stop_reason = True, f"the MAP moved {move:.2g} < {move_tol} log-likelihood units twice"
                 break
 
     def warm_start(self, source: str | dict = "auto") -> dict | None:
@@ -969,214 +932,66 @@ class Monolith:
             self.params["v_grp"].copy_(torch.as_tensor(gmean - place[None, :]))
             self.params["v_all"].copy_(torch.as_tensor(place)[None, :])
 
-    def _uses_v1(self) -> bool:
-        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every model: the counts (IX cold 59 s against
-        v0's 501 s calm), the low-rank interaction (its factors by `solver.ix_sweep`), and the mark and share models (their
-        cells' Fisher weights as leaf-specific features). ``PEGASUS_SOLVER=v0`` restores the v0 Newton–CG until its
-        removal."""
-        return os.environ.get("PEGASUS_SOLVER", "v1") == "v1" and isinstance(self, Monolith)
-
     def _mean(self, iterations: int, loglik_tol: float = 0.0) -> int:
-        """The mean's MAP at fixed strengths, by the v1 exact Newton where it applies, else the v0 Newton–CG."""
-        if self._uses_v1():
-            from . import solver
-            nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
-            tol = max(loglik_tol, 1e-3)
-            steps = solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
-            if self.ix_on:
-                # the interaction's factors by their own exact Newton steps, alternating with the base's; the
-                # alternation's tail is slow (IX rank 3: 6,618 units in the first sweep, then 0.5, 0.2, 0.15 …),
-                # and a sweep below half a log-likelihood unit ends it
-                for _ in range(iterations):
-                    gain = solver.ix_sweep(self)
-                    steps += solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
-                    if gain < max(0.5, min(tol, 1e3)):
-                        break
-            return steps
-        return self._fit_mean(iterations, loglik_tol=loglik_tol)
-
-    def _fit_mean(self, iterations: int, tolerance: float = 1e-9, loglik_tol: float = 0.0) -> int:
-        """MAP of the mean given the τ's: truncated Newton–CG (OQ-6). Each step solves H d = −g by
-        conjugate gradients on exact Hessian–vector products (double backward through the
-        factorised total), preconditioned by the diagonal curvature, to a forcing tolerance
-        min(0.5, √‖g‖)·‖g‖ (Eisenstat–Walker); then an Armijo backtracking line search. Stops when
-        the objective's decrease falls below ``tolerance`` (relative) or ``loglik_tol`` (log-likelihood units; one
-        unit is a shift of about a posterior standard deviation in total). Returns the Newton steps taken.
-
-        It replaced L-BFGS, which used every iteration it was given and, from a start 14 units
-        above the optimum (scaled objective, chapter IX), diverged to NaN; Newton–CG reached a gap
-        of 1e-3 in one step (3 s) and 5e-6 in 40 s (evaluation 2026-10-04)."""
-        params = list(self.params.values())
-        steps = 0
-        first_f = last_f = None      # the objective before the first step and after the last accepted one
-        self.refit_converged = False  # True when a step ended the loop, False when the budget did
-        for _ in range(iterations):
-            steps += 1
-            loss = self.objective()
-            grads = torch.autograd.grad(loss, params, create_graph=True)
-            g = torch.cat([q.reshape(-1) for q in grads]).detach()
-            gnorm = float(g.norm())
-            if gnorm < 1e-14:
-                self.refit_converged = True
-                break
-            solve = self._precondition_operator()
-            cg_before = self.cg_iterations
-
-            def hv(v: torch.Tensor, grads=grads) -> torch.Tensor:
-                parts, i = [], 0
-                for q in params:
-                    parts.append(v[i:i + q.numel()].view_as(q))
-                    i += q.numel()
-                out = torch.autograd.grad(grads, params, grad_outputs=parts, retain_graph=True)
-                return torch.cat([o.reshape(-1) for o in out]).detach()
-
-            x = torch.zeros_like(g)
-            r = -g
-            z = solve(r)
-            d = z.clone()
-            rz = float(r @ z)
-            forcing = min(self.forcing, gnorm ** 0.5) * gnorm
-            for _ in range(50):
-                self.cg_iterations += 1
-                Hd = hv(d)
-                dHd = float(d @ Hd)
-                if dHd <= 0:          # negative curvature: stop at the current iterate (or descend)
-                    if not x.any():
-                        x = solve(-g)
+        """The mean's MAP at fixed strengths by exact Newton on the assembled Hessian (`solver.fit_mean`, ARCHITECTURE
+        §5.3), for every model: counts (IX cold 59 s against the retired v0 Newton–CG's 501 s), the low-rank
+        interaction (its factors by `solver.ix_sweep`), the mark and share models (their cells' Fisher weights)."""
+        from . import solver
+        nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
+        tol = max(loglik_tol, 1e-3)
+        steps = solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
+        if self.ix_on:
+            # the interaction's factors by a joint (modified exact) Newton step, alternating with the base's Newton;
+            # the alternation between the two blocks converges linearly (IX rank 3: 53,322, 457, 36, 6, 3.1, 2.0,
+            # 1.5 … units), and an alternation below two log-likelihood units ends it
+            for _ in range(iterations):
+                gain = solver.ix_sweep(self)
+                steps += solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
+                if gain < max(2.0, min(tol, 1e3)):
                     break
-                alpha = rz / dHd
-                x = x + alpha * d
-                r = r - alpha * Hd
-                if float(r.norm()) < forcing:
-                    break
-                z = solve(r)
-                rz_new = float(r @ z)
-                d = z + (rz_new / rz) * d
-                rz = rz_new
-            f0, slope, step = float(loss), float(g @ x), 1.0
-            first_f = f0 if first_f is None else first_f
-            with torch.no_grad():
-                base = [q.detach().clone() for q in params]
-                for _ in range(30):
-                    i = 0
-                    for q, b0 in zip(params, base, strict=True):
-                        q.copy_(b0 + step * x[i:i + q.numel()].view_as(q))
-                        i += q.numel()
-                    f1 = float(self.objective())
-                    if np.isfinite(f1) and f1 <= f0 + 1e-4 * step * slope:
-                        break
-                    step /= 2
-                else:
-                    for q, b0 in zip(params, base, strict=True):
-                        q.copy_(b0)
-                    self.refit_converged = True
-                    break
-            last_f = f1
-            self.newton_log.append((f0, gnorm, self.cg_iterations - cg_before, step, f0 - f1))
-            if f0 - f1 < tolerance * max(1.0, abs(f0)) or (f0 - f1) * self._objective_norm() < loglik_tol:
-                self.refit_converged = True
-                break
-        # how far the mean moved the objective since the τ's last changed: ½ΔθᵀHΔθ per event, whose square root
-        # (×√2) is the RMS change of the fitted log-rates over the events
-        self.refit_decrement = 0.0 if last_f is None else first_f - last_f
         return steps
-
-    def _precondition_operator(self):
-        """r ↦ M⁻¹ r for the Newton–CG solves: the diagonal of the curvature, the Fisher diagonal plus τ·diag(Q)
-        per parameter, in the units of the scaled objective. A block-Jacobi version (sparse LU of diag(Fisher) + τQ
-        per effect and batch row, as in `laplace.Posterior`) was measured on SIM.DO XVI and was no better:
-        the ill-conditioning is the coupling between effects that explain the same cells, not the structure
-        inside one (evaluation 2026-10-05, fit throughput)."""
-        x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
-        names = ["b0", *self.components]
-        grads = self._fisher_diagonals(x, names)
-        norm = self._objective_norm()
-        parts = []
-        for name, d in zip(names, grads, strict=True):
-            curv = d.detach().reshape(self.params[name].shape).abs()
-            if name in self.components:
-                c = self.components[name]
-                curv = curv + c.tau * torch.as_tensor(c.shape.Q.diagonal(), dtype=self.dtype,
-                                                      device=self.device)[None, :].expand_as(curv)
-            parts.append((curv / norm + 1e-12).reshape(-1))
-        curvature = torch.cat(parts)
-        return lambda r: r / curvature
 
     def _objective_norm(self) -> float:
         """The divisor of the objective (events for counts)."""
         return self.scale
 
-    def _update_taus(self, accel: _Anderson | None = None) -> list[float]:
-        """Fellner–Schall: τ ← (rank − τ·tr(H⁻¹Q)) / (xᵀQx), H ≈ D + τQ per batch row. With ``accel`` the next
-        log τ is the Anderson mix of the last iterates' updates, not the update itself; the reported change is
-        always the update's (the fixed-point residual), so convergence means the same thing."""
-        x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
-        v1_scoring = self._uses_v1() and os.environ.get("PEGASUS_STRENGTHS", "scoring") == "scoring"
-        grads = None if v1_scoring and self.prior != "horseshoe" else self._fisher_diagonals(x, list(self.components))
+    def _update_taus(self) -> list[float]:
+        """The strengths' update (ARCHITECTURE §5.4): with the horseshoe, its node weights from the tree levels' exact
+        Laplace variances (`_update_horseshoe`); the safeguarded Newton step on log τ of every learned strength
+        (`_score_taus`); with the interaction, its ω strengths from ω's own system (`solver.ix_strengths`). Returns
+        the |log τ| changes, one per component."""
+        from . import solver
+        nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
+        self._solver_v1 = nw
         if self.prior == "horseshoe":
-            self._update_horseshoe(x, dict(zip(self.components, grads, strict=True)))
-        # v1: tr(ΣQ_j) from the true constrained Laplace covariance (solver.StructuredNewton.traces), not the
-        # per-effect Fisher diagonal
-        exact = None
-        if self._uses_v1():
-            from . import solver
-            nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
-            self._solver_v1 = nw
-            if v1_scoring:
-                changes = self._score_taus(nw)
-                if self.ix_on:
-                    from . import solver as _s
-                    if getattr(self, "_ix_omega", None) is None:
-                        _s.ix_sweep(self)
-                    ix = dict(zip(("ix_os", "ix_ov"), _s.ix_strengths(self), strict=True))
-                    changes = [ix.get(n, ch) for n, ch in zip(self.components, changes, strict=True)]
-                return changes
-            exact = nw.traces(probes=int(os.environ.get("PEGASUS_TRACE_PROBES", "32")))
-        changes, proposals = [], {}
-        for (name, c), d in zip(self.components.items(), grads, strict=True):
-            if c.rank <= 0 or c.fixed:
-                changes.append(0.0)  # the constraints leave this effect nothing (a single group or leaf)
-                continue
-            D = d.detach().reshape(c.batch, -1).cpu().numpy()  # the Fisher diagonal (see _fisher_mass)
-            v = x[name].detach().reshape(c.batch, -1).cpu().numpy()
-            Q = c.shape.Q
-            quad = float(sum(v[b] @ (Q @ v[b]) for b in range(c.batch)))
-            if exact is not None and name in exact:
-                trace = exact[name]
-            else:
-                trace = c.free * sum(_trace_inv_times(D[b], c.tau, Q) for b in range(c.batch))
-            new = (c.rank - c.tau * trace) / max(quad, 1e-12)
-            new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
-            new = float(np.clip(new, *TAU_BOUNDS))
-            # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability
-            changes.append(0.0 if min(new, c.tau) > self.shrunk else abs(np.log(new / c.tau)))
-            self.trace_log.append((name, c.rank, quad, trace, c.tau, new))
-            proposals[name] = new
-        if accel is not None:
-            active = [k for k, new in proposals.items() if min(new, self.components[k].tau) <= self.shrunk]
-            if active:
-                u = np.log([self.components[k].tau for k in active])
-                g = np.log([proposals[k] for k in active])
-                for k, value in zip(active, accel.step(u, g), strict=True):
-                    proposals[k] = float(np.clip(np.exp(value), *TAU_BOUNDS))
-        for name, new in proposals.items():
-            self.components[name].tau = new
+            self._update_horseshoe(nw)
+        changes = self._score_taus(nw)
+        if self.ix_on:
+            if getattr(self, "_ix_omega", None) is None:
+                solver.ix_sweep(self)
+            ix = dict(zip(("ix_os", "ix_ov"), solver.ix_strengths(self), strict=True))
+            changes = [ix.get(n, ch) for n, ch in zip(self.components, changes, strict=True)]
         return changes
 
-    def _update_horseshoe(self, x: dict[str, torch.Tensor], fisher: dict[str, torch.Tensor]) -> None:
+    def _update_horseshoe(self, nw) -> None:
         """The horseshoe on the tree levels (ARCHITECTURE §4.3): θ_n ~ N(0, σ²λ_n²), λ_n ~ C⁺(0, 1), as the
         reweighted Gaussian penalty τ·Σ w_n θ_n² with w_n = E[1/λ_n²]. Through the auxiliary form λ² | ν ~ IG(½, 1/ν),
         ν ~ IG(½, 1) (Makalic & Schmidt 2016) the mean-field fixed point is closed: with c = τ·E[θ_n²]/2,
-        w = 1/(c + 1/(1 + w)), so w = (√(1 + 4/c) − 1)/2. E[θ²] = θ̂² + 1/(D + τw), the Laplace variance. A node
-        near zero gets w ≈ c^(−½), a large precision, and shrinks to its parent; a node far from it gets w ≈ 1/c and
-        is left nearly free, which is what one variance per level cannot do: shrink the noise and keep the signal.
-        σ² = 1/τ stays the level's global scale, learned by Fellner–Schall on the weighted precision."""
+        w = 1/(c + 1/(1 + w)), so w = (√(1 + 4/c) − 1)/2. E[θ²] = θ̂² + Var θ_n, the node's Laplace variance, read
+        exactly from the globals' covariance block of the v1 factor (`solver.StructuredNewton.traces`; v0 used
+        1/(Fisher diagonal + τw)). A node near zero gets w ≈ c^(−½), a large precision, and shrinks to its parent; a
+        node far from it gets w ≈ 1/c and is left nearly free, which is what one variance per level cannot do: shrink
+        the noise and keep the signal. σ² = 1/τ stays the level's global scale, learned with the other strengths."""
+        if getattr(nw, "_last", None) is None:
+            nw.refactor()
+        nw.traces(probes=0)
+        var = np.diag(nw._Sx)
+        x = self.effects()
         for name in HS:
             c = self.components[name]
             v = x[name].detach().reshape(-1).cpu().numpy()
-            D = fisher[name].detach().reshape(-1).abs().cpu().numpy()   # log-likelihood units, as in Fellner–Schall
-            w = c.shape.Q.diagonal()
-            e2 = v * v + 1.0 / (D + c.tau * w)
+            o = nw.goff[name]
+            e2 = v * v + var[o:o + v.size]
             cc = np.maximum(0.5 * c.tau * e2, 1e-12)
             self._set_weights(name, (np.sqrt(1.0 + 4.0 / cc) - 1.0) / 2.0)
 
@@ -1266,9 +1081,31 @@ class Monolith:
         # no jump to a boundary: from the first outer's τ = 1, Newton's step overran the clip for s_all and v_all on IX,
         # and sent to 10·SHRUNK they stayed there (the LAML is flat out there): held-out NB log-likelihood −1.63793
         # against −1.63716 (2026-10-06)
-        step = np.clip(step, -np.log(100.0), np.log(100.0))
+        # each strength's own step radius, adapted as Rprop's (Riedmiller & Braun 1993): halved when its step reverses,
+        # ×1.2 while it keeps its direction, ×100 at most. Unguarded far from the mode, SIM VI's steps flipped between
+        # two states (s_grp 10 ↔ 1,000, v_cat 0.85 ↔ 85) for 28 outers (2026-10-06)
+        radius = getattr(self, "_tau_radius", None) or {}
+        last = getattr(self, "_tau_sign", None) or {}
+        lim = np.empty(len(names))
+        for i, n in enumerate(names):
+            r0 = radius.get(n, np.log(100.0))
+            sg = float(np.sign(step[i]))
+            if last.get(n, 0.0) * sg < 0:
+                r0 = r0 / 2
+            elif last.get(n, 0.0) * sg > 0:
+                r0 = min(r0 * 1.2, np.log(100.0))
+            lim[i] = max(r0, 1e-3)
+            radius[n], last[n] = lim[i], sg
+        self._tau_radius, self._tau_sign = radius, last
+        step = np.clip(step, -lim, lim)
         gone = (tau > self.shrunk) & (step > 0)
         step = np.where(gone, 0.0, step)
+        if float(g @ step) <= 0.0 and float(np.abs(g).max()) > 0.0:
+            # clipping a non-diagonal Newton step component by component can leave a descent direction of the LAML (SIM
+            # VI's predicted gain came out −1,800, which read as convergence after one outer, 2026-10-06): the diagonal
+            # Newton step instead, an ascent direction since the floored diagonal is positive
+            step = np.clip(g / (dg * dg), -lim, lim)
+            step = np.where((tau > self.shrunk) & (step > 0), 0.0, step)
         # the step's own predicted gain in the marginal likelihood: along the BYM ridge (s against v) the likelihood
         # is flat and τ can wander without changing the fit, so convergence is read from the gain, not from Δρ
         self.laml_gain = float(0.5 * g @ step)
@@ -1598,10 +1435,6 @@ class MarkModel(Monolith):
         units): the v1 solver's weights (`solver.StructuredNewton._mark_factors`). Gaussian: w(η − ȳ) and w."""
         return self.w * (eta - self.y), self.w.clone()
 
-    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Gaussian: the Fisher diagonal of an effect is Σ w over the cells it touches."""
-        return (self.w * self.eta_nnz(x)).sum()
-
     def _objective_norm(self) -> float:
         return float(self.w.sum())
 
@@ -1613,7 +1446,7 @@ class MarkModel(Monolith):
     def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
             **_ignored) -> MarkModel:
         start = time.time()
-        self._laml_prev = self.laml = None
+        self._laml_prev = self.laml = self._tau_radius = self._tau_sign = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         for it in range(outer):
@@ -1721,7 +1554,7 @@ class _CellMark(MarkModel):
     def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
             **_ignored) -> _CellMark:
         start = time.time()
-        self._laml_prev = self.laml = None
+        self._laml_prev = self.laml = self._tau_radius = self._tau_sign = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         for it in range(outer):
@@ -1802,11 +1635,6 @@ class ShareModel(_CellMark):
         p = torch.sigmoid(eta)
         return self.w * (self.n_t * p - self.total_t), self.w * self.n_t * p * (1 - p)
 
-    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        eta = self.eta_nnz(x)
-        p = torch.sigmoid(eta).detach()
-        return ((self.w * self.n_t * p * (1 - p)).detach() * eta).sum()
-
     def _cell_mean(self) -> torch.Tensor:
         return torch.sigmoid(self.eta_nnz(self.effects()))
 
@@ -1857,10 +1685,6 @@ class CountModel(_CellMark):
     def cell_derivatives(self, eta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         mu = torch.exp(eta)
         return self.w * (self.n_t * mu - self.total_t), self.w * self.n_t * mu
-
-    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        eta = self.eta_nnz(x)
-        return ((self.w * self.n_t * torch.exp(eta)).detach() * eta).sum()
 
     def _cell_mean(self) -> torch.Tensor:
         return torch.exp(self.eta_nnz(self.effects()))
@@ -2047,38 +1871,6 @@ def heldout(model: Monolith, test: BlockData, interaction: bool = True) -> dict:
 # ---------------------------------------------------------------------- helpers
 
 
-class _Anderson:
-    """Anderson acceleration (depth ``m``) of the fixed-point iteration u ← g(u) on the vector of log τ.
-    With residuals f_k = g(u_k) − u_k it takes u_{k+1} = g_k − ΔG γ, γ = argmin ‖f_k − ΔF γ‖² + λ‖γ‖²
-    over the last differences of residuals and updates; a fixed point (f = 0) is left unchanged, so the
-    converged τ's are the plain iteration's. Safeguards: the step is limited to the plain damping
-    (×10 per component) and the history is dropped when the residual grows by more than half."""
-
-    def __init__(self, m: int = 4, ridge: float = 1e-8):
-        self.m, self.ridge = m, ridge
-        self.reset()
-
-    def reset(self) -> None:
-        self.F: list[np.ndarray] = []
-        self.G: list[np.ndarray] = []
-
-    def step(self, u: np.ndarray, g: np.ndarray) -> np.ndarray:
-        f = g - u
-        if len(self.F) and (len(f) != len(self.F[-1]) or np.linalg.norm(f) > 1.5 * np.linalg.norm(self.F[-1])):
-            self.reset()
-        self.F.append(f)
-        self.G.append(g)
-        self.F, self.G = self.F[-(self.m + 1):], self.G[-(self.m + 1):]
-        if len(self.F) < 2:
-            return g
-        dF = np.stack([b - a for a, b in zip(self.F[:-1], self.F[1:], strict=True)], axis=1)
-        dG = np.stack([b - a for a, b in zip(self.G[:-1], self.G[1:], strict=True)], axis=1)
-        scale = max(float(np.trace(dF.T @ dF)) / dF.shape[1], 1e-300)
-        gamma = np.linalg.solve(dF.T @ dF + self.ridge * scale * np.eye(dF.shape[1]), dF.T @ f)
-        nxt = g - dG @ gamma
-        return u + np.clip(nxt - u, -MAX_TAU_STEP, MAX_TAU_STEP)
-
-
 _FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split", "rank", "prior"}
 
 
@@ -2123,18 +1915,6 @@ def _torch_sparse(Q: sp.csr_matrix, dtype: torch.dtype, device: torch.device) ->
     idx = torch.as_tensor(np.vstack([coo.row, coo.col]), dtype=torch.int64)
     return torch.sparse_coo_tensor(idx, torch.as_tensor(coo.data, dtype=dtype), coo.shape,
                                    device=device).coalesce()
-
-
-def _trace_inv_times(D: np.ndarray, tau: float, Q: sp.csr_matrix, probes: int = 24) -> float:
-    """tr((diag(D) + τQ)⁻¹ Q): exact for small n, Hutchinson with a sparse LU otherwise."""
-    n = Q.shape[0]
-    H = (sp.diags(D) + tau * Q).tocsc() + sp.identity(n, format="csc") * 1e-9
-    if n <= 400:
-        return float(np.trace(np.linalg.solve(H.toarray(), Q.toarray())))
-    lu = spla.splu(H)
-    rng = np.random.default_rng(config.seed("hutchinson", n))
-    z = rng.choice([-1.0, 1.0], size=(n, probes))
-    return float(np.mean(np.sum(z * lu.solve(Q @ z), axis=0)))
 
 
 def _cached_icar(edges: np.ndarray, weights: np.ndarray, n: int) -> structures.Shape:

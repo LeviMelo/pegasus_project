@@ -31,11 +31,9 @@ def main(dataset: str, event: str, first: int, last: int, graph: str, blocks: li
             cls = monolith.model_class(source)
             model = cls(data, graphs.graph(data.places, graph), graph,
                                       device=os.environ.get("PEGASUS_DEVICE", "cpu"))
-            # warm start from the best related stored fit and a mean fit that stops at one log-likelihood unit per outer
-            # (evaluation 2026-10-05 fit throughput); PEGASUS_FIT_ACCEL=1 adds the Anderson mix and the MAP-movement stop
-            fast = os.environ.get("PEGASUS_FIT_ACCEL") == "1"
+            # warm start from the best related stored fit (``PEGASUS_FIT_COLD=1``: none); the outers' inner tolerance is
+            # the monolith's own (`Monolith._loop`)
             model.fit(outer=40, warm=None if os.environ.get("PEGASUS_FIT_COLD") else "auto", mean_tol=1.0,
-                      accelerate=fast, move_tol=0.5 if fast else 0.0,
                       log=lambda line, b=block: print(f"  {b} {line}", flush=True))
             model.save()
             print(f"BLOCK {block} {json.dumps(model.summary(), default=float)}", flush=True)
