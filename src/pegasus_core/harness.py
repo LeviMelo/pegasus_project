@@ -786,7 +786,7 @@ def grid_units(places: np.ndarray, edges: np.ndarray, kind: str) -> list[np.ndar
 
 def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarray, mu_g: np.ndarray,
                 edges: np.ndarray, rng: np.random.Generator, thetas: tuple[float, ...] = GRID_THETAS,
-                load: float = GRID_LOAD) -> list[Plant]:
+                load: float = GRID_LOAD, offset: int = 0) -> list[Plant]:
     """One world's plants of one kind and shape: disjoint loci, each kept a graph edge away from the others, θ cycled
     over ``thetas``, loci taken round-robin over five quantile bins of their expected events (so the sparsity axis is
     covered), while the planted excess in every period stays within ``load`` of the field's expected events in that
@@ -809,7 +809,7 @@ def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarra
         rows = units[queue.pop()]
         if taken[rows].any():
             continue
-        theta = float(thetas[len(plants) % len(thetas)])
+        theta = float(thetas[(offset + len(plants)) % len(thetas)])     # ``offset``: the world's index, so one-plant worlds cycle θ too
         group = None
         if shape == "spike":
             dur = int(rng.choice([1, 3])) if T >= 3 else 1
@@ -939,7 +939,7 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
         units = [] if kind == "null" else grid_units(places, edges, kind)
         for w in range(n):
             rng = np.random.default_rng(config.seed("grid", f.id, kind, shape, w))
-            plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas)
+            plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas, offset=w)
             t0 = time.time()
             sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng))}   # never the unseeing fit
             sess._local.memo = {}                                           # each tier once per world
@@ -950,9 +950,11 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                 c = p.cells(U, T)
                 base = mu_ut if p.group is None else mu_g[..., p.group]
                 obs, exp_ = s1.y[c].sum(), s1.mu[c].sum()
+                planted = mu_ut + base * (p.multiplier(T)[None, :] - 1.0)      # the field's mean with the plant, all groups
                 per_plant.append({"theta": p.theta, "periods": p.t1 - p.t0, "places": len(p.places), "group": p.group,
                                   "expected": float(base[c].sum()),
-                                  "true_log_ratio": round(float(np.log((base * p.multiplier(T)[None, :])[c].sum() / base[c].sum())), 4),
+                                  # on the field's total, like the seen ratio (a group plant's own ratio is θ itself)
+                                  "true_log_ratio": round(float(np.log(planted[c].sum() / mu_ut[c].sum())), 4),
                                   "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
             runs = [(x, t, tr) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
                     for tr in (tiers or {}).get(x, (None,))]
