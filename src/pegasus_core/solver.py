@@ -690,7 +690,7 @@ class StructuredNewton:
         self.timing["traces"] = time.time()
         return out
 
-    def scoring(self, probes: int = 16, chunk: int = 4, seed: int = 1):
+    def scoring(self, probes: int = 16, chunk: int = 8, seed: int = 1):
         """Everything a Newton step on ρ = log τ needs, at the current mean: the exact traces (as `traces`), the
         quadratic forms xᵀQ_jx, T_ij = tr(ΣQ_iΣQ_j) by probes z solved exactly (tr(ΣQ_iΣQ_j) = E[(Q_iΣz)ᵀ(ΣQ_jz)],
         in chunks so the leaf-place right-hand sides stay small), and R_ij = xᵀQ_iΣQ_jx from J exact solves."""

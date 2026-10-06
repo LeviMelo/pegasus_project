@@ -974,7 +974,8 @@ class Monolith:
         log τ is the Anderson mix of the last iterates' updates, not the update itself; the reported change is
         always the update's (the fixed-point residual), so convergence means the same thing."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
-        grads = self._fisher_diagonals(x, list(self.components))
+        v1_scoring = self._uses_v1() and os.environ.get("PEGASUS_STRENGTHS", "scoring") == "scoring"
+        grads = None if v1_scoring and self.prior != "horseshoe" else self._fisher_diagonals(x, list(self.components))
         if self.prior == "horseshoe":
             self._update_horseshoe(x, dict(zip(self.components, grads, strict=True)))
         # v1: tr(ΣQ_j) from the true constrained Laplace covariance (solver.StructuredNewton.traces), not the
@@ -984,7 +985,7 @@ class Monolith:
             from . import solver
             nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
             self._solver_v1 = nw
-            if os.environ.get("PEGASUS_STRENGTHS", "scoring") == "scoring":
+            if v1_scoring:
                 return self._score_taus(nw)
             exact = nw.traces(probes=int(os.environ.get("PEGASUS_TRACE_PROBES", "32")))
         changes, proposals = [], {}
