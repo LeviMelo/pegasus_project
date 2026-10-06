@@ -165,48 +165,120 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
 
 
 def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, min_years: int = 2,
-                 replicates: int | None = None, rate_ratio: float | None = None) -> list[Finding]:
-    """A level shift in a place's trailing years: for each window [t, T−1] (at least ``min_years``
-    long), the exact upper tail of its total under the predictive, a sum of NB cells
-    moment-matched to NB(M, M²/Σ μ²/φ); the place's p is the smallest window p times the number
-    of windows (Bonferroni: exact for discrete counts, conservative across nested windows, no
-    simulation and no floor). BH across places. ``replicates`` is accepted and unused.
+                 replicates: int | None = None, rate_ratio: float | None = None, min_past: int = 3) -> list[Finding]:
+    """A level shift in a place's trailing years: for each window [t, T−1] (at least ``min_years`` long, after at
+    least ``min_past`` years), the upper tail of its total; the place's p is the smallest window p times the number
+    of windows (Bonferroni: conservative across nested windows, no simulation and no floor). BH across places.
+    ``replicates`` is accepted and unused.
+
+    The window is read against the place's own course, estimated from the years before it and extrapolated
+    (`_past_course`; ADR-0027). This is the baseline of outbreak detectors since Farrington (1996): a persistent place
+    deviation or trend is the baseline, and the step under test never enters it. The window total's predictive is NB,
+    moment-matched to its cells' dispersion plus the extrapolation's uncertainty. Read against B2, which refits each
+    place's trend over the whole series, a place step ×3 was found 11 % of the time. Against B1 as it is, the same step
+    was found 95 % of the time, but SIH's persistent place courses produced steps in every space-scrambled world
+    (evaluation 2026-10-06, minimum effects).
 
     Two simulated nulls were tried first and failed on sparse fields (survey of IX, 2026-10-04):
     a Gumbel fitted by moments to replicate maxima, most of them zero, flagged 25 small places for
     rheumatic heart disease; fitting the Gumbel to the positive maxima only still gave p = 4e-9 to
     2 deaths against 0.03 expected, where the exact tail is near 1e-3."""
-    family = f"change_point|{s.tier}|{s.field.block}"
+    family = f"change_point|{s.tier}|{s.field.block}|past"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": "change_point", "field": s.field.id,
-                                                               "tier": s.tier, "null": "exact NB, Bonferroni"}))
+                                                               "tier": s.tier, "baseline": "past course",
+                                                               "null": "NB predictive, Bonferroni"}))
     rr = RATE_RATIO if rate_ratio is None else rate_ratio
     U, T = s.y.shape
-    starts = T - min_years + 1
-    Y = np.cumsum(s.y[:, ::-1], 1)[:, ::-1][:, :starts]
-    M = rr * np.cumsum(s.mu[:, ::-1], 1)[:, ::-1][:, :starts]   # H0 boundary: θ0 × expected
-    extra_cells = np.where(np.isfinite(s.phi), (rr * s.mu) ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
-    E = np.cumsum(extra_cells[:, ::-1], 1)[:, ::-1][:, :starts]
-    p_win = np.ones((U, starts))
+    starts = np.arange(min_past, T - min_years + 1)
+    if len(starts) == 0:
+        return []
+    Yall = np.cumsum(s.y[:, ::-1], 1)[:, ::-1]
+    Mall = np.cumsum(s.mu[:, ::-1], 1)[:, ::-1]
+    cells = np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
+    Eall = np.cumsum(cells[:, ::-1], 1)[:, ::-1]
+    Y, M, E = Yall[:, starts], rr * Mall[:, starts], rr ** 2 * Eall[:, starts]
+    mult, var_log = _past_course(s, starts)                 # [U, starts]: the window's multiplier and its log variance
+    M, E = M * mult, E * mult ** 2
+    V = M + E + M ** 2 * np.expm1(var_log)                  # the cells' NB variance + the extrapolated course's
+    p_win = np.ones(Y.shape)
     up = (Y > M) & (M > 0)
-    pois = up & (E <= 0)
+    pois = up & (V <= M * (1 + 1e-12))
     p_win[pois] = stats.poisson.sf(Y[pois] - 1, M[pois])
-    nb = up & (E > 0)
-    n = M[nb] ** 2 / E[nb]
+    nb = up & ~pois
+    n = M[nb] ** 2 / (V[nb] - M[nb])
     p_win[nb] = stats.nbinom.sf(Y[nb] - 1, n, n / (n + M[nb]))
-    start = p_win.argmin(1)
-    p = np.minimum(1.0, p_win.min(1) * starts)
+    k = p_win.argmin(1)
+    p = np.minimum(1.0, p_win.min(1) * len(starts))
     ok = ((s.flags & surprise.DENOMINATOR) == 0).all(1)
     p = np.where(ok, p, 1.0)
     hits = np.nonzero(control.bh(p, q))[0]
     out = []
     for u in hits:
-        t = int(start[u])
+        t = int(starts[k[u]])
+        base = M[u, k[u]] / rr
         out.append(Finding("change_point", s.field.id, s.tier, {"places": [int(s.places[u])],
                                                                 "years": [int(s.years[t]), int(s.years[-1])]},
-                           _rr(Y[u, t], M[u, t] / rr), float(p[u]),
-                           {"observed": float(Y[u, t]), "expected": float(M[u, t] / rr), "windows": starts}))
+                           _rr(Y[u, k[u]], base), float(p[u]),
+                           {"observed": float(Y[u, k[u]]), "expected": float(base), "windows": len(starts),
+                            "baseline": "past course"}))
     ledger.complete(test, float(p.min()), None, {"places": int(ok.sum()), "hits": len(out)})
     return out
+
+
+def _past_course(s: surprise.Surprise, starts: np.ndarray, iterations: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    """Each place's course before each window start t, extrapolated over the window [t, T): a Poisson regression of
+    the counts on the tier's mean (offset) with a level and a slope, from the years before t only (Farrington 1996's
+    baseline, with its trend). Priors: level ~ N(0, σ_a²) and slope ~ N(0, σ_b²), both from the field's between-place
+    spread (method of moments on the places with at least 30 expected events over the series), so a sparse place
+    stays near the tier and a large one follows its own course. Returns the window total's multiplier against the
+    tier and the variance of its log (delta method on the posterior's Laplace covariance)."""
+    U, T = s.y.shape
+    yrs = np.arange(T, dtype=float)
+    y, mu = s.y, np.maximum(s.mu, 1e-300)
+    phi = np.where(np.isfinite(s.phi), s.phi, 1e12) if np.ndim(s.phi) else np.full((U, T), s.phi if np.isfinite(s.phi) else 1e12)
+    tot_y, tot_m = y.sum(1), mu.sum(1)
+    big = tot_m >= 30
+    # the between-place variance of the multiplier: the totals' excess over their NB noise (Σμ + Σμ²/φ)
+    noise = mu.sum(1) + (mu ** 2 / phi).sum(1)
+    var_a = float(np.mean(((tot_y[big] - tot_m[big]) ** 2 - noise[big]) / tot_m[big] ** 2)) if big.any() else 0.0
+    var_a = max(var_a, 1e-4)
+    if big.any():                                        # slopes of the big places' log ratio: their spread less their noise
+        c = yrs - yrs.mean()
+        r = np.log((y[big] + 0.5) / (mu[big] + 0.5))
+        b = (r * c).sum(1) / (c ** 2).sum()
+        se2 = ((1.0 / np.maximum(mu[big], 0.5) + 1.0 / phi[big]) * c ** 2).sum(1) / (c ** 2).sum() ** 2
+        var_b = max(float(np.var(b) - np.mean(se2)), 1e-5)
+    else:
+        var_b = 1e-5
+    mult = np.ones((U, len(starts)))
+    var_log = np.zeros((U, len(starts)))
+    for k, t in enumerate(starts):
+        past = np.arange(t)
+        x = yrs[past] - (t - 1)                           # the slope pivots on the last past year
+        a, b = np.zeros(U), np.zeros(U)
+        ph = phi[:, past]
+        for _ in range(iterations):                      # Fisher scoring on the NB 2-parameter MAP, all places at once
+            lam = mu[:, past] * np.exp(np.clip(a[:, None] + b[:, None] * x[None], -20, 20))
+            wt = 1.0 / (1.0 + lam / ph)                  # NB: the score (y − λ)/(1 + λ/φ), the information λ/(1 + λ/φ)
+            g_a = ((y[:, past] - lam) * wt).sum(1) - a / var_a
+            g_b = ((y[:, past] - lam) * wt * x).sum(1) - b / var_b
+            h_aa = (lam * wt).sum(1) + 1 / var_a
+            h_ab = (lam * wt * x).sum(1)
+            h_bb = (lam * wt * x ** 2).sum(1) + 1 / var_b
+            det = h_aa * h_bb - h_ab ** 2
+            a, b = a + (h_bb * g_a - h_ab * g_b) / det, b + (h_aa * g_b - h_ab * g_a) / det
+        lam = mu[:, past] * np.exp(np.clip(a[:, None] + b[:, None] * x[None], -20, 20))
+        wt = 1.0 / (1.0 + lam / ph)
+        h_aa, h_ab, h_bb = (lam * wt).sum(1) + 1 / var_a, (lam * wt * x).sum(1), (lam * wt * x ** 2).sum(1) + 1 / var_b
+        det = h_aa * h_bb - h_ab ** 2
+        cov_aa, cov_ab, cov_bb = h_bb / det, -h_ab / det, h_aa / det
+        xw = yrs[t:] - (t - 1)
+        w = mu[:, t:] * np.exp(a[:, None] + b[:, None] * xw[None])
+        tot = np.maximum(mu[:, t:].sum(1), 1e-300)
+        mult[:, k] = w.sum(1) / tot
+        xbar = np.divide((w * xw).sum(1), w.sum(1), out=np.full(U, xw.mean()), where=w.sum(1) > 0)
+        var_log[:, k] = cov_aa + 2 * xbar * cov_ab + xbar ** 2 * cov_bb
+    return mult, var_log
 
 
 def group_disparity(y_g: np.ndarray, mu_g: np.ndarray, places: np.ndarray, field_id: str, ledger: control.Ledger,

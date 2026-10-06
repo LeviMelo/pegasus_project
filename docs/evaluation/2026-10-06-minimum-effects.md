@@ -55,3 +55,27 @@ Declared before running: the rank-1 interaction absorbs the persistent place × 
 | space-negative worlds with findings | 0/20 | 0/20 |
 
 Half the structure is the shared place × time factor the interaction holds: SIH's utilisation shifts, as in ADR-0018. The prediction fails nonetheless, because every shifted world still has findings. What remains is place-specific persistent courses, which a time shift carries whatever the model. A negative of this kind cannot say whether they are disease or recording. Of the leads that survive rank 1, the facility layer has to decide (ADR-0014/0016), not a threshold.
+
+**The tier a cell lens reads** (`data/queue_grid_tiers.py`, `data/probes/grid/tiers_SIM_I60-I69.jsonl`; stroke; 10 null worlds, all clean at every tier and θ0). Share of place-year and region-year doublings detected (loci of 100 or more expected deaths):
+
+| lens, θ0 | B1 | B2 (production) |
+|---|---|---|
+| outbreak, 1.2 | place 0.71, region 0.52 | place 0.33, region 0.36 |
+| outbreak, 1.0 | place 1.00, region 0.91 | place 0.88, region 0.82 |
+| change point, place step ×2 / ×3 (inline check) | 0.70 / 0.95 | 0.10 / 0.11 |
+
+B2 refits each place's trend over the whole series, so it takes in the departure under test, a spike partly and a step almost wholly.
+
+B1 has its own failures:
+- On SIH, change point at B1 finds steps in every space-scrambled world (20 per world), because B1 lacks SIH's persistent place courses.
+- On sparse I00-I02, its time negatives fail (17/20), as at B2.
+
+Hence a baseline built from the years before the window (`data/change_point_past.py`; ADR-0027). The five variants tried:
+
+| baseline | stroke: nulls (model / space / time); place ×3 | SIH: nulls; place ×3 |
+|---|---|---|
+| B2 | clean; 0.11 | clean at θ0 1.1; 0.07 |
+| B1 as it is | clean; 0.95 | space 20/20 |
+| B1, past level, Poisson | 0/10, 0/20, 1/20; 0.90 | model 2/10, space 20/20, time 20/20 |
+| **B1, past level and slope, NB (adopted)** | 0/10, 0/20, 0/20; 0.47 | 0/10, 3/20, 0/20; 0.40 |
+| B0, past level and slope, NB | 0/10, 0/20, 3/20; 0.94 | 0/10, 3/20, 20/20; 0.01 |

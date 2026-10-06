@@ -45,7 +45,7 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"outbreak": "B2", "change_point": "B2", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"outbreak": "B2", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
