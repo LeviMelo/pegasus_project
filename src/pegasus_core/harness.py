@@ -179,6 +179,15 @@ POSITIVES: tuple[Positive, ...] = (
                        "findings) and capture >= 50% of Ceará's 2017 excess",
              note="Ceará reported the largest chikungunya epidemic of 2017 (105,232 confirmed cases in the state, 61,718 in "
                   "Fortaleza; Fortaleza and state bulletins, read through search summaries, not at the source)"),
+    # Re-test of the arbovirus -> microcephaly pair (its first test, E_w at region-month, did not admit a lag: evaluation
+    # 2026-10-05). Declared before the coarse-grain, prewhitened run (data/positive_lagged_microcephaly.py)
+    Positive("Dengue notifications lead microcephaly births, Northeast 2015-16", "SINAN.DENG -> SINASC.DN",
+             "probable_case -> birth", "* -> Q02", "E_w", "BP", "uf:*", (2015, 2017), grain="month",
+             criterion="state scale, each series prewhitened by its own pooled AR(2), lags 0-12, delta_E 0.1: the largest "
+                       "dengue->Q02 rho is at a lag in 5..9 with p < 0.05/13; dengue->Q90 (Down syndrome, control) admits no "
+                       "lag at p < 0.05/13; Q02->dengue admits no lag in 5..9",
+             note="Q02 births in the Northeast 2,371 against 94 expected in 2015-16, 6-7 months after the dengue-like surge "
+                  "(the Zika epidemic, notifiable only from 2016); Brazil's microcephaly emergency, Nov 2015"),
 )
 
 
