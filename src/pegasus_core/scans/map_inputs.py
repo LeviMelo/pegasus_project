@@ -34,7 +34,7 @@ def _population(places: np.ndarray, years: list[int]) -> np.ndarray:
     ix = {int(u): i for i, u in enumerate(places)}
     out = np.zeros((len(places), len(years), 2, 17))
     t = gateway.population(years)
-    for u, yr, s, a, n in zip(*(t.column(c).to_numpy() for c in ("u", "year", "sex", "age", "n"))):
+    for u, yr, s, a, n in zip(*(t.column(c).to_numpy() for c in ("u", "year", "sex", "age", "n")), strict=True):
         if int(u) in ix and int(s) in (1, 2):
             out[ix[int(u)], years.index(int(yr)), int(s) - 1, min(int(a) // 5, 16)] += n
     return out

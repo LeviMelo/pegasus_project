@@ -204,10 +204,10 @@ def _conditional(inp: MapInputs, basis: pairs.MoranBasis, ii: np.ndarray, jj: np
         if any((min(i, k), max(i, k)) in wanted for i in health):
             run(health + [k], inp.design((k,)), against=k)
     for a, k in enumerate(ctx):                                   # context × context
-        for l in ctx[a + 1:]:
-            if (min(k, l), max(k, l)) in wanted:
-                Z = inp.design((k, l))
-                sub = [inp.names[k], inp.names[l]]
+        for k2 in ctx[a + 1:]:
+            if (min(k, k2), max(k, k2)) in wanted:
+                Z = inp.design((k, k2))
+                sub = [inp.names[k], inp.names[k2]]
                 names, Rm, Nm = pairs.statistics({n: eff[n] for n in sub}, basis, Z)
                 put(names, Rm, Nm, Z)
     return R[ii, jj], N[ii, jj]
