@@ -336,7 +336,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
-### 5.3 The mean: structured Newton (v1 built 2026-10-06 for count blocks without the interaction, `PEGASUS_SOLVER=v1`; evaluation 2026-10-06, solver v1)
+### 5.3 The mean: structured Newton (v1, the default for count blocks without the interaction since 2026-10-06; `PEGASUS_SOLVER=v0` restores v0; evaluation 2026-10-06, solver v1)
 
 **The v0 solver** is truncated Newton–CG on autodiff Hessian–vector products (double backward through the factorised total), with a diagonal preconditioner, Eisenstat–Walker forcing and an Armijo line search; L-BFGS before it diverged (evaluation 2026-10-04). Warm starts, `mean_tol` and Anderson acceleration of the outer loop are ADR-0017.
 - **Measured** on chapter IX 2010–2021 (552,046 parameters; 2026-10-06): the first ten Newton steps take 1–3 CG iterations each; from the fourteenth, every step hits the 50-iteration cap and gains less than 10⁻³.
@@ -458,7 +458,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
 | SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
-| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | Λ 2.8 ms, HVP 26.7 ms (CPU float64); about 6,000 HVPs per fit; 664–1,683 s cold under load | 20 s / 5 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 154–169 s cold (6 outers), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
 | IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |
@@ -1116,7 +1116,7 @@ A solver change is measured on the benchmark before it is adopted.
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
 | marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
-| mean solver | 5.3 | v1 built for count blocks without the interaction (exact Newton, verified on IX); v0 still the default and the path for marks, shares and the interaction | O1 |
+| mean solver | 5.3 | v1, **the default** for count blocks without the interaction since 2026-10-06 (exact Newton; IX ≈ 3× v0 calm, better optimum, equal held-out; monthly grain verified); v0 remains for marks, shares and the interaction | O1 |
 | strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
 | uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
