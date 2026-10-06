@@ -21,10 +21,10 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 | 5.8 | the benchmark (`bench`, O1) and the time budgets: **BM** (`scripts/bench.py`, held out; IX 32 s, XX 107 s; docs/plans/2026-10-06-optimization.md) |
 | 7.0 | departure models per estimand, with Bayesian FDR |
 | 7.5 | relation models: distributed lag, shared component, endemic–epidemic; negative controls |
-| 8.4 | IHW weights and minimum detectable effects |
+| 8.4 | IHW weights and minimum detectable effects: **P** — weighted BH and Roeder–Wasserman weights built (`control`), not applied; no field excluded (ADR-0028); per-field power read from the grid |
 | 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term: **P** since 2026-10-06 (`Registry.conserved`, fields across blocks; E:2026-10-06-icd-structure). Rule versions on verdicts built 2026-10-06 (`explain.RULES`, `triage --stale`; BU until the re-triage reads them). Not built: the lenses' reading beside each lead, the coding-regime term |
-| 10.3 | the designed grid of planted signals |
-| 10.6 | simulation-based calibration: **BU** (`scripts/sbc.py`; VII and XIII running) |
+| 10.3 | the designed grid of planted signals: **BM** (`harness.grid`, `pegasus-core grid`; SIM dense and sparse, SIH, SINASC, SINAN, monthly dengue; E:2026-10-06-absorption, E:2026-10-06-minimum-effects). Not built: the seasonal shift and the lagged response |
+| 10.6 | simulation-based calibration: **BM** (`scripts/sbc.py`; VII, XIII: the intercept and count-scale sums miscalibrate under Laplace draws, E:2026-10-06-sbc, OQ 2) |
 | 3.3, 4.2 | the ICD ontology consumed (subcategory leaves, list effects, structural zeros, relations for the conserved levels): **P** since 2026-10-06 (ADR-0024: the nested tree, profiles by block with geography by group, structural zeros by sex and absolute age, underlying-cause eligibility; E:2026-10-06-icd-structure). Not built: list effects θ_L, relations; subcategory leaves declined by the author. Built since: list fields and conserved levels across blocks, chapter XX's axis fields |
 | 3.4, 4.1, 4.2, 7.0 | race as an axis of G, the recording model, the race terms, race disparities |
 
@@ -216,15 +216,15 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | item | status | evidence | gap |
 |---|---|---|---|
 | 7.1 spatial cluster (B0) | P | `E:harness-gate` (84/250 false at θ0 1.2; θ0 1.5 pooled 0.04), `E:positive-chagas-schistosomiasis` | fails the family rule (2.0 would lose Chagas); outside the default survey; 6 ledger tests |
-| 7.1 outbreak | BM | `E:harness-gate`, `E:positive-leptospirosis-rs`, `E:dengue-monthly` | |
-| 7.1 change point | BM | `E:lens-positives` (COVID at BP, recall 1.00) | positive recovered at BP only; São Paulo 2018, Roraima births not recovered |
+| 7.1 outbreak | BM | ADR-0026/0027 (B1, θ0 1.1; calibrated on five systems' grids and negatives), `E:positive-leptospirosis-rs`, `E:dengue-monthly` | |
+| 7.1 change point | BM | ADR-0027 (the place's pinned past course on B1; place step ×3 0.47 against 0.11 at B2), `E:lens-positives` (COVID at BP) | sparse fields' time negatives fail (no calibrated FDR there) |
 | 7.1 space-time cluster | BM | `E:harness-gate`, `E:sinasc-lenses-optimiser` (microcephaly) | |
-| 7.1 group disparity | P | `E:lens-positives`: weighted recall 0.048 and 0.003, spatial negatives reject sd < 1.0 | fails its gate; runs only `--ungated`; 6,991 leads exist from earlier runs |
+| 7.1 group disparity | P | `E:lens-positives`: weighted recall 0.048 and 0.003, spatial negatives reject sd < 1.0; grid: blind to a one-year group spike (it tests a unit over the whole period) | runs, marked uncalibrated (ADR-0028) |
 | 7.1 trend divergence: national course at region and state | BM | `E:lens-positives` (recall 0.66, Jaccard 0.77) | |
-| 7.1 trend divergence: neighbours; national at municipality | BM | `E:lens-positives` (not recovered; time-shift negatives 5/30) | not run by default; 3,355 SIM neighbour leads have no spatial test (OQ-7c) |
+| 7.1 trend divergence: neighbours; national at municipality | BM | `E:lens-positives` (not recovered); ADR-0026: θ0 1.1 SIM, 1.5 SINASC, 2.0 SINAN; SIH's time negatives fail at every θ0 | runs; the neighbours estimand and SIH trends marked uncalibrated (ADR-0028) |
 | 7.1 observation lens on recording-practice fields | NB | `scans/lenses.py` docstring only | 0 `observation` leads; no ill-defined-share or coding-practice field has been scanned |
 | 7.1 scales and per-scale BH at q/(number of scales) | BM | `scans/scales.py`, `E:lens-positives` | |
-| 7.1 SURVEY_PLAN and `--ungated` | BM | `tools.SURVEY_PLAN` | `spatial_cluster` is in the plan as passing but not in the default `lens_names` |
+| 7.1 SURVEY_PLAN | BM | `tools.SURVEY_PLAN`, ADR-0028 | every combination runs; `--ungated` retired |
 | 7.2 expectation-based score, marks Gaussian, LTSS | BM | `scans/subset.py`, `E:harness-gate` | |
 | 7.2 free dimensions, alternation | BM | `Scanner._alternate` | groups never enter a scan as a dimension (§13) |
 | 7.2 null by NB replicates with Gumbel tail; recursion | BM | `subset.null`, `subset.scan` | |
@@ -266,7 +266,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 8.3 event split for sizes | BM | `E:replication` | |
 | 8.3 reserved period SIM.DO 2024 | BU | `control.RESERVED_PERIODS`, `ReservedPeriod` guard | never opened; three `confirm`-family rows are declarations, not spends |
 | 8.3 tiers R0..R3 | BM | `E:replication-independent-units` (333 of 7,496 R1; 0 R2/R3) | SIH register untiered beyond R0 (25,732) |
-| 8.4 admission rule and minimum effects | P | `fields.admission` (power curves, `admission_curves.json`), `lenses.py` θ0, `pairs.MIN_EFFECT` | section restored; power-curve admission applied (ADR-0022); θ0 1.2 provisional until the calibration below 1.2 is read |
+| 8.4 admission rule and minimum effects | BM | admission retired (ADR-0028); θ0 re-made on the grid (ADR-0026, `lenses.MINIMUM_EFFECT_BY`), `pairs.MIN_EFFECT` | group disparity sd 0.2 provisional |
 | 8.5 mechanical overlap | BM | `fields.overlap`, `gateway.field_overlap`, `maps` | **section lost**; the 0.05 rule stated in 7.6 and 11.4 |
 
 ## §9 Leads, the ledger, use
@@ -308,7 +308,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 10.1 women's and young men's share of homicide | BM | `E:lens-positives` (fails the gate) | |
 | 10.1 marks and E_w each recover a positive | NB | §13 row 10.1 | no citable mark shift; E_w weak |
 | 10.2 negatives: Moran spectral randomisation, series shift | BM | ADR-0005, `E:harness-gate` | |
-| 10.3 planted signals, power curves | BM | `E:harness-gate` | |
+| 10.3 planted signals, power curves | BM | the grid (refitted worlds) replaced the v0 fixed-μ curves (removed, ADR-0028) | |
 | 10.4 null surrogates, false-lead rate | BM | `E:harness-gate` (worst 2/350) | |
 | 10.5 gate | SS | ADR-0028: the gate retired; the lead's `method` record (`tools.method_record`, `method_status`) | old leads keep their v0 gate inside the record |
 
