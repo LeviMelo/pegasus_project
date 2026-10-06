@@ -9,6 +9,7 @@ separate function: it is any of these applied to a recording-practice field
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy import special, stats
@@ -23,13 +24,28 @@ from . import subset
 # SIM I00-I02 and SIH-RD J09-J18. v0's 1.2 cost the outbreak lens half its power (place doublings 0.38 against 0.72).
 RATE_RATIO = 1.1         # cell lenses (outbreak, change point, space-time): H0 is "the rate is at most 1.1 × expected"
 SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0) on SIM: model worlds 2/20 at 1.2, 0/20 at 1.5
-SPATIAL_RATE_RATIO_BY = {"SIH-RD": 2.0}   # SIH's B0 carries its hospital-use geography (ADR-0018): 20/20 worlds at 1.5, 0/20 at 2.0
 TREND_PERIOD = {"municipality": 1.1, "region": 1.1, "state": 1.1}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; v0's municipal 1.5 came from raw-score time shifts, whose single real shock cell the normal scores remove
 
 
-def spatial_rate_ratio(field_id: str) -> float:
-    """The spatial cluster's θ0 for a field (its dataset is the id's first part)."""
-    return SPATIAL_RATE_RATIO_BY.get(field_id.split(":")[0], SPATIAL_RATE_RATIO)
+#: Where a system needs a larger θ0 than the default (ADR-0026): (lens, dataset prefix) → θ0. The first match wins.
+MINIMUM_EFFECT_BY = (
+    ("spatial_cluster", "SIH-RD", 2.0),    # SIH's B0 holds its hospital-use geography (ADR-0018): 20/20 worlds at 1.5, 0/20 at 2.0
+    ("space_time", "SINAN", 1.5),          # SIFC's time negatives: 17/20 worlds at 1.1, 4/20 at 1.2, 0/20 at 1.5
+    ("trend_divergence", "SINAN", 2.0),    # SIFC's time negatives: 10/20 at 1.1, 3/20 at 1.5, 0/20 at 2.0
+    ("spatial_cluster", "SINAN", 2.0),     # SIFC's model worlds: 10/10 at 1.5, 0/10 at 2.0
+    ("trend_divergence", "SINASC", 1.5),   # births' time negatives: 13/20 at 1.1, 8/20 at 1.2, 0/20 at 1.5
+)
+_DEFAULT_EFFECT = {"spatial_cluster": SPATIAL_RATE_RATIO, "trend_divergence": TREND_PERIOD}
+
+
+def minimum_effect(lens: str, field_id: str) -> Any:
+    """A lens's θ0 for a field (its dataset is the id's first part): `MINIMUM_EFFECT_BY`, else the lens's default
+    (`RATE_RATIO`; `SPATIAL_RATE_RATIO`; `TREND_PERIOD` per scale)."""
+    dataset = field_id.split(":")[0]
+    for ln, prefix, value in MINIMUM_EFFECT_BY:
+        if ln == lens and dataset.startswith(prefix):
+            return value
+    return _DEFAULT_EFFECT.get(lens, RATE_RATIO)
 
 
 GROUP_SD = {"municipality": 0.2, "region": 0.2, "state": 0.2}   # group disparity, per scale: H0 is "the groups' log-SIRs spread by at most this sd" (weighted by expected events)
@@ -59,14 +75,15 @@ def spatial_cluster(s: surprise.Surprise, edges: np.ndarray, ledger: control.Led
     """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan.
     ``rate_ratio`` overrides the minimum effect θ0 (the grid's calibration, §10.5)."""
     return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True,
-                  rate_ratio=spatial_rate_ratio(s.field.id) if rate_ratio is None else rate_ratio)
+                  rate_ratio=minimum_effect("spatial_cluster", s.field.id) if rate_ratio is None else rate_ratio)
 
 
 def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
                max_window: int | None = 4, replicates: int = 200, alpha: float = 0.05,
                rate_ratio: float | None = None) -> list[Finding]:
     """Place sets × contiguous windows of at most ``max_window`` years."""
-    return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window, rate_ratio=rate_ratio)
+    return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window,
+                  rate_ratio=minimum_effect("space_time", s.field.id) if rate_ratio is None else rate_ratio)
 
 
 def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int, replicates: int,
@@ -410,7 +427,7 @@ def _trend_delta(s: surprise.Surprise, scale: str = "municipality", ratio: float
     # the period is a ratio TREND_PERIOD between its first and last year
     yrs = s.years.astype(float)
     span = (yrs.max() - yrs.min()) / max(yrs.std(), 1e-9)
-    ratio = TREND_PERIOD if ratio is None else ratio          # ``ratio`` overrides the minimum divergence (the grid)
+    ratio = minimum_effect("trend_divergence", s.field.id) if ratio is None else ratio   # ``ratio``: the grid's override
     ratio = ratio[scale] if isinstance(ratio, dict) else ratio
     return float(np.log(ratio) / span)
 

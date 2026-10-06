@@ -91,14 +91,7 @@ def method_record(dataset: str, lens: str, reference: str | None, prospective: b
         if ln == lens and (ref is None or ref == reference) and (ds is None or ds == dataset):
             calibrated, evidence = cal, ev
             break
-    if lens == "spatial_cluster":
-        theta0: Any = lenses.spatial_rate_ratio(dataset + ":")
-    elif lens == "trend_divergence":
-        theta0 = lenses.TREND_PERIOD
-    elif lens == "group_disparity":
-        theta0 = lenses.GROUP_SD
-    else:
-        theta0 = lenses.RATE_RATIO
+    theta0 = lenses.GROUP_SD if lens == "group_disparity" else lenses.minimum_effect(lens, dataset + ":")
     return {"tier": lens_tier(lens, prospective), "theta0": theta0, "calibrated": calibrated, "evidence": evidence}
 
 

@@ -247,7 +247,8 @@ def test_prospective(sp: surprise.Surprise, estimand: str, locus: dict[str, Any]
     if rows.size == 0:
         return {"tested": False, "reason": "locus outside the grid"}
     s = relevel(sp, rows, level)
-    theta = lenses.spatial_rate_ratio(sp.field.id) if estimand == "spatial_cluster" else THETA.get(estimand, lenses.RATE_RATIO)
+    theta = lenses.minimum_effect(estimand, sp.field.id) if estimand in ("spatial_cluster", "space_time") \
+        else THETA.get(estimand, lenses.RATE_RATIO)
     scale = theta if direction > 0 else 1 / theta
     Y, M = float(s.y[rows].sum()), float(s.mu[rows].sum())
     if M <= 0:
