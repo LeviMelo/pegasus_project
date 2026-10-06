@@ -84,6 +84,9 @@ class BlockData:
         return self.years
 
 
+# the readers of marks: each cell's accumulator states, the one whose mean is y, and (last) the second moment kept in l2
+CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k")}
+CELL_MEAN = {"mark": "l1", "count": "s1", "share": "k"}
 ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
 NEWBORN_SHARE = 0.5     # a field is a newborn-exposure field when at least this share of its events are at age 0
 
@@ -210,7 +213,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         code_list    counts of events under each category of a code-list column, e.g.
                      SINASC's CODANOMAL (``column=``); the exposure is still the population
         mark         accumulator states of a numeric mark (``mark=``, ``bounds=``,
-                     ``classifier=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
+                     ``classifier=``, ``casemix=``, ``facility_effects=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
+        count        the same reader, a count-valued mark: n, s1 = Σ m, s2 = Σ m²; y is s1/n
+        share        a binary mark (``indicator=``, ``success=``, ``classifier=``): n, k; y is k/n, l2 is k
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     years = np.array(sorted(set(years)))
@@ -247,9 +252,10 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     groups = sorted(set(carrier.values()))
     gidx = {g: i for i, g in enumerate(groups)}
     eidx = {c: i for i, c in enumerate(categories)}
-    values = ("n", "l1", "l2") if source == "mark" else ("y",)
-    weight = "n" if source == "mark" else "y"
-    readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments}
+    values = CELL_VALUES.get(source, ("y",))
+    weight = "n" if source in CELL_VALUES else "y"
+    readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments,
+               "count": gateway.mark_moments, "share": gateway.share_moments}
     if grain == "month":
         if source != "events":
             raise NotImplementedError("the monthly grain reads event counts")
@@ -308,20 +314,20 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            **({} if profile == "group" else {"profile": profile}),
            **({} if source == "events" else {"source": source, **source_args}),
            **({} if grain == "year" else {"grain": grain})}
-    y = sums["l1"] / sums["n"] if source == "mark" else sums["y"]
+    y = sums[CELL_MEAN[source]] / sums["n"] if source in CELL_VALUES else sums["y"]
     live = N[u, t, g] > 0
     if not live.all():
         # events in a cell the population holds nobody in (the account's interval-free zeros: 1 death in 14 years of IX):
         # no rate exists there, so they are counted as unallocated, never given a guessed denominator
-        w = (sums["n"] if source == "mark" else y)[~live]
+        w = (sums["n"] if source in CELL_VALUES else y)[~live]
         unallocated["no population in the cell"] = unallocated.get("no population in the cell", 0) + int(w.sum())
         e, u, t, g, y = e[live], u[live], t[live], g[live], y[live]
         sums = {v: x[live] for v, x in sums.items()}
     data = BlockData(dataset, event, block, years, places, categories, groups,
                      np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key,
                      S=S, population=population)
-    if source == "mark":
-        data.n, data.l2 = sums["n"], sums["l2"]
+    if source in CELL_VALUES:
+        data.n, data.l2 = sums["n"], sums[CELL_VALUES[source][-1]]   # share: l2 is k, the successes (y is k/n)
     if grain == "month":
         data.grain = "month"
         data.month_of_year = np.tile(np.arange(12), len(years))
@@ -1026,11 +1032,13 @@ class MarkModel(Monolith):
         with torch.no_grad():
             self.params["b0"].fill_(float(np.sum(d.n * d.y) / np.sum(d.n)))
 
-    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print) -> MarkModel:
+    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
+            **_ignored) -> MarkModel:
         start = time.time()
         self._initialise()
+        self.warm_info = self.warm_start(warm) if warm else None
         for it in range(outer):
-            self._fit_mean(inner)
+            self._fit_mean(inner, loglik_tol=mean_tol)
             changes = self._update_taus()
             old = self.sigma2_c
             self.sigma2_c = self._cell_variance()
@@ -1096,6 +1104,202 @@ class MarkModel(Monolith):
     def _restore(self, meta: dict) -> None:
         self.sigma2_w, self.sigma2_c = float(meta["sigma2_w"]), float(meta["sigma2_c"])
         self._weights()
+
+
+class _CellMark(MarkModel):
+    """The mark models that are not log-normal (ARCHITECTURE §4.4): a count-valued mark and a binary share. Each cell
+    (e, u, t, g) carries n events and an accumulator; ν = η is the *link* of the cell's mean (the same linear predictor as
+    the counts', without exposure). The likelihood is a quasi-likelihood of the family, every cell weighted by its
+    over-dispersion at the previous outer iteration (``_weights``); the dispersion is estimated by moments, as the
+    log-normal's cell variance is. A place-year's observed value, expectation and variance are on the family's y scale
+    (``observed``, ``expected``), which is where the lenses read a departure."""
+
+    family = ""
+    dispersion_name = ""
+    disp = 0.0                 # the family's dispersion; 0 until the first outer iteration
+    mu_c = None                # each cell's mean at the previous outer iteration
+
+    def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str, device: str = "cpu"):
+        super().__init__(data, graph, graph_kind, device)
+        self.total_t = torch.as_tensor(data.y * data.n, dtype=self.dtype, device=self.device)   # Σ m (a count) or k (successes)
+        self.mu_c = torch.full_like(self.n_t, float(data.y @ data.n / data.n.sum()))
+        self._weights()
+
+    def _weights(self) -> None:
+        raise NotImplementedError
+
+    def _objective_norm(self) -> float:
+        return self.scale
+
+    def _initialise(self) -> None:
+        raise NotImplementedError
+
+    def _moment(self) -> float:
+        """The dispersion by moments at the current fit."""
+        raise NotImplementedError
+
+    def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
+            **_ignored) -> _CellMark:
+        start = time.time()
+        self._initialise()
+        self.warm_info = self.warm_start(warm) if warm else None
+        for it in range(outer):
+            self._fit_mean(inner, loglik_tol=mean_tol)
+            changes = self._update_taus()
+            old = self.disp
+            self.disp = self._moment()
+            with torch.no_grad():
+                self.mu_c = self._cell_mean().detach()
+            self._weights()
+            changes.append(abs(self.disp - old) / (self.disp + 0.01))
+            self.history.append({"iteration": it, "taus": {k: c.tau for k, c in self.components.items()},
+                                 self.dispersion_name: self.disp, "seconds": time.time() - start})
+            taus = " ".join(f"{k}={c.tau:.3g}" for k, c in self.components.items())
+            log(f"outer {it}: max change {max(changes):.3f}, {self.dispersion_name} {self.disp:.4g}, {time.time() - start:.0f}s | {taus}")
+            if max(changes) < tol:
+                break
+        self._fit_mean(inner)
+        self.phi = float("nan")
+        return self
+
+    def _cell_mean(self) -> torch.Tensor:
+        raise NotImplementedError
+
+    def _sums(self, leaves: np.ndarray, *cols: np.ndarray) -> list[np.ndarray]:
+        """Per (u, t), the sums over the cells of ``leaves`` of each column."""
+        d = self.data
+        m = np.isin(d.e, leaves)
+        U, T = d.N.shape[:2]
+        out = []
+        for c in cols:
+            a = np.zeros((U, T))
+            np.add.at(a, (d.u[m], d.t[m]), c[m])
+            out.append(a)
+        return out
+
+    def summary(self) -> dict:
+        out = super().summary()
+        out.update({"family": self.family, self.dispersion_name: self.disp})
+        out.pop("sigma2_w", None)
+        out.pop("sigma2_c", None)
+        return out
+
+    def _restore(self, meta: dict) -> None:
+        self.disp = float(meta[self.dispersion_name])
+        with torch.no_grad():
+            self.mu_c = self._cell_mean().detach()
+        self._weights()
+
+    def events(self, leaves: np.ndarray) -> np.ndarray:
+        return self._sums(leaves, self.data.n)[0]
+
+
+class ShareModel(_CellMark):
+    """A binary share (death in hospital, caesarean): k of n events carry the mark, logit p = ν. Beta-binomial by
+    quasi-likelihood: the binomial score with each cell weighted 1/(1 + (n − 1)ρ), ρ the intra-cell correlation by
+    moments. y is the empirical logit log((k + ½)/(n − k + ½)) of a place-year, its expectation and variance
+    from the cells' p by the delta method."""
+
+    family, dispersion_name = "share", "rho"
+
+    def _weights(self) -> None:
+        self.w = 1.0 / (1.0 + (self.n_t - 1.0) * self.disp)
+
+    def _initialise(self) -> None:
+        d = self.data
+        p = float(np.clip(np.sum(d.y * d.n) / np.sum(d.n), 1e-6, 1 - 1e-6))
+        with torch.no_grad():
+            self.params["b0"].fill_(float(np.log(p / (1 - p))))
+
+    def objective(self) -> torch.Tensor:
+        x = self.effects()
+        eta = self.eta_nnz(x)
+        nll = (self.w * (self.n_t * torch.nn.functional.softplus(eta) - self.total_t * eta)).sum()
+        return (nll + self.penalty(x)) / self.scale
+
+    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        eta = self.eta_nnz(x)
+        p = torch.sigmoid(eta).detach()
+        return ((self.w * self.n_t * p * (1 - p)).detach() * eta).sum()
+
+    def _cell_mean(self) -> torch.Tensor:
+        return torch.sigmoid(self.eta_nnz(self.effects()))
+
+    def _moment(self) -> float:
+        p = self._cell_mean().cpu().numpy().clip(1e-9, 1 - 1e-9)
+        n, k = self.data.n, self.data.y * self.data.n
+        r2 = (k - n * p) ** 2 / (n * p * (1 - p)) - 1.0
+        return float(np.clip(np.sum((n - 1) * r2) / max(np.sum((n - 1) ** 2), 1.0), 0.0, 1.0))
+
+    def expected(self, leaves: np.ndarray, spatial: bool = True) -> tuple[np.ndarray, np.ndarray]:
+        d = self.data
+        with torch.no_grad():
+            p = torch.sigmoid(self.eta_nnz(self.effects(), spatial)).cpu().numpy()
+        n = d.n
+        N, K, V = self._sums(leaves, n, n * p, n * p * (1 - p) * (1 + (n - 1) * self.disp))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mean = np.log((K + 0.5) / (N - K + 0.5))
+            var = V * (1.0 / (K + 0.5) + 1.0 / (N - K + 0.5)) ** 2
+        return np.where(N > 0, mean, np.nan), np.where(N > 0, var, np.nan)
+
+    def observed(self, leaves: np.ndarray) -> np.ndarray:
+        N, K = self._sums(leaves, self.data.n, self.data.y * self.data.n)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(N > 0, np.log((K + 0.5) / (N - K + 0.5)), np.nan)
+
+
+class CountModel(_CellMark):
+    """A count-valued mark (ICU days of the admissions that used ICU): per-event mean μ with log μ = ν and variance
+    μ + μ²/θ, by quasi-likelihood on the cell sums (n, Σm): each cell weighted 1/(1 + μ/θ) at its previous μ, 1/θ by
+    moments from Σm². y is the log of a place-year's mean count."""
+
+    family, dispersion_name = "count", "inv_theta"
+
+    def _weights(self) -> None:
+        self.w = torch.ones_like(self.n_t) if self.mu_c is None else 1.0 / (1.0 + self.mu_c * self.disp)
+
+    def _initialise(self) -> None:
+        d = self.data
+        with torch.no_grad():
+            self.params["b0"].fill_(float(np.log(max(np.sum(d.y * d.n) / np.sum(d.n), 1e-9))))
+
+    def objective(self) -> torch.Tensor:
+        x = self.effects()
+        eta = self.eta_nnz(x)
+        nll = (self.w * (self.n_t * torch.exp(eta) - self.total_t * eta)).sum()
+        return (nll + self.penalty(x)) / self.scale
+
+    def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        eta = self.eta_nnz(x)
+        return ((self.w * self.n_t * torch.exp(eta)).detach() * eta).sum()
+
+    def _cell_mean(self) -> torch.Tensor:
+        return torch.exp(self.eta_nnz(self.effects()))
+
+    def _moment(self) -> float:
+        mu = self._cell_mean().cpu().numpy()
+        n, s1, s2 = self.data.n, self.data.y * self.data.n, self.data.l2
+        q = np.sum(s2 - 2 * mu * s1 + n * mu ** 2)
+        return float(max((q - np.sum(n * mu)) / np.sum(n * mu ** 2), 0.0))
+
+    def expected(self, leaves: np.ndarray, spatial: bool = True) -> tuple[np.ndarray, np.ndarray]:
+        n = self.data.n
+        with torch.no_grad():
+            mu = torch.exp(self.eta_nnz(self.effects(), spatial)).cpu().numpy()
+        N, S, V = self._sums(leaves, n, n * mu, n * mu * (1 + mu * self.disp))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(N > 0, np.log(S / N), np.nan), np.where(N > 0, V / S ** 2, np.nan)
+
+    def observed(self, leaves: np.ndarray) -> np.ndarray:
+        N, S = self._sums(leaves, self.data.n, self.data.y * self.data.n)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(N > 0, np.log(S / N), np.nan)
+
+
+def model_class(source: dict | None) -> type[Monolith]:
+    """The model of a reader's source: counts by the Poisson-NB monolith, a mark by its family's (``mark``: log-normal)."""
+    kind = (source or {}).get("source", "events")
+    return {"mark": MarkModel, "count": CountModel, "share": ShareModel}.get(kind, Monolith)
 
 
 # ---------------------------------------------------------------------- model choice

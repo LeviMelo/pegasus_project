@@ -698,8 +698,9 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     log mark less the facility's effect (``facility_effects``: a stored table, `store_facility_effects`) and less the case-mix
     offset of its (diagnosis category, procedure group) stratum when ``casemix`` names the procedure column: the stratum's
     mean log mark above its category's, shrunk by n/(n + MARK_SHRINK). Returns the unallocated (year, reason, code, y)."""
+    from .facility import facility_column  # the facility module reads this one: imported where used
+
     strata = _strata(dataset)
-    from .facility import facility_column     # the facility module reads this one: imported where used
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
     cols = [strata["residence"], strata["age"], mark] + ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else []) + ([casemix] if casemix else []) + ([fcol] if fcol else [])

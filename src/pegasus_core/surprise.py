@@ -105,7 +105,7 @@ class Expectations:
 
     def model(self, block: str) -> monolith.Monolith:
         if block not in self._models:
-            cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
+            cls = monolith.model_class(self.source)
             self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
                                            device=self.device, **self._reader())
             if self.supply and cls is monolith.Monolith and self._models[block].data.grain == "year":
@@ -153,8 +153,8 @@ class Expectations:
         f = node if isinstance(node, fields.Field) else self.field(node)
         train = [y for y in self.years if y <= train_last]
         test = [y for y in self.years if y > train_last]
-        cls = monolith.MarkModel if self.source.get("source") == "mark" else monolith.Monolith
-        if cls is monolith.MarkModel:
+        cls = monolith.model_class(self.source)
+        if issubclass(cls, monolith.MarkModel):
             raise NotImplementedError("the prospective tier is for counts")
         model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader())
         if purpose not in PURPOSE_TIER:
