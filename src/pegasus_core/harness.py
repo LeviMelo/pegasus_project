@@ -158,6 +158,27 @@ POSITIVES: tuple[Positive, ...] = (
              note="Lead-triage entry item 14: I21 112 against 20 a year, neighbours flat, ill-defined share 8.0% -> 1.8%. The "
                   "same rule applies to the other leads in the 'unexplained' top 15 of that entry; the supply fields are "
                   "2008-2023 December stocks. A supply step explains a detection or recording change, not incidence"),
+    # SINAN breadth wave 1: declared BEFORE the families were fitted or surveyed (commit order is the evidence)
+    Positive("Congenital syphilis rise of the 2010s", "SINAN.SIFC", "notification", "*", "outbreak", "BPA", "uf:*",
+             (2014, 2023),
+             criterion="alarm baseline fitted to 2010-2013: national observed/expected in 2018 >= 1.5 and at least 20 of the "
+                       "27 UFs flagged (outbreak lens, state level) in 2018",
+             note="Ministry of Health syphilis bulletins (SINAN): congenital syphilis incidence 2.4 per 1,000 live births in "
+                  "2010, 9.0 in 2018 (26,219 notifications); read through secondary articles that cite the bulletins, not at "
+                  "the source. A national rise, so a prospective positive: B2 absorbs a trend"),
+    Positive("Visceral leishmaniasis geography", "SINAN.LEIV", "notification", "*", "spatial_cluster", "B0",
+             "uf:21,31,15,23,29", (2010, 2023),
+             criterion="as the Chagas and schistosomiasis positives: observed/expected above 1 in each named UF; every spatial "
+                       "cluster inside the named UFs (precision >= 0.8); share of the named UFs' excess captured reported",
+             note="Ministry of Health, visceral leishmaniasis cases by UF 2018-2022: Maranhão, Minas Gerais, Pará, Ceará, Bahia "
+                  "each above 1,000 (read through a search summary of the Ministry's table and of a 2007-2021 review, not at the "
+                  "source)"),
+    Positive("Chikungunya epidemic, Ceará 2017", "SINAN.CHIK", "case", "*", "space_time", "B1", "uf:23", (2017, 2017),
+             grain="month",
+             criterion="as the leptospirosis positive: the space-time findings of 2017 lie inside Ceará (>= 80% of in-window "
+                       "findings) and capture >= 50% of Ceará's 2017 excess",
+             note="Ceará reported the largest chikungunya epidemic of 2017 (105,232 confirmed cases in the state, 61,718 in "
+                  "Fortaleza; Fortaleza and state bulletins, read through search summaries, not at the source)"),
 )
 
 
