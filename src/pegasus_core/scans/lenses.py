@@ -151,8 +151,12 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
         sdv = np.sqrt(np.divide(1.0, s.w, out=np.full(s.w.shape, np.inf), where=s.w > 0))
         excess = np.abs(np.nan_to_num(s.y) - np.nan_to_num(s.mu)) - MARK_LOG
         p = np.minimum(1.0, 2 * special.ndtr(-np.divide(excess, sdv, out=np.zeros_like(excess), where=sdv < np.inf)))
-    else:
+    elif s.tier.startswith("BP"):          # prospective: the alarm baseline already holds the watched years out
         p = _upper_tail(s.y, rr * s.mu, s.phi)
+    else:                                  # each cell against its place's course from every other year (`_course`)
+        mult, var_log = _course(s, [(t, t + 1) for t in range(s.y.shape[1])], past_only=False)
+        phi = np.where(np.isfinite(s.phi), s.phi, np.inf) if np.ndim(s.phi) else np.full(s.y.shape, s.phi)
+        p = _upper_tail(s.y, rr * s.mu * mult, 1.0 / (1.0 / phi + np.expm1(var_log)))
     flat = np.where(ok, p, 1.0).ravel()
     hits = np.nonzero(control.bh(flat, q))[0]
     U, T = s.y.shape
@@ -172,7 +176,7 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
     ``replicates`` is accepted and unused.
 
     The window is read against the place's own course, estimated from the years before it and extrapolated
-    (`_past_course`; ADR-0027). This is the baseline of outbreak detectors since Farrington (1996): a persistent place
+    (`_course`; ADR-0027). This is the baseline of outbreak detectors since Farrington (1996): a persistent place
     deviation or trend is the baseline, and the step under test never enters it. The window total's predictive is NB,
     moment-matched to its cells' dispersion plus the extrapolation's uncertainty. Read against B2, which refits each
     place's trend over the whole series, a place step ×3 was found 11 % of the time. Against B1 as it is, the same step
@@ -197,7 +201,7 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
     cells = np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
     Eall = np.cumsum(cells[:, ::-1], 1)[:, ::-1]
     Y, M, E = Yall[:, starts], rr * Mall[:, starts], rr ** 2 * Eall[:, starts]
-    mult, var_log = _past_course(s, starts)                 # [U, starts]: the window's multiplier and its log variance
+    mult, var_log = _course(s, [(int(t), T) for t in starts], past_only=True)   # [U, starts]: multiplier, log variance
     M, E = M * mult, E * mult ** 2
     V = M + E + M ** 2 * np.expm1(var_log)                  # the cells' NB variance + the extrapolated course's
     p_win = np.ones(Y.shape)
@@ -225,10 +229,12 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
     return out
 
 
-def _past_course(s: surprise.Surprise, starts: np.ndarray, iterations: int = 8) -> tuple[np.ndarray, np.ndarray]:
-    """Each place's course before each window start t, extrapolated over the window [t, T): a Poisson regression of
-    the counts on the tier's mean (offset) with a level and a slope, from the years before t only (Farrington 1996's
-    baseline, with its trend). Priors: level ~ N(0, σ_a²) and slope ~ N(0, σ_b²), both from the field's between-place
+def _course(s: surprise.Surprise, windows: list[tuple[int, int]], past_only: bool, iterations: int = 8
+            ) -> tuple[np.ndarray, np.ndarray]:
+    """Each place's course outside each window [t0, t1), carried into the window: an NB regression of the counts on the
+    tier's mean (offset) with a level and a slope, fitted on the years before t0 (``past_only``: a step to the series'
+    end, Farrington 1996's baseline with its trend) or on every year outside the window (a spike: the year under test
+    never enters its own baseline). Priors: level ~ N(0, σ_a²) and slope ~ N(0, σ_b²), both from the field's between-place
     spread (method of moments on the places with at least 30 expected events over the series), so a sparse place
     stays near the tier and a large one follows its own course. Returns the window total's multiplier against the
     tier and the variance of its log (delta method on the posterior's Laplace covariance)."""
@@ -250,11 +256,12 @@ def _past_course(s: surprise.Surprise, starts: np.ndarray, iterations: int = 8) 
         var_b = max(float(np.var(b) - np.mean(se2)), 1e-5)
     else:
         var_b = 1e-5
-    mult = np.ones((U, len(starts)))
-    var_log = np.zeros((U, len(starts)))
-    for k, t in enumerate(starts):
-        past = np.arange(t)
-        x = yrs[past] - (t - 1)                           # the slope pivots on the last past year
+    mult = np.ones((U, len(windows)))
+    var_log = np.zeros((U, len(windows)))
+    for k, (t, t1) in enumerate(windows):
+        past = np.arange(t) if past_only else np.r_[np.arange(t), np.arange(t1, T)]
+        pivot = t - 1 if past_only else (t + t1 - 1) / 2   # the slope pivots on the last past year, or the window's centre
+        x = yrs[past] - pivot
         a, b = np.zeros(U), np.zeros(U)
         ph = phi[:, past]
         for _ in range(iterations):                      # Fisher scoring on the NB 2-parameter MAP, all places at once
@@ -272,9 +279,9 @@ def _past_course(s: surprise.Surprise, starts: np.ndarray, iterations: int = 8) 
         h_aa, h_ab, h_bb = (lam * wt).sum(1) + 1 / var_a, (lam * wt * x).sum(1), (lam * wt * x ** 2).sum(1) + 1 / var_b
         det = h_aa * h_bb - h_ab ** 2
         cov_aa, cov_ab, cov_bb = h_bb / det, -h_ab / det, h_aa / det
-        xw = yrs[t:] - (t - 1)
-        w = mu[:, t:] * np.exp(a[:, None] + b[:, None] * xw[None])
-        tot = np.maximum(mu[:, t:].sum(1), 1e-300)
+        xw = yrs[t:t1] - pivot
+        w = mu[:, t:t1] * np.exp(a[:, None] + b[:, None] * xw[None])
+        tot = np.maximum(mu[:, t:t1].sum(1), 1e-300)
         mult[:, k] = w.sum(1) / tot
         xbar = np.divide((w * xw).sum(1), w.sum(1), out=np.full(U, xw.mean()), where=w.sum(1) > 0)
         var_log[:, k] = cov_aa + 2 * xbar * cov_ab + xbar ** 2 * cov_bb

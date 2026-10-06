@@ -70,7 +70,7 @@ B1 has its own failures:
 - On SIH, change point at B1 finds steps in every space-scrambled world (20 per world), because B1 lacks SIH's persistent place courses.
 - On sparse I00-I02, its time negatives fail (17/20), as at B2.
 
-Hence a baseline built from the years before the window (`data/change_point_past.py`; ADR-0027). The five variants tried:
+Hence a baseline built from the years before the window (`data/lens_course.py`; ADR-0027). The five variants tried:
 
 | baseline | stroke: nulls (model / space / time); place ×3 | SIH: nulls; place ×3 |
 |---|---|---|
