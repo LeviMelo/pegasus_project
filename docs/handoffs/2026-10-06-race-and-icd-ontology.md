@@ -6,9 +6,11 @@
 
 The tensor carries total plus five declared races, 2000–2030 (pegasus_data decision 0151). The race input has four measured limits:
 
-1. **The 2000 census's "sem declaração".**
-   - **The figure:** 1.207 M people, 0.71 % of the sample (SIDRA 2093, measured 2026-10-06 on `pegasus_core_data`). `load_race` keeps only the five races, so the undeclared are split like the declared.
-   - **Asked:** keep the undeclared as a measured category. Its distribution over the five races then becomes a stated assumption, and its sensitivity (all to one race, proportional) is reported in the manifest.
+1. **The 2000 census's "sem declaração"**: 1.207 M people, 0.71 % of the sample (SIDRA 2093, measured 2026-10-06 on `pegasus_core_data`). `load_race` keeps only the five races, so the undeclared are split like the declared.
+   - **Asked:** allocate them, without denting the official totals and without making "undeclared" a denominator of its own.
+   - **How:** impute each undeclared person's race from IBGE's public 2000 sample microdata, with a model of race given age, sex, municipality, education, urban residence and the declared races of the other members of the household. Fit it on the declared; carry multiple imputations into the race intervals.
+   - **The 2010 and 2022 residuals** (6,608 and 11,119) are split by their cell's declared shares.
+   - **Report** a bound for race-dependent non-response in the manifest.
 2. **2000's ten-year bands spread flat.** 2093 publishes five-year bands to 29, ten-year bands 30–79, then 80+.
    - **Asked:** split each 2000 band by the within-band shape of the same cohorts' single-age shares in the 2010 full count (the 2000 band 30–39 is the 2010 cohort 40–49), constrained to the band's total. Measure the shape's error on 2010 itself, by aggregating 9606 to the 2093 bands.
 3. **The sample and the full count.** 2000 is a sample; 2010 and 2022 are full counts.
@@ -20,6 +22,12 @@ The tensor carries total plus five declared races, 2000–2030 (pegasus_data dec
 **Also asked:**
 - **A recorded-race confusion for adults other than women 15–49** (pegasus_data decision 0149 measured women through their births). Candidates: SIM ↔ SIH records of the same person (both recorded, a recorded-to-recorded matrix); SINAN ↔ SIM. Or a statement that no Brazilian source identifies it, with the sensitivity band to use.
 - **The unknown-race share** of SIM, SINASC, SIH (with the per-hospital-month flags of pegasus_data decision 0128) and SINAN, by place and year, as a modelled field.
+
+5. **Single ages 0–19.** The tensor's single ages are the vital account's own path. Asked:
+   - validate them by single age against the 2010 and 2022 censuses and the 2007 Contagem;
+   - tie children's migration to the account's schedule for adults aged 20–39.
+
+   PegaSUS now reads single years 0–19 (ARCHITECTURE §3.2).
 
 ## B. The ICD ontology (O4)
 

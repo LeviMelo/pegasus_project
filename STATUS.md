@@ -70,7 +70,7 @@
 | O0 | the revision: review, principles (P11–P15), the ICD ontology and race (§3.3–3.4), §5, §7.0, §7.5, §8.4, §8.6, §10, §12, §13 (ADR-0021, ADR-0023) | done |
 | O1 | the solver: assembled arrowhead Hessian, sparse Cholesky, Schur, BYM2, LAML, selected inversion, the benchmark (`bench`, O1) | next |
 | O2 | settle on the fast stack: the interaction's rank, the horseshoe, the SUS exposure and race groups, SINAN wave 1 | measurements running |
-| O3 | race as an axis: pegasus_data's tensor fixes (2000 undeclared, bands, sample vs full count, 1991), G = age × sex × race, the recording model, disparities | |
+| O3 | race and ages: pegasus_data's tensor fixes (2000 undeclared imputed from microdata, bands, sample vs full count, 1991, single ages 0–19 validated), G = 33 ages × sex × race, the recording model, disparities | |
 | O4 | the ICD ontology: pegasus_data's `icd_ontology` (attributes, age rules, ICD-9 bridge, lists, external-cause axes, relations); subcategory leaves, lists, structural zeros, conserved levels from the relations | |
 | O5 | characterise: the planted grid, null worlds, constants re-made, IHW weights, the gate retired | |
 | O6 | departure models | |

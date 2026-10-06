@@ -100,7 +100,7 @@ Leads are statistical objects, not conclusions.
 **Lattice cell.** `c = (u, t, g)`:
 - u, a place (municipality, comparable area or health region);
 - t, a time (year, or month for dense families);
-- g, a group: age band × sex × race (§3.4; from 2000, the year the population tensor's race begins; race `total` before).
+- g, a group: age × sex × race (§3.4). Ages are single years 0–19, five-year bands 20–79, and 80+ (33 classes; the tensor carries single ages, and pediatric epidemiology needs them). Race from 2000, the year the population tensor's race begins; race `total` before.
 
 The **population tensor** P = U × T × G holds N_c.
 
@@ -155,7 +155,7 @@ Field
 
 | component | content | source | what PegaSUS does with it |
 |---|---|---|---|
-| **hierarchy** | WHO ICD-10 with the Brazilian additions (U codes), validity per year | `code_trees` (shipped) | tree effects (§4.2); leaves down to the **subcategory** where the data support it (the 4th character is in SIM and SIH), pooled to the category by the tree prior |
+| **hierarchy** | WHO ICD-10 with the Brazilian additions (U codes), validity per year | `code_trees` (shipped) | tree effects (§4.2); leaves at the 3-character **category**. The 4th character is not a modelled level: certifiers and services rarely use it informatively, and a subcategory lattice multiplies the leaves for little epidemiology (author, 2026-10-06). It is read only where it encodes an axis: the place of occurrence of W00–Y34 |
 | **code attributes** | dagger/asterisk, sex restriction, acceptability as underlying cause, references, exclusions | the DATASUS CID-10 release (2008 harvested; the current release to fetch) | **structural zeros**: a sex-restricted code has no exposure in the other sex; an asterisk code is never an underlying cause; unacceptable underlying causes become recording-quality fields (§8.6) |
 | **age plausibility** | age limits per code (perinatal, obstetric, congenital, senility) | the critique tables of SIM and SIH; SIGTAP's CID table | structural zeros by age; impossible records flagged, never dropped |
 | **ICD-9 and its bridge** | the ICD-9 tree (SIM 1979–1995) and an ICD-9 → ICD-10 map with comparability ratios | to locate (pegasus_data open question 69) | the SIM series from 1979 in one tree, with the bridge's uncertainty |
@@ -176,11 +176,24 @@ Field
 - **Between censuses:** cohort composition, the log race shares linear along each birth cohort, with a state reclassification rate per year. Calibrated out of sample on 2010.
 - **Each census year has exactly one source:** 2010's sample in table 2093 is never mixed with its full count.
 
-*Known limits, to fix in pegasus_data (O3):*
-1. **2000's "sem declaração".** 1.207 M people, 0.71 % of the sample, are dropped: the five races' shares are taken among the declared, so the undeclared are split like the declared. The 2010 and 2022 full counts leave 6,608 and 11,119 people outside the five races.
-2. **2000's bands are spread flat over their ages** before smoothing, including the ten-year bands. The within-band shape of the cohort, seen by single age in 2010, is the better prior.
-3. **2000 is a sample and 2010–2022 are full counts.** The two kinds differ: in 2010 the sample's white count is 90.62 M against the full count's 91.05 M. 2010 has both, so the correction can be measured there and applied to 2000. It is not yet.
-4. **1991–1999 carry the total only.** The 1991 census's race is not read. SIM records race from 1996.
+*Known limits, to fix in pegasus_data (O3).* The tensor is the denominator of every rate, so its race split must be as defensible as its totals.
+1. **2000's "sem declaração": allocate, never drop, never a denominator of its own.**
+   - **Today:** 1.207 M people (0.71 % of the sample) are dropped, so the undeclared are split like the declared. The 2010 and 2022 full counts leave 6,608 and 11,119 people outside the five races.
+   - **The fix: impute each undeclared person's race** from the census microdata of the same year (IBGE's public 2000 sample), with a model of race given age, sex, municipality, education, urban residence and **the declared races of the other members of the household**, which predicts it best.
+     - The fit is on the declared people and is applied to the undeclared.
+     - Several imputations carry its uncertainty into the race intervals.
+   - **The official totals are untouched:** only the split among races changes.
+   - **Where only tables exist** (the 2010 and 2022 residuals), the undeclared are split by their municipality × sex × age cell's declared shares.
+   - **Sensitivity:** a bound for race-dependent non-response (all undeclared of the most affected cells to each race in turn) is reported in the manifest.
+2. **2000's bands spread flat over their ages**, including the ten-year bands 30–79. The prior is the same cohorts' single-age shape in the 2010 full count (the 2000 band 30–39 is the 2010 cohort 40–49), constrained to the band's total. Its error is measured on 2010 by aggregating 9606 to the 2093 bands.
+3. **2000 is a sample and 2010–2022 are full counts.** In 2010 the sample's white count is 90.62 M against the full count's 91.05 M. 2010 publishes both, so the correction is measured there by race × band × state and applied to 2000, its spread entering the interval.
+4. **1991–1999 carry the total only.** The 1991 census's race is read and carried through the backcast; SIM records race from 1996.
+
+**Ages.**
+- **The tensor's single ages 0–79 are the vital cohort-component account's own path** (SINASC births, adjusted for registration completeness, and SIM deaths by single age, settled on the censuses; pegasus_data decision 0151). The within-band share error is measured at the census closings (a² 0.0015 over all ages).
+- **PegaSUS kept only POPSVS's bands (0, 1–4, 5–9 …) and discarded them.** Revision 2 reads single years 0–19 (§3.2).
+- **The tensor is validated at those ages** (O3), by single age 0–19 against the 2010 and 2022 censuses, and the 2007 Contagem where it counts.
+- **Children's migration** is tied to the account's schedule for adults aged 20–39, the ages of their mothers.
 
 **Recorded race in the events:**
 - SIM `RACACOR` (from 1996);
@@ -241,7 +254,6 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
 
   A **disparity** is the exponentiated race contrast, a rate ratio with its posterior, by place, period, age and node. The cells grow fivefold. The race contrasts join the place and global classes of §5.3, so the solver's structure is unchanged.
 - **The ICD ontology in the predictor (revision 2, O4; §3.3).**
-  - Leaves go down to the subcategory where the data support it.
   - List effects θ_L are carried by every member code (CID-BR-10, avoidable causes, ICSAP, garbage levels).
   - Sex- and age-impossible cells are structural zeros of the exposure, not low rates.
 - **Context fields are not in the default predictor.** A relation between a context field and an outcome must stay discoverable (§7.5), not absorbed as "boring". Context enters only in adjusted estimands (E_b|Z) and in explaining away (§7.7).
@@ -412,13 +424,14 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 | arrays, sparse algebra | numpy, scipy |
 | **sparse Cholesky, selected inversion** | **CHOLMOD via scikit-sparse** (installed into the environment; SuperLU fallback); per-place dense blocks by batched `torch.linalg.cholesky` on the GPU |
 | automatic differentiation, GPU contractions and GEMM | **PyTorch 2.5 (CUDA)**; JAX's GPU builds do not run natively on Windows. Autodiff checks the assembled Hessian; it is not the solver's engine |
+| fused kernels where a contraction is not enough | numba (CPU), CuPy 14 (GPU, conda-forge). `torch.compile` does not run on this machine: no Triton and no compiler toolchain, tested 2026-10-06 |
 | columnar I/O, aggregation | pyarrow, duckdb, polars |
 | scan loops (sorting, LTSS) | numba |
 | reference GLMs for checks | statsmodels |
 | CLI and configuration | typer, rich, pydantic |
 
 **Numerics:**
-- float32 on the GPU with float64 accumulation for sums over cells;
+- float32 on the GPU with float64 accumulation for sums over cells. The v0 runs float64 everywhere (`Monolith.dtype`), and mostly on the CPU: on the GPU, float32 cuts the total from 2.1 to 0.7 ms on IX (2026-10-06);
 - float64 for the factorisations;
 - every random draw seeded from (field id, cell, purpose), so every surprise is reproducible.
 
@@ -433,13 +446,17 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 
 **Speed is a requirement (P13).** The benchmark (`bench`, to build in O1) fits a fixed set of blocks cold and warm and records seconds, outers, Newton steps, inner iterations, peak memory and the optimum reached. It runs on every change to the solver, and its result is an evaluation entry.
 
-| benchmark block | v0 measured | budget |
+The measurements, the design of every fast path and the order of work are in `docs/plans/2026-10-06-optimization.md`.
+
+| benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
-| SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer, 25 outers cap | ≤ 10 s cold |
-| SIM.DO IX 2010–2021 (2.07 M non-empty cells, 552 k parameters) | 664–1,683 s cold (exposure variants, 2026-10-05); 191 s warm | ≤ 120 s cold, ≤ 30 s warm |
-| SIH-RD X 2010–2023 annual | about 1 h | ≤ 10 min |
-| SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | ≤ 10 min |
-| survey of one chapter (all lenses and their nulls) | hours | ≤ 10 min |
+| SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | Λ 2.8 ms, HVP 26.7 ms (CPU float64); about 6,000 HVPs per fit; 664–1,683 s cold under load | 20 s / 5 s |
+| IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
+| SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
+| SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |
+| all 19 SIM chapters; all 20 SIH chapters | hours | 10 min; 30 min |
+| survey of one chapter | 65 s (III, 21 fields) to hours | < 2 min |
 
 **Budgets are design targets.** The first v1 measurement either meets them or revises them, with the reason.
 
@@ -1069,8 +1086,8 @@ A solver change is measured on the benchmark before it is adopted.
 | **O0** | this revision: review, principles P9 and P11–P15, the ICD ontology (§3.3) and race (§3.4), §5, §7.0, §7.5 relation models, §8.4, §8.6, §10, this roadmap (ADR-0023) | written (2026-10-06) |
 | **O1, solver** | `solver`: the assembled arrowhead Hessian (checked against autodiff), elimination, sparse Cholesky, Schur complement, constraints; BYM2; LAML in log τ; selected inversion; the benchmark (`bench`, O1) | the v0 optimum is reached on the four benchmark blocks, and the §5.8 budgets are met or revised with the reason |
 | **O2, settle** | refit the fitted blocks on the new solver; decide what waited on slow fits: the interaction's rank (ADR-0021), the tree prior (horseshoe), the SUS exposure and race groups (ADR-0020), the SINAN wave-1 families | each decision has its held-out measurement |
-| **O3, race** | pegasus_data: the 2000 census's undeclared race, the within-band prior from 2010's cohorts, the sample-to-full-count correction measured on 2010, the 1991 race; PegaSUS: race as an axis of G, the recording model of §4.1 (unknown share, confusion where measured, the women's matrix wired), the race terms of §4.2, the race-disparity departure | births, infant deaths and one adult chapter fitted with race; recorded against expected by race calibrated at B1; disparities with intervals checked against published rates (held out) |
-| **O4, ICD ontology** | pegasus_data: the ontology product of §3.3 (attributes from the DATASUS release, age plausibility, ICD-9 and its bridge, the lists to add, external-cause axes, the relation graph); PegaSUS: subcategory leaves, list effects θ_L, structural zeros, conserved levels and corroboration rules read from the relations | the ontology served through `gateway`; one chapter refitted with subcategories, lists and zeros, held-out deviance against the category-level fit |
+| **O3, race and ages** | pegasus_data: the 2000 undeclared imputed from the census microdata with household context (totals untouched), the within-band prior from 2010's cohorts, the sample-to-full-count correction measured on 2010, the 1991 race, single ages 0–19 validated; PegaSUS: G = 33 ages × 2 sexes × 5 races, the recording model of §4.1, the race terms of §4.2, the race-disparity departure | births, infant deaths and one adult chapter fitted with race and single child ages; recorded against expected by race calibrated at B1; disparities with intervals checked against published rates (held out) |
+| **O4, ICD ontology** | pegasus_data: the ontology product of §3.3 (attributes from the DATASUS release, age plausibility, ICD-9 and its bridge, the lists to add, external-cause axes, the relation graph); PegaSUS: list effects θ_L, structural zeros, intent and mechanism fields, conserved levels and corroboration rules read from the relations | the ontology served through `gateway`; one chapter refitted with lists and zeros, held-out deviance against the fit without them |
 | **O5, characterise** | the designed grid of planted signals (§10.3) and null worlds over real fields of every system; v0 constants re-made on the grid; IHW weights (§8.4); the gate retired in code, the method record on every lead | every v0 lens has its power surface and null-world FDR; no documented event tunes anything |
 | **O6, departures** | departure models (§7.0): unusual trend (BaySTDetect), cell excess (local fdr / shrinkage), step, cluster exceedance, group interaction; Bayesian FDR | each beats or matches its v0 lens on the grid at equal FDR, else the lens stays the inference and the reason is recorded |
 | **O7, relations** | the distributed-lag term in the monolith; the shared-component model; the endemic–epidemic term for infectious families; negative controls | the arbovirus → microcephaly lag recovered (declared before the run), cold → respiratory admissions estimated with its interval, null worlds held |
