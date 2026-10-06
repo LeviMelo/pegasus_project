@@ -336,7 +336,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
-### 5.3 The mean: structured Newton (v0 built, v1 to build)
+### 5.3 The mean: structured Newton (v1 built 2026-10-06 for count blocks without the interaction, `PEGASUS_SOLVER=v1`; evaluation 2026-10-06, solver v1)
 
 **The v0 solver** is truncated Newton–CG on autodiff Hessian–vector products (double backward through the factorised total), with a diagonal preconditioner, Eisenstat–Walker forcing and an Armijo line search; L-BFGS before it diverged (evaluation 2026-10-04). Warm starts, `mean_tol` and Anderson acceleration of the outer loop are ADR-0017.
 - **Measured** on chapter IX 2010–2021 (552,046 parameters; 2026-10-06): the first ten Newton steps take 1–3 CG iterations each; from the fourteenth, every step hits the 50-iteration cap and gains less than 10⁻³.
@@ -372,7 +372,7 @@ H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP
 
 **BYM2.** The geography is reparametrised as BYM2: one σ and a mixing ρ (Riebler et al. 2016, §4.3). The v0's two separate τ's for the ICAR and iid parts form a ridge, which is the ill-conditioning the `move_tol` stopping rule steps around.
 
-### 5.4 Strengths: the Laplace marginal likelihood (v0 built, v1 to build)
+### 5.4 Strengths: the Laplace marginal likelihood (v1 built 2026-10-06: Newton on log τ with exact traces)
 
 **v0:** Fellner–Schall fixed point, damped to ×10 per outer, with the Poisson Fisher diagonal per effect, Anderson-accelerated. It converges linearly: 12–40 outers per fit, each repeating the mean fit.
 
@@ -387,6 +387,13 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 - **Every quantity comes from the factor of §5.3:**
   - log|H| from its diagonal;
   - tr(H⁻¹Q_j) by selected inversion (Takahashi recursions on the sparse factor; the Schur part densely), which replaces the probes and per-row dense solves of `_trace_inv_times`.
+- **As built (2026-10-06):**
+  - Newton on ρ with the observed negative Hessian of LAML (W's derivative dropped): ½δ_ij τ_j(tr_j + q_j) − ½τ_iτ_j tr(ΣQ_iΣQ_j) − τ_iτ_j xᵀQ_iΣQ_jx.
+  - Floored on each component's own scale, with Fellner–Schall's step where it agrees in sign and goes further.
+  - It stops when the step's predicted LAML gain is below 0.1 (the BYM ridge is flat).
+  - The traces are exact for the globals and use 32 probes solved exactly with the factor for the rest; tr(ΣQ_iΣQ_j) uses 16 probes.
+  - Selected inversion was measured and not adopted at this size: a numba Takahashi recursion took 44 s against about 2 s for 32 exactly solved probes, which agree with it to 10⁻³ (evaluation 2026-10-06, solver v1). A supernodal selected inversion would change that.
+  - On IX: 11 outers cold, against 12–40.
 - **LAML is also a model-choice criterion** (§5.6), beside held-out deviance.
 - **The dispersion φ** stays maximum likelihood with μ fixed (§5.2). A joint estimate inside LAML is a measured option.
 
@@ -1109,8 +1116,8 @@ A solver change is measured on the benchmark before it is adopted.
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
 | marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
-| mean solver | 5.3 | v0 (Newton–CG on autodiff HVPs) | O1 |
-| strengths | 5.4 | v0 (Fellner–Schall fixed point) | O1 |
+| mean solver | 5.3 | v1 built for count blocks without the interaction (exact Newton, verified on IX); v0 still the default and the path for marks, shares and the interaction | O1 |
+| strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
 | uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
 | lenses and their nulls | 7.1–7.2 | v0, now screens | O5, O6 |

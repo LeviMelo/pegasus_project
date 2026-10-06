@@ -219,6 +219,17 @@ O1.0 measures the parts (assembly, factorisation, Schur, LAML iterations) on the
 
 Each step's measurement goes into one evaluation entry for O1, written when O1 closes (documentation weight: one entry, not six).
 
+## 8b. Measured so far (2026-10-06, evaluation 2026-10-06, solver v1)
+
+| block, cold | v0 | v1 | held-out deviance per event (v0 / v1) |
+|---|---|---|---|
+| SIM.DO IX 2010–2021 | 664–1,683 s under load (12–40 outers) | **154 s, 6 outers** (about 5.6 s mean fit and 9.4 s strengths per outer) | 2.21851 / 2.21828 |
+| SIM.DO VII 2010–2021 (277 deaths) | — | 395 s, 17 outers; h_all and v_all run to their bounds | — / 18.2 |
+
+**What VII shows.** A block with very few events pays the full lattice's fixed cost (E·U leaf-place parameters, every probe over them), and its weakly identified strengths bounce off the ×10 clip. Two model changes are measured before adoption, by held-out deviance:
+1. **Leaf-place terms only where identifiable: measured and rejected.** v_cat restricted to leaves with ≥ 0.1 % of the block's events and ≥ 100 events kept 42 of IX's 77 leaves (99.4 % of deaths). Held-out deviance went 2.21828 → 2.21934 (worse by about 840 units over 788 k deaths), and the time 169 → 160 s: the rare codes' place deviations predict, and the per-outer cost is the probes, not E·U. On VII (none qualify) held-out went 18.21 → 19.95. The option was removed.
+2. **A weak prior on log τ.** N(0, 3²) on each ρ, which barely moves the identified strengths and keeps the flat ones from wandering.
+
 ## 9. Risks and their fallbacks
 
 - **Selected inversion in Python.** No maintained Python binding exposes it. The fallback is Hutchinson probes with exact factor solves: the LAML gradient's noise is then √(2/S) of the trace, and BFGS tolerates it with S = 30.

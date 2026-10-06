@@ -593,7 +593,10 @@ class StructuredNewton:
         direction Newton's up to the change of H between steps, at a 117-column solve per fit instead of per step."""
         nc_l, nc_v = len(self.con_l), len(self.con_v)
         nc = nc_l + nc_v
-        if getattr(self, "_V", None) is None or getattr(self, "_V_fac", None) is not fac:
+        # V is recomputed for every new factor: reusing it across factors (with 8 trace probes) took IX from 6 outers to 29
+        # (2026-10-06), so its exactness is worth the 1.8 s
+        self._V_age = getattr(self, "_V_age", 0) + (getattr(self, "_V_fac", None) is not fac)
+        if getattr(self, "_V", None) is None or (getattr(self, "_V_fac", None) is not fac and self._V_age >= 1):
             bv = np.zeros((self.E, self.U, nc))
             br = np.zeros((self.nl_red + self.ng_red, nc))
             for j, (idx, val) in enumerate(self.con_l):
@@ -601,7 +604,8 @@ class StructuredNewton:
             for j, e in enumerate(self.con_v):
                 bv[e, :, nc_l + j] = 1.0
             self._V = self.solve_full(fac, f, vs, bv, br)
-            self._V_fac = fac
+            self._V_age = 0
+        self._V_fac = fac
         Vv, Vr = self._V
         def apply_A(xv, xr):
             out = np.zeros((nc, xr.shape[1]))
@@ -691,9 +695,9 @@ class StructuredNewton:
         quadratic forms xᵀQ_jx, T_ij = tr(ΣQ_iΣQ_j) by probes z solved exactly (tr(ΣQ_iΣQ_j) = E[(Q_iΣz)ᵀ(ΣQ_jz)],
         in chunks so the leaf-place right-hand sides stay small), and R_ij = xᵀQ_iΣQ_jx from J exact solves."""
         m = self.m
-        tr = self.traces(probes=32)                    # exact globals; 32 probes of their own for the rest
+        tr = self.traces(probes=int(__import__("os").environ.get("PEGASUS_TRACE_PROBES", "32")))   # exact globals; probes for the rest
         fac, f, vs = self._last
-        need_T = True          # a T reused across outers misdirected the weakly identified s/v strengths (2026-10-06)
+        need_T = probes > 0    # a T reused across outers misdirected the weakly identified s/v strengths (2026-10-06)
         Vv, Vr = self._V
         AV = self._apply_A(Vv, Vr)
         x = {k: v.detach() for k, v in m.effects().items()}
@@ -743,7 +747,7 @@ class StructuredNewton:
             F /= probes
             F = (F + F.T) / 2
             self._T = F
-        F = self._T
+        F = self._T if need_T else np.zeros((J, J))
         # R_ij = xᵀQ_i Σ Q_j x: one exact solve per component
         qx = {nm: np.zeros(shapes[nm] + (J,)) for nm in names}
         for j, nm in enumerate(names):
@@ -800,7 +804,6 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
     decrease ½δᵀHδ falls below ``loglik_tol`` log-likelihood units. Returns the Newton steps taken."""
     nw = solver or StructuredNewton(model)
     model._solver_v1 = nw
-    nw._V = None                                              # kriging directions from this fit's first Hessian
     scale = model._objective_norm()
     steps = 0
     first = last = None
@@ -853,65 +856,6 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
         reuse = step == 1.0 and 0.8 < ratio < 1.25 and streak < 4
     model.refit_decrement = 0.0 if last is None else (first - last) / scale
     return steps
-
-
-def selected_inverse(L: sp.csc_matrix, D: np.ndarray) -> sp.csc_matrix:
-    """Σ = (L D Lᵀ)⁻¹ on the sparsity pattern of L (unit lower triangular, CSC, rows sorted), by the Takahashi
-    recursion (Takahashi, Fagan & Chin 1973; Rue & Martino 2007): from the last column back,
-    Σ_ij = −Σ_{k∈struct(j)} Σ_ik L_kj (i ∈ struct(j)), Σ_jj = 1/D_j − Σ_{k∈struct(j)} L_kj Σ_kj. Every Σ_ik it
-    reads lies in the pattern (struct(j) is a clique of the filled graph). Returns the lower triangle of Σ on L's
-    pattern; the marginal variances are its diagonal and tr(Σ Q) needs only entries where Q is nonzero."""
-    from numba import njit
-
-    @njit(cache=True)
-    def _run(indptr, indices, Lx, D, Sx):
-        n = len(indptr) - 1
-        for j in range(n - 1, -1, -1):
-            lo, hi = indptr[j], indptr[j + 1]
-            # rows of column j strictly below the diagonal (the diagonal is stored first)
-            start = lo + 1
-            m = hi - start
-            if m == 0:
-                Sx[lo] = 1.0 / D[j]
-                continue
-            rows = indices[start:hi]
-            lv = Lx[start:hi]
-            # Σ_ij for i in rows: −Σ_k Σ_ik L_kj, Σ_ik read from column min(i,k)
-            for a in range(m):
-                i = rows[a]
-                acc = 0.0
-                for b in range(m):
-                    k = rows[b]
-                    if k >= i:
-                        col, row = i, k
-                    else:
-                        col, row = k, i
-                    # find row in column col (rows sorted): binary search
-                    l2, h2 = indptr[col], indptr[col + 1] - 1
-                    val = 0.0
-                    while l2 <= h2:
-                        mid = (l2 + h2) // 2
-                        r = indices[mid]
-                        if r == row:
-                            val = Sx[mid]
-                            break
-                        elif r < row:
-                            l2 = mid + 1
-                        else:
-                            h2 = mid - 1
-                    acc += val * lv[b]
-                Sx[start + a] = -acc
-            acc = 0.0
-            for a in range(m):
-                acc += lv[a] * Sx[start + a]
-            Sx[lo] = 1.0 / D[j] - acc
-        return Sx
-
-    L = L.tocsc()
-    L.sort_indices()
-    Sx = np.zeros(L.nnz)
-    _run(L.indptr.astype(np.int64), L.indices.astype(np.int64), L.data.astype(np.float64), np.asarray(D, np.float64), Sx)
-    return sp.csc_matrix((Sx, L.indices, L.indptr), shape=L.shape)
 
 
 def _lower_solve_kernel():
