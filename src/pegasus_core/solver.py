@@ -67,6 +67,7 @@ class Factors:
     dPu: np.ndarray | None = None    # [A, U]
     dR: np.ndarray | None = None     # [A, U, G]
     cell_grad: np.ndarray | None = None   # a mark model's score per non-empty cell (log-likelihood units)
+    nb_phi: float | None = None           # the counts fitted by the negative binomial likelihood: its φ
 
 
 class Arrowhead:
@@ -74,8 +75,10 @@ class Arrowhead:
     (CHOLMOD) and Y = L⁻¹PB: S = C − YᵀY = L_S L_Sᵀ, and a solve is one forward and one back substitution with L
     plus a dense solve with L_S."""
 
-    def __init__(self, fa, Y: np.ndarray, B: np.ndarray, Sc: np.ndarray, nl: int, L: Supernodal | None = None):
-        self.fa, self.Y, self.B, self.Sc, self.nl, self.L = fa, Y, B, Sc, nl, L
+    def __init__(self, fa, Y: np.ndarray, Cg: np.ndarray, Sc: np.ndarray, nl: int, L: Supernodal | None = None):
+        # Y = L⁻¹PB with B in the globals' own (x-space) columns, Cg their reduced basis: a solve applies Cg on the
+        # small side (Yᵀy then Cgᵀ, Cg x then Y)
+        self.fa, self.Y, self.Cg, self.Sc, self.nl, self.L = fa, Y, Cg, Sc, nl, L
         self.p = np.asarray(fa.perm)
 
     def __call__(self, b: np.ndarray) -> np.ndarray:
@@ -84,9 +87,10 @@ class Arrowhead:
         bl, bg = b[: self.nl], b[self.nl:]
         many = self.L is not None and b.shape[1] >= 8
         yl = self.L.lower(bl[self.p]) if many else self.fa.solve(bl[self.p], system="L")
-        rhs = bg - self.Y.T @ yl
+        rhs = bg - self.Cg.T @ (self.Y.T @ yl)
         xg = np.linalg.solve(self.Sc.T, np.linalg.solve(self.Sc, rhs))
-        z = self.L.lower_t(yl - self.Y @ xg) if many else self.fa.solve(yl - self.Y @ xg, system="Lt")
+        yx = self.Y @ (self.Cg @ xg)
+        z = self.L.lower_t(yl - yx) if many else self.fa.solve(yl - yx, system="Lt")
         xl = np.empty_like(z)
         xl[self.p] = z
         out = np.vstack([xl, xg])
@@ -190,6 +194,12 @@ class StructuredNewton:
         m = self.m
         if hasattr(m, "cell_derivatives"):
             return self._mark_factors(x)
+        if getattr(m, "likelihood", "poisson") == "nb" and np.isfinite(getattr(m, "phi_fit", np.inf)):
+            # the negative binomial likelihood (`Monolith(likelihood="nb")`): its expected information φμ/(φ + μ) over
+            # every cell, streamed per leaf; the score is the same sums less φy/(φ + μ) over the non-empty cells
+            f = self.nb_factors(x, m.phi_fit)
+            f.nb_phi = float(m.phi_fit)
+            return f
         t0 = time.time()
         with torch.no_grad():
             LP = m._leaf_place(x)                                                 # [E, U]
@@ -246,11 +256,9 @@ class StructuredNewton:
         self.timing["factors"] = time.time() - t0
         return f
 
-    def _mark_gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
-        """The gradient from a mark model's cell scores, summed over the cells each effect touches."""
-        m = self.m
-        d = m.data
-        r = f.cell_grad
+    def _cell_sums(self, r: np.ndarray) -> dict[str, np.ndarray]:
+        """Σ of a per-non-empty-cell quantity over the cells each effect touches."""
+        d = self.m.data
         E, U, T, G, K = self.E, self.U, self.T, self.G, self.K
         e, u, t, gg = (np.asarray(a, dtype=np.int64) for a in (d.e, d.u, d.t, d.g))
         k = self.grp[e]
@@ -268,6 +276,10 @@ class StructuredNewton:
             mo = self.moy[t]
             M["c_all"] = np.bincount(mo, weights=r, minlength=12)[None, :]
             M["c_grp"] = np.bincount(k * 12 + mo, weights=r, minlength=K * 12).reshape(K, 12)
+        return M
+
+    def _with_penalty(self, x: dict[str, torch.Tensor], M: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        m = self.m
         out = {}
         for n, val in M.items():
             out[n] = val
@@ -277,11 +289,41 @@ class StructuredNewton:
                 out[n] = val + ((c.shape.Q @ xv.T).T * c.tau).reshape(val.shape)
         return out
 
+    def _nb_gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
+        """The negative binomial score: Σ over every cell of w = φμ/(φ + μ) (the streamed sums of `nb_factors`), less
+        φy/(φ + μ) over the non-empty cells, summed over the cells each effect touches."""
+        m = self.m
+        K, T = self.K, self.T
+        grp = self.grp
+        w_t = f.dPk.sum(1)                                                  # [E, T]
+        w_g = f.mubar.sum(1)                                                # [E, G]
+        gs = np.zeros((K, self.U))
+        np.add.at(gs, grp, f.m)
+        M = {"b0": np.array([f.m.sum()]), "th_grp": np.bincount(grp, weights=f.m.sum(1), minlength=K)[None, :],
+             "th_cat": f.m.sum(1)[None, :], "f_all": w_g.sum(0)[None, :], "f_grp": np.zeros((K, self.G)),
+             "h_all": w_t.sum(0)[None, :], "h_grp": np.zeros((K, T)), "s_all": f.m.sum(0)[None, :], "s_grp": gs,
+             "v_cat": f.m.copy()}
+        np.add.at(M["f_grp"], grp, w_g)
+        np.add.at(M["h_grp"], grp, w_t)
+        M["v_all"], M["v_grp"] = M["s_all"], M["s_grp"]
+        if self.monthly:
+            agg = np.zeros((T, 12))
+            agg[np.arange(T), self.moy] = 1.0
+            M["c_all"] = (M["h_all"] @ agg)
+            M["c_grp"] = M["h_grp"] @ agg
+        with torch.no_grad():
+            mu = _np(torch.exp(m.eta_nnz(x)))
+        phi = f.nb_phi
+        corr = self._cell_sums(phi * m.data.y / (phi + mu))
+        return self._with_penalty(x, {n: v - corr[n] for n, v in M.items()})
+
     def gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
         """∂(−log L + penalty)/∂x for every effect (x-space, unscaled: log-likelihood units)."""
         m = self.m
         if f.cell_grad is not None:
-            return self._mark_gradient(x, f)
+            return self._with_penalty(x, self._cell_sums(f.cell_grad))
+        if f.nb_phi is not None:
+            return self._nb_gradient(x, f)
         WPu, Ht, Fg = self._leaf_sums(f)
         M = {"b0": np.array([f.total]), "th_grp": WPu.sum(1)[None, :], "th_cat": f.m.sum(1)[None, :],
              "f_all": Fg.sum(0)[None, :], "f_grp": Fg, "h_all": Ht.sum(0)[None, :], "h_grp": Ht,
@@ -581,8 +623,9 @@ class StructuredNewton:
 
     def factor(self, parts) -> Arrowhead:
         """Factor the arrowhead: CHOLMOD on the place system (supernodal, its symbolic analysis kept across steps), Y =
-        L⁻¹PB for the globals' columns (B already in reduced global coordinates) by the supernodal solve, and the dense
-        Cholesky of S = C − YᵀY."""
+        L⁻¹PB for the globals' x-space columns by the supernodal solve, and the dense Cholesky of the reduced Schur
+        complement S = Cgᵀ(C − YᵀY)Cg. Mapping B to the reduced basis first (B·Cg, 233,940 × 1,293 by 1,293 × 1,179 on
+        SIM chapter I: 0.7 TFLOP) cost more than the solve; the basis is applied on the small side instead."""
         from sksparse.cholmod import cho_factor
         Al, Bl, Hgg = parts
         t0 = time.time()
@@ -594,21 +637,20 @@ class StructuredNewton:
             self._symbolic.factorize(Al)
         fa = self._symbolic
         t1 = time.time()
-        B = Bl @ self.Cg                                              # [n_place_red, ng_red]
         p = np.asarray(fa.perm)
         L = Supernodal(fa.get_factor("LL"))
-        Y = L.lower(B[p])
+        Y = L.lower(Bl[p], overwrite=True)                             # [n_place_red, ng] (Bl[p] is already a copy)
         t2 = time.time()
         # YᵀY by a symmetric rank-k update (half a general product's arithmetic), on Yᵀ's Fortran view: no copy
         from scipy.linalg.blas import dsyrk
         YtY = dsyrk(1.0, Y.T, trans=0, lower=0)
         YtY = np.triu(YtY) + np.triu(YtY, 1).T
-        S = self.Cg.T @ ((Hgg + Hgg.T) * 0.5) @ self.Cg - YtY
+        S = self.Cg.T @ (((Hgg + Hgg.T) * 0.5 - YtY) @ self.Cg)
         ds = np.diag(S)
         S = S + np.diag(RIDGE * np.maximum(ds, ds.max() * 1e-12))
         Sc = np.linalg.cholesky(S)
         self.timing.update(factor=t1 - t0, schur_solve=t2 - t1, schur=time.time() - t2)
-        return Arrowhead(fa, Y, B, Sc, self.nl_red, L)
+        return Arrowhead(fa, Y, self.Cg, Sc, self.nl_red, L)
 
     def solve_full(self, fac, f: Factors, vs, b_v: np.ndarray, b_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Solve H δ = b for (v, reduced (ℓ,γ)) right-hand sides: b_v [E, U, n], b_r [n_red, n]. The leaf-place parts
@@ -1070,7 +1112,7 @@ class StructuredNewton:
         z_l = rng.standard_normal((self.nl_red, n))
         z_g = rng.standard_normal((self.ng_red, n))
         x_g = solve_triangular(fac.Sc.T, z_g, lower=False)
-        x_lp = fac.L.lower_t(z_l - fac.Y @ x_g)
+        x_lp = fac.L.lower_t(z_l - fac.Y @ (fac.Cg @ x_g))
         x_l = np.empty_like(x_lp)
         x_l[fac.p] = x_lp
         x_r = np.vstack([x_l, x_g])
@@ -1429,17 +1471,17 @@ class Supernodal:
         self.n = L.shape[0]
         self.parts = _sn_kernels()[0](L.indptr.astype(np.int64), L.indices.astype(np.int64), L.data, self.n)
 
-    def _run(self, B: np.ndarray, transpose: bool) -> np.ndarray:
+    def _run(self, B: np.ndarray, transpose: bool, overwrite: bool = False) -> np.ndarray:
         from numba import get_num_threads
         from threadpoolctl import threadpool_limits
-        Y = np.array(B, dtype=np.float64, order="C", copy=True)
+        Y = np.array(B, dtype=np.float64, order="C", copy=not overwrite)
         chunk = max(1, -(-Y.shape[1] // get_num_threads()))
         with threadpool_limits(1, user_api="blas"):      # the products run inside numba's threads
             return _sn_kernels()[2 if transpose else 1](*self.parts, Y, chunk)
 
-    def lower(self, B: np.ndarray) -> np.ndarray:
-        """L⁻¹B."""
-        return self._run(B, False)
+    def lower(self, B: np.ndarray, overwrite: bool = False) -> np.ndarray:
+        """L⁻¹B (in B's own memory when ``overwrite`` and B is C-contiguous float64)."""
+        return self._run(B, False, overwrite)
 
     def lower_t(self, B: np.ndarray) -> np.ndarray:
         """L⁻ᵀB."""

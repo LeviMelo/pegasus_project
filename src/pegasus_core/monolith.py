@@ -385,9 +385,18 @@ class Monolith:
     """One block's fitted model."""
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
-                 device: str = "cpu", rank: int = 0, prior: str = "gaussian"):
+                 device: str = "cpu", rank: int = 0, prior: str = "gaussian", likelihood: str = "poisson"):
         if prior not in ("gaussian", "horseshoe"):
             raise ValueError(f"tree prior {prior!r}: gaussian or horseshoe")
+        if likelihood not in ("poisson", "nb"):
+            raise ValueError(f"likelihood {likelihood!r}: poisson or nb")
+        if likelihood == "nb" and rank:
+            raise NotImplementedError("the negative binomial mean fit does not carry the low-rank interaction")
+        # the mean's likelihood: Poisson quasi-likelihood (consistent for μ, φ estimated after; ARCHITECTURE §5.2) or the
+        # negative binomial itself, φ re-estimated every outer (`phi_fit`), so the strengths' LAML reads the
+        # overdispersion as such and not as place variation (OPEN_QUESTIONS 8)
+        self.likelihood = likelihood
+        self.phi_fit = float("inf")
         self.data = data
         self.prior = prior          # the tree levels' prior: iid Gaussian per level, or the horseshoe (`_update_horseshoe`)
         self.rank = int(rank)       # R, the components of the place × time interaction (0: none); `_enable_interaction` adds them
@@ -696,8 +705,11 @@ class Monolith:
 
     def objective(self) -> torch.Tensor:
         """−log L + penalty, divided by the number of events so gradients are of order one.
-        Σ y·η comes from the sufficient statistics; only Λ is computed per evaluation."""
+        Σ y·η comes from the sufficient statistics; only Λ is computed per evaluation. With the negative binomial
+        likelihood (and a finite φ) the log-likelihood is `nb_loglik`'s, streamed over every cell."""
         x = self.effects()
+        if self.likelihood == "nb" and np.isfinite(self.phi_fit):
+            return (-torch.as_tensor(self.nb_loglik(self.phi_fit, x), dtype=self.dtype) + self.penalty(x)) / self.scale
         linear = sum((x[k] * self.Y[k]).sum() for k in self.Y) + self.y_offset
         if self.ix_on:
             linear = linear + (self._I(x) * self.Y3).sum()
@@ -748,6 +760,13 @@ class Monolith:
                                loglik_tol=max(mean_tol, 1000.0))
             t1 = time.time()
             changes = self._update_taus()
+            if self.likelihood == "nb":
+                old = self.phi_fit
+                self.phi_fit = self._dispersion()
+                if np.isfinite(old) and np.isfinite(self.phi_fit):
+                    changes = list(changes) + [abs(float(np.log(self.phi_fit / old)))]
+                elif np.isfinite(self.phi_fit):
+                    changes = list(changes) + [np.inf]
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
             self.history.append({"iteration": it, "objective": float(self.objective()) * self.scale, "newton": steps,
                                  "change": max(changes), "move": move, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
@@ -1029,7 +1048,8 @@ class Monolith:
         # the LAML is comparable across outers only when nothing else moves between them: with the interaction on (its
         # factors and strengths), or a mark model's dispersion re-estimated every outer (its cells' weights), there is
         # no line search (IX rank 1 halved every step; birth weight halved back to τ = 1 where v0 had 10⁴)
-        prev = None if self.ix_on or hasattr(self, "cell_derivatives") else getattr(self, "_laml_prev", None)
+        prev = (None if self.ix_on or hasattr(self, "cell_derivatives") or self.likelihood == "nb"
+                else getattr(self, "_laml_prev", None))
         # the step aims at the fixed point without W's derivative, which sits a few per cent of τ from the LAML's own
         # optimum (IX, 2026-10-06): a fall of a few units is that difference, not an overshoot
         if prev is not None and not (prev["accurate"] and accurate):
@@ -1351,7 +1371,8 @@ class Monolith:
 
     def key(self) -> dict:
         return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {}),
-                **({"prior": self.prior} if self.prior != "gaussian" else {})}
+                **({"prior": self.prior} if self.prior != "gaussian" else {}),
+                **({"likelihood": self.likelihood} if self.likelihood != "poisson" else {})}
 
     def save(self) -> None:
         arrays = {k: v.detach().cpu().numpy() for k, v in self.params.items()}
