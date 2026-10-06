@@ -140,6 +140,9 @@ GRIDS = {"outbreak": ("RATE_RATIO", (1.2, 1.3, 1.4, 1.5, 1.75, 2.0)),
          "group_disparity": ("GROUP_SD", (0.2, 0.3, 0.4, 0.5, 0.7))}
 
 
+LOW_RATE_RATIO = (1.0, 1.05, 1.1, 1.15, 1.2)   # GATE_LOW=1: the grid below the provisional 1.2, to find the smallest θ0 (ADR-0022)
+
+
 def calibrate(name: str, n: int, lens_names: list[str]) -> dict:
     kinds = os.environ.get("GATE_KINDS", "space,time").split(",")
     """The false-lead share of a lens on the negatives, over a grid of its minimum effect (§8.4)."""
@@ -152,6 +155,8 @@ def calibrate(name: str, n: int, lens_names: list[str]) -> dict:
     out: dict = {"field": name, "worlds": n, "grid": {}}
     for lens in lens_names:
         const, grid = GRIDS[lens] if not mark else ("MARK_LOG", (0.03, 0.05, 0.08, 0.12))
+        if os.environ.get("GATE_LOW") and const == "RATE_RATIO":
+            grid = LOW_RATE_RATIO
         orig = getattr(lenses, const)
         for v in grid:
             setattr(lenses, const, v)

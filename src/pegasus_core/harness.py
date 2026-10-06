@@ -22,7 +22,7 @@ Results are tables in the store (``harness``), written up as evaluation entries.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -235,6 +235,50 @@ def power_curve(s: surprise.Surprise, run_lens, loci: list[np.ndarray], thetas: 
                 by_mu[f"θ={theta} μ∈[{lo},{hi})"] = (round(float(np.mean(sel)), 2), len(sel))
     return {"field": s.field.id, "tier": s.tier, "loci": len(loci), "curve": curve, "hits": detail,
             "by_expected": by_mu, "rows": rows_out}
+
+
+def region_power(s: surprise.Surprise, run_lens, region_of: np.ndarray, theta: float, windows: list[tuple[int, int]],
+                 thin: float = 1.0, seed_parts: tuple = ("region-power",)) -> list[tuple[float, bool]]:
+    """Power for a rate ratio ``theta`` over one macro-region and window of years (the admission reference of
+    ARCHITECTURE §8.4), by the production lens itself: [(expected count of the locus, detected)].
+
+    ``windows`` are year-index ranges [t0, t1). Every region meets every window once, the regions of a round on
+    different windows, all planted at once into one null background y* ~ NB(thin · μ, φ) (``thin`` < 1 is a rarer
+    field of the same shape: a thinned negative binomial keeps its size φ, so the curve reaches small counts).
+    **Detected** = a finding of the lens lies at least half inside the locus (its cells). A region-year at 1.5 is
+    far larger than any one cell or the scanner's 30-place neighbourhood, so the criterion of `power_curve`
+    (half the locus recovered) would measure the scanner's size, not whether the lens sees the effect; false
+    findings elsewhere are the lens's FDR, not power."""
+    rng = np.random.default_rng(config.seed(*seed_parts, s.field.id, s.tier, thin))
+    base = replace(s, mu=s.mu * thin)
+    regions = sorted(set(region_of.tolist()))
+    in_region = {r: region_of == r for r in regions}
+    T = s.y.shape[1]
+    out: list[tuple[float, bool]] = []
+    for k in range(len(windows)):
+        loci = {}
+        for i, r in enumerate(regions):
+            t0, t1 = windows[(k + i) % len(windows)]
+            m = np.zeros(s.y.shape, dtype=bool)
+            m[np.ix_(in_region[r], np.arange(t0, t1))] = True
+            loci[r] = (m, t0, t1)
+        union = np.any([m for m, _, _ in loci.values()], axis=0)
+        y = _null_draw(base, rng)
+        y[union] += rng.poisson((theta - 1) * base.mu[union])
+        findings = run_lens(with_counts(base, y, (*seed_parts, s.field.id, thin, k)))
+        for r, (m, t0, t1) in loci.items():
+            hit = False
+            for f in findings:
+                rows = np.isin(base.places, f.locus["places"])
+                yrs = f.locus.get("years", [int(s.years[0]), int(s.years[-1])])
+                cols = (s.years >= yrs[0]) & (s.years <= yrs[-1])
+                total = rows.sum() * cols.sum()
+                inside = (rows & in_region[r]).sum() * (cols & (np.arange(T) >= t0) & (np.arange(T) < t1)).sum()
+                if total and inside >= 0.5 * total:
+                    hit = True
+                    break
+            out.append((float(base.mu[m].sum()), hit))
+    return out
 
 
 def _null_draw(s: surprise.Surprise, rng: np.random.Generator) -> np.ndarray:

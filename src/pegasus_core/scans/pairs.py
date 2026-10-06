@@ -199,9 +199,18 @@ def between(effects: dict[str, tuple[np.ndarray, np.ndarray]], basis: MoranBasis
 
 
 def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, delta: float = MIN_EFFECT["E_w"],
-           rank: bool = False, testable=None) -> list[Pair]:
-    """E_w at lag ℓ (Y follows X by ℓ periods) on calibrated surprises z with their weights w."""
+           rank: bool = False, testable=None, excluded: dict | None = None) -> list[Pair]:
+    """E_w at lag ℓ (Y follows X by ℓ periods) on calibrated surprises z with their weights w. A surprise whose
+    calibration failed at its tier is left out (ARCHITECTURE §11.4) and named in ``excluded`` (name → KS record)."""
+    failed = {k: {"tier": v.tier, "ks": v.calibration.get("ks"),
+                   "worst_region": max(v.calibration.get("ks_by_macroregion", {}).values(), default=None)}
+              for k, v in surprises.items() if v.calibration.get("calibrated") is False}
+    if excluded is not None:
+        excluded.update(failed)
+    surprises = {k: v for k, v in surprises.items() if k not in failed}
     names = list(surprises)
+    if len(names) < 2:
+        return []
     first = surprises[names[0]]
     U, T = first.z.shape
     Tl = T - lag

@@ -97,6 +97,19 @@ class DependencyMap:
         return [r for r in self.edges.to_pylist() if r[col]]
 
 
+def exclude_miscalibrated(inp: MapInputs, calibration: dict[str, dict], tier: str = "B1") -> MapInputs:
+    """ARCHITECTURE §11.4: a field whose calibration failed at ``tier`` (KS above 0.03 overall or 0.05 in a macro-region,
+    §6.2) never enters a pair scan there. ``calibration``: field name → the calibration record of its Surprise at the
+    tier; a field with no record (SINASC indicators and contexts have no count expectation) stays. The exclusions, with
+    the KS that excluded them, are recorded in the inputs' ``meta``."""
+    bad = {n: {"tier": tier, "ks": c.get("ks"),
+                      "worst_region": max(c.get("ks_by_macroregion", {}).values(), default=None)}
+           for n, c in calibration.items() if n in inp.names and not c.get("calibrated", True)}
+    out = inp.subset([i for i, n in enumerate(inp.names) if n not in bad])
+    out.meta = {**inp.meta, "excluded_calibration": bad}
+    return out
+
+
 UTILIZATION_GROUP = "SIH"
 
 

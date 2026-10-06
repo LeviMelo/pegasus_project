@@ -53,3 +53,6 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+
+[tool.setuptools.package-data]
+pegasus_core = ["admission_curves.json"]

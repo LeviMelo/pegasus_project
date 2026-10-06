@@ -12,7 +12,10 @@ numerator and denominator, a level never lifts below its own grain.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path
 
 import numpy as np
 
@@ -23,10 +26,19 @@ SUPPORTS = ("municipality", "ibge_immediate_region", "health_region", "ibge_inte
             "ibge_macroregion", "national")
 LAWS = ("sum", "ratio_of_sums", "weighted_mean", "none")
 
-# provisional admission until the harness's power curves exist (ARCHITECTURE §8.4)
-MIN_EVENTS = 1000
-MIN_UNIT_SHARE = 0.05
+# Admission (ARCHITECTURE §8.4, ADR-0022): a field enters a lens scan when the lens's power for the reference effect
+# (a rate ratio of REFERENCE_RATE_RATIO, or the smallest the lens can see, over one macro-region and window) is at least MIN_POWER at the field's expected
+# count there, and a pair scan when the power to see a shared latent of correlation PAIR_RHO is.
+REFERENCE_RATE_RATIO = 1.5
+PAIR_RHO = 0.3
+MIN_POWER = 0.5
 MAX_OVERLAP = 0.05
+CURVES = Path(__file__).with_name("admission_curves.json")
+# the lenses with a curve at the reference effect, and the locus whose expected count it is read at:
+# (share of a macro-region's events over the whole window that the locus holds): a region-year is 1/T of the window,
+# the last three years of a change point 3/T, the whole period of a spatial cluster 1
+COUNT_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster")
+RECENT_YEARS = 3
 
 
 @dataclass(frozen=True)
@@ -123,13 +135,82 @@ class Registry:
         return a in ancestors(b) or b in ancestors(a)
 
 
-def admission(events_total: float, units_with_events: int, units: int) -> tuple[bool, str]:
-    """The provisional rule of ARCHITECTURE §8.4 (replaced by power curves once calibrated)."""
-    if events_total < MIN_EVENTS:
-        return False, f"{events_total:.0f} events < {MIN_EVENTS}"
-    if units_with_events < MIN_UNIT_SHARE * units:
-        return False, f"events in {units_with_events}/{units} units < {MIN_UNIT_SHARE:.0%}"
-    return True, "admitted (provisional rule)"
+@cache
+def curves() -> dict:
+    """The lenses' measured power at the reference effect (`scripts/measure_admission.py`): per lens, bins of the
+    locus's expected count with the share of planted loci the production lens detected."""
+    if not CURVES.exists():
+        raise FileNotFoundError(f"{CURVES.name}: run scripts/measure_admission.py (the admission rule is read from the "
+                                "harness's power curves, ARCHITECTURE §8.4)")
+    return json.loads(CURVES.read_text(encoding="utf-8"))
+
+
+@cache
+def reference_theta(lens: str) -> float | None:
+    """The rate ratio a lens is admitted at: the reference 1.5 (§8.4) if some count gives it power 0.5 there, else the
+    smallest measured ratio at which some count does (a lens that cannot see 1.5 anywhere would otherwise scan nothing);
+    None if it never reaches 0.5 (ADR-0022)."""
+    by_theta = curves()["lenses"][lens]["theta"]
+    for theta in sorted(by_theta, key=float):
+        if max((b["power"] for b in by_theta[theta]["bins"]), default=0.0) >= MIN_POWER:
+            return float(theta)
+    return None
+
+
+@cache
+def _curve(lens: str) -> tuple[np.ndarray, np.ndarray]:
+    """(log expected count, power) of a lens at its reference ratio, made non-decreasing in the count by pooling
+    adjacent violators (more expected events never lowers power), one point per bin."""
+    theta = reference_theta(lens)
+    if theta is None:
+        return np.array([0.0]), np.array([0.0])
+    bins = curves()["lenses"][lens]["theta"][str(theta)]["bins"]
+    x = np.log(np.array([b["median_m"] for b in bins]))
+    y = np.array([b["power"] for b in bins], dtype=float)
+    w = np.array([b["n"] for b in bins], dtype=float)
+    out: list[list[float]] = []
+    for blk in ([yy, ww, 1] for yy, ww in zip(y, w, strict=True)):
+        out.append(blk)
+        while len(out) > 1 and out[-2][0] > out[-1][0]:
+            b2, b1 = out.pop(), out.pop()
+            tot = b1[1] + b2[1]
+            out.append([(b1[0] * b1[1] + b2[0] * b2[1]) / tot, tot, b1[2] + b2[2]])
+    return x, np.repeat([b[0] for b in out], [b[2] for b in out])
+
+
+def power(lens: str, expected: float) -> float:
+    """The lens's power for its reference effect over a locus of ``expected`` events: interpolated in the log count
+    between the measured bins, 0 below the smallest, flat above the largest."""
+    x, y = _curve(lens)
+    if expected <= 0 or reference_theta(lens) is None:
+        return 0.0
+    return float(np.interp(np.log(expected), x, y, left=0.0, right=y[-1]))
+
+
+def critical_count(lens: str) -> float | None:
+    """The smallest locus count at which the lens reaches MIN_POWER; None if it never does."""
+    x, y = _curve(lens)
+    if reference_theta(lens) is None or y[-1] < MIN_POWER:
+        return None
+    return float(np.exp(np.interp(MIN_POWER, y, x))) if y[0] < MIN_POWER else float(np.exp(x[0]))
+
+
+def locus_count(lens: str, region_events: np.ndarray, years: int) -> float:
+    """The expected count of the reference locus for a field with ``region_events`` events per macro-region over
+    ``years`` years: the typical (median) macro-region's share of the window the lens reads."""
+    share = {"outbreak": 1 / years, "space_time": 1 / years, "change_point": min(RECENT_YEARS, years) / years,
+             "spatial_cluster": 1.0}[lens]
+    return float(np.median(region_events)) * share
+
+
+def admission(lens: str, region_events: np.ndarray, years: int) -> tuple[bool, str]:
+    """Whether a lens scans a field (ARCHITECTURE §8.4): its power for a rate ratio of 1.5 over a macro-region-year is at
+    least 0.5 at the field's count, read from the measured curve (`curves`). ``region_events``: the field's events in
+    each macro-region over the ``years`` of the window."""
+    m = locus_count(lens, region_events, years)
+    p = power(lens, m)
+    return p >= MIN_POWER, (f"{lens}: {m:.0f} expected in the median macro-region's locus, power {p:.2f} at RR "
+                            f"{reference_theta(lens)}")
 
 
 def overlap(a: Field, b: Field, registry: Registry | None = None, period: object | None = None) -> float | None:
