@@ -150,7 +150,7 @@ Once v1 reaches the v0 optimum on the benchmark:
 |---|---|---|---|
 | **gateway, assembly** | 10.6 s per block; cached 0.6–1.0 s; SIH role tables rebuilt from compressed files in hours | the lake (Parquet) and pegasus_data's aggregate cubes materialised once in the core data home for SIM, SIH, SINASC and SINAN; BlockData stored float32 | < 2 s per block cold from the lake; never a decode in an analysis |
 | **dispersion φ** | about 14 evaluations of about 1 s, streamed per leaf | a 1-D Newton on the GPU over the same slabs, float32 with float64 sums; the empty cells' term from the factorised marginals | < 1 s |
-| **tiers** | B0 13 s, B1 3 s, B2 2 s, BP 15 s per node | **every node of a block at once**: the node-level μ is a sparse aggregation matrix [nodes × leaves] times the leaf cube; B2 is a 2 × 2 Newton per (node, place), vectorised; BP from the same factor's draws | a block's tiers for all nodes < 10 s |
+| **tiers** | B0 13 s, B1 3 s, B2 2 s, BP 15 s per node under load (2026-10-05); calm, 0.8–1.2 s per node, half in the field's place-year φ (32 scalar searches) and the KS tests (2026-10-06) | **every node of a block at once**: the node-level μ is a sparse aggregation matrix [nodes × leaves] times the leaf cube; B2 is a 2 × 2 Newton per (node, place), vectorised; BP from the same factor's draws | a block's tiers for all nodes < 10 s |
 | **PIT, surprises** | per field, NB CDFs on the CPU | vectorised over all nodes and cells (scipy's C kernels, or the GPU's regularised incomplete beta); seeded draws in batch | a chapter < 5 s |
 | **scans (screens)** | 2.5–3.7 s per field; Python-bound; R = 200 replicates for nulls | one null set per field shared by its lenses; the scalar optimiser and `refit_place` vectorised across fields; nulls only for screens, since departure models (O6) infer from posteriors | a chapter survey < 2 min; all SIM < 30 min |
 | **departure models (O6)** | none | fitted on aggregate cells with the same solver; the per-place mixtures vectorised | a field < 1 s |
@@ -207,15 +207,15 @@ O1.0 measures the parts (assembly, factorisation, Schur, LAML iterations) on the
 
 ## 8. Order of work in O1
 
-| step | what | done when |
-|---|---|---|
-| O1.0 | **Spike and benchmark:** install scikit-sparse (CHOLMOD) and CuPy; `bench`; build the IX place system's real sparsity pattern; time CHOLMOD's symbolic and numeric factorisation, the multi-RHS Schur, and a dense 4,000² factorisation; check the arithmetic of §3 against autodiff | numbers recorded; targets confirmed or revised |
-| O1.1 | the analytic gradient and the assembled Hessian (§3), float32 contractions with float64 accumulation | equal to autodiff to 10⁻⁸ relative (float64) and 10⁻⁵ (mixed) on VII, IX, DENG |
-| O1.2 | elimination, place factorisation, Schur, exact Newton; BYM2; contrasts and kriging | IX optimum equals v0's; Newton steps ≤ 6 cold |
-| O1.3 | LAML with selected inversion (or the exact-solve Hutchinson fallback) | τ's equal to v0's converged ones; outers ≤ 10 |
-| O1.4 | uncertainty from the factor; removal of the v0 path (§4.3) | Laplace marginals equal to v0's draws within their Monte-Carlo error |
-| O1.5 | the pipeline of §5: lake materialisation, all-node tiers, vectorised PIT, φ on the GPU | chapter tiers < 10 s; chapter survey < 2 min |
-| O1.6 | scheduling (§2.6): `heavy.py` with a GPU slot of one, thread counts, memory reservations | no measured contention between two concurrent jobs |
+| step | what | done when | status (2026-10-06, evaluation solver v1) |
+|---|---|---|---|
+| O1.0 | **Spike and benchmark:** install scikit-sparse (CHOLMOD) and CuPy; `bench`; build the IX place system's real sparsity pattern; time CHOLMOD's symbolic and numeric factorisation, the multi-RHS Schur, and a dense 4,000² factorisation; check the arithmetic of §3 against autodiff | numbers recorded; targets confirmed or revised | done: CHOLMOD supernodal; CuPy measured and dropped (the CPU wins in float64) |
+| O1.1 | the analytic gradient and the assembled Hessian (§3), float32 contractions with float64 accumulation | equal to autodiff to 10⁻⁸ relative (float64) and 10⁻⁵ (mixed) on VII, IX, DENG | done in float64 (gradient to 10⁻¹⁴); float32 not adopted |
+| O1.2 | elimination, place factorisation, Schur, exact Newton; BYM2; contrasts and kriging | IX optimum equals v0's; Newton steps ≤ 6 cold | done but BYM2: the IX optimum is below v0's; IX cold 6 outers, 9 Newton steps |
+| O1.3 | LAML with selected inversion (or the exact-solve Hutchinson fallback) | τ's equal to v0's converged ones; outers ≤ 10 | done with Hutchinson probes (selected inversion measured, not adopted); safeguarded Newton on log τ; IX 6 outers |
+| O1.4 | uncertainty from the factor; removal of the v0 path (§4.3) | Laplace marginals equal to v0's draws within their Monte-Carlo error | done: exact Laplace draws (projections within Monte-Carlo error of aᵀH⁻¹a); v0 retired |
+| O1.5 | the pipeline of §5: lake materialisation, all-node tiers, vectorised PIT, φ on the GPU | chapter tiers < 10 s; chapter survey < 2 min | φ binned (4 s against 14); the rest open |
+| O1.6 | scheduling (§2.6): `heavy.py` with a GPU slot of one, thread counts, memory reservations | no measured contention between two concurrent jobs | `heavy.py` thread counts and the GPU slot built; contention not measured |
 
 Each step's measurement goes into one evaluation entry for O1, written when O1 closes (documentation weight: one entry, not six).
 
