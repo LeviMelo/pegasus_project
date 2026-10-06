@@ -289,3 +289,8 @@ One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of 
 **Checked at B1 on SIM 2010–2023 refits,** on the five ICSAP groups that span two chapters:
 - each total equals its parts' sum: heart failure, IX + X: 396,240 + 38,436 observed, 434,675 expected;
 - every one is calibrated, KS 0.004–0.020.
+
+**Conserved levels** (§8.6, `Registry.conserved`):
+- A node's conserved level is its family (the outermost group), plus R00–R99, plus Y10–Y34 for an external cause.
+- C53 → `CONS[C00-C97]` (II + XVIII, 178 categories); X95 → `CONS[X85-Y09]` (+ Y10–Y34).
+- `CONS[I20-I25]` at B1: 2,631,335 deaths observed and expected, calibrated (KS 0.006, the field's φ).

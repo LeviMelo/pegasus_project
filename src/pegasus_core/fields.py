@@ -105,6 +105,8 @@ class Registry:
     def field(self, node: str) -> Field:
         if node not in self.level and node.startswith("LIST[") and "=" in node:
             self.list_fields(node[5:].split("=", 1)[0])           # a list's items are registered on first use
+        if node not in self.level and node.startswith("CONS[") and node.endswith("]"):
+            return self.conserved(node[5:-1])
         if node not in self.level:
             raise KeyError(f"{node!r} is not a node of {self.structure}")
         return Field(id=f"{self.dataset}:{self.event}:{self.classifier}:{node}", dataset=self.dataset,
@@ -144,6 +146,25 @@ class Registry:
             out.append(self.field(node))
         self.partial[name] = partial
         return out
+
+    def conserved(self, node: str) -> Field:
+        """The conserved level of a node (ARCHITECTURE §8.6): its ICD family (the outermost group below its chapter,
+        `leads.family`'s rule), plus the ill-defined causes R00-R99, plus, for an external cause, the events of
+        undetermined intent Y10-Y34: the pools a coding change exchanges with. A departure that a recoding makes
+        shows at the node and not here; one in the events shows in both. A field across blocks (`CONS[<family>]`)."""
+        fam = node
+        while self.parent.get(fam) is not None and self.parent.get(self.parent[fam]) is not None:
+            fam = self.parent[fam]
+        if self.level.get(fam) == "chapter":
+            raise ValueError(f"{node!r} is a chapter: its conserved level is not defined below it")
+        members = set(self.leaves(fam))
+        members |= {c for c in self.level if self.level[c] == "category" and "R00" <= c <= "R99"}
+        if self.chapter(fam) == "XX":
+            members |= {c for c in self.level if self.level[c] == "category" and "Y10" <= c <= "Y34"}
+        cons = f"CONS[{fam}]"
+        self.members[cons], self.level[cons], self.parent[cons] = sorted(members), "list", None
+        self.label[cons] = f"conserved level of {fam}: + R00-R99" + (" + Y10-Y34" if self.chapter(fam) == "XX" else "")
+        return self.field(cons)
 
     def blocks(self, node: str) -> list[str]:
         """The chapters a node's leaves fall in (one for a tree node or an axis, several for a list item)."""

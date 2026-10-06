@@ -867,7 +867,7 @@ It is computed from records by pegasus_data. Pairs with overlap > 0.05 are not t
 **A departure in a recorded count is a change in events, in how they were recorded, or both.** v0 separated them after the fact, with triage rules and thresholds (§7.7). Revision 2 moves as much as the data identify into the model, and grades the rest.
 
 1. **Conserved-level fields are standard (to build).**
-   - For every node, the field of its conserved level is fitted and surveyed beside it (the machinery across blocks is built: list fields, 2026-10-06; the conserved-level nodes themselves are not): the ICD family, plus R00–R99, plus (for external causes) undetermined intent Y10–Y34, the pools a coding change exchanges with. These are list structures across blocks (§3.1).
+   - For every node, the field of its conserved level is fitted and surveyed beside it (built 2026-10-06: `Registry.conserved(node)`, the field `CONS[<family>]` across blocks; not yet read by the lenses beside each lead): the ICD family, plus R00–R99, plus (for external causes) undetermined intent Y10–Y34, the pools a coding change exchanges with. These are list structures across blocks (§3.1).
    - A lead is reported at its own level and at its conserved level. A coding exchange shows as a node lead with no conserved-level lead, which is the *tested* reading of ADR-0019's exchange, available for every lead instead of on demand.
 2. **Recording processes are measurement terms where the data identify them:**
 
