@@ -199,9 +199,15 @@ def between(effects: dict[str, tuple[np.ndarray, np.ndarray]], basis: MoranBasis
 
 
 def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, delta: float = MIN_EFFECT["E_w"],
-           rank: bool = False, testable=None, excluded: dict | None = None) -> list[Pair]:
+           rank: bool = False, testable=None, excluded: dict | None = None, prewhiten: int = 0) -> list[Pair]:
     """E_w at lag ℓ (Y follows X by ℓ periods) on calibrated surprises z with their weights w. A surprise whose
-    calibration failed at its tier is left out (ARCHITECTURE §11.4) and named in ``excluded`` (name → KS record)."""
+    calibration failed at its tier is left out (ARCHITECTURE §11.4) and named in ``excluded`` (name → KS record).
+
+    ``prewhiten`` = p filters each field's z by its own AR(p), pooled over places, before correlating (Haugh's
+    double prewhitening): two series that each carry one slow wave correlate at every lag inside the wave's width,
+    whatever their relation, and the residuals do not. Without it a lag cannot be located (dengue → microcephaly,
+    2015–16: ρ flat over lags 0–6 at the unit-month grain, evaluation 2026-10-05). The caller chooses the grain: a
+    rare outcome is lifted to coarse units first (`surprise.lift`), where its counts are not mostly zero."""
     failed = {k: {"tier": v.tier, "ks": v.calibration.get("ks"),
                    "worst_region": max(v.calibration.get("ks_by_macroregion", {}).values(), default=None)}
               for k, v in surprises.items() if v.calibration.get("calibrated") is False}
@@ -211,15 +217,19 @@ def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, d
     names = list(surprises)
     if len(names) < 2:
         return []
-    first = surprises[names[0]]
-    U, T = first.z.shape
+    zs = {k: np.where(np.isfinite(surprises[k].z), surprises[k].z, 0.0) for k in names}
+    ws = {k: surprises[k].w for k in names}
+    if prewhiten:
+        zs = {k: _ar_residuals(z, prewhiten) for k, z in zs.items()}
+        ws = {k: w[:, prewhiten:] for k, w in ws.items()}
+    U, T = zs[names[0]].shape
     Tl = T - lag
     if Tl < 3:
         raise ValueError(f"lag {lag} leaves {Tl} periods")
-    Zx = np.stack([surprises[k].z[:, :Tl].ravel() for k in names], axis=1)
-    Zy = np.stack([surprises[k].z[:, lag:].ravel() for k in names], axis=1)
-    Wx = np.stack([surprises[k].w[:, :Tl].ravel() for k in names], axis=1)
-    Wy = np.stack([surprises[k].w[:, lag:].ravel() for k in names], axis=1)
+    Zx = np.stack([zs[k][:, :Tl].ravel() for k in names], axis=1)
+    Zy = np.stack([zs[k][:, lag:].ravel() for k in names], axis=1)
+    Wx = np.stack([ws[k][:, :Tl].ravel() for k in names], axis=1)
+    Wy = np.stack([ws[k][:, lag:].ravel() for k in names], axis=1)
     if rank:
         Zx, Zy = (np.apply_along_axis(stats.rankdata, 0, z) for z in (Zx, Zy))
     Ax, Ay = _weighted(Zx, Wx), _weighted(Zy, Wy)
@@ -228,12 +238,22 @@ def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, d
     R = ((tx.T @ ty) / torch.outer(torch.linalg.norm(tx, dim=0), torch.linalg.norm(ty, dim=0)).clamp(min=1e-30)
          ).double().cpu().numpy()
     # AR(1) per field (pooled over places) and cross-place correlation at equal t
-    a1 = np.array([_lag1(surprises[k].z) for k in names])
-    rho_space = np.array([_space(surprises[k].z) for k in names])
+    a1 = np.array([_lag1(zs[k]) for k in names])
+    rho_space = np.array([_space(zs[k]) for k in names])
     per_place = Tl * (1 - np.outer(a1, a1)) / (1 + np.outer(a1, a1))
     deff = 1 + (U - 1) * np.clip((rho_space[:, None] + rho_space[None, :]) / 2, 0, 1)
     n_eff = np.clip(U * per_place / deff, 3.0, U * Tl)
     return _test("E_w", names, R, n_eff, delta, ledger, family, testable, lag, symmetric=(lag == 0))
+
+
+def _ar_residuals(z: np.ndarray, p: int) -> np.ndarray:
+    """z [U, T] filtered by its AR(p), the coefficients pooled over places (least squares on every unit's lags);
+    the first p periods have no residual and are dropped."""
+    U, T = z.shape
+    X = np.stack([z[:, p - k - 1:T - k - 1].ravel() for k in range(p)], axis=1)
+    y = z[:, p:].ravel()
+    coef = np.linalg.lstsq(X, y, rcond=None)[0]
+    return (y - X @ coef).reshape(U, T - p)
 
 
 def _lag1(z: np.ndarray) -> float:

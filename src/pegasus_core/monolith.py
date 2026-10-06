@@ -24,8 +24,8 @@ import hashlib
 import inspect
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -43,6 +43,7 @@ TAU_BOUNDS = (1e-8, 1e8)
 MAX_TAU_STEP = np.log(10.0)  # Fellner–Schall updates are damped to ×10 per outer iteration
 IX_SHARE = 1e-3                                # a leaf carries the interaction when it holds this share of the block's events
 IX = ("ix_psi", "ix_os", "ix_ov", "ix_t")     # the interaction's parameters: ψ[R,E], ω = ix_os + ix_ov [R,U], τ [R,T]
+HS = ("th_grp", "th_cat")    # the tree levels a horseshoe prior scales node by node (ARCHITECTURE §4.3)
 SHRUNK = 1e5                 # a τ above this leaves its effect at a negligible size (sd < 0.003)
 
 
@@ -380,8 +381,11 @@ class Monolith:
     """One block's fitted model."""
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
-                 device: str = "cpu", rank: int = 0):
+                 device: str = "cpu", rank: int = 0, prior: str = "gaussian"):
+        if prior not in ("gaussian", "horseshoe"):
+            raise ValueError(f"tree prior {prior!r}: gaussian or horseshoe")
         self.data = data
+        self.prior = prior          # the tree levels' prior: iid Gaussian per level, or the horseshoe (`_update_horseshoe`)
         self.rank = int(rank)       # R, the components of the place × time interaction (0: none); `_enable_interaction` adds them
         self.ix_on = False
         self.graph_kind = graph_kind
@@ -952,6 +956,8 @@ class Monolith:
         always the update's (the fixed-point residual), so convergence means the same thing."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
         grads = self._fisher_diagonals(x, list(self.components))
+        if self.prior == "horseshoe":
+            self._update_horseshoe(x, dict(zip(self.components, grads, strict=True)))
         changes, proposals = [], {}
         for (name, c), d in zip(self.components.items(), grads, strict=True):
             if c.rank <= 0 or c.fixed:
@@ -979,6 +985,31 @@ class Monolith:
         for name, new in proposals.items():
             self.components[name].tau = new
         return changes
+
+    def _update_horseshoe(self, x: dict[str, torch.Tensor], fisher: dict[str, torch.Tensor]) -> None:
+        """The horseshoe on the tree levels (ARCHITECTURE §4.3): θ_n ~ N(0, σ²λ_n²), λ_n ~ C⁺(0, 1), as the
+        reweighted Gaussian penalty τ·Σ w_n θ_n² with w_n = E[1/λ_n²]. Through the auxiliary form λ² | ν ~ IG(½, 1/ν),
+        ν ~ IG(½, 1) (Makalic & Schmidt 2016) the mean-field fixed point is closed: with c = τ·E[θ_n²]/2,
+        w = 1/(c + 1/(1 + w)), so w = (√(1 + 4/c) − 1)/2. E[θ²] = θ̂² + 1/(D + τw), the Laplace variance. A node
+        near zero gets w ≈ c^(−½), a large precision, and shrinks to its parent; a node far from it gets w ≈ 1/c and
+        is left nearly free, which is what one variance per level cannot do: shrink the noise and keep the signal.
+        σ² = 1/τ stays the level's global scale, learned by Fellner–Schall on the weighted precision."""
+        for name in HS:
+            c = self.components[name]
+            v = x[name].detach().reshape(-1).cpu().numpy()
+            D = fisher[name].detach().reshape(-1).abs().cpu().numpy()   # log-likelihood units, as in Fellner–Schall
+            w = c.shape.Q.diagonal()
+            e2 = v * v + 1.0 / (D + c.tau * w)
+            cc = np.maximum(0.5 * c.tau * e2, 1e-12)
+            self._set_weights(name, (np.sqrt(1.0 + 4.0 / cc) - 1.0) / 2.0)
+
+    def _set_weights(self, name: str, w: np.ndarray) -> None:
+        """A tree level's precision becomes diag(w): every consumer (the penalty, the Newton preconditioner,
+        Fellner–Schall, the Laplace posterior) reads it from the component's shape."""
+        c = self.components[name]
+        w = np.clip(np.asarray(w, dtype=float), 1e-6, 1e8)
+        c.shape = structures.Shape("horseshoe", sp.diags(w, format="csr"), c.shape.rank, c.shape.centred, c.shape.components)
+        self._Q[name] = _torch_sparse(c.shape.Q, self.dtype, self.device)
 
     def nb_loglik(self, phi: float | np.ndarray, x: dict[str, torch.Tensor] | None = None,
                   places: np.ndarray | None = None) -> float:
@@ -1144,24 +1175,28 @@ class Monolith:
     # ---- persistence -------------------------------------------------------------
 
     def key(self) -> dict:
-        return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {})}
+        return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {}),
+                **({"prior": self.prior} if self.prior != "gaussian" else {})}
 
     def save(self) -> None:
         arrays = {k: v.detach().cpu().numpy() for k, v in self.params.items()}
         if self.ix_on:
             arrays["ix_active"] = self.ixl.cpu().numpy()
+        for name in HS if self.prior == "horseshoe" else ():
+            arrays[f"hs_{name}"] = self.components[name].shape.Q.diagonal()
         store.put_arrays("monolith", self.key(), arrays, self.summary())
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
              graph_kind: str = "contiguity", profile: str = "group", device: str = "cpu", rank: int = 0,
-             **source) -> Monolith:
+             prior: str = "gaussian", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
         interaction's R (0: the base model)."""
         from . import graphs
 
         data = assemble(dataset, event, block, years, profile, **source)
-        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device, **({"rank": rank} if rank else {}))
+        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device, **({"rank": rank} if rank else {}),
+                    **({"prior": prior} if prior != "gaussian" else {}))
         arrays = store.get_arrays("monolith", model.key())
         if rank and arrays is not None:
             model._enable_interaction(arrays.get("ix_active"))
@@ -1175,6 +1210,8 @@ class Monolith:
                     model.params[k].copy_(torch.as_tensor(v))
         for k, tau in meta["taus"].items():
             model.components[k].tau = float(tau)
+        for name in HS if prior == "horseshoe" else ():
+            model._set_weights(name, arrays[f"hs_{name}"])
         model.phi = float(meta["phi"]) if meta.get("phi") is not None else float("nan")
         model._restore(meta)
         model.history = [{"seconds": meta.get("fit_seconds")}]
@@ -1685,7 +1722,7 @@ class _Anderson:
         return u + np.clip(nxt - u, -MAX_TAU_STEP, MAX_TAU_STEP)
 
 
-_FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split", "rank"}
+_FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split", "rank", "prior"}
 
 
 def _family(key: dict) -> dict:

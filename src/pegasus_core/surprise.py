@@ -438,6 +438,25 @@ def _dispersion_levels(places: np.ndarray, macro: np.ndarray) -> list[np.ndarray
     return [labels[k] for k in DISPERSION_LEVELS]
 
 
+def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Surprise:
+    """A Surprise at a coarser scale (`scans.scales.Scale`: immediate region, state): Σy and Σμ per unit and period,
+    the dispersion of a sum of independent cells (M² / Σ μ²/φ), with an optional unit-period variance component
+    1/φ_extra on top (`place_year_phi` on the training years), then a fresh randomised PIT. A rare outcome is tested
+    here: at the municipality its cells are mostly zero and their surprises noise (dengue → microcephaly)."""
+    y, mu = scale.sum(s.y), scale.sum(s.mu)
+    v = scale.sum(np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
+    phi = np.divide(mu ** 2, v, out=np.full(mu.shape, np.inf), where=v > 0)
+    if extra_phi is not None:
+        phi = 1.0 / (1.0 / phi + 1.0 / extra_phi)
+    # one random stream per field and scale: shared draws would correlate fields
+    u, z = randomised_pit(y, mu, phi, config.seed(s.field.id, s.tier, "lift", scale.name, scale.n))
+    w = np.where(np.isinf(phi), mu, mu / (1 + mu / phi))
+    units = np.asarray(scale.units)
+    units = units.astype(np.int64) if all(str(k).isdigit() for k in units) else units   # IBGE codes stay integers
+    return Surprise(s.field, s.tier, units, s.years, y, mu, phi, u, z, w,
+                    np.zeros(y.shape, dtype=np.int8), {}, {"scale": scale.name})
+
+
 def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray) -> float | np.ndarray:
     """The field's place-year variance component, by maximum likelihood on its aggregate cells:
     Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
