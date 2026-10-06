@@ -950,7 +950,9 @@ class Monolith:
             changes = [np.inf]
             log(f"interaction rank {self.rank} started from the base fit's residuals; {time.time() - start:.0f}s")
         self._loop(outer, inner, tol, log, changes, mean_tol, start)
-        self._mean(inner)
+        # the closing mean to the fit's own tolerance (``mean_tol`` log-likelihood units of predicted decrease): at
+        # 0.001 it took 7.4 of IX's 38.6 s for a decrease no figure reads (2026-10-06)
+        self._mean(inner, loglik_tol=mean_tol)
         self.phi = self._dispersion()
         log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
         return self
