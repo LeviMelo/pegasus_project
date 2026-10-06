@@ -20,6 +20,7 @@ dependencies = [
   "polars>=1.0",
   "torch>=2.5",
   "numba>=0.60",
+  "scikit-sparse>=0.5",   # CHOLMOD for the v1 solver (ARCHITECTURE §5.3); on Windows from conda-forge, installed --no-deps
   "statsmodels>=0.14",
   "pydantic>=2",
   "typer>=0.12",

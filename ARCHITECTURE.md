@@ -1006,7 +1006,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), the fit's outer loop (§5.4), blocks and model choice (§5.6), marks' likelihoods (§4.4), prediction for any slice | structures, fields, solver |
-| `solver` (to build) | the assembled block-arrowhead Hessian, per-place elimination, the graph's sparse Cholesky, the Schur complement on the globals, constraints by contrast bases and kriging, selected inversion, LAML and its gradient (§5.3–5.5) | structures (scikit-sparse, torch) |
+| `solver` (O1, built for count blocks without the interaction; `PEGASUS_SOLVER=v1`) | the assembled block-arrowhead Hessian, per-place elimination, the graph's sparse Cholesky, the Schur complement on the globals, constraints by contrast bases and kriging, selected inversion, LAML and its gradient (§5.3–5.5) | structures (scikit-sparse, torch) |
 | `marks` | the mark models' fitting per chapter: specs (length of stay, cost, death, ICU), empirical-Bayes facility effects, the mark lead's facility triage (§4.4) | monolith, facility |
 | `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |

@@ -22,6 +22,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import inspect
+import os
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -730,7 +731,7 @@ class Monolith:
             changes = [np.inf]
             log(f"interaction rank {self.rank} started from the base fit's residuals; {time.time() - start:.0f}s")
         self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
-        self._fit_mean(inner)
+        self._mean(inner)
         self.phi = self._dispersion()
         log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
         return self
@@ -743,7 +744,7 @@ class Monolith:
         for it in range(outer):
             # the mean need not be precise while the τ's still move: a few Newton steps until they settle
             t0 = time.time()
-            steps = self._fit_mean(inner if max(changes) < 0.1 else 10, loglik_tol=mean_tol)
+            steps = self._mean(inner if max(changes) < 0.1 else 10, loglik_tol=mean_tol)
             t1 = time.time()
             changes = self._update_taus(accel)
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
@@ -838,6 +839,19 @@ class Monolith:
             self.params["f_all"].copy_(torch.as_tensor(np.log(np.clip(by_g, 1e-6, None))).reshape(2, -1))
             self.params["h_all"].copy_(torch.as_tensor(np.log(np.clip(by_t, 1e-6, None)))[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
+
+    def _uses_v1(self) -> bool:
+        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits a count block without the interaction when
+        ``PEGASUS_SOLVER=v1``; the mark and share models and the interaction keep the v0 Newton–CG until ported."""
+        return os.environ.get("PEGASUS_SOLVER", "v0") == "v1" and type(self) is Monolith and not self.ix_on and not self.rank
+
+    def _mean(self, iterations: int, loglik_tol: float = 0.0) -> int:
+        """The mean's MAP at fixed strengths, by the v1 exact Newton where it applies, else the v0 Newton–CG."""
+        if self._uses_v1():
+            from . import solver
+            nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
+            return solver.fit_mean(self, iterations=max(iterations, 8), loglik_tol=max(loglik_tol, 1e-3), solver=nw)
+        return self._fit_mean(iterations, loglik_tol=loglik_tol)
 
     def _fit_mean(self, iterations: int, tolerance: float = 1e-9, loglik_tol: float = 0.0) -> int:
         """MAP of the mean given the τ's: truncated Newton–CG (OQ-6). Each step solves H d = −g by
