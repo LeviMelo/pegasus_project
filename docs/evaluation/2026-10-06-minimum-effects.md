@@ -92,3 +92,9 @@ Hence a baseline built from the years before the window (`data/lens_course.py`; 
 The freed level buys power and fails the time negatives: the residuals are serially correlated, and a baseline that follows a place's recent level reads them as steps. The level stays pinned. With it pinned, the outbreak's course is B1 with negligible extra variance, so the outbreak lens reads B1 as it is (checked directly below).
 
 Checked directly: the outbreak lens on B1 as it is gives what the pinned course gave. Stroke and the sparse field are clean, and SIH has space 1/20 and time 0/20. Place ×2 / ×3: 0.44 / 0.92 on stroke, 0.15 / 0.73 on SIH.
+
+**Monthly dengue** (SINAN-DENG 2010–2023 refitted at the monthly grain: 14.5 M notifications, φ 0.244, B1 KS 0.031; `data/refit_dengue_monthly.py`, `pegasus-core grid --grain month`, `data/probes/grid/monthly_DENG.json`).
+- The model worlds are clean for every lens (0/10).
+- Space-time and trend divergence find nothing up to regional triplings (0.03): at φ 0.24 a ×3 month is within dengue's own epidemic variation.
+- Steps are findable: change point finds regional step triplings every time and place steps 0.78. This was read under the freed-level variant that ADR-0027 rejected, so the settled lenses are rerun (`data/queue_monthly_rerun.py`).
+
