@@ -8,6 +8,7 @@ places u, years t and groups g = sex × age band:
           + f_all[g] + f_grp[p(e), g]                     age–sex profiles (RW2 over age, per sex)
           + h_all[t] + h_grp[p(e), t]                     history (RW2 over years)
           + s_all[u] + v_all[u] + s_grp[p(e),u] + v_grp[p(e),u]   geography (scaled ICAR + iid: BYM)
+          + Σ_r ψ[r,e] ω[r,u] τ[r,t]                      low-rank place × time interaction (``rank`` R > 0; §4.2, ADR-0021)
 
 p(e) is the leaf's ICD group (the profile and geography level). Every effect
 is centred along its structure; every strength τ is learned by Fellner–Schall
@@ -40,6 +41,8 @@ AGE_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80
 N_BANDS = len(AGE_EDGES)
 TAU_BOUNDS = (1e-8, 1e8)
 MAX_TAU_STEP = np.log(10.0)  # Fellner–Schall updates are damped to ×10 per outer iteration
+IX_SHARE = 1e-3                                # a leaf carries the interaction when it holds this share of the block's events
+IX = ("ix_psi", "ix_os", "ix_ov", "ix_t")     # the interaction's parameters: ψ[R,E], ω = ix_os + ix_ov [R,U], τ [R,T]
 SHRUNK = 1e5                 # a τ above this leaves its effect at a negligible size (sd < 0.003)
 
 
@@ -355,6 +358,7 @@ class Component:
     batch: int                  # leading dimension (1 when shared by the block)
     tau: float = 1.0
     free: float = 1.0           # share of the batch's dimensions left free by constraints across rows
+    fixed: bool = False         # τ identifies the model and is not learned (the interaction's ψ and τ(t))
 
     @property
     def rank(self) -> float:
@@ -367,15 +371,17 @@ class Monolith:
     """One block's fitted model."""
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
-                 device: str = "cpu"):
+                 device: str = "cpu", rank: int = 0):
         self.data = data
+        self.rank = int(rank)       # R, the components of the place × time interaction (0: none); `_enable_interaction` adds them
+        self.ix_on = False
         self.graph_kind = graph_kind
         self.graph = graph
         self.device = torch.device(device)
         self.dtype = torch.float64
         nU, nT, nG = data.N.shape
         nE, nGrp = len(data.leaves), len(data.groups)
-        icar = _cached_icar(graph[0], graph[1], nU)
+        icar = self._icar = _cached_icar(graph[0], graph[1], nU)
         self.nB = nG // 2                      # age bands per sex (the population source's)
         rw_age = structures.random_walk(self.nB, order=2)
         rw_t = structures.random_walk(nT, order=2 if nT >= 4 else 1)
@@ -454,15 +460,146 @@ class Monolith:
             self.Y["c_grp"] = acc((nGrp, 12), pe, moy)
         self.y_offset = float(np.sum(y * np.log(d.N[d.u, d.t, d.g])))   # Σ y log N, constant
 
+    # ---- the low-rank interaction (ARCHITECTURE §4.2, ADR-0021) ------------------
+
+    def _enable_interaction(self, active: np.ndarray | None = None) -> None:
+        """Add the R components of Σ_r ψ[r,e] ω[r,u] τ[r,t] to the parameters (all zero: `_init_interaction` or a warm
+        start sets them). The interaction acts on the *active* leaves, those holding at least ``IX_SHARE`` of the
+        block's events (``active``: a given set, for a model over other years that must read a fit's parameters);
+        the others have ψ = 0, which keeps the cube at |E_active|·U·T cells. The identifiability is by the priors and
+        two constraints: ψ (the leaf loadings, N(0, 1)) is centred within each group's active leaves, so the
+        interaction is orthogonal to the effects they share (level, the group's place and history effects); ω is a
+        scaled ICAR plus an iid part, both centred over the places, with learned strengths (the amplitude lives
+        there); τ is a random walk of order 1 scaled like the other shapes plus a unit prior on its level, with a
+        fixed strength. A fixed ψ and τ leave ω the one free scale of each product, so the three factors' scales are
+        not a ridge of the likelihood."""
+        if self.ix_on:
+            return
+        d = self.data
+        if d.grain == "month":
+            raise NotImplementedError("the low-rank interaction is built for the annual grain")
+        nU, nT, _ = d.N.shape
+        nE, R = len(d.leaves), self.rank
+        if active is None:
+            totals = np.bincount(d.e, weights=d.y, minlength=nE)
+            active = np.nonzero(totals >= IX_SHARE * totals.sum())[0]
+        self.ixl = torch.as_tensor(np.asarray(active, dtype=np.int64), device=self.device)
+        pos = np.full(nE, -1, dtype=np.int64)
+        pos[np.asarray(active)] = np.arange(len(active))
+        self.ixpos = torch.as_tensor(pos, device=self.device)
+        self.ixp = self.ixpos[self.e]                                  # per non-empty cell: its leaf's position, -1 if inactive
+        groups = np.unique(d.leaf_group[np.asarray(active)], return_inverse=True)[1]
+        rw = structures.random_walk(nT, order=1)
+        level = structures.Shape("rw1+level", (rw.Q + sp.csr_matrix(np.ones((nT, nT)) / nT)).tocsr(), nT, centred=False)
+        self.components.update({
+            "ix_psi": Component("ix_psi", _within_groups(groups, len(active)), R, fixed=True),
+            "ix_os": Component("ix_os", self._icar, R),
+            "ix_ov": Component("ix_ov", structures.iid(nU), R),
+            "ix_t": Component("ix_t", level, R, fixed=True),
+        })
+        for name in IX:
+            c = self.components[name]
+            self.params[name] = torch.zeros((c.batch, c.shape.Q.shape[0]), dtype=self.dtype, device=self.device,
+                                            requires_grad=True)
+            self._Q[name] = _torch_sparse(c.shape.Q, self.dtype, self.device)
+            self._labels[name] = torch.as_tensor(c.shape.components if c.shape.components is not None
+                                                 else np.zeros(c.shape.Q.shape[0], dtype=int), device=self.device)
+        self.ix_on = True
+
+    @property
+    def Y3(self) -> torch.Tensor:
+        """[E_active, U, T] events of the active leaves summed over the groups: the interaction's sufficient
+        statistic (Σ y·I = ⟨Y3, I⟩)."""
+        if getattr(self, "_Y3", None) is None:
+            d = self.data
+            out = np.zeros((len(self.ixl), *d.N.shape[:2]))
+            pos = self.ixpos.cpu().numpy()[d.e]
+            keep = pos >= 0
+            np.add.at(out, (pos[keep], d.u[keep], d.t[keep]), d.y[keep])
+            self._Y3 = torch.as_tensor(out, dtype=self.dtype, device=self.device)
+        return self._Y3
+
+    @staticmethod
+    def _om(x: dict[str, torch.Tensor]) -> torch.Tensor:
+        return x["ix_os"] + x["ix_ov"]
+
+    def _I(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """[E_active, U, T]: the interaction Σ_r ψ[r,e] ω[r,u] τ[r,t] in η of the active leaves."""
+        return self._product(x["ix_psi"], self._om(x), x["ix_t"])
+
+    @staticmethod
+    def _product(psi: torch.Tensor, om: torch.Tensor, tm: torch.Tensor) -> torch.Tensor:
+        """Σ_r ψ[r,e] ω[r,u] τ[r,t] as one matrix product, [E, U, T]."""
+        R, U, T = psi.shape[0], om.shape[1], tm.shape[1]
+        return (psi.T @ (om[:, :, None] * tm[:, None, :]).reshape(R, U * T)).reshape(psi.shape[1], U, T)
+
+    def _I_of(self, x: dict[str, torch.Tensor], leaves: torch.Tensor) -> torch.Tensor:
+        """[|leaves|, U, T]: the interaction of any leaves (zero for an inactive one)."""
+        pos = self.ixpos[leaves]
+        act = pos >= 0
+        out = torch.zeros((len(leaves), self.N.shape[0], self.N.shape[1]), dtype=self.dtype, device=self.device)
+        if bool(act.any()):
+            out[act] = self._product(x["ix_psi"][:, pos[act]], self._om(x), x["ix_t"])
+        return out
+
+    def _cells(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """[E_active, U, T] expected events μ of the active leaves summed over the groups (the factorisation of §5.1
+        with the leaf's own slab: O(E_active·U·T·R))."""
+        pt = self._place_time(x)                                          # [K, U, T]
+        return self._leaf_place(x)[self.ixl][:, :, None] * torch.exp(self._I(x)) * pt[self.grp[self.ixl]]
+
+    def _ix_correction(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Λ's change from the interaction: Σ over the active leaves' cells of μ₀ (e^I − 1)."""
+        pt = self._place_time(x)
+        return (self._leaf_place(x)[self.ixl][:, :, None] * torch.expm1(self._I(x)) * pt[self.grp[self.ixl]]).sum()
+
+    def _ix_fisher(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """The Gauss–Newton diagonal of each interaction parameter: Σ μ (∂η/∂parameter)² over the cells it touches."""
+        with torch.no_grad():
+            S = self._cells(x)
+            psi, om, tm = x["ix_psi"], self._om(x), x["ix_t"]
+            d_om = torch.einsum("eut,re,rt->ru", S, psi ** 2, tm ** 2)
+            return {"ix_psi": torch.einsum("eut,ru,rt->re", S, om ** 2, tm ** 2), "ix_os": d_om, "ix_ov": d_om,
+                    "ix_t": torch.einsum("eut,re,ru->rt", S, psi ** 2, om ** 2)}
+
+    def _init_interaction(self, ridge: float = 1.0, sweeps: int = 12) -> None:
+        """Starting values of the interaction from the base fit's residual cube (a zero start is a saddle).
+        Each component is a rank-one fit of (Y3 − S) by weighted least squares with weights S (the Poisson
+        working residual (y − μ)/μ weighted by μ, so no cell is divided by a tiny μ), by alternating
+        closed-form updates with the unit ridge of ψ's prior, deflated component by component; ψ is
+        centred within groups, ω over the places, and ω carries the amplitude."""
+        with torch.no_grad():
+            x = self.effects()
+            S = self._cells({**x, **{k: torch.zeros_like(v) for k, v in x.items() if k.startswith("ix_")}})
+            num = self.Y3 - S
+            gen = torch.Generator().manual_seed(config.seed("ix_init", self.data.block, self.rank))
+            nE, nU, nT = S.shape
+            places = torch.zeros(nU, dtype=torch.int64, device=self.device)
+            for r in range(self.rank):
+                om = _centre(torch.randn((1, nU), generator=gen, dtype=self.dtype).to(self.device), places)[0]
+                tm = torch.randn(nT, generator=gen, dtype=self.dtype).to(self.device)
+                for _ in range(sweeps):
+                    psi = _centre((torch.einsum("eut,u,t->e", num, om, tm)
+                                   / (torch.einsum("eut,u,t->e", S, om ** 2, tm ** 2) + ridge))[None], self._labels["ix_psi"])[0]
+                    psi = psi / psi.pow(2).mean().sqrt().clamp_min(1e-12)
+                    om = _centre((torch.einsum("eut,e,t->u", num, psi, tm)
+                                  / (torch.einsum("eut,e,t->u", S, psi ** 2, tm ** 2) + ridge))[None], places)[0]
+                    tm = torch.einsum("eut,e,u->t", num, psi, om) / (torch.einsum("eut,e,u->t", S, psi ** 2, om ** 2) + ridge)
+                    tm = tm / tm.pow(2).mean().sqrt().clamp_min(1e-12)
+                num = num - S * psi[:, None, None] * om[None, :, None] * tm[None, None, :]
+                self.params["ix_psi"][r].copy_(psi)
+                self.params["ix_ov"][r].copy_(om)
+                self.params["ix_t"][r].copy_(tm)
+
     # ---- effects (centred) -------------------------------------------------
 
     def effects(self, params: dict[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
-        """The centred effects of ``params`` (default: the fitted ones). The map is linear, which the
-        Laplace approximation uses (``laplace.py``)."""
+        """The centred effects of ``params`` (default: the fitted ones). The map is linear (the interaction's
+        factors apart), which the Laplace approximation uses (``laplace.py``)."""
         params = self.params if params is None else params
         out = {"b0": params["b0"]}
         for name in self.components:
-            v = _centre(params[name], self._labels[name])
+            v = _centre(params[name], self._labels[name]) if self.components[name].shape.centred else params[name]
             # group deviations sum to zero across groups; a leaf's place effect within its group
             if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
                 v = v - v.mean(dim=0, keepdim=True)
@@ -507,6 +644,9 @@ class Monolith:
         if spatial:
             eta = (eta + x["s_all"][0][self.u] + x["v_all"][0][self.u] + x["s_grp"][p, self.u] + x["v_grp"][p, self.u]
                    + x["v_cat"][self.e, self.u])
+            if self.ix_on:
+                psi = x["ix_psi"][:, self.ixp.clamp_min(0)] * (self.ixp >= 0)
+                eta = eta + (psi * self._om(x)[:, self.u] * x["ix_t"][:, self.tt]).sum(0)
         return eta
 
     def total(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
@@ -514,12 +654,21 @@ class Monolith:
         leaf_place = self._leaf_place(x, spatial)                                   # [E, U]
         per_group = torch.zeros((len(self.data.groups), self.N.shape[0]), dtype=self.dtype,
                                 device=self.device).index_add_(0, self.grp, leaf_place)  # [K, U]
-        return (per_group[:, :, None] * self._place_time(x, spatial)).sum()
+        total = (per_group[:, :, None] * self._place_time(x, spatial)).sum()
+        return total + self._ix_correction(x) if self.ix_on and spatial else total
 
     def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         """A scalar whose gradient in each effect is that effect's Fisher diagonal: for Poisson
         counts Λ = Σ μ (∂Λ/∂effect = Σ μ over the cells the effect touches)."""
         return self.total(x)
+
+    def _fisher_diagonals(self, x: dict[str, torch.Tensor], names: list[str]) -> list[torch.Tensor]:
+        """The Fisher diagonal of each named effect: the gradient of the expected total for the linear effects, the
+        Gauss–Newton sums of `_ix_fisher` for the interaction's factors (η is not linear in them)."""
+        grads = list(torch.autograd.grad(self._fisher_mass(x), [x[k] for k in names], allow_unused=True))
+        ix = self._ix_fisher(x) if self.ix_on else {}
+        return [ix[k] if k in ix else (g if g is not None else torch.zeros_like(x[k]))
+                for k, g in zip(names, grads, strict=True)]
 
     def penalty(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
@@ -536,6 +685,8 @@ class Monolith:
         Σ y·η comes from the sufficient statistics; only Λ is computed per evaluation."""
         x = self.effects()
         linear = sum((x[k] * self.Y[k]).sum() for k in self.Y) + self.y_offset
+        if self.ix_on:
+            linear = linear + (self._I(x) * self.Y3).sum()
         loglik = linear - self.total(x)
         return (-loglik + self.penalty(x)) / self.scale
 
@@ -558,7 +709,22 @@ class Monolith:
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         changes = [0.0] if self.warm_info else [np.inf]
-        accel = _Anderson() if accelerate else None
+        if self.rank and not self.ix_on:
+            # the base model first (a zero interaction is a saddle), then the interaction from its residuals (ADR-0021)
+            self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
+            self._enable_interaction()
+            self._init_interaction()
+            changes = [np.inf]
+            log(f"interaction rank {self.rank} started from the base fit's residuals; {time.time() - start:.0f}s")
+        self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
+        self._fit_mean(inner)
+        self.phi = self._dispersion()
+        log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
+        return self
+
+    def _loop(self, outer: int, inner: int, tol: float, log, changes: list[float], accel, move_tol: float,
+              mean_tol: float, start: float) -> None:
+        """The outer iterations of `fit`: the mean at fixed τ's, then the Fellner–Schall update of every learned τ."""
         quiet = 0
         self.converged, self.stop_reason = False, f"outer cap {outer}"
         for it in range(outer):
@@ -581,10 +747,6 @@ class Monolith:
             if move_tol and quiet >= 2:
                 self.converged, self.stop_reason = True, f"the MAP moved {move:.2g} < {move_tol} log-likelihood units twice"
                 break
-        self._fit_mean(inner)
-        self.phi = self._dispersion()
-        log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
-        return self
 
     def warm_start(self, source: str | dict = "auto") -> dict | None:
         """Overwrite the starting values with those of a related fitted block of the store: the same dataset,
@@ -608,10 +770,11 @@ class Monolith:
                 shared = len(span(k) & span(mine))
                 if shared == 0:
                     continue
-                scored.append((k.get("population", "popsvs") == mine.get("population", "popsvs"),
+                scored.append((k.get("rank", 0) == mine.get("rank", 0),
+                               k.get("population", "popsvs") == mine.get("population", "popsvs"),
                                k.get("split") == mine.get("split"), shared / max(len(span(k) | span(mine)), 1),
                                k.get("through") == mine.get("through"), m))
-            cand = max(scored, key=lambda s: s[:4])[4] if scored else None
+            cand = max(scored, key=lambda s: s[:5])[5] if scored else None
         arrays = store.get_arrays("monolith", cand["key"]) if cand else None
         if cand is None or arrays is None:
             return None
@@ -621,6 +784,12 @@ class Monolith:
         shift = my_first - theirs_first                    # my period i is theirs i + shift (in years, or months)
         if grain == "month":
             shift *= 12
+        if self.rank and cand["key"].get("rank", 0) == self.rank and all(n in arrays for n in IX) and "ix_active" in arrays:
+            self._enable_interaction(arrays["ix_active"])      # a stored fit of the same rank: its interaction is carried with the rest
+            if any(tuple(arrays[n].shape) != tuple(self.params[n].shape) for n in IX):
+                for n in IX:                # the periods differ: the interaction is started afresh from the base fit
+                    del self.params[n], self.components[n]
+                self.ix_on = False
         with torch.no_grad():
             for name, q in self.params.items():
                 v = torch.as_tensor(arrays[name]) if name in arrays else None
@@ -751,7 +920,7 @@ class Monolith:
         inside one (evaluation 2026-10-05, fit throughput)."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
         names = ["b0", *self.components]
-        grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in names])
+        grads = self._fisher_diagonals(x, names)
         norm = self._objective_norm()
         parts = []
         for name, d in zip(names, grads, strict=True):
@@ -773,10 +942,10 @@ class Monolith:
         log τ is the Anderson mix of the last iterates' updates, not the update itself; the reported change is
         always the update's (the fixed-point residual), so convergence means the same thing."""
         x = {k: v.detach().requires_grad_(True) for k, v in self.effects().items()}
-        grads = torch.autograd.grad(self._fisher_mass(x), [x[k] for k in self.components])
+        grads = self._fisher_diagonals(x, list(self.components))
         changes, proposals = [], {}
         for (name, c), d in zip(self.components.items(), grads, strict=True):
-            if c.rank <= 0:
+            if c.rank <= 0 or c.fixed:
                 changes.append(0.0)  # the constraints leave this effect nothing (a single group or leaf)
                 continue
             D = d.detach().reshape(c.batch, -1).cpu().numpy()  # the Fisher diagonal (see _fisher_mass)
@@ -832,9 +1001,12 @@ class Monolith:
                    if per_place else float(phi))
         total = 0.0                                      # Σ_all φ log(1 + μ/φ)
         with torch.no_grad():
+            om = self._om(x) if self.ix_on else None
             for e in range(lp.shape[0]):
                 k = int(self.grp[e])
                 m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
+                if om is not None and int(self.ixpos[e]) >= 0:
+                    m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
                 total += float((divisor * torch.log1p(m / divisor)).sum())
         return float(full.sum()) - (total - float((ph * np.log1p(mu / ph)).sum()))
 
@@ -876,14 +1048,24 @@ class Monolith:
             pt = self._place_time(x, spatial)
             sel = torch.as_tensor(leaves, device=self.device)
             K, U = len(self.data.groups), self.N.shape[0]
-            w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
-            mu = (w[:, :, None] * pt).sum(0)
+            ix = self.ix_on and spatial
+            if ix:      # the interaction makes each leaf's place-time factor its own: [K, U, T] sums over the leaves
+                E = torch.exp(self._I_of(x, sel))
+                w = torch.zeros((K, *pt.shape[1:]), dtype=self.dtype, device=self.device).index_add_(
+                    0, self.grp[sel], lp[sel][:, :, None] * E)
+            else:
+                w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])[:, :, None]
+            mu = (w * pt).sum(0)
             M2 = torch.einsum("utg,kg->kut", self.N ** 2, torch.exp(2 * (x["f_all"] + x["f_grp"])))
             lin = self._time(x)[:, None, :]
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
-            w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)
-            mu2 = (w2[:, :, None] * torch.exp(2 * lin) * M2).sum(0)
+            if ix:
+                w2 = torch.zeros((K, *pt.shape[1:]), dtype=self.dtype, device=self.device).index_add_(
+                    0, self.grp[sel], (lp[sel][:, :, None] * E) ** 2)
+            else:
+                w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)[:, :, None]
+            mu2 = (w2 * torch.exp(2 * lin) * M2).sum(0)
         mu, mu2 = mu.cpu().numpy(), mu2.cpu().numpy()
         if self.supply is not None:
             mu, mu2 = mu * self.supply, mu2 * self.supply ** 2
@@ -897,12 +1079,17 @@ class Monolith:
             lp = self._leaf_place(x, spatial)
             sel = torch.as_tensor(leaves, device=self.device)
             K, U = len(self.data.groups), self.N.shape[0]
-            w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
             lin = self._time(x)[:, None, :]
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
             prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]
-            mu = torch.einsum("ku,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
+            if self.ix_on and spatial:
+                w = torch.zeros((K, U, self.N.shape[1]), dtype=self.dtype, device=self.device).index_add_(
+                    0, self.grp[sel], lp[sel][:, :, None] * torch.exp(self._I_of(x, sel)))
+                mu = torch.einsum("kut,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
+            else:
+                w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
+                mu = torch.einsum("ku,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
         mu = mu.cpu().numpy()
         return mu if self.supply is None else mu * self.supply[:, :, None]
 
@@ -943,32 +1130,40 @@ class Monolith:
                 "phi": self.phi, "dispersion_check": getattr(self, "dispersion_check", None), "taus": {k: c.tau for k, c in self.components.items()}, "spatial_share": bym,
                 "fit_seconds": self.history[-1]["seconds"] if self.history else None,
                 "outers": len(self.history), "converged": getattr(self, "converged", None),
-                "stop_reason": getattr(self, "stop_reason", None)}
+                "stop_reason": getattr(self, "stop_reason", None), "rank": self.rank}
 
     # ---- persistence -------------------------------------------------------------
 
     def key(self) -> dict:
-        return {**self.data.key, "graph": self.graph_kind}
+        return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {})}
 
     def save(self) -> None:
         arrays = {k: v.detach().cpu().numpy() for k, v in self.params.items()}
+        if self.ix_on:
+            arrays["ix_active"] = self.ixl.cpu().numpy()
         store.put_arrays("monolith", self.key(), arrays, self.summary())
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
-             graph_kind: str = "contiguity", profile: str = "group", device: str = "cpu", **source) -> Monolith:
-        """A fitted block from the store (its data re-assembled from the gateway's cache)."""
+             graph_kind: str = "contiguity", profile: str = "group", device: str = "cpu", rank: int = 0,
+             **source) -> Monolith:
+        """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
+        interaction's R (0: the base model)."""
         from . import graphs
 
         data = assemble(dataset, event, block, years, profile, **source)
-        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device)
+        model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device, **({"rank": rank} if rank else {}))
         arrays = store.get_arrays("monolith", model.key())
+        if rank and arrays is not None:
+            model._enable_interaction(arrays.get("ix_active"))
+
         meta = store.manifest("monolith", model.key())
         if arrays is None or meta is None:
             raise LookupError(f"no fitted monolith for {model.key()}")
         with torch.no_grad():
             for k, v in arrays.items():
-                model.params[k].copy_(torch.as_tensor(v))
+                if k in model.params:
+                    model.params[k].copy_(torch.as_tensor(v))
         for k, tau in meta["taus"].items():
             model.components[k].tau = float(tau)
         model.phi = float(meta["phi"]) if meta.get("phi") is not None else float("nan")
@@ -1117,7 +1312,9 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
     if not np.array_equal(test.places, model.data.places) or test.leaves != model.data.leaves \
             or test.groups != model.data.groups:
         raise ValueError("test data must share the fit's places, leaves and profile carriers")
-    tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device))
+    tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device), rank=model.rank)
+    if model.ix_on:
+        tm._enable_interaction(model.ixl.cpu().numpy())
     tm.phi = model.phi
     return tm, extrapolate_effects(model, tm, model.effects(), history)
 
@@ -1132,6 +1329,8 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
     test = tm.data
     with torch.no_grad():
         x = {k: v.detach().clone() for k, v in effects.items()}
+        if "ix_t" in x:      # the interaction's course is a random walk of order 1: its forecast mean is flat at the last value
+            x["ix_t"] = x["ix_t"][:, -1:].expand(-1, test.N.shape[1]).clone()
         if monthly:
             # months after the last fitted month; the cyclic season repeats as fitted
             steps = torch.arange(1, test.N.shape[1] + 1, dtype=model.dtype, device=model.device)
@@ -1220,12 +1419,16 @@ def _baseline_level(h: np.ndarray, kind: str) -> float:
     raise ValueError(f"unknown history forecast {kind!r}")
 
 
-def heldout(model: Monolith, test: BlockData) -> dict:
+def heldout(model: Monolith, test: BlockData, interaction: bool = True) -> dict:
     """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
     h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
     Returns the Poisson deviance over every test cell (empty cells through the factorised
-    total) and the NB log-likelihood of the non-empty cells at the fitted φ."""
+    total) and the NB log-likelihood of the non-empty cells at the fitted φ, and of every cell
+    (``nb_loglik_all``, the empty ones through the factorised sum). ``interaction=False`` scores the same fit with
+    its low-rank interaction switched off, which separates the term's gain from a better-converged base."""
     tm, x = extrapolate(model, test)
+    if not interaction:
+        x = {k: (torch.zeros_like(v) if k.startswith("ix_") else v) for k, v in x.items()}
     with torch.no_grad():
         eta = tm.eta_nnz(x)
         lam = float(tm.total(x))
@@ -1236,7 +1439,7 @@ def heldout(model: Monolith, test: BlockData) -> dict:
     nb = float(np.sum(special.gammaln(y + phi) - special.gammaln(phi) - special.gammaln(y + 1)
                       + phi * np.log(phi / (phi + mu)) + y * np.log(mu / (phi + mu)))) if np.isfinite(phi) else None
     return {"deviance": dev, "events": float(y.sum()), "expected": lam, "deviance_per_event": dev / float(y.sum()),
-            "nb_loglik_nonempty": nb, "years": test.years.tolist(), "graph": model.graph_kind,
+            "nb_loglik_nonempty": nb, "nb_loglik_all": tm.nb_loglik(phi, x) if np.isfinite(phi) else None, "years": test.years.tolist(), "graph": model.graph_kind,
             "profile": test.key.get("profile", "group")}
 
 
@@ -1275,7 +1478,7 @@ class _Anderson:
         return u + np.clip(nxt - u, -MAX_TAU_STEP, MAX_TAU_STEP)
 
 
-_FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split"}
+_FAMILY_DROP = {"years", "data", "through", "population", "population_model", "split", "rank"}
 
 
 def _family(key: dict) -> dict:

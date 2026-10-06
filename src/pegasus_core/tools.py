@@ -105,6 +105,7 @@ class Session:
     years: list[int]
     graph: str = graphs.DEFAULT
     supply: bool = False          # the facility-supply term in every expectation (ADR-0016)
+    rank: int = 0                 # the low-rank place x time interaction's R in every expectation (ADR-0021); 0: none
     source: dict = field(default_factory=dict)   # the event reader: {"grain": "month"} for the monthly grain
     ledger: control.Ledger = field(default_factory=control.Ledger)
     register: leads.Register = field(default_factory=leads.Register)
@@ -114,7 +115,7 @@ class Session:
 
     def __post_init__(self):
         control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
-        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source, supply=self.supply)
+        self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source, supply=self.supply, rank=self.rank)
 
     # ---- reading ---------------------------------------------------------------
 
