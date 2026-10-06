@@ -216,3 +216,22 @@ Chapter I's held-out figures therefore measure the history's extrapolation acros
 - **The default is now `GEO_POOL = 0.01`.** The data key names it only where pooling happens.
 - **The losses on IV and XX** are about 200 units each.
 - **I's gain** is the same extrapolation artefact (above) and does not count for or against pooling. The decision rests on IV and XX and on the speed.
+
+
+## The courses' held-out forecast (OPEN_QUESTIONS 9)
+
+One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of the courses scored on 2022–23 (`data/history_compare.json`). Each cell gives the NB log-likelihood per death, with the expected deaths in brackets.
+
+| block | linear | robust | level | median | observed |
+|---|---|---|---|---|---|
+| I | -5.53881 (2,706,590) | -3.70957 (126,962) | **-3.48441** (1,010,379) | -3.69202 (128,068) | 205,016 |
+| IX | -1.63503 (849,703) | -1.63611 (870,510) | **-1.63295** (795,733) | -1.63687 (878,326) | 787,877 |
+| II | -2.38386 (491,895) | -2.38429 (517,974) | **-2.38373** (489,873) | -2.38426 (517,503) | 498,964 |
+| XX | -3.23055 (307,593) | -3.23842 (321,405) | **-3.22965** (299,291) | -3.23860 (320,128) | 304,525 |
+| XIII | -4.44680 (12,170) | -4.44944 (13,252) | **-4.44004** (12,734) | -4.44786 (13,319) | 14,312 |
+| IV | -2.04785 (207,753) | -2.04770 (193,396) | **-2.04295** (201,530) | -2.04821 (193,072) | 181,759 |
+| X | -1.67901 (280,500) | -1.65476 (359,688) | -1.66976 (295,880) | **-1.65419** (362,986) | 345,919 |
+
+- The flat forecasts beat the linear one on every block. `level`, flat at the fitted years' mean, is best on six of seven; X prefers `robust` and `median`.
+- **This window follows COVID-19:** every chapter's 2020–21 rose, and the linear continuation overshoots (IX 849,703 expected against 787,877).
+- A window without a shock (fitted 2010–2017, held out 2018–19, `data/history_compare_2018.json`) decides before any default changes: PENDING.
