@@ -1170,20 +1170,34 @@ class Monolith:
         names = [n for n, c in self.components.items() if c.rank > 0 and not c.fixed]
         rho_now = np.log([self.components[n].tau for n in names])
         rank = np.array([self.components[n].rank for n in names])
-        laml = (-float(self.objective()) * self._objective_norm() + 0.5 * float(rank @ rho_now)
-                - 0.5 * nw.logdet_constrained())
-        self.laml = laml
+        def read_laml() -> float:
+            return (-float(self.objective()) * self._objective_norm() + nw.remaining() + 0.5 * float(rank @ rho_now)
+                    - 0.5 * nw.logdet_constrained())
+        laml = read_laml()
         prev = getattr(self, "_laml_prev", None)
         # the step aims at the fixed point without W's derivative, which sits a few per cent of τ from the LAML's own
         # optimum (IX, 2026-10-06): a fall of a few units is that difference, not an overshoot
-        if prev is not None and laml < prev["laml"] - 2.0 and prev["halvings"] < 8:
+        if prev is not None and laml < prev["laml"] - 2.0:
+            # read again from a factor at the current mean before rejecting: the outers' factor is one Newton step
+            # back, and its log-determinant moved SIM II's LAML by 8 units at the same strengths (2026-10-06)
+            nw.refactor()
+            laml = read_laml()
+        self.laml = laml
+        if prev is not None and laml < prev["laml"] - 2.0:
+            if prev["halvings"] >= 3:
+                # three halvings did not help: back to the best strengths found, and stop there
+                for n, r0 in zip(names, prev["rho"], strict=True):
+                    self.components[n].tau = float(np.exp(r0))
+                self._laml_prev = None
+                self.laml_gain = 0.0
+                return [0.0] * len(self.components)
             step = prev["step"] / 2
             self._laml_prev = {**prev, "step": step, "halvings": prev["halvings"] + 1}
             for n, r0, dlt in zip(names, prev["rho"], step, strict=True):
                 self.components[n].tau = float(np.clip(np.exp(r0 + dlt), *TAU_BOUNDS))
             self.laml_gain = float("inf")
-            out = dict(zip(names, np.abs(rho_now - (prev["rho"] + step)), strict=True))
-            return [out.get(n, 0.0) for n in self.components]
+            # a halved step is small by construction: it must not read as convergence (SIM II stopped mid-halving)
+            return [1.0] * len(self.components)
         tr, quad, T, R, names = nw.scoring(probes=int(os.environ.get("PEGASUS_SCORING_PROBES", "16")))
         tau = np.array([self.components[n].tau for n in names])
         q = np.array([quad[n] for n in names])

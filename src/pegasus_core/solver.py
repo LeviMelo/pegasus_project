@@ -457,7 +457,11 @@ class StructuredNewton:
         L = Supernodal(fa.get_factor("LL"))
         Y = L.lower(B[p])
         t2 = time.time()
-        S = self.Cg.T @ ((Hgg + Hgg.T) * 0.5) @ self.Cg - Y.T @ Y
+        # YᵀY by a symmetric rank-k update (half a general product's arithmetic), on Yᵀ's Fortran view: no copy
+        from scipy.linalg.blas import dsyrk
+        YtY = dsyrk(1.0, Y.T, trans=0, lower=0)
+        YtY = np.triu(YtY) + np.triu(YtY, 1).T
+        S = self.Cg.T @ ((Hgg + Hgg.T) * 0.5) @ self.Cg - YtY
         ds = np.diag(S)
         S = S + np.diag(RIDGE * np.maximum(ds, ds.max() * 1e-12))
         Sc = np.linalg.cholesky(S)
@@ -569,6 +573,15 @@ class StructuredNewton:
             p = m.params[n]
             out[n] = torch.as_tensor(val.reshape(p.shape), dtype=p.dtype, device=p.device)
         return out, info
+
+    def remaining(self) -> float:
+        """What is left of the mean's optimisation: Newton's predicted decrease −½gᵀH⁻¹g from the current parameters
+        with the last factor (one constrained solve). The strengths' LAML is read at the mode as −objective plus this;
+        read at a mean that stopped below 1,000 units of predicted decrease, SIM II's LAML moved by 8 units between
+        outers at the same strengths, and a 2-unit test then rejected sound steps (2026-10-06)."""
+        _, info = self.step(reuse=True)
+        self._last_reused = False
+        return max(float(info["predicted"]), 0.0)
 
     def refactor(self) -> None:
         """Factor the Hessian at the model's current parameters (the last factor's point otherwise)."""
