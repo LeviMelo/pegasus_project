@@ -28,7 +28,7 @@ parser.add_argument("--prior", default="gaussian", help="the tree levels' prior:
 parser.add_argument("--tag", default="", help="a label kept in the row")
 parser.add_argument("--profile", default="block", help="the profile carrier: group (outermost ICD group), block (innermost) or category")
 parser.add_argument("--geography", default="group", help="the carrier of history and place effects, at or above --profile")
-parser.add_argument("--geo-pool", type=float, default=0.0, help="pool the geography carriers below this share of the block's events")
+parser.add_argument("--geo-pool", type=float, default=None, help="pool the geography carriers below this share of the block's events (default: monolith.GEO_POOL)")
 parser.add_argument("--event", default="", help="the event (default by dataset: death, hospitalisation, birth, notification)")
 parser.add_argument("--mean-tol", type=float, default=1.0, help="fit(mean_tol=): the outers' Newton steps end below this predicted decrease")
 args = parser.parse_args()
@@ -36,6 +36,9 @@ if args.threads:
     torch.set_num_threads(args.threads)
 
 from pegasus_core import graphs, monolith  # noqa: E402
+
+if args.geo_pool is None:
+    args.geo_pool = monolith.GEO_POOL
 
 first, last = map(int, args.years.split("-"))
 years = range(first, last + 1)

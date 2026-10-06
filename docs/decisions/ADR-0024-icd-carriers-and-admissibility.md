@@ -12,6 +12,7 @@
    - The outermost group under the chapter carries history, place effects and season.
    - The solver's place system follows the geography carrier.
    - Held out, this keeps 88–93 % of the all-block carrier's gain at near the group carrier's cost. II gains 0.075 per death over group in about the same time; XX gains 0.11 in 192 s, against the all-block carrier's 2,174 s.
+   - Geography carriers holding under 1 % of the block's events are pooled into one (`GEO_POOL`). Chapter I has 21 groups, 14 of them under 1 %; pooled, its place system went from 42 to 16 unknowns per place and its fit ran 2.3× faster, while IV and XX lost under 0.001 per death.
 2. **Admissible cells.**
    - A category occurs only in the age–sex cells its sex restriction and its absolute age limit allow.
    - The sex restriction comes from the DATASUS release's RESTRSEXO, or NCHS Part 11 Table G's absolute sex edit. The two never contradict.

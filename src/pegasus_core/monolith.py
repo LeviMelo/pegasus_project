@@ -99,7 +99,10 @@ class BlockData:
 CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k")}
 CELL_MEAN = {"mark": "l1", "count": "s1", "share": "k"}
 ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
-NEWBORN_SHARE = 0.5     # a field is a newborn-exposure field when at least this share of its events are at age 0
+NEWBORN_SHARE = 0.5
+# geography carriers holding less than this share of a block's events are pooled into one (`assemble(geo_pool=)`):
+# held out on SIM 2022-23, I gained 0.47 per death and ran 2.3x faster, IV and XX lost under 0.001 (2026-10-06)
+GEO_POOL = 0.01     # a field is a newborn-exposure field when at least this share of its events are at age 0
 
 
 def _icd10_tree() -> tuple[dict, dict]:
@@ -140,7 +143,7 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
              source: str = "events", grain: str = "year", population: str | None = None, cache: bool = True,
-             geography: str | None = "group", geo_pool: float = 0.0, **source_args) -> BlockData:
+             geography: str | None = "group", geo_pool: float = GEO_POOL, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway, memoised in the store (kind ``blockdata``).
 
     The 10.7 M cells of SIH chapter X monthly took 467 s to assemble, and every variant of a fit (train and
@@ -229,7 +232,7 @@ def _blockdata_from(a: dict[str, np.ndarray], m: dict) -> BlockData:
 
 def _assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
               source: str = "events", grain: str = "year", population: str | None = None, geography: str | None = "group",
-              geo_pool: float = 0.0, **source_args) -> BlockData:
+              geo_pool: float = GEO_POOL, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
@@ -381,8 +384,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            **({} if source == "events" else {"source": source, **source_args}),
            **({} if grain == "year" else {"grain": grain}),
            **({"admissible": 2} if not group_cells.all() or never else {}),
-           **({} if group_outer is None else {"geography": geography}),
-           **({"geo_pool": geo_pool} if geo_pool and group_outer is not None else {})}
+           **({} if group_outer is None else {"geography": geography})}
     y = sums[CELL_MEAN[source]] / sums["n"] if source in CELL_VALUES else sums["y"]
     lg = np.array([gidx[carrier[c]] for c in categories])
     excluded = ~group_cells[lg[e], g]
@@ -416,6 +418,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             pooled = len(keep_o)
             group_outer = np.array([remap.get(int(o), pooled) for o in group_outer], dtype=np.int64)
             outer_groups = [outer_groups[o] for o in keep_o] + ["(pooled)"]
+            key = {**key, "geo_pool": geo_pool}            # only where pooling happens: other blocks keep their keys
     data = BlockData(dataset, event, block, years, places, categories, groups,
                      np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key,
                      S=S, population=population, group_cells=None if group_cells.all() else group_cells,
@@ -1657,7 +1660,7 @@ class Monolith:
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
              graph_kind: str = "contiguity", profile: str = "block", device: str = "cpu", rank: int = 0,
-             geography: str | None = "group", geo_pool: float = 0.0,
+             geography: str | None = "group", geo_pool: float = GEO_POOL,
              prior: str = "gaussian", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
         interaction's R (0: the base model)."""
