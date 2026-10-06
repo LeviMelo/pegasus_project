@@ -236,5 +236,11 @@ def dependency_map(years: str = typer.Option("2015-2019", help="first-last year 
     console.print(t)
 
 
+def main() -> None:
+    """The console entry point. Click expands wildcards in arguments on Windows, which turned the root field ``*``
+    into the folder's file names; the arguments are passed as typed."""
+    app(windows_expand_args=False)
+
+
 if __name__ == "__main__":
-    app()
+    main()

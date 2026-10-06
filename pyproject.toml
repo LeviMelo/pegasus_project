@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pegasus-core = "pegasus_core.cli:app"
+pegasus-core = "pegasus_core.cli:main"
 pegasus-mcp = "pegasus_core.mcp_server:main"
 
 [project.optional-dependencies]
