@@ -10,9 +10,9 @@
 
 | status | items |
 |---|---|
-| BM built and measured | 114 |
+| BM built and measured | 116 |
 | BU built, unmeasured | 12 |
-| P partial | 48 |
+| P partial | 46 |
 | NB not built | 41 |
 | SS superseded | 1 |
 | total | 216 |
@@ -59,7 +59,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 
 | item | status | evidence | gap |
 |---|---|---|---|
-| rule 1: every input through `gateway`, the only importer | P | `gateway.py` is the reader; invariant 1 | `config.py`, `corroborate.py` (S2iD, SINAN direct), `facility.py`, `fields.py` import `pegasus_data` themselves; §13 silent |
+| rule 1: every input through `gateway`, the only importer | BM | `gateway.py` is the only module importing `pegasus_data` (checked by `grep`); `config.py`, `corroborate.py`, `facility.py`, `fields.py` reach it through `gateway.package_version`, `package_dir`, `nothing_published`, `roles`, `event_type`, `raw_event_counts`, `raw_field` | fixed 2026-10-05 (was four direct importers) |
 | rule 2: meaning and data belong in pegasus_data, requested by handoff | BU | `docs/handoffs/`, `data/handoffs/` | enforced by practice only |
 | rule 3: never write into pegasus_data's home | BU | `config.population_root` reads only | none observed |
 | pegasus_view presents leads later | NB | | no export of leads to the frontend |
@@ -275,7 +275,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 11.2 Python first, Arrow at boundaries | BM | | `control`, `leads` read their own Parquet |
 | 11.3 homes and artefact layout | BM | `pegasus_home/` | ten ledger and eleven register variants beside the production ones |
 | 11.3 keys hash data versions; stale never served | P | §13 row 11.3 | key is the package version; the stale-key rule works (SIM XVII not served) but leaves the block unservable until refit |
-| inv. 1 every input through gateway | P | | four modules (§2) |
+| inv. 1 every input through gateway | BM | | the four direct importers now go through `gateway` (§2 rule 1) |
 | inv. 2 no statistic without expectation and weight | BM | | |
 | inv. 3 context never in a default tier | BM | | |
 | inv. 4 taxonomic structure never in a relation prior | BU | | |

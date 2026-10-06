@@ -57,9 +57,9 @@ def data_version() -> str:
     exposes publication-level data versions (ARCHITECTURE §13). Not its commit: the
     repository is developed concurrently, and a commit key would invalidate every
     cached aggregate on each of its edits. The commit is recorded in each manifest."""
-    import pegasus_data
+    from . import gateway
 
-    return str(pegasus_data.__version__)
+    return gateway.package_version()
 
 
 @cache
@@ -69,9 +69,9 @@ def resource_version(file: str) -> str:
     resource is a new key even when the package version is unchanged."""
     import json
 
-    import pegasus_data
+    from . import gateway
 
-    manifest = Path(pegasus_data.__file__).resolve().parent / "resources" / "manifest.json"
+    manifest = gateway.package_dir() / "resources" / "manifest.json"
     entries = json.loads(manifest.read_text(encoding="utf-8"))
     entries = entries.get("resources", entries)
     entry = next(v for v in entries.values() if isinstance(v, dict) and v.get("file") == file)
@@ -81,9 +81,9 @@ def resource_version(file: str) -> str:
 @lru_cache(maxsize=1)
 def data_code_version() -> str:
     """pegasus_data's version and commit, recorded in manifests and the ledger."""
-    import pegasus_data
+    from . import gateway
 
-    return f"{pegasus_data.__version__}@{_git_version(Path(pegasus_data.__file__).resolve().parents[2])}"
+    return f"{gateway.package_version()}@{_git_version(gateway.package_dir().parents[1])}"
 
 
 def _git_version(path: Path) -> str:

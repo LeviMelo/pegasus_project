@@ -63,10 +63,8 @@ class Registry:
     """The fields of one event type's classifier tree, with the tree's relations."""
 
     def __init__(self, dataset: str, event: str, structure: str = "ICD10", classifier: str | None = None):
-        import pegasus_data as pg  # only for the event type's declared classifier name
-
         if classifier is None:
-            spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+            spec = gateway.event_type(dataset, event)
             primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
             classifier = primary[0] if primary else None
         self.classifier = classifier or "*"
