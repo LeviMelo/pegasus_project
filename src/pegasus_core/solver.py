@@ -57,9 +57,16 @@ class Factors:
     Pk: np.ndarray        # [K, U, T] EX · Σ_g N F
     Pu: np.ndarray        # [K, U]   Σ_t Pk
     R: np.ndarray         # [K, U, G] F · Σ_t EX N
-    m: np.ndarray         # [E, U]   LP · Pu[k(e)]
+    m: np.ndarray         # [E, U]   Σ_{t,g} μ / … : LP · Pu[k(e)], the active leaves' with their interaction
     mubar: np.ndarray     # [E, T, G] Σ_u μ
     total: float
+    # the interaction (`Monolith(rank=R)` with it on): each active leaf's place-time factor is its group's times
+    # J = exp(I); its features differ from its group's by these (zero-size arrays without the interaction)
+    act: np.ndarray | None = None    # [A]       the active leaves
+    dPk: np.ndarray | None = None    # [A, U, T] Pk_a − Pk[k(a)]
+    dPu: np.ndarray | None = None    # [A, U]
+    dR: np.ndarray | None = None     # [A, U, G]
+    cell_grad: np.ndarray | None = None   # a mark model's score per non-empty cell (log-likelihood units)
 
 
 class Arrowhead:
@@ -93,8 +100,6 @@ class StructuredNewton:
     """Exact Newton steps for one fitted `Monolith` (count block, no interaction)."""
 
     def __init__(self, model):
-        if getattr(model, "ix_on", False) or getattr(model, "rank", 0):
-            raise NotImplementedError("the v1 solver does not carry the low-rank interaction yet")
         self.m = model
         d = model.data
         self.U, self.T, self.G = d.N.shape
@@ -183,6 +188,8 @@ class StructuredNewton:
 
     def factors(self, x: dict[str, torch.Tensor]) -> Factors:
         m = self.m
+        if hasattr(m, "cell_derivatives"):
+            return self._mark_factors(x)
         t0 = time.time()
         with torch.no_grad():
             LP = m._leaf_place(x)                                                 # [E, U]
@@ -200,17 +207,82 @@ class StructuredNewton:
             for k in range(self.K):
                 leaves = torch.nonzero(m.grp == k).ravel()
                 mubar[leaves] = torch.einsum("eu,ut,utg->etg", LP[leaves], EX[k], m.N) * Fk[k][None, None, :]
-            total = float((W * Pu).sum())
-        f = Factors(_np(LP), _np(EX), _np(Fk), _np(W), _np(Pk), _np(Pu), _np(R), _np(mm), _np(mubar), total)
+            dev = {}
+            if getattr(m, "ix_on", False):
+                act = m.ixl
+                ka = m.grp[act]
+                Xa = EX[ka] * torch.exp(m._I(x))                                 # [A, U, T]
+                dPk = Xa * NF[ka] - Pk[ka]
+                dPu = dPk.sum(2)
+                dR = Fk[ka][:, None, :] * torch.einsum("aut,utg->aug", Xa, m.N) - R[ka]
+                mm[act] = LP[act] * (Pu[ka] + dPu)
+                mubar[act] = torch.einsum("au,aut,utg->atg", LP[act], Xa, m.N) * Fk[ka][:, None, :]
+                dev = {"act": _np(act).astype(np.int64), "dPk": _np(dPk), "dPu": _np(dPu), "dR": _np(dR)}
+            total = float(mm.sum())
+        f = Factors(_np(LP), _np(EX), _np(Fk), _np(W), _np(Pk), _np(Pu), _np(R), _np(mm), _np(mubar), total, **dev)
         self.timing["factors"] = time.time() - t0
         return f
+
+    def _mark_factors(self, x: dict[str, torch.Tensor]) -> Factors:
+        """A mark model's (MarkModel, ShareModel, CountModel) cells exist only where events do, each with its own
+        Fisher weight h_c (the family's), so every leaf has its own features: they are written as the interaction's
+        active-leaf deviations of a zero shared factor (LP = 1, every leaf active), which the assembly and the solve
+        already carry exactly. The scores are kept for the gradient."""
+        m = self.m
+        t0 = time.time()
+        d = m.data
+        with torch.no_grad():
+            g, h = (_np(a) for a in m.cell_derivatives(m.eta_nnz(x)))
+        E, U, T, G, K = self.E, self.U, self.T, self.G, self.K
+        e, u, t, gg = (np.asarray(a, dtype=np.int64) for a in (d.e, d.u, d.t, d.g))
+        mm = np.bincount(e * U + u, weights=h, minlength=E * U).reshape(E, U)
+        mubar = np.bincount((e * T + t) * G + gg, weights=h, minlength=E * T * G).reshape(E, T, G)
+        dPk = np.bincount((e * U + u) * T + t, weights=h, minlength=E * U * T).reshape(E, U, T)
+        dR = np.bincount((e * U + u) * G + gg, weights=h, minlength=E * U * G).reshape(E, U, G)
+        zK = np.zeros((K, U))
+        f = Factors(np.ones((E, U)), np.zeros((K, U, T)), np.zeros((K, G)), np.bincount(self.grp, minlength=K)[:, None] * np.ones((1, U)),
+                    np.zeros((K, U, T)), zK, np.zeros((K, U, G)), mm, mubar, float(h.sum()),
+                    act=np.arange(E, dtype=np.int64), dPk=dPk, dPu=mm, dR=dR, cell_grad=g)
+        self.timing["factors"] = time.time() - t0
+        return f
+
+    def _mark_gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
+        """The gradient from a mark model's cell scores, summed over the cells each effect touches."""
+        m = self.m
+        d = m.data
+        r = f.cell_grad
+        E, U, T, G, K = self.E, self.U, self.T, self.G, self.K
+        e, u, t, gg = (np.asarray(a, dtype=np.int64) for a in (d.e, d.u, d.t, d.g))
+        k = self.grp[e]
+        M = {"b0": np.array([r.sum()]), "th_grp": np.bincount(k, weights=r, minlength=K)[None, :],
+             "th_cat": np.bincount(e, weights=r, minlength=E)[None, :],
+             "f_all": np.bincount(gg, weights=r, minlength=G)[None, :],
+             "f_grp": np.bincount(k * G + gg, weights=r, minlength=K * G).reshape(K, G),
+             "h_all": np.bincount(t, weights=r, minlength=T)[None, :],
+             "h_grp": np.bincount(k * T + t, weights=r, minlength=K * T).reshape(K, T),
+             "s_all": np.bincount(u, weights=r, minlength=U)[None, :],
+             "s_grp": np.bincount(k * U + u, weights=r, minlength=K * U).reshape(K, U),
+             "v_cat": np.bincount(e * U + u, weights=r, minlength=E * U).reshape(E, U)}
+        M["v_all"], M["v_grp"] = M["s_all"], M["s_grp"]
+        if self.monthly:
+            mo = self.moy[t]
+            M["c_all"] = np.bincount(mo, weights=r, minlength=12)[None, :]
+            M["c_grp"] = np.bincount(k * 12 + mo, weights=r, minlength=K * 12).reshape(K, 12)
+        out = {}
+        for n, val in M.items():
+            out[n] = val
+            if n in m.components:
+                c = m.components[n]
+                xv = _np(x[n]).reshape(c.batch, -1)
+                out[n] = val + ((c.shape.Q @ xv.T).T * c.tau).reshape(val.shape)
+        return out
 
     def gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
         """∂(−log L + penalty)/∂x for every effect (x-space, unscaled: log-likelihood units)."""
         m = self.m
-        WPu = f.W * f.Pu
-        Ht = (f.W[:, :, None] * f.Pk).sum(1)
-        Fg = (f.W[:, :, None] * f.R).sum(1)
+        if f.cell_grad is not None:
+            return self._mark_gradient(x, f)
+        WPu, Ht, Fg = self._leaf_sums(f)
         M = {"b0": np.array([f.total]), "th_grp": WPu.sum(1)[None, :], "th_cat": f.m.sum(1)[None, :],
              "f_all": Fg.sum(0)[None, :], "f_grp": Fg, "h_all": Ht.sum(0)[None, :], "h_grp": Ht,
              "s_all": WPu.sum(0)[None, :], "v_all": WPu.sum(0)[None, :], "s_grp": WPu, "v_grp": WPu, "v_cat": f.m}
@@ -229,6 +301,55 @@ class StructuredNewton:
                 pen = (c.shape.Q @ xv.T).T * c.tau
                 g[n] = g[n] + pen.reshape(val.shape)
         return g
+
+    def _leaf_sums(self, f: Factors):
+        """Σ over each group's leaves of LP·Pu [K, U], LP·Pk summed over places [K, T] and LP·R summed over places
+        [K, G]: the group's shared factor, plus the active leaves' deviations."""
+        WPu = f.W * f.Pu
+        Ht = (f.W[:, :, None] * f.Pk).sum(1)
+        Fg = (f.W[:, :, None] * f.R).sum(1)
+        if f.act is not None:
+            ka = self.grp[f.act]
+            LPa = f.LP[f.act]
+            np.add.at(WPu, ka, LPa * f.dPu)
+            np.add.at(Ht, ka, np.einsum("au,aut->at", LPa, f.dPk))
+            np.add.at(Fg, ka, np.einsum("au,aug->ag", LPa, f.dR))
+        return WPu, Ht, Fg
+
+    def _dfeatures(self, f: Factors) -> np.ndarray:
+        """The active leaves' feature deviations [A, U, nf], in `_features`' layout."""
+        parts = [f.dPu[:, :, None], f.dPk, f.dR]
+        if self.monthly:
+            agg = np.zeros((self.T, 12))
+            agg[np.arange(self.T), self.moy] = 1.0
+            parts.append(f.dPk @ agg)
+        return np.concatenate(parts, axis=2)
+
+    def _active_terms(self, f: Factors, vs, feat: np.ndarray):
+        """The leaf-place elimination's terms from the active leaves, per group: with the coupling row of leaf e at
+        place u written LP_e·(φ_k + δφ_e) (δφ zero for an inactive leaf), the Schur update q·φφᵀ gains
+        φ·G1ᵀ + G1·φᵀ + Σ_a (LP_a²/d_a) δφ_a δφ_aᵀ − H1·H1ᵀ/s, G1 = Σ_a LP_a ζ_a δφ_a, H1 = Σ_a LP_a δφ_a / d_a.
+        Returns G1, H1 [K, U, nf], the summed active–active matrices AA [K, nf, nf], and its place-scalar rows AA0
+        [K, U, nf] per place."""
+        d, inv_d, s, a1, q, alpha, zeta = vs
+        df = self._dfeatures(f)
+        act = f.act
+        ka = self.grp[act]
+        LPa = f.LP[act]
+        K, U, nf = feat.shape
+        G1 = np.zeros((K, U, nf))
+        H1 = np.zeros((K, U, nf))
+        np.add.at(G1, ka, (LPa * zeta[act])[:, :, None] * df)
+        np.add.at(H1, ka, (LPa * inv_d[act])[:, :, None] * df)
+        w2 = LPa * LPa * inv_d[act]                                            # [A, U]
+        AA = np.zeros((K, nf, nf))
+        AA0 = np.zeros((K, U, nf))
+        for k in np.unique(ka):
+            sel = np.nonzero(ka == k)[0]
+            dk = df[sel]
+            AA[k] = np.einsum("au,auf,aug->fg", w2[sel], dk, dk) - np.einsum("uf,ug,u->fg", H1[k], H1[k], 1.0 / s[k])
+            AA0[k] = np.einsum("au,au,auf->uf", w2[sel], dk[:, :, 0], dk) - H1[k][:, :1] * H1[k] / s[k][:, None]
+        return df, G1, H1, AA, AA0
 
     # ------------------------------------------------------------------ the v block
 
@@ -333,7 +454,10 @@ class StructuredNewton:
         K, U = self.K, self.U
         d, inv_d, s, a1, q, alpha, zeta = vs
         feat = self._features(f)                                   # [K, U, nf]
-        WPu = f.W * f.Pu
+        WPu = self._leaf_sums(f)[0]
+        ix = f.act is not None
+        if ix:
+            df, G1, H1, AA, AA0 = self._active_terms(f, vs, feat)
 
         # ---- γγ: data (design over (e,t,g) cells weighted by Σ_u μ), minus Σ_k Mkᵀ(Σ_u q φφᵀ)Mk, θc terms
         D = self._global_design()
@@ -341,19 +465,28 @@ class StructuredNewton:
         fd = self._fmap_dense()
         for k in range(K):
             Sk = (feat[k] * q[k][:, None]).T @ feat[k]
+            if ix:
+                Sk = Sk + feat[k].T @ G1[k] + G1[k].T @ feat[k] + AA[k]
             Hgg -= fd[k].T @ Sk @ fd[k]
-        # θc[e] with the shared features: −Σ_u η_eu φ_{k(e),u}; θc–θc: −Σ_u Pu²(α LP δ − α α'/s)
-        eta = zeta * f.LP * f.Pu[self.grp]                         # [E, U]
+        # θc[e] (coupling m_e at each place) with the shared features: −Σ_u m_e ζ_e φ_{k(e),u}, and with the active
+        # leaves' deviations; θc–θc: −Σ_u (m_e m_e' (δ_ee'/d_e − 1/(d_e d_e' s)))
+        eta = zeta * f.m                                           # [E, U]
+        md = f.m * inv_d
         oc = self.goff["th_cat"]
         for k in range(K):
             leaves = np.nonzero(self.grp == k)[0]
-            cross = (eta[leaves] @ feat[k]) @ fd[k]                    # [n_k, ng]
+            cross = eta[leaves] @ feat[k]                              # [n_k, nf]
+            if ix:
+                cross = cross - (md[leaves] / s[k][None, :]) @ H1[k]
+                act_k = np.nonzero(self.grp[f.act] == k)[0]
+                if len(act_k):
+                    pos = np.searchsorted(leaves, f.act[act_k])
+                    cross[pos] += np.einsum("au,auf->af", md[f.act[act_k]] * f.LP[f.act[act_k]], df[act_k])
+            cross = cross @ fd[k]                                      # [n_k, ng]
             Hgg[oc + leaves, :] -= cross
             Hgg[:, oc + leaves] -= cross.T
-            pu2 = f.Pu[k] ** 2
-            a = alpha[leaves]
-            diag = (a * f.LP[leaves]) @ pu2
-            off = (a * (pu2 / s[k])[None, :]) @ a.T
+            diag = (md[leaves] * f.m[leaves]).sum(1)
+            off = (md[leaves] / s[k][None, :]) @ md[leaves].T
             Hgg[np.ix_(oc + leaves, oc + leaves)] -= np.diag(diag) - off
         # penalties of the globals
         for n in self.gnames:
@@ -367,8 +500,11 @@ class StructuredNewton:
         # ---- ℓℓ in reduced coordinates: per place Tbᵀ·block·Tb, plus the penalties written in reduced coordinates
         npl, npr = self.npl, self.npl_red
         blocks = np.zeros((U, npl, npl))
-        a_tot = WPu.sum(0) - np.einsum("ku,ku->u", q, f.Pu ** 2)                 # a–a
-        ab = WPu - q * f.Pu ** 2                                                # a–b_k and b_k–b_k
+        Qpp = q * f.Pu ** 2                                                     # the place scalar's elimination
+        if ix:
+            Qpp = Qpp + 2.0 * f.Pu * G1[:, :, 0] + AA0[:, :, 0]
+        a_tot = WPu.sum(0) - Qpp.sum(0)                                         # a–a
+        ab = WPu - Qpp                                                          # a–b_k and b_k–b_k
         blocks[:, :2, :2] = a_tot[:, None, None]
         for k in range(K):
             for j in (2 + k, 2 + K + k):
@@ -387,6 +523,12 @@ class StructuredNewton:
         # contrasts; s_all/v_all read the sum over groups
         vec = f.W[:, :, None] * feat - (q * f.Pu)[:, :, None] * feat           # [K, U, nf]
         thc = f.m - eta * f.Pu[self.grp]                                     # [E, U]
+        if ix:
+            DA = np.zeros_like(feat)
+            np.add.at(DA, self.grp[f.act], f.LP[f.act][:, :, None] * df)
+            vec = vec + DA - f.Pu[:, :, None] * G1 - G1[:, :, :1] * feat - AA0
+            thc = thc + md * (H1[self.grp][:, :, 0] / s[self.grp])
+            thc[f.act] -= md[f.act] * f.LP[f.act] * f.dPu
         Gk = np.empty((K, U, self.ng))
         oc = self.goff["th_cat"]
         for k in range(K):
@@ -481,14 +623,35 @@ class StructuredNewton:
         Zb = np.empty_like(b_v)
         lz = np.empty((self.K, self.U, n))
         forward(b_v, inv_d, s, f.LP, gptr, gleaves, Zb, lz)
-        red = self._shared_to_reduced(lz, feat, fmap, f)                    # [n_red, n]
-        thc = thc_sum(Zb, f.LP * f.Pu[self.grp], np.empty((self.E, n)))     # [E, n]
+        ix = f.act is not None
+        lzA = f.LP[f.act][:, :, None] * Zb[f.act] if ix else None             # [A, U, n]
+        red = self._shared_to_reduced(lz, feat, fmap, f, lzA)               # [n_red, n]
+        thc = thc_sum(Zb, f.m, np.empty((self.E, n)))                        # [E, n]
         red += self._thc_to_reduced(thc)
         x_r = fac(b_r - red)
-        # back-substitution: δ_v = Z(b_v − B δ_r)
+        # back-substitution: δ_v = Z(b_v − B δ_r), the active leaves' own part of Bδ taken off b_v first
         dot, dth = self._B_parts(f, feat, x_r)
+        if ix:
+            b_v = b_v.copy()
+            b_v[f.act] -= f.LP[f.act][:, :, None] * self._active_dot(f, x_r, dth)
         x_v = back(b_v, inv_d, s, f.LP, f.Pu, self.grp, gptr, gleaves, dot, dth, np.empty_like(b_v))
         return x_v, x_r
+
+    def _active_dot(self, f: Factors, x_r: np.ndarray, dth: np.ndarray) -> np.ndarray:
+        """[A, U, n]: δφ_a·δ for each active leaf (its features' deviations against the global increments, its place
+        scalar's against its group's place increments, and against its θc increment)."""
+        U, K, npl = self.U, self.K, self.npl
+        xl = self.Tplace @ x_r[: self.nl_red]
+        xg = self.Cg @ x_r[self.nl_red:]
+        fd = self._fmap_dense()
+        df = self._dfeatures(f)
+        rows = np.arange(U) * npl
+        base = xl[rows + 0] + xl[rows + 1]
+        out = np.empty((len(f.act), U, x_r.shape[1]))
+        for i, (a, k) in enumerate(zip(f.act, self.grp[f.act], strict=True)):
+            place = base + xl[rows + 2 + k] + xl[rows + 2 + K + k]
+            out[i] = df[i] @ (fd[k] @ xg) + f.dPu[i][:, None] * (place + dth[a][None, :])
+        return out
 
     def _groups(self):
         if getattr(self, "_gp", None) is None:
@@ -511,13 +674,16 @@ class StructuredNewton:
         dth = np.ascontiguousarray(xg[self.goff["th_cat"]:self.goff["th_cat"] + self.E])
         return dot, dth
 
-    def _shared_to_reduced(self, lz: np.ndarray, feat, fmap, f) -> np.ndarray:
-        """Σ_(k,u) lz[k,u,·] ω_ku mapped to the reduced coordinates (ℓ rows and γ columns)."""
+    def _shared_to_reduced(self, lz: np.ndarray, feat, fmap, f, lzA: np.ndarray | None = None) -> np.ndarray:
+        """Σ_(k,u) lz[k,u,·] ω_ku mapped to the reduced coordinates (ℓ rows and γ columns), plus the active leaves'
+        Σ_u lzA[a,u,·] δφ_a,u (lzA = LP·Zb of the active leaves)."""
         U, K, npl = self.U, self.K, self.npl
         n = lz.shape[2]
         xl = np.zeros((self.nl, n))
         # place rows: a[u] (s_all, v_all) gets Σ_k lz Pu ; b[k,u] gets lz Pu
         lp = lz * f.Pu[:, :, None]
+        if lzA is not None:
+            np.add.at(lp, self.grp[f.act], lzA * f.dPu[:, :, None])
         xl[np.arange(U) * npl + 0] = lp.sum(0)
         xl[np.arange(U) * npl + 1] = lp.sum(0)
         for k in range(K):
@@ -526,6 +692,10 @@ class StructuredNewton:
         xg = np.zeros((self.ng, n))
         for k in range(K):
             xg += fmap[k].T @ (feat[k].T @ lz[k])
+        if lzA is not None:
+            df = self._dfeatures(f)
+            for i, k in enumerate(self.grp[f.act]):
+                xg += fmap[k].T @ (df[i].T @ lzA[i])
         return np.vstack([self.Tplace.T @ xl, self.Cg.T @ xg])
 
     def _thc_to_reduced(self, thc: np.ndarray) -> np.ndarray:
@@ -707,8 +877,9 @@ class StructuredNewton:
         Vv, Vr = self._V
         AV = self._apply_A(Vv, Vr)
         x = {k: v.detach() for k, v in m.effects().items()}
-        names = [n for n, c in m.components.items() if c.rank > 0 and not c.fixed]
-        shapes = {nm: tuple(v.shape) for nm, v in x.items()}
+        # the base block's strengths (the interaction's, `ix_strengths`, are read from its own factor)
+        names = [n for n, c in m.components.items() if c.rank > 0 and not c.fixed and not n.startswith("ix_")]
+        shapes = {nm: tuple(v.shape) for nm, v in x.items() if not nm.startswith("ix_")}
         quad = {}
         for nm in names:
             c = m.components[nm]
@@ -912,6 +1083,220 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
     model.refit_decrement = 0.0 if last is None else (first - last) / scale
     return steps
 
+
+# ---------------------------------------------------------------------------------------------- the interaction's factors
+
+def _line_search(model, names: tuple[str, ...], delta: dict[str, np.ndarray], slope: float) -> float:
+    """Armijo backtracking along ``delta`` (raw parameters of ``names``) on the model's own objective; returns the
+    step taken (0 when none decreased it, the parameters then unchanged)."""
+    scale = model._objective_norm()
+    with torch.no_grad():
+        f0 = float(model.objective()) * scale
+        base = {n: model.params[n].detach().clone() for n in names}
+        step = 1.0
+        for _ in range(30):
+            for n in names:
+                model.params[n].copy_(base[n] + step * torch.as_tensor(delta[n].reshape(base[n].shape),
+                                                                        dtype=base[n].dtype, device=base[n].device))
+            f1 = float(model.objective()) * scale
+            if np.isfinite(f1) and f1 <= f0 + 1e-4 * step * slope:
+                return step
+            step /= 2
+        for n in names:
+            model.params[n].copy_(base[n])
+        return 0.0
+
+
+def _constrained_solve(H: np.ndarray, g: np.ndarray, C: np.ndarray) -> np.ndarray:
+    """δ minimising ½δᵀHδ + gᵀδ subject to Cδ = 0 (a small dense KKT system; C's rows may be redundant)."""
+    n, c = H.shape[0], C.shape[0]
+    K = np.zeros((n + c, n + c))
+    K[:n, :n] = H
+    K[:n, n:] = C.T
+    K[n:, :n] = C
+    rhs = np.concatenate([-g, np.zeros(c)])
+    return np.linalg.lstsq(K, rhs, rcond=None)[0][:n]
+
+
+def ix_sweep(model, log=None) -> float:
+    """One pass of exact Newton steps over the interaction's three factors (ARCHITECTURE §4.2, ADR-0021), each given
+    the other two and the base effects: η is linear in each factor alone, so each step is Newton's for a Poisson
+    model with that factor's prior (the alternating fit of Goodman's row–column association models). ψ: an R × R
+    block per active leaf, centred within each group's active leaves; τ: an R × R block per year plus its random
+    walk and level prior; ω = os + ov: the per-place R × R data block shared by the ICAR and iid parts, a sparse
+    system over 2R·U solved by CHOLMOD with the centrings imposed by kriging. Each step is line-searched on the
+    model's objective. Returns the decrease of the objective (log-likelihood units)."""
+    m = model
+    scale = m._objective_norm()
+    f_start = float(m.objective()) * scale
+    R = m.rank
+    with torch.no_grad():
+        for factor in ("ix_psi", "ix_t", "ix_om"):
+            x = m.effects()
+            S = _np(m._cells(x))                                              # [A, U, T]
+            G = S - _np(m.Y3)
+            psi, om, tm = _np(x["ix_psi"]), _np(m._om(x)), _np(x["ix_t"])
+            if factor == "ix_psi":
+                c = om[:, :, None] * tm[:, None, :]                            # [R, U, T]
+                A = psi.shape[1]
+                comp = m.components["ix_psi"]
+                g = np.einsum("aut,rut->ar", G, c) + comp.tau * psi.T            # Q = I within the groups
+                Hb = np.einsum("aut,rut,sut->ars", S, c, c) + comp.tau * np.eye(R)[None]
+                H = np.zeros((A * R, A * R))
+                for a in range(A):
+                    H[a * R:(a + 1) * R, a * R:(a + 1) * R] = Hb[a]
+                labels = _np(m._labels["ix_psi"]).astype(np.int64)
+                rows = []
+                for grp in np.unique(labels):
+                    for r in range(R):
+                        row = np.zeros(A * R)
+                        row[np.nonzero(labels == grp)[0] * R + r] = 1.0
+                        rows.append(row)
+                d = _constrained_solve(H, g.ravel(), np.array(rows)).reshape(A, R).T
+                step = _line_search(m, ("ix_psi",), {"ix_psi": d}, float(g.ravel() @ d.T.ravel()))
+            elif factor == "ix_t":
+                b = psi[:, :, None] * om[:, None, :]                           # [R, A, U]
+                T = tm.shape[1]
+                comp = m.components["ix_t"]
+                Q = comp.shape.Q.toarray()
+                g = np.einsum("aut,rau->rt", G, b) + comp.tau * (tm @ Q.T)
+                Ht = np.einsum("aut,rau,sau->trs", S, b, b)
+                H = np.kron(np.eye(R), comp.tau * Q)                             # ordered (r, t)
+                for t in range(T):
+                    H[np.ix_(np.arange(R) * T + t, np.arange(R) * T + t)] += Ht[t]
+                d = np.linalg.solve(H, -g.ravel()).reshape(R, T)
+                step = _line_search(m, ("ix_t",), {"ix_t": d}, float(g.ravel() @ d.ravel()))
+            else:
+                dfac = psi[:, :, None] * tm[:, None, :]                        # [R, A, T]
+                U = om.shape[1]
+                os_, ov = m.components["ix_os"], m.components["ix_ov"]
+                gu = np.einsum("aut,rat->ru", G, dfac)                            # [R, U] (the same for os and ov)
+                Hu = np.einsum("aut,rat,sat->urs", S, dfac, dfac)                 # [U, R, R]
+                xos, xov = _np(x["ix_os"]), _np(x["ix_ov"])
+                Qs = os_.shape.Q
+                g_os = gu + os_.tau * (Qs @ xos.T).T
+                g_ov = gu + ov.tau * xov
+                # variables ordered (u, [os_r..., ov_r...]): per place a 2R × 2R data block, ICAR coupling across places
+                blk = np.zeros((U, 2 * R, 2 * R))
+                blk[:, :R, :R] = Hu
+                blk[:, :R, R:] = Hu
+                blk[:, R:, :R] = Hu
+                blk[:, R:, R:] = Hu + ov.tau * np.eye(R)[None]
+                rr = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, :, None]).repeat(2 * R, axis=2)
+                cc = (np.arange(U)[:, None, None] * 2 * R + np.arange(2 * R)[None, None, :]).repeat(2 * R, axis=1)
+                Hd = sp.csr_matrix((blk.ravel(), (rr.ravel(), cc.ravel())), shape=(2 * R * U, 2 * R * U))
+                # the ICAR penalty on each os_r: P (2RU × RU) picks os_r[u] = variable u·2R + r
+                P = sp.csr_matrix((np.ones(U * R), ((np.arange(U)[:, None] * 2 * R + np.arange(R)[None, :]).ravel(),
+                                                    (np.arange(R)[None, :] * U + np.arange(U)[:, None]).ravel())),
+                                  shape=(2 * R * U, R * U))
+                H = (Hd + P @ sp.kron(sp.identity(R), os_.tau * Qs) @ P.T).tocsc()
+                dg = H.diagonal()
+                H = (H + sp.diags(RIDGE * np.maximum(dg, dg.max() * 1e-12))).tocsc()
+                gvec = np.concatenate([g_os.T, g_ov.T], axis=1).ravel()           # (u, [os_r, ov_r])
+                # centrings: os_r over each connected component, ov_r over all places
+                comp_os = _np(m._labels["ix_os"].to(torch.float64)).astype(np.int64)
+                cons = []
+                for r in range(R):
+                    for cpt in np.unique(comp_os):
+                        idx = np.nonzero(comp_os == cpt)[0] * 2 * R + r
+                        cons.append(idx)
+                    cons.append(np.arange(U) * 2 * R + R + r)
+                from sksparse.cholmod import cho_factor
+                fa = cho_factor(H, lower=True)
+                d0 = fa.solve(-gvec)
+                At = np.zeros((2 * R * U, len(cons)))
+                for j, idx in enumerate(cons):
+                    At[idx, j] = 1.0
+                V = fa.solve(At)
+                AV = At.T @ V
+                lam = np.linalg.lstsq(AV, At.T @ d0, rcond=None)[0]
+                dvec = (d0 - V @ lam).reshape(U, 2 * R)
+                d = {"ix_os": dvec[:, :R].T.copy(), "ix_ov": dvec[:, R:].T.copy()}
+                step = _line_search(m, ("ix_os", "ix_ov"), d, float(gvec @ (d0 - V @ lam)))
+                m._ix_omega = (fa, At, V, AV, U, R)                              # for the strengths' traces
+            if factor in ("ix_psi", "ix_t") and step > 0:
+                _normalise(m, factor)
+            if log:
+                log(f"    ix {factor}: step {step:g}")
+    return f_start - float(m.objective()) * scale
+
+
+def _normalise(m, factor: str) -> None:
+    """ψ_r and τ_r rescaled to unit root mean square, ω_r (os and ov) taking the scale: the likelihood is invariant to
+    (ψ·a, ω/(a·b), τ·b), and with ψ and τ's strengths fixed, a learned ω strength otherwise walks the scale ridge
+    (v0's IX rank 3 ended with ψ at sd 5, τ at sd 13-22 and ω at sd 0.001, its strengths near 3·10⁵; v1 crept there
+    at ×1.12 per outer). Normalising all factors but one is the identification of PARAFAC and of Goodman's
+    association models; ω carries the amplitude, as ADR-0021 intends."""
+    with torch.no_grad():
+        rms = m.effects()[factor].pow(2).mean(dim=1).sqrt().clamp_min(1e-12)   # [R], of the (centred) effect
+        m.params[factor].div_(rms[:, None])                                    # the centring is linear
+        m.params["ix_os"].mul_(rms[:, None])
+        m.params["ix_ov"].mul_(rms[:, None])
+
+
+def ix_strengths(model, probes: int = 32, seed: int = 0) -> list[float]:
+    """A Newton step on log τ for the ω strengths (ix_os, ix_ov), conditional on the other factors and the base, by the
+    same formulas as `Monolith._score_taus`: g_j = ½(r_j − τ_j xᵀQ_jx − τ_j tr(ΣQ_j)) and the observed −H with
+    tr(ΣQ_iΣQ_j) and xᵀQ_iΣQ_jx, Σ the ω block's constrained inverse (its factor from the last `ix_sweep`; traces by
+    Hutchinson, solved exactly and kriged). Fellner–Schall alone crept (IX rank 1: ix_ov 100 → 531 in six outers).
+    Steps clipped to ×100. Returns the |log τ| changes."""
+    m = model
+    fa, At, V, AV, U, R = m._ix_omega
+    rng = np.random.default_rng(seed)
+
+    def sigma(b):
+        w = fa.solve(b)
+        return w - V @ np.linalg.lstsq(AV, At.T @ w, rcond=None)[0]
+
+    Qs = m.components["ix_os"].shape.Q
+    Iu = sp.identity(U, format="csr")
+    parts = (("ix_os", slice(0, R), Qs), ("ix_ov", slice(R, 2 * R), Iu))
+
+    def applyQ(j, v):                                   # v [2RU, n] → Q_j v (zero outside component j)
+        name, part, Q = parts[j]
+        vv = v.reshape(U, 2 * R, -1)
+        out = np.zeros_like(vv)
+        for r in range(part.start, part.stop):
+            out[:, r, :] = Q @ vv[:, r, :]
+        return out.reshape(v.shape)
+
+    z = rng.choice([-1.0, 1.0], size=(2 * R * U, probes))
+    w = sigma(z)
+    J = 2
+    Qz = [applyQ(j, z) for j in range(J)]
+    SQz = [sigma(q) for q in Qz]
+    tr = np.array([float((z * applyQ(j, w)).sum()) / probes for j in range(J)])
+    T = np.array([[float((applyQ(i, w) * SQz[j]).sum()) / probes for j in range(J)] for i in range(J)])
+    T = (T + T.T) / 2
+    x = m.effects()
+    xvec = np.zeros((U, 2 * R))
+    xvec[:, :R] = _np(x["ix_os"]).T
+    xvec[:, R:] = _np(x["ix_ov"]).T
+    xvec = xvec.reshape(-1, 1)
+    Qx = [applyQ(j, xvec) for j in range(J)]
+    q = np.array([float(xvec[:, 0] @ Qx[j][:, 0]) for j in range(J)])
+    SQx = sigma(np.hstack(Qx))
+    Rm = np.array([[float(Qx[i][:, 0] @ SQx[:, j]) for j in range(J)] for i in range(J)])
+    Rm = (Rm + Rm.T) / 2
+    comps = [m.components[n] for n, _, _ in parts]
+    tau = np.array([c.tau for c in comps])
+    rank = np.array([c.rank for c in comps])
+    g = 0.5 * (rank - tau * q - tau * tr)
+    tt = np.outer(tau, tau)
+    negH = np.diag(0.5 * tau * (tr + q)) - 0.5 * tt * T - tt * Rm
+    negH = (negH + negH.T) / 2
+    dg = np.sqrt(np.maximum(np.abs(np.diag(negH)), 1e-12))
+    ev, evec = np.linalg.eigh(negH / np.outer(dg, dg))
+    step = (evec @ ((evec.T @ (g / dg)) / np.maximum(ev, 1e-2))) / dg
+    fs = np.log(np.maximum(rank - tau * tr, 1e-12) / np.maximum(tau * q, 1e-300))
+    bolder = (np.sign(fs) == np.sign(step)) & (np.abs(fs) > np.abs(step))
+    step = np.clip(np.where(bolder, fs, step), -np.log(100.0), np.log(100.0))
+    out = []
+    for c, d in zip(comps, step, strict=True):
+        new = float(c.tau * np.exp(d))
+        out.append(abs(float(d)))
+        c.tau = new
+    return out
 
 class Supernodal:
     """A sparse lower-triangular factor L (from CHOLMOD) cut into its fundamental supernodes, runs of columns with

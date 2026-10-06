@@ -25,6 +25,7 @@ parser.add_argument("--threads", type=int, default=0)
 parser.add_argument("--accel", action="store_true", help="Anderson acceleration of the strengths (fit(accelerate=True))")
 parser.add_argument("--heldout", type=int, default=0, help="score the years after the fit up to this one (monolith.heldout)")
 parser.add_argument("--grain", default="year", help="year or month")
+parser.add_argument("--rank", type=int, default=0, help="the low-rank interaction's R (ADR-0021)")
 parser.add_argument("--event", default="", help="the event (default by dataset: death, hospitalisation, birth, notification)")
 parser.add_argument("--mean-tol", type=float, default=1.0, help="fit(mean_tol=): the outers' Newton steps end below this predicted decrease")
 args = parser.parse_args()
@@ -46,13 +47,13 @@ for spec in args.blocks.split(","):
     event = args.event or EVENTS.get(dataset, "notification")
     data = monolith.assemble(dataset, event, block, years, grain=args.grain)
     t_asm = time.time() - t0
-    model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity")
+    model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity", **({"rank": args.rank} if args.rank else {}))
     t1 = time.time()
     model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=args.mean_tol, accelerate=args.accel,
               log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
-    row = {"block": spec, "years": args.years, "grain": args.grain, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel, "mean_tol": args.mean_tol,
+    row = {"block": spec, "years": args.years, "grain": args.grain, "rank": args.rank, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel, "mean_tol": args.mean_tol,
            "commit": commit, "seconds": round(secs, 2), "assemble_seconds": round(t_asm, 2),
            "outers": len(model.history), "newton": len(model.newton_log), "cg": model.cg_iterations,
            "objective": float(model.objective()) * model._objective_norm(), "phi": model.phi,

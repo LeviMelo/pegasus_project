@@ -338,7 +338,7 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **The search for φ bins the cells once** (`_nb_loglik_binned`): the non-empty cells exactly, the sum over every cell from one pass that bins μ by its log (8,192 bins, count, Σμ, Σμ² with a second-order correction). It agrees with the exact streamed likelihood to 10⁻⁶ log-likelihood units and gives the same φ. On IX it takes about 4 s against 14 (2026-10-06).
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
-### 5.3 The mean: structured Newton (v1, the default for count blocks without the interaction since 2026-10-06; `PEGASUS_SOLVER=v0` restores v0; evaluation 2026-10-06, solver v1)
+### 5.3 The mean: structured Newton (v1, the default for every model since 2026-10-06: counts, the low-rank interaction, marks and shares; `PEGASUS_SOLVER=v0` restores v0 until its removal; evaluation 2026-10-06, solver v1)
 
 **The v0 solver** is truncated Newton–CG on autodiff Hessian–vector products (double backward through the factorised total), with a diagonal preconditioner, Eisenstat–Walker forcing and an Armijo line search; L-BFGS before it diverged (evaluation 2026-10-04). Warm starts, `mean_tol` and Anderson acceleration of the outer loop are ADR-0017.
 - **Measured** on chapter IX 2010–2021 (552,046 parameters; 2026-10-06): the first ten Newton steps take 1–3 CG iterations each; from the fourteenth, every step hits the 50-iteration cap and gains less than 10⁻³.
@@ -377,6 +377,12 @@ H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP
 **Constraints.** Constraints local to a place (groups' deviations summing to zero, leaves centred within groups) and to the globals (h_grp over groups) are imposed by contrast bases inside the blocks. The few constraints across places (ICAR sum-to-zero per connected component) are imposed by conditioning by kriging on the factor (Rue & Held 2005, §2.3.3).
 
 **When γ is large** (the monthly grain: h_grp over 168 months), the factor of the place system with an approximate Schur complement becomes the preconditioner of a CG on the exact assembled product. A handful of iterations is expected, against the v0's 50-iteration cap. This is measured, not assumed (§5.8).
+
+**The interaction and the marks on v1** (2026-10-06; evaluation 2026-10-06, solver v1).
+- **Leaf-specific features.** The assembly and the solve carry them exactly. With the low-rank interaction on, an active leaf's place-time factor is its group's times exp(I), so its coupling to the shared effects is its group's features plus a deviation δφ. The leaf-place elimination then gains, per (group, place), the cross term φ·G1ᵀ + G1·φᵀ and the active–active term Σ (LP²/d)·δφ·δφᵀ − H1·H1ᵀ/s. On IX rank 3 with the interaction held fixed: gradient equal to autodiff to 10⁻¹⁴, solves to 10⁻⁶.
+- **The interaction's own factors** (ψ, τ, ω = os + ov) by alternating exact Newton steps (`solver.ix_sweep`; the fit of Goodman's row–column association models). Given the other two, η is linear in each factor, so each step is a Poisson Newton step with that factor's prior. ψ and τ are small dense systems; ω is a sparse 2R·U system (CHOLMOD, with the centrings by kriging). The ω strengths take a Newton step on log τ from that system's own traces (`ix_strengths`).
+- **The mark and share models** (log-normal, beta-binomial share, count) exist only on non-empty cells, each with its family's Fisher weight. They are the same structure with a zero shared factor and every leaf active (`StructuredNewton._mark_factors`). Gradients equal autodiff to 10⁻¹⁵, and Newton converges quadratically. Birth weight 2010–2023 fits in 9 s against v0's 21 s.
+- **Age–sex cells with no exposure** in the whole block (a mother's male cells) are fixed at zero, and the profiles are centred over the exposed cells. Under the centring over both sexes, the unexposed sex's level was a flat direction tied to b0.
 
 **BYM2.** The geography is reparametrised as BYM2: one σ and a mixing ρ (Riebler et al. 2016, §4.3). The v0's two separate τ's for the ICAR and iid parts form a ridge, which is the ill-conditioning the `move_tol` stopping rule steps around.
 
@@ -1128,7 +1134,7 @@ A solver change is measured on the benchmark before it is adopted.
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
 | marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
-| mean solver | 5.3 | v1, **the default** for count blocks without the interaction since 2026-10-06 (exact Newton; IX ≈ 3× v0 calm, better optimum, equal held-out; monthly grain verified); v0 remains for marks, shares and the interaction | O1 |
+| mean solver | 5.3 | v1, **the default for every model** since 2026-10-06 (exact Newton; IX cold 59 s against v0's 501 s, a better optimum and held-out; monthly grain, the interaction, marks and shares verified against autodiff); v0 kept until the uncertainty (laplace.py) and the horseshoe move to v1 | O1 |
 | strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
 | uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |

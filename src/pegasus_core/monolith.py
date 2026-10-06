@@ -48,7 +48,8 @@ HS = ("th_grp", "th_cat")    # the tree levels a horseshoe prior scales node by 
 # the parametrisation's centring, stored with every fit: 2 since 2026-10-06 (the age–sex profile over both sexes, the iid
 # place effects uncentred); a fit stored without it is read through `_legacy_centring`
 CENTRING = 2
-SHRUNK = 1e3                 # a τ above this leaves its effect at a negligible size (sd < 0.03; 1e5 until 2026-10-06)
+SHRUNK = 1e3                 # a τ above this leaves its effect at a negligible size on a log-rate or logit scale (sd < 0.03;
+                             # 1e5 until 2026-10-06); a model on another scale sets its own (`Monolith.shrunk`)
 
 
 def age_band(age: np.ndarray, edges: list[int] | None = None) -> np.ndarray:
@@ -382,6 +383,7 @@ class Component:
 
 
 class Monolith:
+    shrunk = SHRUNK              # the strength past which an effect has shrunk away (on this model's linear predictor)
     """One block's fitted model."""
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
@@ -402,11 +404,17 @@ class Monolith:
         self.nB = nG // 2                      # age bands per sex (the population source's)
         rw_age = structures.random_walk(self.nB, order=2)
         rw_t = structures.random_walk(nT, order=2 if nT >= 4 else 1)
+        # age–sex cells with no exposure anywhere in the block (a mother's male cells) carry no profile: fixed at zero,
+        # and the profiles centred over the exposed cells only. Centred over both sexes, the unexposed sex's level was
+        # a flat direction tied to b0 (the births' solve read b0 to 4 %, 2026-10-06)
+        exposed = data.N.sum(axis=(0, 1)) > 0
+        self._gmask = torch.as_tensor(exposed, dtype=self.dtype, device=self.device)
+        rows = float(exposed.reshape(2, -1).any(axis=1).sum()) / 2
         self.components = {
             "th_grp": Component("th_grp", structures.iid(nGrp), 1),
             "th_cat": Component("th_cat", _within_groups(data.leaf_group, nE), 1),
-            "f_all": Component("f_all", rw_age, 2),
-            "f_grp": Component("f_grp", rw_age, nGrp * 2, free=(nGrp - 1) / nGrp),
+            "f_all": Component("f_all", rw_age, 2, free=rows),
+            "f_grp": Component("f_grp", rw_age, nGrp * 2, free=(nGrp - 1) / nGrp * rows),
             "h_all": Component("h_all", rw_t, 1),
             "h_grp": Component("h_grp", rw_t, nGrp, free=(nGrp - 1) / nGrp),
             "s_all": Component("s_all", icar, 1),
@@ -630,10 +638,12 @@ class Monolith:
             # the age profile is centred over both sexes together, not within each: the sex difference is a direction
             # of the RW2's null space the data inform. Centred within each sex, no component carried it, and IX's
             # youngest bands were fitted 0.57-0.77x and 1.4-3.0x observed in the two sexes (2026-10-06)
-            return raw - raw.mean()
+            mask = self._gmask.reshape(raw.shape)
+            return (raw - (raw * mask).sum() / mask.sum()) * mask
         if name == "f_grp":
+            mask = self._gmask[None, :]
             v = raw.reshape(-1, 2 * self.nB)
-            v = v - v.mean(dim=1, keepdim=True)                       # each group over both sexes (its level is θ_grp)
+            v = (v - (v * mask).sum(dim=1, keepdim=True) / mask.sum()) * mask    # each group over the exposed age–sex cells
             return (v - v.mean(dim=0, keepdim=True)).reshape(raw.shape)  # across groups (f_all's)
         v = _centre(raw, self._labels[name]) if self.components[name].shape.centred else raw
         if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
@@ -744,6 +754,7 @@ class Monolith:
             self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
             self._enable_interaction()
             self._init_interaction()
+            self._laml_prev = self._ix_omega = None          # the LAML changes with the model: no step is compared across
             changes = [np.inf]
             log(f"interaction rank {self.rank} started from the base fit's residuals; {time.time() - start:.0f}s")
         self._loop(outer, inner, tol, log, changes, _Anderson() if accelerate else None, move_tol, mean_tol, start)
@@ -879,9 +890,10 @@ class Monolith:
         level = np.bincount(grp, weights=a, minlength=nK) / np.maximum(np.bincount(grp, minlength=nK), 1)
         cbar, bbar = c.mean(axis=0), b.mean(axis=0)
         F, B = c - cbar[None, :], b - bbar[None, :]
-        lv = level + F.mean(axis=1) + B.mean(axis=1)                             # each group's own profile and course levels
+        # each group's own profile and course levels (the profiles' over the exposed age–sex cells, as they are centred)
+        lv = level + F[:, exposed_g].mean(axis=1) + B.mean(axis=1)
         with torch.no_grad():
-            self.params["b0"].fill_(float(lv.mean() + bbar.mean() + cbar.mean()))
+            self.params["b0"].fill_(float(lv.mean() + bbar.mean() + cbar[exposed_g].mean()))
             self.params["th_grp"].copy_(torch.as_tensor(lv - lv.mean())[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(a - level[grp])[None, :])
             self.params["h_all"].copy_(torch.as_tensor(bbar)[None, :])
@@ -958,18 +970,29 @@ class Monolith:
             self.params["v_all"].copy_(torch.as_tensor(place)[None, :])
 
     def _uses_v1(self) -> bool:
-        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every count block without the interaction (the
-        default since 2026-10-06: IX cold 154-169 s against v0's 501 s calm, a better optimum, held-out 2.21828 against
-        2.21851); ``PEGASUS_SOLVER=v0`` restores the v0 Newton–CG, which the mark and share models and the interaction
-        keep until ported."""
-        return os.environ.get("PEGASUS_SOLVER", "v1") == "v1" and type(self) is Monolith and not self.ix_on and not self.rank
+        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every model: the counts (IX cold 59 s against
+        v0's 501 s calm), the low-rank interaction (its factors by `solver.ix_sweep`), and the mark and share models (their
+        cells' Fisher weights as leaf-specific features). ``PEGASUS_SOLVER=v0`` restores the v0 Newton–CG until its
+        removal."""
+        return os.environ.get("PEGASUS_SOLVER", "v1") == "v1" and isinstance(self, Monolith)
 
     def _mean(self, iterations: int, loglik_tol: float = 0.0) -> int:
         """The mean's MAP at fixed strengths, by the v1 exact Newton where it applies, else the v0 Newton–CG."""
         if self._uses_v1():
             from . import solver
             nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
-            return solver.fit_mean(self, iterations=iterations, loglik_tol=max(loglik_tol, 1e-3), solver=nw)
+            tol = max(loglik_tol, 1e-3)
+            steps = solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
+            if self.ix_on:
+                # the interaction's factors by their own exact Newton steps, alternating with the base's; the
+                # alternation's tail is slow (IX rank 3: 6,618 units in the first sweep, then 0.5, 0.2, 0.15 …),
+                # and a sweep below half a log-likelihood unit ends it
+                for _ in range(iterations):
+                    gain = solver.ix_sweep(self)
+                    steps += solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
+                    if gain < max(0.5, min(tol, 1e3)):
+                        break
+            return steps
         return self._fit_mean(iterations, loglik_tol=loglik_tol)
 
     def _fit_mean(self, iterations: int, tolerance: float = 1e-9, loglik_tol: float = 0.0) -> int:
@@ -1100,7 +1123,14 @@ class Monolith:
             nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
             self._solver_v1 = nw
             if v1_scoring:
-                return self._score_taus(nw)
+                changes = self._score_taus(nw)
+                if self.ix_on:
+                    from . import solver as _s
+                    if getattr(self, "_ix_omega", None) is None:
+                        _s.ix_sweep(self)
+                    ix = dict(zip(("ix_os", "ix_ov"), _s.ix_strengths(self), strict=True))
+                    changes = [ix.get(n, ch) for n, ch in zip(self.components, changes, strict=True)]
+                return changes
             exact = nw.traces(probes=int(os.environ.get("PEGASUS_TRACE_PROBES", "32")))
         changes, proposals = [], {}
         for (name, c), d in zip(self.components.items(), grads, strict=True):
@@ -1119,11 +1149,11 @@ class Monolith:
             new = float(np.clip(new, c.tau * np.exp(-MAX_TAU_STEP), c.tau * np.exp(MAX_TAU_STEP)))
             new = float(np.clip(new, *TAU_BOUNDS))
             # a τ climbing past SHRUNK has shrunk its effect to nothing; its further climb is not instability
-            changes.append(0.0 if min(new, c.tau) > SHRUNK else abs(np.log(new / c.tau)))
+            changes.append(0.0 if min(new, c.tau) > self.shrunk else abs(np.log(new / c.tau)))
             self.trace_log.append((name, c.rank, quad, trace, c.tau, new))
             proposals[name] = new
         if accel is not None:
-            active = [k for k, new in proposals.items() if min(new, self.components[k].tau) <= SHRUNK]
+            active = [k for k, new in proposals.items() if min(new, self.components[k].tau) <= self.shrunk]
             if active:
                 u = np.log([self.components[k].tau for k in active])
                 g = np.log([proposals[k] for k in active])
@@ -1167,16 +1197,28 @@ class Monolith:
         new mean, and a step that lowered it is halved from where it started instead of being followed by a new one.
         Steps are clipped to ×100; a strength past `SHRUNK` and still rising has shrunk its effect away and stops.
         The fixed point is Fellner–Schall's (g = 0)."""
-        names = [n for n, c in self.components.items() if c.rank > 0 and not c.fixed]
+        names = [n for n, c in self.components.items() if c.rank > 0 and not c.fixed and not n.startswith("ix_")]
         rho_now = np.log([self.components[n].tau for n in names])
         rank = np.array([self.components[n].rank for n in names])
+        rem = {}
+
         def read_laml() -> float:
-            return (-float(self.objective()) * self._objective_norm() + nw.remaining() + 0.5 * float(rank @ rho_now)
+            rem["left"] = nw.remaining()
+            return (-float(self.objective()) * self._objective_norm() + rem["left"] + 0.5 * float(rank @ rho_now)
                     - 0.5 * nw.logdet_constrained())
         laml = read_laml()
-        prev = getattr(self, "_laml_prev", None)
+        # the LAML is read accurately only near the mean's mode: far from it (a large strength step just taken) the
+        # remaining decrease is itself a rough quadratic estimate, and SIH I's reference read 800 units high, so the
+        # guard reverted a sound fit to its first outer's strengths (2026-10-06). Comparisons need both reads accurate
+        accurate = rem["left"] < 10.0
+        # the LAML is comparable across outers only when nothing else moves between them: with the interaction on (its
+        # factors and strengths), or a mark model's dispersion re-estimated every outer (its cells' weights), there is
+        # no line search (IX rank 1 halved every step; birth weight halved back to τ = 1 where v0 had 10⁴)
+        prev = None if self.ix_on or hasattr(self, "cell_derivatives") else getattr(self, "_laml_prev", None)
         # the step aims at the fixed point without W's derivative, which sits a few per cent of τ from the LAML's own
         # optimum (IX, 2026-10-06): a fall of a few units is that difference, not an overshoot
+        if prev is not None and not (prev["accurate"] and accurate):
+            prev = None
         if prev is not None and laml < prev["laml"] - 2.0:
             # read again from a factor at the current mean before rejecting: the outers' factor is one Newton step
             # back, and its log-determinant moved SIM II's LAML by 8 units at the same strengths (2026-10-06)
@@ -1225,14 +1267,14 @@ class Monolith:
         # and sent to 10·SHRUNK they stayed there (the LAML is flat out there): held-out NB log-likelihood −1.63793
         # against −1.63716 (2026-10-06)
         step = np.clip(step, -np.log(100.0), np.log(100.0))
-        gone = (tau > SHRUNK) & (step > 0)
+        gone = (tau > self.shrunk) & (step > 0)
         step = np.where(gone, 0.0, step)
         # the step's own predicted gain in the marginal likelihood: along the BYM ridge (s against v) the likelihood
         # is flat and τ can wander without changing the fit, so convergence is read from the gain, not from Δρ
         self.laml_gain = float(0.5 * g @ step)
         if self.laml_gain < float(os.environ.get("PEGASUS_LAML_TOL", "0.1")):
             return [0.0] * len(self.components)
-        self._laml_prev = {"rho": rho_now, "laml": laml, "step": step, "halvings": 0}
+        self._laml_prev = {"rho": rho_now, "laml": laml, "step": step, "halvings": 0, "accurate": accurate}
         out = {}
         for n, tau_n, d in zip(names, tau, step, strict=True):
             new = float(np.clip(tau_n * np.exp(d), *TAU_BOUNDS))
@@ -1329,9 +1371,16 @@ class Monolith:
             slabs = range(lp.shape[0])
             n = torch.zeros(bins, dtype=self.dtype, device=self.device)
             s1, s2 = torch.zeros_like(n), torch.zeros_like(n)
+            om = self._om(x) if self.ix_on else None
+            if om is not None:          # an active leaf's slab carries exp(I) (a bound for the edges: |I| at most)
+                imax = float(self._I(x).abs().max())
+                lo, hi = lo - imax, hi + imax
             for e in slabs:
                 k = int(self.grp[e])
-                m = (lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]).reshape(-1)
+                m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
+                if om is not None and int(self.ixpos[e]) >= 0:
+                    m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
+                m = m.reshape(-1)
                 # an unexposed cell (μ = 0) goes to an extra bin that is dropped: no compaction of the slab
                 idx = torch.where(m > 0, ((torch.log(m) - lo) / (hi - lo) * bins).clamp_(0, bins - 1),
                                   torch.full_like(m, bins)).long()
@@ -1519,6 +1568,9 @@ class MarkModel(Monolith):
     empty cells and no factorised total; the likelihood is a weighted Gaussian over the
     non-empty cells."""
 
+    # on the log mark's scale an effect of sd 0.01 is 1 % of a birth weight (about 30 g): the threshold is sd < 0.001
+    shrunk = 1e6
+
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
                  device: str = "cpu"):
         if data.n is None:
@@ -1541,6 +1593,11 @@ class MarkModel(Monolith):
         r = self.y - self.eta_nnz(x)
         return (0.5 * (self.w * r * r).sum() + self.penalty(x)) / float(self.w.sum())
 
+    def cell_derivatives(self, eta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per non-empty cell, the first and second derivative of the objective's data term in η (log-likelihood
+        units): the v1 solver's weights (`solver.StructuredNewton._mark_factors`). Gaussian: w(η − ȳ) and w."""
+        return self.w * (eta - self.y), self.w.clone()
+
     def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         """Gaussian: the Fisher diagonal of an effect is Σ w over the cells it touches."""
         return (self.w * self.eta_nnz(x)).sum()
@@ -1556,10 +1613,11 @@ class MarkModel(Monolith):
     def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
             **_ignored) -> MarkModel:
         start = time.time()
+        self._laml_prev = self.laml = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         for it in range(outer):
-            self._fit_mean(inner, loglik_tol=mean_tol)
+            self._mean(inner, loglik_tol=mean_tol)
             changes = self._update_taus()
             old = self.sigma2_c
             self.sigma2_c = self._cell_variance()
@@ -1572,7 +1630,7 @@ class MarkModel(Monolith):
                 f"{time.time() - start:.0f}s | {taus}")
             if max(changes) < tol:
                 break
-        self._fit_mean(inner)
+        self._mean(inner)
         self.phi = float("nan")
         return self
 
@@ -1635,6 +1693,7 @@ class _CellMark(MarkModel):
     log-normal's cell variance is. A place-year's observed value, expectation and variance are on the family's y scale
     (``observed``, ``expected``), which is where the lenses read a departure."""
 
+    shrunk = SHRUNK              # logit and log-mean scales, as the counts'
     family = ""
     dispersion_name = ""
     disp = 0.0                 # the family's dispersion; 0 until the first outer iteration
@@ -1662,10 +1721,11 @@ class _CellMark(MarkModel):
     def fit(self, outer: int = 25, inner: int = 30, tol: float = 0.02, log=print, warm=None, mean_tol: float = 0.0,
             **_ignored) -> _CellMark:
         start = time.time()
+        self._laml_prev = self.laml = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         for it in range(outer):
-            self._fit_mean(inner, loglik_tol=mean_tol)
+            self._mean(inner, loglik_tol=mean_tol)
             changes = self._update_taus()
             old = self.disp
             self.disp = self._moment()
@@ -1679,7 +1739,7 @@ class _CellMark(MarkModel):
             log(f"outer {it}: max change {max(changes):.3f}, {self.dispersion_name} {self.disp:.4g}, {time.time() - start:.0f}s | {taus}")
             if max(changes) < tol:
                 break
-        self._fit_mean(inner)
+        self._mean(inner)
         self.phi = float("nan")
         return self
 
@@ -1738,6 +1798,10 @@ class ShareModel(_CellMark):
         nll = (self.w * (self.n_t * torch.nn.functional.softplus(eta) - self.total_t * eta)).sum()
         return (nll + self.penalty(x)) / self.scale
 
+    def cell_derivatives(self, eta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        p = torch.sigmoid(eta)
+        return self.w * (self.n_t * p - self.total_t), self.w * self.n_t * p * (1 - p)
+
     def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         eta = self.eta_nnz(x)
         p = torch.sigmoid(eta).detach()
@@ -1789,6 +1853,10 @@ class CountModel(_CellMark):
         eta = self.eta_nnz(x)
         nll = (self.w * (self.n_t * torch.exp(eta) - self.total_t * eta)).sum()
         return (nll + self.penalty(x)) / self.scale
+
+    def cell_derivatives(self, eta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mu = torch.exp(eta)
+        return self.w * (self.n_t * mu - self.total_t), self.w * self.n_t * mu
 
     def _fisher_mass(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         eta = self.eta_nnz(x)
