@@ -52,15 +52,18 @@ def deal(dataset: str, event: str, block: str, years: list[int]) -> tuple[monoli
     meta = store.manifest("split_sides", key)
     if arr is not None and meta is not None:
         sides = {k: arr[f"y_{k}"].astype(float) for k in control.SIDES}
+        # the deal is a stored snapshot (its sides are the honest split's: re-dealing would mix A and E), so its cells
+        # and carriers are read back with it, the sex restriction's groups included where the deal carries them
         return monolith.BlockData(dataset, event, block, arr["years"], arr["places"], meta["leaves"], meta["groups"],
                                   arr["leaf_group"], arr["N"], arr["e"], arr["u"], arr["t"], arr["g"], sum(sides.values()),
-                                  meta.get("unallocated", {}), meta["key"]), sides
+                                  meta.get("unallocated", {}), meta["key"], group_cells=arr.get("group_cells")), sides
     full = monolith.assemble(dataset, event, block, years)
     sides = {k: v.astype(float) for k, v in
              control.event_sides(full.y, f"event-sides-v1|{dataset}|{event}|{block}|{list(years)}").items()}
     store.put_arrays("split_sides", key,
                      {"years": full.years, "places": full.places, "leaf_group": full.leaf_group, "N": full.N, "e": full.e,
-                      "u": full.u, "t": full.t, "g": full.g, **{f"y_{k}": v.astype(np.int32) for k, v in sides.items()}},
+                      "u": full.u, "t": full.t, "g": full.g, **{f"y_{k}": v.astype(np.int32) for k, v in sides.items()},
+                      **({} if full.group_cells is None else {"group_cells": full.group_cells})},
                      {"leaves": full.leaves, "groups": full.groups, "unallocated": full.unallocated, "key": full.key})
     return full, sides
 
@@ -270,7 +273,9 @@ def test_lead(sp: surprise.Surprise, x: leads.Lead, level: str = "state") -> dic
 
 CHAPTER_R = ("R00", "R99")
 INTENT = ("Y10", "Y34")              # events of undetermined intent
-WIDE_BLOCKS = (("V01", "V99"), ("W00", "W19"), ("W75", "W84"))   # blocks the ICD tree's parent holds too wide for siblings
+# transport accidents: siblings across victim types (V89, unspecified, against V40-V49 …), wider than the tree's group.
+# W00-W19 and W75-W84 were here while the tree hung categories on its outermost group; it nests them since 2026-10-06
+WIDE_BLOCKS = (("V01", "V99"),)
 AGE_CUTS = (0, 15, 30, 45, 60, 75)   # coarse ages of the profile cells
 #: ICD-10 gives the intent chapters one mechanism list: an assault X85-Y09 and an event of undetermined intent
 #: Y10-Y34 are the same mechanism at the same position (X93-X95 firearm / Y22-Y24, X99 sharp object / Y28 ...).
@@ -295,7 +300,7 @@ def node_codes(node: str, known) -> list[str]:
 
 
 def block_of(node: str, known, tree=None) -> list[str]:
-    """The ICD-10 block that holds the node's siblings: V, W00-W19 and W75-W84 by `WIDE_BLOCKS`, else the tree's
+    """The ICD-10 block that holds the node's siblings: V by `WIDE_BLOCKS`, else the tree's
     parent (``tree``: the ICD-10 code structure with a ``parent`` column indexed by code)."""
     first = (node_codes(node, known) or [node])[0]
     for lo, hi in WIDE_BLOCKS:

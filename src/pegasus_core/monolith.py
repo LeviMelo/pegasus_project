@@ -83,6 +83,9 @@ class BlockData:
     month_of_year: np.ndarray | None = None   # monthly grain: t -> 0..11
     S: np.ndarray | None = None       # [U, T, G] sd of log N where the population carries uncertainty (the account)
     population: str = "popsvs"
+    group_cells: np.ndarray | None = None  # [groups, G] the age–sex cells each group can occur in (`_admissible`)
+    group_outer: np.ndarray | None = None  # per group: its geography carrier (`assemble(geography=)`); None: itself
+    outer_groups: list[str] | None = None  # the geography carriers' names
 
     def periods(self) -> np.ndarray:
         """The time axis as period codes: the years, or YYYYMM at the monthly grain."""
@@ -134,9 +137,9 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
     return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version()) >= NEWBORN_SHARE else "popsvs"
 
 
-def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
+def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
              source: str = "events", grain: str = "year", population: str | None = None, cache: bool = True,
-             **source_args) -> BlockData:
+             geography: str | None = "group", **source_args) -> BlockData:
     """One block's cells and populations, from the gateway, memoised in the store (kind ``blockdata``).
 
     The 10.7 M cells of SIH chapter X monthly took 467 s to assemble, and every variant of a fit (train and
@@ -146,8 +149,10 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     a changed reader is a different address and a stale entry is never served. The confirmation reserve is
     checked before the cache is read. ``cache=False`` assembles afresh and stores nothing."""
     control.check_reserved(dataset, years)
+    if block == "*":
+        profile, geography = "group", None          # no classifier tree: one leaf, nothing to carry
     if not cache:
-        return _assemble(dataset, event, block, years, profile, source, grain, population, **source_args)
+        return _assemble(dataset, event, block, years, profile, source, grain, population, geography, **source_args)
     ys = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, ys.tolist(), source, **source_args)
@@ -156,12 +161,15 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     for name in pop.column_names:
         h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
     key = {"what": "blockdata", "dataset": dataset, "event": event, "block": block, "years": ys.tolist(),
-           "profile": profile, "source": source, "grain": grain, "args": source_args, "data": config.data_version(),
-           **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code()}
+           "profile": profile, "geography": geography, "source": source, "grain": grain, "args": source_args,
+           "data": config.data_version(),
+           **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code(),
+           **({} if block == "*" else {"tree": config.resource_version("code_trees.parquet"),
+                                       "attributes": config.resource_version("code_attributes.parquet")})}
     arrays, meta = store.get_arrays("blockdata", key), store.manifest("blockdata", key)
     if arrays is not None and meta is not None:
         return _blockdata_from(arrays, meta)
-    data = _assemble(dataset, event, block, years, profile, source, grain, population, **source_args)
+    data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, **source_args)
     store.put_arrays("blockdata", key, *_blockdata_to(data))
     return data
 
@@ -170,7 +178,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
 def _assembly_code() -> str:
     """The hash of the code a BlockData is a function of: the assembly and the gateway's readers."""
     h = hashlib.sha256(str(ASSEMBLY).encode())
-    for fn in (_assemble, _index_of, age_band, _chapter):
+    for fn in (_assemble, _index_of, age_band, _chapter, _carrier, _admissible):
         h.update(inspect.getsource(fn).encode())
     h.update(Path(gateway.__file__).read_bytes())
     return h.hexdigest()[:16]
@@ -185,8 +193,13 @@ def _blockdata_to(d: BlockData) -> tuple[dict[str, np.ndarray], dict]:
         arrays["S"] = d.S[:, ::12] if month else d.S
     if d.n is not None:
         arrays["n"], arrays["l2"] = d.n, d.l2
+    if d.group_cells is not None:
+        arrays["group_cells"] = d.group_cells
+    if d.group_outer is not None:
+        arrays["group_outer"] = d.group_outer
     meta = {"dataset": d.dataset, "event": d.event, "block": d.block, "leaves": d.leaves, "groups": d.groups,
-            "unallocated": d.unallocated, "data_key": d.key, "grain": d.grain, "population": d.population}
+            "unallocated": d.unallocated, "data_key": d.key, "grain": d.grain, "population": d.population,
+            **({} if d.outer_groups is None else {"outer_groups": d.outer_groups})}
     return arrays, meta
 
 
@@ -201,19 +214,27 @@ def _blockdata_from(a: dict[str, np.ndarray], m: dict) -> BlockData:
                   a["g"].astype(np.int64), a["y"], m["unallocated"], m["data_key"], S=S, population=m["population"])
     if "n" in a:
         d.n, d.l2 = a["n"], a["l2"]
+    if "group_cells" in a:
+        d.group_cells = a["group_cells"].astype(bool)
+    if "group_outer" in a:
+        d.group_outer, d.outer_groups = a["group_outer"], m["outer_groups"]
     if month:
         d.grain = "month"
         d.month_of_year = np.tile(np.arange(12), len(d.years))
     return d
 
 
-def _assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "group",
-              source: str = "events", grain: str = "year", population: str | None = None, **source_args) -> BlockData:
+def _assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
+              source: str = "events", grain: str = "year", population: str | None = None, geography: str | None = "group",
+              **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
     ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
-    ``profile`` is the tree level that carries profiles, history and geography: ``group``
-    (the ICD block, pooling its categories) or ``category`` (each category its own).
+    ``profile`` is the tree level that carries the levels and the age–sex profiles: ``group`` (the outermost ICD group
+    under the chapter, pooling its categories: C00-C97, all malignant neoplasms), ``block`` (the innermost group,
+    C51-C58: ICD-10 groups nest, pegasus_data's tree since 2026-10-06) or ``category`` (each category its own).
+    ``geography`` is the level that carries history and the place effects (h, s, v and season by group), a level at
+    or above ``profile`` (None: the same): each profile carrier lies in one geography carrier.
     ``source`` chooses the gateway reader, each giving cells of (u, year, sex, age, code):
 
         events       counts of the event type (y)
@@ -255,8 +276,36 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         parent_of, level_of = _icd10_tree()
     categories = (["*"] if block == "*" else
                   sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block))
-    carrier = {c: (parent_of[c] if profile == "group" and parent_of[c] is not None else c) for c in categories}
+    if profile not in ("group", "block", "category"):
+        raise ValueError(f"profile {profile!r}: group, block or category")
+    carrier = {c: _carrier(c, profile, parent_of, level_of) for c in categories}
+    # admissibility (ARCHITECTURE §3.3): a category occurs only in the age–sex cells its sex restriction and its absolute
+    # age limits allow (`_admissible`). Its carrier's profile would otherwise give it the carrier's sex ratio and ages
+    # (the group-profile fit of II expected 53 % of cervical-cancer deaths in men, 2026-10-06): a carrier whose
+    # categories differ in admissibility is split by it, and each group's exposure is zero outside its cells
+    # (`Monolith._prof`). For an underlying cause, the codes that cannot be one are not leaves at all
+    underlying = dataset == "SIM.DO" and source == "events"
+    adm, never = ({}, set()) if block == "*" else _admissible(edges, underlying)
+    never = never & set(categories)
+    every = (np.ones(2 * nB, dtype=bool), "")
+    cls = {c: adm.get(c, every) for c in categories}
+    categories = [c for c in categories if c not in never]
+    carrier = {c: carrier[c] for c in categories}
+    mixed = {k for k in set(carrier.values()) if len({cls[c][0].tobytes() for c in categories if carrier[c] == k}) > 1}
+    carrier = {c: (f"{k}|{cls[c][1]}" if k in mixed and cls[c][1] else k) for c, k in carrier.items()}
     groups = sorted(set(carrier.values()))
+    group_cells = np.array([next(cls[c][0] for c in categories if carrier[c] == k) for k in groups])
+    group_outer = outer_groups = None
+    if geography is not None and geography != profile:
+        if geography not in ("group", "block", "category"):
+            raise ValueError(f"geography {geography!r}: group, block or category")
+        outer_of = {}
+        for c in categories:
+            o = _carrier(c, geography, parent_of, level_of)
+            if outer_of.setdefault(carrier[c], o) != o:
+                raise ValueError(f"geography {geography!r} is finer than profile {profile!r}: {carrier[c]} spans two")
+        outer_groups = sorted(set(outer_of.values()))
+        group_outer = np.array([outer_groups.index(outer_of[k]) for k in groups], dtype=np.int64)
     gidx = {g: i for i, g in enumerate(groups)}
     eidx = {c: i for i, c in enumerate(categories)}
     values = CELL_VALUES.get(source, ("y",))
@@ -283,6 +332,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         row_code = enc.indices.to_numpy(zero_copy_only=False)
         in_block = np.array([c in eidx for c in cats], dtype=bool)[row_code]
         other = ~in_block & np.array([level_of.get(c) is None for c in cats], dtype=bool)[row_code]
+        if never:
+            # a code that cannot be an underlying cause (an asterisk code; the release's rule): counted, not modelled
+            bad = np.array([c in never for c in cats], dtype=bool)[row_code]
+            unallocated["not an underlying cause"] = unallocated.get("not an underlying cause", 0) + int(
+                tab.column(weight).to_numpy()[bad].sum())
         unallocated["code not in ICD-10 tree"] = unallocated.get("code not in ICD-10 tree", 0) + int(
             tab.column(weight).to_numpy()[other].sum())
         for r in ec.unallocated.to_pylist():
@@ -320,8 +374,23 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            "data": config.data_version(), **gateway.population_key(population),
            **({} if profile == "group" else {"profile": profile}),
            **({} if source == "events" else {"source": source, **source_args}),
-           **({} if grain == "year" else {"grain": grain})}
+           **({} if grain == "year" else {"grain": grain}),
+           **({"admissible": 2} if not group_cells.all() or never else {}),
+           **({} if group_outer is None else {"geography": geography})}
     y = sums[CELL_MEAN[source]] / sums["n"] if source in CELL_VALUES else sums["y"]
+    lg = np.array([gidx[carrier[c]] for c in categories])
+    excluded = ~group_cells[lg[e], g]
+    if excluded.any():
+        # records in a cell the code excludes (a man's cervical cancer, a newborn's senility): impossible as recorded,
+        # so not modelled, and counted by reason, never dropped silently (ARCHITECTURE §3.3)
+        w = (sums["n"] if source in CELL_VALUES else y)
+        sex_ok = group_cells.reshape(len(groups), 2, nB).any(axis=2)[lg[e], g // nB]
+        for reason, sel in (("sex the code excludes", excluded & ~sex_ok), ("age the code excludes", excluded & sex_ok)):
+            if sel.any():
+                unallocated[reason] = unallocated.get(reason, 0) + int(w[sel].sum())
+        keep = ~excluded
+        e, u, t, g, y = e[keep], u[keep], t[keep], g[keep], y[keep]
+        sums = {v: x[keep] for v, x in sums.items()}
     live = N[u, t, g] > 0
     if not live.all():
         # events in a cell the population holds nobody in (the account's interval-free zeros: 1 death in 14 years of IX):
@@ -332,7 +401,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         sums = {v: x[live] for v, x in sums.items()}
     data = BlockData(dataset, event, block, years, places, categories, groups,
                      np.array([gidx[carrier[c]] for c in categories]), N, e, u, t, g, y, unallocated, key,
-                     S=S, population=population)
+                     S=S, population=population, group_cells=None if group_cells.all() else group_cells,
+                     group_outer=group_outer, outer_groups=outer_groups)
     if source in CELL_VALUES:
         data.n, data.l2 = sums["n"], sums[CELL_VALUES[source][-1]]   # share: l2 is k, the successes (y is k/n)
     if grain == "month":
@@ -349,6 +419,56 @@ def _index_of(sorted_values: np.ndarray, values: np.ndarray) -> np.ndarray:
         raise KeyError(f"{int((sorted_values[np.minimum(pos, len(sorted_values) - 1)] != values).sum())} values "
                        "outside the index")
     return pos.astype(np.int64)
+
+
+def _admissible(edges: list[int], underlying: bool) -> tuple[dict[str, tuple[np.ndarray, str]], set[str]]:
+    """The age–sex cells each ICD-10 category can occur in, from pegasus_data's `code_attributes`: its sex restriction
+    (the release's RESTRSEXO, or NCHS Part 11 Table G's absolute sex edit; the two never contradict) and Table G's
+    absolute age limits. A band is excluded only when it lies wholly outside the allowed ages (``edges``: the bands'
+    lower edges, the last open). Conditional edits (highly improbable, not impossible) are not zeros. Returns
+    {category: (allowed cells [2·bands], a short tag)} for the restricted ones and, for an underlying cause
+    (``underlying``), the categories that cannot be one (the release's rule: asterisk codes, chapters XIX and XXI)."""
+    a = gateway.code_attributes("ICD10")
+    cols = {c: a.column(c).to_pylist() for c in ("code", "level", "sex", "nchs_sex", "nchs_sex_edit", "nchs_age_from",
+                                                 "nchs_age_to", "nchs_age_edit", "underlying_cause")}
+    lo = np.asarray(edges, dtype=float)
+    hi = np.r_[lo[1:], np.inf]
+    nB = len(lo)
+    out, never = {}, set()
+    for i, code in enumerate(cols["code"]):
+        if cols["level"][i] != "category":
+            continue
+        if underlying and not cols["underlying_cause"][i]:
+            never.add(code)
+            continue
+        sex = cols["sex"][i] or (cols["nchs_sex"][i] if cols["nchs_sex_edit"][i] == "absolute" else None)
+        cell = np.ones(2 * nB, dtype=bool)
+        tag = sex or ""
+        if sex == "M":
+            cell[nB:] = False
+        elif sex == "F":
+            cell[:nB] = False
+        if cols["nchs_age_edit"][i] == "absolute":
+            a0 = cols["nchs_age_from"][i] or 0.0
+            a1 = cols["nchs_age_to"][i] if cols["nchs_age_to"][i] is not None else np.inf
+            ok = (hi > a0) & (lo < a1)
+            if not ok.all():
+                cell &= np.tile(ok, 2)
+                tag += f"{lo[ok][0]:g}-{hi[ok][-1]:g}".replace("-inf", "+")
+        if not cell.all():
+            out[code] = (cell, tag)
+    return out, never
+
+
+def _carrier(code: str, profile: str, parent_of: dict[str, str | None], level_of: dict[str, str]) -> str:
+    """The node that carries a category's profile: itself (``category``), its innermost group (``block``), or the
+    outermost group below its chapter (``group``)."""
+    node = parent_of.get(code)
+    if profile == "category" or node is None or level_of.get(node) != "group":
+        return code
+    while profile == "group" and level_of.get(parent_of.get(node)) == "group":
+        node = parent_of[node]
+    return node
 
 
 def _chapter(code: str, parent_of: dict[str, str | None]) -> str | None:
@@ -414,26 +534,61 @@ class Monolith:
         # age–sex cells with no exposure anywhere in the block (a mother's male cells) carry no profile: fixed at zero,
         # and the profiles centred over the exposed cells only. Centred over both sexes, the unexposed sex's level was
         # a flat direction tied to b0 (the births' solve read b0 to 4 %, 2026-10-06)
-        exposed = data.N.sum(axis=(0, 1)) > 0
+        # a group's admissible cells (`BlockData.group_cells`): its exposure is zero outside them (`_emask`). Its
+        # profile is fixed at zero only on a whole sex it cannot occur in (`_smask`); excluded ages inside an allowed
+        # sex keep their profile entries, which no data reach and the RW2 extends smoothly, so the penalty neither
+        # bends the allowed ages toward a forced zero nor changes rank
+        cells = np.ones((nGrp, nG), dtype=bool) if data.group_cells is None else np.asarray(data.group_cells, dtype=bool)
+        rows_k = cells.reshape(nGrp, 2, self.nB).any(axis=2)
+        smask = np.repeat(rows_k, self.nB, axis=1).astype(float)
+        exposed = (data.N.sum(axis=(0, 1)) > 0) & smask.any(axis=0)
+        smask = smask * exposed[None, :]
+        emask = cells * exposed[None, :]
         self._gmask = torch.as_tensor(exposed, dtype=self.dtype, device=self.device)
+        self._smask = torch.as_tensor(smask, dtype=self.dtype, device=self.device) if not rows_k.all() else None
+        self._emask = torch.as_tensor(emask, dtype=self.dtype, device=self.device) if not cells.all() else None
         rows = float(exposed.reshape(2, -1).any(axis=1).sum()) / 2
+        f_free = (nGrp - 1) / nGrp * rows
+        self._fproj = None
+        if self._emask is not None:
+            # f_grp's centring on an incomplete groups × cells table: the residual of the additive (group + cell) fit
+            # over the admissible cells, the orthogonal projection onto profiles centred within each group and across
+            # the groups at each cell (on a complete table, the double centring below). The excluded ages of an allowed
+            # sex are left as they are (`fidx`): no data and no constraint reach them, the RW2 alone. Centred over the
+            # whole sex rows instead, the zeros there were read as data and shifted every group's profile at those
+            # ages (SIM IV started at 2.7 times its optimum, 2026-10-06)
+            idx = np.flatnonzero(emask.reshape(-1))
+            fidx = np.flatnonzero((smask > 0).reshape(-1) & ~(emask > 0).reshape(-1))
+            kk, gg = np.divmod(idx, nG)
+            A = np.zeros((len(idx), nGrp + nG))
+            A[np.arange(len(idx)), kk] = 1.0
+            A[np.arange(len(idx)), nGrp + gg] = 1.0
+            P = np.eye(len(idx)) - A @ np.linalg.pinv(A)
+            self._fproj = (torch.as_tensor(idx, device=self.device), torch.as_tensor(P, dtype=self.dtype, device=self.device),
+                           torch.as_tensor(fidx, device=self.device))
+            sex_rows = smask.reshape(nGrp, 2, self.nB).any(axis=2)
+            f_free = float(sex_rows.sum() - sex_rows.any(axis=0).sum()) / (2 * nGrp)
+        # history and the place effects by geography carrier (`BlockData.group_outer`), the profile and levels by group
+        outer = np.arange(nGrp) if data.group_outer is None else np.asarray(data.group_outer, dtype=np.int64)
+        nOut = int(outer.max()) + 1
+        self.outer = torch.as_tensor(outer, device=self.device)
         self.components = {
             "th_grp": Component("th_grp", structures.iid(nGrp), 1),
             "th_cat": Component("th_cat", _within_groups(data.leaf_group, nE), 1),
             "f_all": Component("f_all", rw_age, 2, free=rows),
-            "f_grp": Component("f_grp", rw_age, nGrp * 2, free=(nGrp - 1) / nGrp * rows),
+            "f_grp": Component("f_grp", rw_age, nGrp * 2, free=f_free),
             "h_all": Component("h_all", rw_t, 1),
-            "h_grp": Component("h_grp", rw_t, nGrp, free=(nGrp - 1) / nGrp),
+            "h_grp": Component("h_grp", rw_t, nOut, free=(nOut - 1) / nOut),
             "s_all": Component("s_all", icar, 1),
             "v_all": Component("v_all", structures.iid(nU, centred=False), 1),
-            "s_grp": Component("s_grp", icar, nGrp, free=(nGrp - 1) / nGrp),
-            "v_grp": Component("v_grp", structures.iid(nU, centred=False), nGrp, free=(nGrp - 1) / nGrp),
+            "s_grp": Component("s_grp", icar, nOut, free=(nOut - 1) / nOut),
+            "v_grp": Component("v_grp", structures.iid(nU, centred=False), nOut, free=(nOut - 1) / nOut),
             "v_cat": Component("v_cat", structures.iid(nU, centred=False), nE, free=(nE - nGrp) / nE),
         }
         if data.grain == "month":
             season = structures.random_walk(12, order=2, cyclic=True)
             self.components["c_all"] = Component("c_all", season, 1)
-            self.components["c_grp"] = Component("c_grp", season, nGrp, free=(nGrp - 1) / nGrp)
+            self.components["c_grp"] = Component("c_grp", season, nOut, free=(nOut - 1) / nOut)
         self.params = {"b0": torch.zeros(1, dtype=self.dtype, device=self.device, requires_grad=True)}
         for c in self.components.values():
             self.params[c.name] = torch.zeros((c.batch, c.shape.Q.shape[0]), dtype=self.dtype,
@@ -448,7 +603,8 @@ class Monolith:
         self.e, self.u, self.tt, self.g = t(data.e), t(data.u), t(data.t), t(data.g)
         self.y = t(data.y, self.dtype)
         self.grp = t(data.leaf_group)
-        self.n_cells = float(nE * np.count_nonzero(data.N > 0))
+        cells_g = np.count_nonzero(data.N > 0, axis=(0, 1))
+        self.n_cells = float(nE * cells_g.sum() if self._emask is None else (emask[data.leaf_group] @ cells_g).sum())
         self.phi: float = float("inf")
         self.forcing = 0.5               # the largest relative residual CG stops at (Eisenstat–Walker cap)
         self.newton_log: list[tuple] = []   # per Newton step: objective, gradient norm, CG iterations, step length, decrease
@@ -468,6 +624,8 @@ class Monolith:
         d = self.data
         nE, nGrp, (nU, nT, nG) = len(d.leaves), len(d.groups), d.N.shape
         pe = d.leaf_group[d.e]
+        po = self.outer.cpu().numpy()[pe]
+        nOut = int(self.outer.max()) + 1
         y = d.y
 
         def acc(shape: tuple[int, ...], *index: np.ndarray) -> torch.Tensor:
@@ -480,15 +638,15 @@ class Monolith:
             "b0": torch.as_tensor([float(y.sum())], dtype=self.dtype, device=self.device),
             "th_grp": acc((1, nGrp), zero, pe), "th_cat": acc((1, nE), zero, d.e),
             "f_all": acc((1, nG), zero, d.g), "f_grp": acc((nGrp, nG), pe, d.g),
-            "h_all": acc((1, nT), zero, d.t), "h_grp": acc((nGrp, nT), pe, d.t),
+            "h_all": acc((1, nT), zero, d.t), "h_grp": acc((nOut, nT), po, d.t),
             "s_all": acc((1, nU), zero, d.u), "v_all": acc((1, nU), zero, d.u),
-            "s_grp": acc((nGrp, nU), pe, d.u), "v_grp": acc((nGrp, nU), pe, d.u),
+            "s_grp": acc((nOut, nU), po, d.u), "v_grp": acc((nOut, nU), po, d.u),
             "v_cat": acc((nE, nU), d.e, d.u),
         }
         if d.grain == "month":
             moy = d.month_of_year[d.t]
             self.Y["c_all"] = acc((1, 12), zero, moy)
-            self.Y["c_grp"] = acc((nGrp, 12), pe, moy)
+            self.Y["c_grp"] = acc((nOut, 12), po, moy)
         self.y_offset = float(np.sum(y * np.log(d.N[d.u, d.t, d.g])))   # Σ y log N, constant
 
     # ---- the low-rank interaction (ARCHITECTURE §4.2, ADR-0021) ------------------
@@ -637,6 +795,11 @@ class Monolith:
             # youngest bands were fitted 0.57-0.77x and 1.4-3.0x observed in the two sexes (2026-10-06)
             mask = self._gmask.reshape(raw.shape)
             return (raw - (raw * mask).sum() / mask.sum()) * mask
+        if name == "f_grp" and self._fproj is not None:
+            idx, P, fidx = self._fproj
+            out = torch.zeros(raw.numel(), dtype=raw.dtype, device=raw.device)
+            out = out.index_put((idx,), P @ raw.reshape(-1)[idx]).index_put((fidx,), raw.reshape(-1)[fidx])
+            return out.reshape(raw.shape)
         if name == "f_grp":
             mask = self._gmask[None, :]
             v = raw.reshape(-1, 2 * self.nB)
@@ -649,20 +812,36 @@ class Monolith:
             v = _centre(v.T.contiguous(), self.grp).T
         return v
 
+    def _prof(self, x: dict[str, torch.Tensor], power: float = 1.0) -> torch.Tensor:
+        """[groups, G] exp(f_all + f_grp)^power, zero in the cells a sex-restricted group has no exposure in."""
+        p = torch.exp(power * (x["f_all"] + x["f_grp"]))
+        return p if self._emask is None else p * self._emask
+
     def _place_time(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         """[groups, U, T] of exp(h + g) · M: the factor every leaf of a group shares."""
-        M = torch.einsum("utg,kg->kut", self.N, torch.exp(x["f_all"] + x["f_grp"]))
+        M = torch.einsum("utg,kg->kut", self.N, self._prof(x))
         lin = self._time(x)[:, None, :]
         if spatial:
-            lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
+            lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
         return torch.exp(lin) * M
 
     def _time(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         """[groups, T]: history (h), plus season (c) at monthly grain, by group."""
-        lin = x["h_all"][0][None, :] + x["h_grp"]
+        lin = x["h_all"][0][None, :] + x["h_grp"][self.outer]
         if "c_all" in x:
-            lin = lin + x["c_all"][0][self.moy][None, :] + x["c_grp"][:, self.moy]
+            lin = lin + x["c_all"][0][self.moy][None, :] + x["c_grp"][self.outer][:, self.moy]
         return lin
+
+    def _to_outer(self, a: np.ndarray, mean: bool = False) -> np.ndarray:
+        """Rows by group summed (or averaged) into rows by geography carrier."""
+        o = self.outer.cpu().numpy()
+        out = np.zeros((int(o.max()) + 1, *a.shape[1:]))
+        np.add.at(out, o, a)
+        return out / np.bincount(o).reshape(-1, *([1] * (a.ndim - 1))) if mean else out
+
+    def _grp_place(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """[groups, U]: s + v of each group's geography carrier."""
+        return (x["s_grp"] + x["v_grp"])[self.outer]
 
     def _leaf_place(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
         """[E, U] exp(b0 + θ_grp + θ_cat + v_cat): the leaf's level and its own place deviation."""
@@ -678,7 +857,7 @@ class Monolith:
         eta = (x["b0"][0] + x["th_grp"][0][p] + x["th_cat"][0][self.e] + x["f_all"][0][self.g] + x["f_grp"][p, self.g]
                + self._time(x)[p, self.tt] + self.logN_nnz)
         if spatial:
-            eta = (eta + x["s_all"][0][self.u] + x["v_all"][0][self.u] + x["s_grp"][p, self.u] + x["v_grp"][p, self.u]
+            eta = (eta + x["s_all"][0][self.u] + x["v_all"][0][self.u] + x["s_grp"][self.outer[p], self.u] + x["v_grp"][self.outer[p], self.u]
                    + x["v_cat"][self.e, self.u])
             if self.ix_on:
                 psi = x["ix_psi"][:, self.ixp.clamp_min(0)] * (self.ixp >= 0)
@@ -757,7 +936,8 @@ class Monolith:
             # unchanged; IX's s_all ends 7 % off along the flat BYM ridge; 2026-10-06); the mean after the loop
             # converges fully
             steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10),
-                               loglik_tol=max(mean_tol, 1000.0))
+                               loglik_tol=max(mean_tol, float(os.environ.get("PEGASUS_OUTER_TOL_FRAC", "inf")) * self.scale
+                                              if "PEGASUS_OUTER_TOL_FRAC" in os.environ else max(mean_tol, 1000.0)))
             t1 = time.time()
             changes = self._update_taus()
             if self.likelihood == "nb":
@@ -857,29 +1037,75 @@ class Monolith:
         O_kt = np.maximum(np.bincount(grp[d.e].astype(np.int64) * nT + d.t, weights=d.y, minlength=nK * nT), 0.5).reshape(nK, nT)
         O_kg = np.maximum(np.bincount(grp[d.e].astype(np.int64) * nG + d.g, weights=d.y, minlength=nK * nG), 0.5).reshape(nK, nG)
         exposed_t, exposed_g = Ntg.sum(axis=1) > 0, Ntg.sum(axis=0) > 0
+        sm = np.ones((nK, nG)) if self._emask is None else self._emask.cpu().numpy()
+        ok = exposed_g[None, :] & (sm > 0)                                   # [K, G]: a group's exposed cells
         a, b, c = np.zeros(nE), np.zeros((nK, nT)), np.zeros((nK, nG))
         for _ in range(200):
             a_old = a.copy()
-            S = np.einsum("kt,tg,kg->k", np.exp(b), Ntg, np.exp(c))
+            S = np.einsum("kt,tg,kg->k", np.exp(b), Ntg, np.exp(c) * sm)
             a = np.log(O_e) - np.log(S)[grp]
             A = np.bincount(grp, weights=np.exp(a), minlength=nK)               # [K]
-            den = A[:, None] * (np.exp(c) @ Ntg.T)                               # [K, T]
+            den = A[:, None] * ((np.exp(c) * sm) @ Ntg.T)                        # [K, T]
             b = np.where(exposed_t[None, :], np.log(O_kt) - np.log(np.where(exposed_t[None, :], den, 1.0)), 0.0)
             den = A[:, None] * (np.exp(b) @ Ntg)                                 # [K, G]
-            c = np.where(exposed_g[None, :], np.log(O_kg) - np.log(np.where(exposed_g[None, :], den, 1.0)), 0.0)
+            c = np.where(ok, np.log(O_kg) - np.log(np.where(ok, den, 1.0)), 0.0)
             if np.abs(a - a_old).max() < 1e-10:
                 break
+        # the IPF fixes each group's leaves × profile × course only up to a scale per group: put each profile's mean over
+        # its admissible cells (and each course's mean) at zero, the scale on the leaves. Left free, a group with two
+        # admissible cells or one death (A33, A34) drifted to −36 and its level to +240 (SIM I, 2026-10-06)
+        shift = (c * ok).sum(axis=1) / np.maximum(ok.sum(axis=1), 1) + b.mean(axis=1)
+        c = np.where(ok, c - ((c * ok).sum(axis=1) / np.maximum(ok.sum(axis=1), 1))[:, None], 0.0)
+        b = b - b.mean(axis=1, keepdims=True)
+        a = a + shift[grp]
         level = np.bincount(grp, weights=a, minlength=nK) / np.maximum(np.bincount(grp, minlength=nK), 1)
-        cbar, bbar = c.mean(axis=0), b.mean(axis=0)
-        F, B = c - cbar[None, :], b - bbar[None, :]
+        bbar = b.mean(axis=0)
+        cbar = (c * ok).sum(axis=0) / np.maximum(ok.sum(axis=0), 1)
+        F, B = (c - cbar[None, :]) * ok, b - bbar[None, :]
+        if self._emask is not None:
+            # the excluded ages of an allowed sex start on the line through their nearest admissible bands (the RW2's
+            # own extension), not at zero beside them
+            nB = self.nB
+            for k in range(nK):
+                for sx in range(2):
+                    row = F[k, sx * nB:(sx + 1) * nB]
+                    adm = np.flatnonzero(ok[k, sx * nB:(sx + 1) * nB])
+                    if 0 < len(adm) < nB:
+                        lo2, hi2 = adm[:2], adm[-2:]
+                        slope_lo = (row[lo2[-1]] - row[lo2[0]]) / max(lo2[-1] - lo2[0], 1)
+                        slope_hi = (row[hi2[-1]] - row[hi2[0]]) / max(hi2[-1] - hi2[0], 1)
+                        for j in range(nB):
+                            if j < adm[0]:
+                                row[j] = row[adm[0]] + (j - adm[0]) * slope_lo
+                            elif j > adm[-1]:
+                                row[j] = row[adm[-1]] + (j - adm[-1]) * slope_hi
+        # the course by geography carrier, centred across the carriers; the part centring removes joins h_all
+        Bo = self._to_outer(B, mean=True)
+        bbar = bbar + Bo.mean(axis=0)
+        Bo = Bo - Bo.mean(axis=0, keepdims=True)
+        course = Bo[self.outer.cpu().numpy()].mean(axis=1)
         # each group's own profile and course levels (the profiles' over the exposed age–sex cells, as they are centred)
-        lv = level + F[:, exposed_g].mean(axis=1) + B.mean(axis=1)
+        if self._fproj is None:
+            lv = level + (F * ok).sum(axis=1) / np.maximum(ok.sum(axis=1), 1) + course
+        else:
+            # on an incomplete table the centring removes an additive part α_k + β_g from the profiles, not the row
+            # means alone: α_k joins the group's level and β_g the overall profile, so the effects reproduce the fit on
+            # every admissible cell (crediting the row means only started SIM I at 8 times its optimum, 2026-10-06)
+            idx, P, _ = (t.cpu().numpy() for t in self._fproj)
+            removed = F.reshape(-1)[idx] - P @ F.reshape(-1)[idx]
+            kk, gg = np.divmod(idx, nG)
+            A = np.zeros((len(idx), nK + nG))
+            A[np.arange(len(idx)), kk] = 1.0
+            A[np.arange(len(idx)), nK + gg] = 1.0
+            coef = np.linalg.lstsq(A, removed, rcond=None)[0]
+            lv = level + coef[:nK] + course
+            cbar = cbar + coef[nK:]
         with torch.no_grad():
             self.params["b0"].fill_(float(lv.mean() + bbar.mean() + cbar[exposed_g].mean()))
             self.params["th_grp"].copy_(torch.as_tensor(lv - lv.mean())[None, :])
             self.params["th_cat"].copy_(torch.as_tensor(a - level[grp])[None, :])
             self.params["h_all"].copy_(torch.as_tensor(bbar)[None, :])
-            self.params["h_grp"].copy_(torch.as_tensor(B))
+            self.params["h_grp"].copy_(torch.as_tensor(Bo))
             self.params["f_all"].copy_(torch.as_tensor(cbar).reshape(self.params["f_all"].shape))
             self.params["f_grp"].copy_(torch.as_tensor(F).reshape(self.params["f_grp"].shape))
         # their strengths from the same fit: Fellner–Schall's value for a well-identified effect, rank / x̂ᵀQx̂ (its
@@ -903,9 +1129,12 @@ class Monolith:
         d = self.data
         nU, nE = d.N.shape[0], len(d.leaves)
         grp = np.asarray(d.leaf_group)
-        W = np.einsum("utg,kt,kg->ku", d.N, np.exp(b), np.exp(c))                             # [K, U]
+        sm = np.ones_like(c) if self._emask is None else self._emask.cpu().numpy()
+        W = np.einsum("utg,kt,kg->ku", d.N, np.exp(b), np.exp(c) * sm)                        # [K, U]
         E = np.exp(a)[:, None] * W[grp]
         Obs = np.bincount(d.e.astype(np.int64) * nU + d.u, weights=d.y, minlength=nE * nU).reshape(nE, nU)
+        nK = int(grp.max()) + 1
+        grp = self.outer.cpu().numpy()[grp]            # the place deviations belong to the geography carriers
         nK = int(grp.max()) + 1
         # the place strengths' start: Marshall's (1991) moment estimate of the between-unit variance of observed over
         # expected (less its Poisson part) at each level, each level's expectation carrying the level above; the
@@ -1152,9 +1381,9 @@ class Monolith:
             mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
             lp = self._leaf_place(x)                                              # [E, U]
             lin = (self._time(x)[:, None, :]
-                   + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None])
+                   + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None])
             base = torch.exp(lin)                                                 # [K, U, T]
-            prof = torch.exp(x["f_all"] + x["f_grp"])                             # [K, G]
+            prof = self._prof(x)                                                  # [K, G]
         y, u = self.data.y, self.data.u
         sel = slice(None)
         keep = np.ones(self.N.shape[0], dtype=bool) if places is None else np.asarray(places, dtype=bool)
@@ -1207,9 +1436,9 @@ class Monolith:
             mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
             lp = self._leaf_place(x)
             lin = (self._time(x)[:, None, :]
-                   + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None])
+                   + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None])
             base = torch.exp(lin)
-            prof = torch.exp(x["f_all"] + x["f_grp"])
+            prof = self._prof(x)
             y, u = self.data.y, self.data.u
             sel = slice(None)
             if places is not None:
@@ -1291,10 +1520,10 @@ class Monolith:
             else:
                 w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])[:, :, None]
             mu = (w * pt).sum(0)
-            M2 = torch.einsum("utg,kg->kut", self.N ** 2, torch.exp(2 * (x["f_all"] + x["f_grp"])))
+            M2 = torch.einsum("utg,kg->kut", self.N ** 2, self._prof(x, 2.0))
             lin = self._time(x)[:, None, :]
             if spatial:
-                lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
+                lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
             if ix:
                 w2 = torch.zeros((K, *pt.shape[1:]), dtype=self.dtype, device=self.device).index_add_(
                     0, self.grp[sel], (lp[sel][:, :, None] * E) ** 2)
@@ -1316,8 +1545,8 @@ class Monolith:
             K, U = len(self.data.groups), self.N.shape[0]
             lin = self._time(x)[:, None, :]
             if spatial:
-                lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
-            prof = torch.exp(x["f_all"] + x["f_grp"])                                   # [K, G]
+                lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
+            prof = self._prof(x)                                                        # [K, G]
             if self.ix_on and spatial:
                 w = torch.zeros((K, U, self.N.shape[1]), dtype=self.dtype, device=self.device).index_add_(
                     0, self.grp[sel], lp[sel][:, :, None] * torch.exp(self._I_of(x, sel)))
@@ -1384,13 +1613,14 @@ class Monolith:
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
-             graph_kind: str = "contiguity", profile: str = "group", device: str = "cpu", rank: int = 0,
+             graph_kind: str = "contiguity", profile: str = "block", device: str = "cpu", rank: int = 0,
+             geography: str | None = "group",
              prior: str = "gaussian", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
         interaction's R (0: the base model)."""
         from . import graphs
 
-        data = assemble(dataset, event, block, years, profile, **source)
+        data = assemble(dataset, event, block, years, profile, geography=geography, **source)
         model = cls(data, graphs.graph(data.places, graph_kind), graph_kind, device=device, **({"rank": rank} if rank else {}),
                     **({"prior": prior} if prior != "gaussian" else {}))
         arrays = store.get_arrays("monolith", model.key())

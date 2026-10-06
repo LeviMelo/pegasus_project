@@ -58,7 +58,9 @@ $PY scripts/check_docs.py
 - **Never act outward as the author.** Pushing, publishing, submitting and contacting anyone need explicit authorisation, each time.
 - **Replace, never build beside.** Before adding a mechanism, find the one that does the job (ARCHITECTURE §11.1). Two mechanisms for one job is a defect.
 - **Carry the whole request.** Each instruction is done, or reported as not done with the reason.
-- **Never idle on a wait; work fronts in parallel.** While a fit, a scan or an agent runs, advance a task that does not depend on it.
+- **Never idle on a wait; work fronts in parallel** (author, 2026-10-03, repeated 2026-10-06). While a fit, a scan or an agent runs, advance a task that does not depend on it: other code, documentation of finished work, analysis of results at hand. Launching a job and then waiting on it is the failure this rule names.
+  - **Parallel is my work, not the heavy jobs.** Heavy fits run one at a time through `scripts/heavy.py` (or one sequential queue script), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
+  - Launch detached, check it started, set a watcher that catches completion and failure, then turn to the next front at once.
 - **Subagents** run on the cheaper model (Sonnet) for reading, searching and auditing. Spawn few, with precise briefs.
 - **Keep pegasus_data and pegasus_view working.**
   - A change PegaSUS needs in pegasus_data is written as a handoff (`docs/handoffs/`). Change pegasus_data directly only when the author asks.

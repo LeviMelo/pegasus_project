@@ -142,26 +142,31 @@ Field
 **It is a pegasus_data product** (§2, rule 2): versioned, typed, read through `gateway`.
 
 **What exists (2026-10-06):**
-- **The tree.** pegasus_data ships the ICD-10 tree (chapter → group → category → subcategory; 14,563 nodes, with validity windows).
+- **The tree.** pegasus_data ships the ICD-10 tree (chapter → group → category → subcategory; 14,563 nodes, with validity windows). Groups nest as the release defines them (C00-C97 ⊃ C00-C75 ⊃ C51-C58; 11 groups hold others), since 2026-10-06; before, every category hung on its outermost group.
 - **Seven concept lists:** CID-BR-10, the tabulation lists 2 and 4, avoidable causes for ages 0–4 and 5–74, ICSAP conditions and groups.
-- **What PegaSUS uses:** the tree down to the 3-character category, and nothing else.
-- **Harvested, not built:** DATASUS's own CID-10 release (`sources/cid10csv_v2008.zip`: chapters, groups, categories, 12,451 subcategories, and ICD-O). It carries per code:
-  - `CLASSIF`: dagger or asterisk;
-  - `RESTRSEXO`: the sex restriction;
-  - `CAUSAOBITO`: acceptable as an underlying cause of death;
-  - `REFER` and `EXCLUIDOS`: cross-references and exclusions.
+- **Code attributes** (`pegasus_data.code_attributes()`, from DATASUS's CID-10 release V2008, `sources/cid10csv_v2008.zip`), per code:
+  - `dual`: dagger (etiology) or asterisk (manifestation);
+  - `sex`: the sex restriction (`RESTRSEXO`);
+  - `unlikely_cause_of_death`: the release's `CAUSAOBITO = N`, "pouca probabilidade de causar óbito". It is *not* the underlying-cause rule;
+  - `underlying_cause`: false for asterisk codes and chapters XIX and XXI, the release's own rule;
+  - `refer` and `merged`: the code in the other dual classification, and the retired codes now part of this one (`EXCLUIDOS`).
+- **External-cause axes,** in the same table: mechanism, intent, motor-vehicle person and adverse effect by the NCHS External Cause of Injury Mortality Matrix; the place of occurrence of W00–Y34 from the release's descriptions.
+- **What PegaSUS uses** (ADR-0024):
+  - The tree down to the 3-character category. Profiles are carried by the ICD block and history and geography by the ICD group (§4.2).
+  - The attributes' admissibility: the sex restriction (RESTRSEXO and NCHS Table G), Table G's absolute age limits and, for SIM's underlying cause, the codes that can be one. A category occurs only in its admissible age–sex cells; records outside them are counted by reason.
+  - Before 2026-10-06 every category took its carrier's sex ratio: the chapter II fit expected 53 % of cervical-cancer and 52 % of breast-cancer deaths in men.
 
 **The ontology, by component:**
 
 | component | content | source | what PegaSUS does with it |
 |---|---|---|---|
 | **hierarchy** | WHO ICD-10 with the Brazilian additions (U codes), validity per year | `code_trees` (shipped) | tree effects (§4.2); leaves at the 3-character **category**. The 4th character is not a modelled level: certifiers and services rarely use it informatively, and a subcategory lattice multiplies the leaves for little epidemiology (author, 2026-10-06). It is read only where it encodes an axis: the place of occurrence of W00–Y34 |
-| **code attributes** | dagger/asterisk, sex restriction, acceptability as underlying cause, references, exclusions | the DATASUS CID-10 release (2008 harvested; the current release to fetch) | **structural zeros**: a sex-restricted code has no exposure in the other sex; an asterisk code is never an underlying cause; unacceptable underlying causes become recording-quality fields (§8.6) |
+| **code attributes** | dagger/asterisk, sex restriction, acceptability as underlying cause, references, exclusions | the DATASUS CID-10 release (V2008, built as `code_attributes`; a later release not found) | **structural zeros**: a sex-restricted code has no exposure in the other sex (built); an asterisk code is never an underlying cause; unacceptable underlying causes become recording-quality fields (§8.6) |
 | **age plausibility** | age limits per code (perinatal, obstetric, congenital, senility) | the critique tables of SIM and SIH; SIGTAP's CID table | structural zeros by age; impossible records flagged, never dropped |
 | **ICD-9 and its bridge** | the ICD-9 tree (SIM 1979–1995) and an ICD-9 → ICD-10 map with comparability ratios | to locate (pegasus_data open question 69) | the SIM series from 1979 in one tree, with the bridge's uncertainty |
 | **ICD-O** | morphology of neoplasms | in the DATASUS release | oncology fields (SIH, APAC) |
 | **analytical lists** | the seven shipped; to add: WHO mortality list 1, the SIH morbidity list (`LISTA10`, pegasus_data open question 69), garbage codes by level (GBD, licence checked), the work-related disease list (LDRT, Portaria 2.309/2020), notifiable diseases ↔ ICD | list tables | list effects θ_L (§4.2, not built); fields that cross the tree |
-| **external-cause axes** | intent × mechanism (WHO / CDC external-cause matrix); place of occurrence by the 4th character of W00–Y34 | derived from the tree and the matrix | intent and mechanism fields across chapter XX (homicide, suicide, accident, undetermined, whatever the code) |
+| **external-cause axes** | intent × mechanism (WHO / CDC external-cause matrix); place of occurrence by the 4th character of W00–Y34 | built: `code_attributes` (the NCHS matrix; the release's descriptions) | intent and mechanism fields across chapter XX (homicide, suicide, accident, undetermined, whatever the code) |
 | **relations** (a typed graph) | *sequela of* (I69 → I60–I67, B90–B94, T90–T98, Y85–Y89); dagger → asterisk; exclusions; **exchange pools**, the codes coders trade (unspecified ↔ specified, R00–R99, Y10–Y34, C76–C80, garbage → targets); procedure ↔ diagnosis (SIGTAP compatibility); notifiable disease ↔ ICD (SINAN) | documented relations from the release and the WHO rules; exchange pools from the literature and from this data's measured exchanges | the conserved levels of §8.6 (no longer a list inside triage code); corroboration rules (§8.3, no longer `corroborate.RULES`); the coding-regime term and redistribution sensitivity |
 
 ### 3.4 Race (revision 2; O3)
@@ -245,6 +250,11 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
   ```
 
 - **Profile nodes.** p(e) is the ancestor of e at the profile level ℓ_f (default: ICD block; SIGTAP subgroup). Age–sex profiles below that level are not separately estimated: **age-specific geography is a lead** (the group lens, §7.1), not a model term.
+  - **Built** as two carriers (`assemble(profile=, geography=)`):
+    - `profile` carries the levels θ_grp and the profile f_grp: `group` (the outermost ICD group), `block` (the innermost; the tree nests since 2026-10-06) or `category`;
+    - `geography` carries h, s, v and the season by group, at or above the profile (`BlockData.group_outer`).
+  - In the solver the place system's reduced coordinates are the geography carriers' contrasts, so its size follows the geography carrier, not the profile's.
+  - Held out on SIM 2022–23, block profiles with group geography keep about 90 % of the block carrier's gain at the group carrier's cost: XX −3.2297 per death in 192 s, against block −3.2142 in 2,174 s and group −3.3397 (evaluation 2026-10-06, ICD structure).
 - **The low-rank interaction (`Monolith(rank=R)`, annual grain, ADR-0021).** Σ_r ψ[r,e] ω[r,u] τ[r,t] acts on the *active* leaves, those holding at least 0.1 % of the block's events (the others have ψ = 0), so the cube is |E_active|·U·T. ψ ~ N(0, 1) is fixed and centred within each group's active leaves, which makes the term orthogonal to the effects the leaves of a group share; ω = scaled ICAR + iid, both centred over the places, with learned strengths (the amplitude lives there); τ = RW1 scaled like the other shapes plus a unit prior on its level, strength fixed. The strengths of ψ and τ are fixed so the three factors' scales are not a ridge. A fit runs the base model, then starts the interaction from a weighted alternating least squares of the base fit's working-residual cube (a zero start is a saddle), then iterates the same Newton–CG and Fellner–Schall (the Gauss–Newton diagonals of the three factors replace the first-derivative mass). Forecast: ω and ψ as fitted, τ flat at its last value (the RW1 mean). Laplace draws are not built for it. The interaction is *within the block*: it carries a place–time pattern shared by some leaves with different loadings; a place level shared by whole chapters is the block's main place effect and cannot be separated here (evaluation 2026-10-05, low-rank).
 - **Race terms (revision 2, O3).** η gains, for declared race j:
   - a race effect per tree node, shrunk along the tree like θ;
@@ -255,7 +265,13 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
   A **disparity** is the exponentiated race contrast, a rate ratio with its posterior, by place, period, age and node. The cells grow fivefold. The race contrasts join the place and global classes of §5.3, so the solver's structure is unchanged.
 - **The ICD ontology in the predictor (revision 2, O4; §3.3).**
   - List effects θ_L are carried by every member code (CID-BR-10, avoidable causes, ICSAP, garbage levels).
-  - Sex- and age-impossible cells are structural zeros of the exposure, not low rates.
+  - Sex- and age-impossible cells are structural zeros of the exposure, not low rates. **Built** (`_admissible`):
+    - a category's admissible cells come from its sex restriction (the release's RESTRSEXO, or NCHS Part 11 Table G's absolute sex edit) and Table G's absolute age limits;
+    - a band is excluded only when it lies wholly outside the limit; conditional edits are not zeros;
+    - carriers split by admissibility class, and each group's exposure is zero outside its cells;
+    - the profile is fixed at zero only on an excluded whole sex: excluded ages inside an allowed sex keep free entries that the RW2 extends;
+    - records in an excluded cell are counted as unallocated by reason (sex, age);
+    - for SIM's underlying cause, codes that cannot be one (asterisk codes, chapters XIX and XXI) are not leaves, and their records are counted as "not an underlying cause".
 - **Context fields are not in the default predictor.** A relation between a context field and an outcome must stay discoverable (§7.5), not absorbed as "boring". Context enters only in adjusted estimands (E_b|Z) and in explaining away (§7.7).
 
 ### 4.3 Priors: one per shape (P6, P7)
@@ -384,7 +400,7 @@ H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP
 - **The mark and share models** (log-normal, beta-binomial share, count) exist only on non-empty cells, each with its family's Fisher weight. They are the same structure with a zero shared factor and every leaf active (`StructuredNewton._mark_factors`). Gradients equal autodiff to 10⁻¹⁵, and Newton converges quadratically. Birth weight 2010–2023 fits in 9 s against v0's 21 s.
 - **Age–sex cells with no exposure** in the whole block (a mother's male cells) are fixed at zero, and the profiles are centred over the exposed cells. Under the centring over both sexes, the unexposed sex's level was a flat direction tied to b0.
 
-**BYM2.** The geography is reparametrised as BYM2: one σ and a mixing ρ (Riebler et al. 2016, §4.3). The v0's two separate τ's for the ICAR and iid parts form a ridge, which is the ill-conditioning the `move_tol` stopping rule steps around.
+**BYM2.** The geography is reparametrised as BYM2: one σ and a mixing ρ (Riebler et al. 2016, §4.3). *Measured 2026-10-06 and not adopted*: the strengths' Newton step taken in BYM2's coordinates (σ², logit φ) and mapped back exactly. It improved VII (held-out −10.107 against −10.32, 9 outers against 16) but slowed VI (13 outers against 9) and left II and IX unchanged. The parametrisation itself waits for the PC priors. The v0's two separate τ's for the ICAR and iid parts form a ridge, which is the ill-conditioning the `move_tol` stopping rule steps around.
 
 ### 5.4 Strengths: the Laplace marginal likelihood (v1 built 2026-10-06: Newton on log τ with exact traces)
 

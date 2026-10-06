@@ -26,6 +26,7 @@ models and the interaction keep the v0 Newton–CG until they are ported."""
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -112,7 +113,12 @@ class StructuredNewton:
         self.N = np.asarray(d.N, dtype=np.float64)
         self.monthly = d.grain == "month"
         self.moy = np.asarray(d.month_of_year if self.monthly else np.zeros(self.T, dtype=np.int64))
-        self.C = _contrast(self.K)
+        # the place effects by geography carrier (`Monolith.outer`): a group's s_grp, v_grp are its carrier's, so the
+        # reduced place coordinates are the carriers' Ko − 1 contrasts, mapped to the groups' x-space rows by C
+        self.outer = _np(model.outer.to(torch.float64)).astype(np.int64)
+        self.Ko = int(self.outer.max()) + 1
+        self.rep = np.array([int(np.nonzero(self.outer == o)[0][0]) for o in range(self.Ko)])
+        self.C = np.eye(self.Ko)[self.outer] @ _contrast(self.Ko)          # [K, Ko − 1]
         self._global_layout()
         self._place_layout()
         self._constraints()
@@ -127,8 +133,8 @@ class StructuredNewton:
         their centred subspace, read from the model's own centring (a linear map: its matrix is the projector)."""
         K, E, T, G = self.K, self.E, self.T, self.G
         names = ["b0", "th_grp", "th_cat", "f_all", "f_grp", "h_all", "h_grp"] + (["c_all", "c_grp"] if self.monthly else [])
-        sizes = {"b0": 1, "th_grp": K, "th_cat": E, "f_all": G, "f_grp": K * G, "h_all": T, "h_grp": K * T,
-                 "c_all": 12, "c_grp": K * 12}
+        sizes = {"b0": 1, "th_grp": K, "th_cat": E, "f_all": G, "f_grp": K * G, "h_all": T, "h_grp": self.Ko * T,
+                 "c_all": 12, "c_grp": self.Ko * 12}
         self.gnames = names
         self.goff, o = {}, 0
         for n in names:
@@ -151,15 +157,15 @@ class StructuredNewton:
     def _place_layout(self) -> None:
         """Per place: s_all, v_all, s_grp[0..K−1], v_grp[0..K−1] in x-space; in reduced coordinates the group
         deviations are replaced by their K−1 contrasts. Places are blocks of consecutive rows (CHOLMOD locality)."""
-        K = self.K
+        K, Ko = self.K, self.Ko
         self.npl = 2 + 2 * K                  # x-space per place
-        self.npl_red = 2 + 2 * (K - 1)        # reduced per place
+        self.npl_red = 2 + 2 * (Ko - 1)       # reduced per place
         U = self.U
         # T_place: x-space place block (npl) <- reduced (npl_red)
         Tb = np.zeros((self.npl, self.npl_red))
         Tb[0, 0] = Tb[1, 1] = 1.0
-        Tb[2:2 + K, 2:2 + K - 1] = self.C
-        Tb[2 + K:, 2 + K - 1:] = self.C
+        Tb[2:2 + K, 2:2 + Ko - 1] = self.C
+        Tb[2 + K:, 2 + Ko - 1:] = self.C
         self.Tblock = Tb
         self.Tplace = sp.kron(sp.identity(U, format="csr"), sp.csr_matrix(Tb), format="csr")
         self.nl = U * self.npl
@@ -170,20 +176,20 @@ class StructuredNewton:
         s_all and s_grp's contrasts per connected component of the graph; v_all, v_grp's contrasts and each leaf of
         v_cat over all places where their shape is centred (the iid place effects are not, since 2026-10-06)."""
         m = self.m
-        U, K = self.U, self.K
+        U = self.U
         comp = _np(m._labels["s_all"].to(torch.float64)).astype(np.int64)
         rows_l = []                                     # (indices into reduced ℓ, values)
         for c in np.unique(comp):
             places = np.nonzero(comp == c)[0]
             rows_l.append((places * self.npl_red + 0, np.ones(len(places))))
-            for j in range(K - 1):
+            for j in range(self.Ko - 1):
                 rows_l.append((places * self.npl_red + 2 + j, np.ones(len(places))))
         allp = np.arange(U)
         if m.components["v_all"].shape.centred:
             rows_l.append((allp * self.npl_red + 1, np.ones(U)))
         if m.components["v_grp"].shape.centred:
-            for j in range(K - 1):
-                rows_l.append((allp * self.npl_red + 2 + (K - 1) + j, np.ones(U)))
+            for j in range(self.Ko - 1):
+                rows_l.append((allp * self.npl_red + 2 + (self.Ko - 1) + j, np.ones(U)))
         self.con_l = rows_l
         # one per leaf, Σ_u v[e, u] = 0, where v_cat is centred
         self.con_v = list(range(self.E)) if m.components["v_cat"].shape.centred else []
@@ -203,8 +209,8 @@ class StructuredNewton:
         t0 = time.time()
         with torch.no_grad():
             LP = m._leaf_place(x)                                                 # [E, U]
-            Fk = torch.exp(x["f_all"] + x["f_grp"])                              # [K, G]
-            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
+            Fk = m._prof(x)                              # [K, G]
+            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + m._grp_place(x)[:, :, None]
             EX = torch.exp(lin)                                                  # [K, U, T]
             NF = torch.einsum("utg,kg->kut", m.N, Fk)
             Pk = EX * NF
@@ -276,7 +282,18 @@ class StructuredNewton:
             mo = self.moy[t]
             M["c_all"] = np.bincount(mo, weights=r, minlength=12)[None, :]
             M["c_grp"] = np.bincount(k * 12 + mo, weights=r, minlength=K * 12).reshape(K, 12)
-        return M
+        return self._by_outer(M)
+
+    def _by_outer(self, M: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """The sums over the groups' rows of the effects carried by geography (h, s, v, c by group) into their carriers'
+        rows (the chain rule through s_k = s_outer(k))."""
+        out = dict(M)
+        for n in ("h_grp", "s_grp", "v_grp", "c_grp"):
+            if n in out and out[n].shape[0] == self.K and self.Ko != self.K:
+                a = np.zeros((self.Ko, *out[n].shape[1:]))
+                np.add.at(a, self.outer, out[n])
+                out[n] = a
+        return out
 
     def _with_penalty(self, x: dict[str, torch.Tensor], M: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         m = self.m
@@ -311,6 +328,7 @@ class StructuredNewton:
             agg[np.arange(T), self.moy] = 1.0
             M["c_all"] = (M["h_all"] @ agg)
             M["c_grp"] = M["h_grp"] @ agg
+        M = self._by_outer(M)
         with torch.no_grad():
             mu = _np(torch.exp(m.eta_nnz(x)))
         phi = f.nb_phi
@@ -333,6 +351,7 @@ class StructuredNewton:
             agg[np.arange(self.T), self.moy] = 1.0
             M["c_all"] = (Ht.sum(0) @ agg)[None, :]
             M["c_grp"] = Ht @ agg
+        M = self._by_outer(M)
         g = {}
         for n, val in M.items():
             y = _np(m.Y[n]).reshape(val.shape)
@@ -442,14 +461,14 @@ class StructuredNewton:
             c += [self.goff["b0"], self.goff["th_grp"] + k]
             for t in range(T):
                 r += [1 + t, 1 + t]
-                c += [self.goff["h_all"] + t, self.goff["h_grp"] + k * T + t]
+                c += [self.goff["h_all"] + t, self.goff["h_grp"] + self.outer[k] * T + t]
             for g in range(G):
                 r += [1 + T + g, 1 + T + g]
                 c += [self.goff["f_all"] + g, self.goff["f_grp"] + k * G + g]
             if self.monthly:
                 for mo in range(12):
                     r += [1 + T + G + mo, 1 + T + G + mo]
-                    c += [self.goff["c_all"] + mo, self.goff["c_grp"] + k * 12 + mo]
+                    c += [self.goff["c_all"] + mo, self.goff["c_grp"] + self.outer[k] * 12 + mo]
             out.append(sp.csr_matrix((np.ones(len(r)), (r, c)), shape=(nf, self.ng)))
         self._fmap = out
         return out
@@ -480,15 +499,15 @@ class StructuredNewton:
         k = self.grp[e]
         n = len(e)
         cols = [np.zeros(n, np.int64), self.goff["th_grp"] + k, self.goff["th_cat"] + e, self.goff["f_all"] + g,
-                self.goff["f_grp"] + k * G + g, self.goff["h_all"] + t, self.goff["h_grp"] + k * T + t]
+                self.goff["f_grp"] + k * G + g, self.goff["h_all"] + t, self.goff["h_grp"] + self.outer[k] * T + t]
         if self.monthly:
             mo = self.moy[t]
-            cols += [self.goff["c_all"] + mo, self.goff["c_grp"] + k * 12 + mo]
+            cols += [self.goff["c_all"] + mo, self.goff["c_grp"] + self.outer[k] * 12 + mo]
         rows = np.tile(np.arange(n), len(cols))
         self._gdes = sp.csr_matrix((np.ones(n * len(cols)), (rows, np.concatenate(cols))), shape=(n, self.ng))
         return self._gdes
 
-    def assemble(self, f: Factors, vs) -> tuple[sp.csc_matrix, sp.csc_matrix, np.ndarray]:
+    def assemble(self, f: Factors, vs) -> tuple[sp.csc_matrix, Callable[[np.ndarray], np.ndarray], np.ndarray]:
         """The reduced Hessian over (ℓ, γ) in reduced coordinates: the data part, minus the v block's Schur update,
         plus the penalties; then the contrast bases."""
         t0 = time.time()
@@ -571,22 +590,35 @@ class StructuredNewton:
             vec = vec + DA - f.Pu[:, :, None] * G1 - G1[:, :, :1] * feat - AA0
             thc = thc + md * (H1[self.grp][:, :, 0] / s[self.grp])
             thc[f.act] -= md[f.act] * f.LP[f.act] * f.dPu
-        Gk = np.empty((K, U, self.ng))
         oc = self.goff["th_cat"]
-        for k in range(K):
-            Gk[k] = vec[k] @ fd[k]
-            leaves = np.nonzero(self.grp == k)[0]
-            Gk[k][:, oc + leaves] += thc[leaves].T
-        Bl = np.empty((U, npr, self.ng))
-        tot = Gk.sum(0)
-        Bl[:, 0] = tot
-        Bl[:, 1] = tot
-        cg = np.tensordot(self.C, Gk, axes=([0], [0])).transpose(1, 0, 2)     # [U, K−1, ng]
-        Bl[:, 2:2 + K - 1] = cg
-        Bl[:, 2 + K - 1:] = cg
-        Bl = Bl.reshape(U * npr, self.ng)
+        ng, C = self.ng, self.C
+        members = [np.nonzero(self.grp == k)[0] for k in range(K)]
+
+        def build(p: np.ndarray) -> np.ndarray:
+            """B (reduced place rows × x-space globals) written straight into the factor's row order P·B, a chunk of
+            places at a time: the group couplings G_k = vec_k·M_k (+ θc) are never held for every place at once, and
+            no permuted copy is made (SIM II by block held B, PB and every G_k: 32 GB, 2026-10-06)."""
+            n = U * npr
+            pinv = np.empty(n, dtype=np.int64)
+            pinv[p] = np.arange(n)
+            out = np.empty((n, ng))
+            step = max(1, int(2.5e8 // (8 * ng * (K + npr))))          # places per chunk: about 250 MB of temporaries
+            for a in range(0, U, step):
+                z = min(U, a + step)
+                Gc = np.empty((K, z - a, ng))
+                for k in range(K):
+                    Gc[k] = vec[k, a:z] @ fd[k]
+                    Gc[k][:, oc + members[k]] += thc[members[k], a:z].T
+                blk = np.empty((z - a, npr, ng))
+                blk[:, 0] = blk[:, 1] = Gc.sum(0)
+                cg = np.tensordot(C, Gc, axes=([0], [0])).transpose(1, 0, 2)    # [places, K−1, ng]
+                blk[:, 2:2 + self.Ko - 1] = cg
+                blk[:, 2 + self.Ko - 1:] = cg
+                out[pinv[a * npr:z * npr]] = blk.reshape(-1, ng)
+            return out
+
         self.timing["assemble"] = time.time() - t0
-        return Al, Bl, Hgg
+        return Al, build, Hgg
 
     def _block_diag(self, blocks: np.ndarray) -> sp.csr_matrix:
         U, n, _ = blocks.shape
@@ -598,7 +630,7 @@ class StructuredNewton:
         """The place penalties in reduced coordinates: τ_s·Q_ICAR on s_all and on each of s_grp's K−1 contrasts
         (C is orthonormal, so Σ_k s_kᵀQs_k = Σ_j s'_jᵀQs'_j), τ_v·I on v_all and on v_grp's contrasts."""
         m = self.m
-        U, K, npr = self.U, self.K, self.npl_red
+        U, npr = self.U, self.npl_red
         Q = sp.coo_matrix(m.components["s_all"].shape.Q)
         Qg = sp.coo_matrix(m.components["s_grp"].shape.Q)
         rows, cols, vals = [], [], []
@@ -613,9 +645,9 @@ class StructuredNewton:
             vals.append(tau * d)
         add_graph(Q, 0, m.components["s_all"].tau)
         add_iid(1, m.components["v_all"].tau, m.components["v_all"].shape.Q)
-        for j in range(K - 1):
+        for j in range(self.Ko - 1):
             add_graph(Qg, 2 + j, m.components["s_grp"].tau)
-            add_iid(2 + K - 1 + j, m.components["v_grp"].tau, m.components["v_grp"].shape.Q)
+            add_iid(2 + self.Ko - 1 + j, m.components["v_grp"].tau, m.components["v_grp"].shape.Q)
         n = U * npr
         return sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, n))
 
@@ -639,7 +671,7 @@ class StructuredNewton:
         t1 = time.time()
         p = np.asarray(fa.perm)
         L = Supernodal(fa.get_factor("LL"))
-        Y = L.lower(Bl[p], overwrite=True)                             # [n_place_red, ng] (Bl[p] is already a copy)
+        Y = L.lower(Bl(p), overwrite=True)                             # [n_place_red, ng], solved in P·B's own memory
         t2 = time.time()
         # YᵀY by a symmetric rank-k update (half a general product's arithmetic), on Yᵀ's Fortran view: no copy
         from scipy.linalg.blas import dsyrk
@@ -766,12 +798,10 @@ class StructuredNewton:
         # right-hand side −g: v part [E,U,1], reduced (ℓ, γ)
         b_v = -g["v_cat"][..., None]
         gl = np.zeros(self.nl)
-        U, K, npl = self.U, self.K, self.npl
+        U, npl = self.U, self.npl
         gl[np.arange(U) * npl + 0] = g["s_all"][0]
         gl[np.arange(U) * npl + 1] = g["v_all"][0]
-        for k in range(K):
-            gl[np.arange(U) * npl + 2 + k] = g["s_grp"][k]
-            gl[np.arange(U) * npl + 2 + K + k] = g["v_grp"][k]
+        self._carrier_rows(gl, g["s_grp"], g["v_grp"])
         gg = np.concatenate([g[n].ravel() for n in self.gnames])
         b_r = -np.concatenate([self.Tplace.T @ gl, self.Cg.T @ gg])[:, None]
         x_v, x_r = self.solve_full(fac, f, vs, b_v, b_r)
@@ -838,16 +868,22 @@ class StructuredNewton:
     def _rhs(self, b: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         """x-space right-hand sides (dict of [..., n] arrays shaped like the effects plus a trailing column axis) to the
         solver's (v [E,U,n], reduced (ℓ,γ) [n_red, n])."""
-        U, K, npl = self.U, self.K, self.npl
+        U, npl = self.U, self.npl
         n = b["b0"].shape[-1]
         gl = np.zeros((self.nl, n))
         gl[np.arange(U) * npl + 0] = b["s_all"].reshape(U, n)
         gl[np.arange(U) * npl + 1] = b["v_all"].reshape(U, n)
-        for k in range(K):
-            gl[np.arange(U) * npl + 2 + k] = b["s_grp"][k]
-            gl[np.arange(U) * npl + 2 + K + k] = b["v_grp"][k]
+        self._carrier_rows(gl, b["s_grp"], b["v_grp"])
         gg = np.concatenate([b[nm].reshape(-1, n) for nm in self.gnames])
         return b["v_cat"], np.vstack([self.Tplace.T @ gl, self.Cg.T @ gg])
+
+    def _carrier_rows(self, gl: np.ndarray, s_grp: np.ndarray, v_grp: np.ndarray) -> None:
+        """Write the carriers' place right-hand sides into x-space rows: each on its carrier's first group, whose row
+        Tᵀ sums with its tied groups' (the reduced right-hand side is Cᵀ of the carriers', once each)."""
+        U, K, npl = self.U, self.K, self.npl
+        for o, k in enumerate(self.rep):
+            gl[np.arange(U) * npl + 2 + k] = s_grp[o]
+            gl[np.arange(U) * npl + 2 + K + k] = v_grp[o]
 
     def traces(self, probes: int = 32, seed: int = 0) -> dict[str, float]:
         """tr(Σ Q_j) for every component j, Σ the constrained Laplace covariance (H⁻¹ less the kriging term) at the
@@ -1039,8 +1075,8 @@ class StructuredNewton:
         xl = self.Tplace @ x_r[: self.nl_red]
         xg = self.Cg @ x_r[self.nl_red:]
         out = {"v_cat": x_v, "s_all": xl[np.arange(U) * npl + 0][None], "v_all": xl[np.arange(U) * npl + 1][None],
-               "s_grp": np.stack([xl[np.arange(U) * npl + 2 + k] for k in range(K)]),
-               "v_grp": np.stack([xl[np.arange(U) * npl + 2 + K + k] for k in range(K)])}
+               "s_grp": np.stack([xl[np.arange(U) * npl + 2 + k] for k in self.rep]),
+               "v_grp": np.stack([xl[np.arange(U) * npl + 2 + K + k] for k in self.rep])}
         for nm in self.gnames:
             o = self.goff[nm]
             nn = 1 if nm == "b0" else self.m.components[nm].batch * self.m.components[nm].shape.Q.shape[0]
@@ -1053,8 +1089,8 @@ class StructuredNewton:
         xg = self.Cg @ x_r[self.nl_red:]
         out = {"v_cat": x_v,
                "s_all": xl[np.arange(U) * npl + 0][None, :], "v_all": xl[np.arange(U) * npl + 1][None, :],
-               "s_grp": np.stack([xl[np.arange(U) * npl + 2 + k] for k in range(K)]),
-               "v_grp": np.stack([xl[np.arange(U) * npl + 2 + K + k] for k in range(K)])}
+               "s_grp": np.stack([xl[np.arange(U) * npl + 2 + k] for k in self.rep]),
+               "v_grp": np.stack([xl[np.arange(U) * npl + 2 + K + k] for k in self.rep])}
         for n in self.gnames:
             o = self.goff[n]
             nn = 1 if n == "b0" else self.m.components[n].batch * self.m.components[n].shape.Q.shape[0]
@@ -1071,9 +1107,9 @@ class StructuredNewton:
         m = self.m
         with torch.no_grad():
             LP = m._leaf_place(x)
-            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
+            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + m._grp_place(x)[:, :, None]
             EX = torch.exp(lin)
-            Fk = torch.exp(x["f_all"] + x["f_grp"])
+            Fk = m._prof(x)
             J = torch.exp(m._I(x)) if getattr(m, "ix_on", False) else None
             E, U, T, G = self.E, self.U, self.T, self.G
             mm = torch.empty((E, U), dtype=LP.dtype)

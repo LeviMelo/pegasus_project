@@ -458,26 +458,10 @@ class Session:
         self._total, self._ill, self._pop = total, ill, pop
 
     def _data(self, block: str) -> monolith.BlockData:
-        """A block's cells, cached on disk: assembling one takes about a minute."""
+        """A block's cells (`monolith.assemble`, which keeps them in the store)."""
         cache = self.__dict__.setdefault("_blocks_data", {})
         if block not in cache:
-            reader = self.expectations._reader()
-            key = {"dataset": self.dataset, "event": self.event, "block": block, "years": self.years,
-                   "data": config.data_version(), "triage_block": 1, **({"reader": reader} if reader else {})}
-            hit = store.get_arrays("triage_block", key)
-            if hit is not None:
-                meta = store.manifest("triage_block", key)
-                cache[block] = monolith.BlockData(self.dataset, self.event, block, hit["years"], hit["places"],
-                                                  meta["leaves"], meta["groups"], hit["leaf_group"], hit["N"], hit["e"],
-                                                  hit["u"], hit["t"], hit["g"], hit["y"], key=key)
-                if meta.get("grain") == "month":
-                    cache[block].grain, cache[block].month_of_year = "month", np.tile(np.arange(12), len(hit["years"]))
-            else:
-                d = monolith.assemble(self.dataset, self.event, block, self.years, **reader)
-                store.put_arrays("triage_block", key, {k: getattr(d, k) for k in
-                                 ("years", "places", "leaf_group", "N", "e", "u", "t", "g", "y")},
-                                 {"leaves": d.leaves, "groups": d.groups, "grain": d.grain})
-                cache[block] = d
+            cache[block] = monolith.assemble(self.dataset, self.event, block, self.years, **self.expectations._reader())
         return cache[block]
 
     @staticmethod

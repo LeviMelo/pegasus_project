@@ -920,6 +920,21 @@ def code_structure(name: str) -> pa.Table:
     return table
 
 
+def code_attributes(structure: str = "ICD10") -> pa.Table:
+    """Each code's attributes as pegasus_data serves them (`pegasus_data.code_attributes`: the DATASUS CID-10 release's
+    dual role, sex restriction, underlying-cause eligibility; the external-cause axes)."""
+    import pegasus_data as pg
+
+    key = {"what": "code_attributes", "structure": structure, "data": config.data_version(),
+           "resource": config.resource_version("code_attributes.parquet")}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    table = pg.code_attributes(structure)
+    store.put_table("gateway", key, table)
+    return table
+
+
 def municipality_points(places) -> np.ndarray:
     """(lon, lat) of each municipality's population centre (Census 2022), in the given order."""
     import pegasus_data as pg
