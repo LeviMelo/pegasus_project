@@ -680,7 +680,7 @@ class StructuredNewton:
         self.timing["traces"] = time.time()
         return out
 
-    def scoring(self, probes: int = 16, chunk: int = 8, seed: int = 1):
+    def scoring(self, probes: int = 16, chunk: int = 16, seed: int = 1):
         """Everything a Newton step on ρ = log τ needs, at the current mean: the exact traces (as `traces`), the
         quadratic forms xᵀQ_jx, T_ij = tr(ΣQ_iΣQ_j) by probes z solved exactly (tr(ΣQ_iΣQ_j) = E[(Q_iΣz)ᵀ(ΣQ_jz)],
         in chunks so the leaf-place right-hand sides stay small), and R_ij = xᵀQ_iΣQ_jx from J exact solves."""
@@ -966,7 +966,14 @@ def _tri(L, B, chunk, transpose):
         L = sp.csc_matrix(L)
         L.sort_indices()
     Y = np.array(B, dtype=np.float64, order="C", copy=True)
-    args = (L.indptr.astype(np.int64, copy=False), L.indices.astype(np.int64, copy=False), L.data, Y, chunk)
+    # the 64-bit index arrays once per factor (copying CHOLMOD's 32-bit ones cost 0.2 s per strengths update), and the
+    # columns split over every thread: in chunks of 32, the 8-40 columns of a probe batch ran on one or two threads
+    idx = getattr(L, "_idx64", None)
+    if idx is None:
+        idx = L._idx64 = (L.indptr.astype(np.int64), L.indices.astype(np.int64))
+    from numba import get_num_threads
+    chunk = max(1, min(chunk, -(-Y.shape[1] // get_num_threads())))
+    args = (idx[0], idx[1], L.data, Y, chunk)
     return _LSOLVE[1](*args) if transpose else _LSOLVE[0](*args)
 
 
