@@ -247,6 +247,8 @@ B's construction became a column copy (the feature map has weight-1 entries only
 - 4 outers end at 27 s: the mean 7.7, 4.5, 2.5 and 2.5 s; the strengths 2.4 s each. The closing mean and φ take the last 8 s, the binned dispersion pass 3 s of them.
 - The closing mean now runs to the fit's own tolerance (1 unit, not 0.001): 37.6 → 35.1 s, held-out unchanged (−1.63304).
 - The 20 s target needs the core's ~2 s Newton step and 2.4 s strengths update halved, which is to be profiled on a calm machine.
+- Scoring probes 16 → 8 on blocks of 100 k events or more (`data/probes_*.log`): IX 48 → 31 s and XX 197 → 186 s, held-out equal to 1e-5. VII kept at 16: with 8 its held-out fell by 0.17 per death.
+- The interaction's Hessian terms (`_active_terms`) by per-group sums and BLAS Gram products: 1.38 → 0.29 s a call. Rank-1 IX takes 178 s (36 Newton steps); a chord start after its sweeps was slower (228 s) and was dropped.
 
 **SIH-RD 2010–2023 refits under ADR-0024** (warm-started, beside three to five other jobs; `data/logs/refit3_sih_2023.log`):
 - 16 chapters took 1,013 s; most took 8–80 s, I 133 s and XIX 282 s (23 groups, none under the pooling share);

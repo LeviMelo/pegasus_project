@@ -1352,7 +1352,11 @@ class Monolith:
             self.laml_gain = float("inf")
             # a halved step is small by construction: it must not read as convergence (SIM II stopped mid-halving)
             return [1.0] * len(self.components)
-        tr, quad, T, R, names = nw.scoring(probes=int(os.environ.get("PEGASUS_SCORING_PROBES", "16")))
+        # Hutchinson probes for the place traces: 8 on a large block, 16 on a sparse one. Halved on IX and XX the held-out
+        # figures were unchanged to 1e-5 and IX's strengths took 7.3 s against 11.0; on VII (277 deaths) the held-out
+        # NB log-likelihood fell by 0.17 per death (2026-10-06)
+        probes = int(os.environ.get("PEGASUS_SCORING_PROBES", "8" if self.scale >= 1e5 else "16"))
+        tr, quad, T, R, names = nw.scoring(probes=probes)
         tau = np.array([self.components[n].tau for n in names])
         q = np.array([quad[n] for n in names])
         t = np.array([tr[n] for n in names])
