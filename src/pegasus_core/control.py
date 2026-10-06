@@ -98,12 +98,19 @@ class Ledger:
 # ---------------------------------------------------------------------- FDR
 
 
-def bh(p: np.ndarray, q: float = 0.05, dependence: str = "positive") -> np.ndarray:
-    """Benjamini–Hochberg (or Benjamini–Yekutieli for arbitrary dependence): a boolean rejection mask."""
+def bh(p: np.ndarray, q: float = 0.05, dependence: str = "positive", weights: np.ndarray | None = None) -> np.ndarray:
+    """Benjamini–Hochberg (or Benjamini–Yekutieli for arbitrary dependence): a boolean rejection mask. ``weights``
+    (a priori, independent of the p-values under the null; normalised here to mean 1) make it the weighted BH of
+    Genovese, Roeder & Wasserman (2006): BH on p / w, which keeps FDR ≤ q. A hypothesis of weight 0 is never rejected
+    and gives its share of q to the others (ARCHITECTURE §8.4: weights from the power surface, no exclusion)."""
     p = np.asarray(p, dtype=float)
     m = len(p)
     if m == 0:
         return np.zeros(0, dtype=bool)
+    if weights is not None:
+        w = np.asarray(weights, dtype=float)
+        w = w * (m / w.sum()) if w.sum() > 0 else np.ones(m)
+        p = np.divide(p, w, out=np.full(m, np.inf), where=w > 0)
     c = 1.0 if dependence == "positive" else float(np.sum(1.0 / np.arange(1, m + 1)))
     order = np.argsort(p)
     passed = p[order] <= q * np.arange(1, m + 1) / (m * c)
@@ -111,6 +118,32 @@ def bh(p: np.ndarray, q: float = 0.05, dependence: str = "positive") -> np.ndarr
     out = np.zeros(m, dtype=bool)
     out[order[:k]] = True
     return out
+
+
+def optimal_weights(xi: np.ndarray, alpha: float = 0.05) -> np.ndarray:
+    """Roeder & Wasserman (2009) optimal weights for one-sided tests whose alternatives sit ``xi`` standard errors
+    from the null: w_i = (1/α) Φ̄(ξ_i/2 + c/ξ_i), c chosen so the weights average 1. A hypothesis with ξ ≤ 0 (nothing to
+    see) takes weight 0. Each ξ comes from the hypothesis's expectation and dispersion at a reference effect, never from
+    its count, so the weights are independent of the p-values under the null (ARCHITECTURE §8.4)."""
+    from scipy import optimize, special
+
+    xi = np.asarray(xi, dtype=float)
+    live = np.isfinite(xi) & (xi > 1e-9)
+    w = np.zeros(len(xi))
+    if not live.any():
+        return np.ones(len(xi))
+    x = xi[live]
+
+    def mean_w(c: float) -> float:
+        return float(special.ndtr(-(x / 2 + c / x)).sum() / alpha / len(xi) - 1.0)
+
+    lo, hi = -50.0 * x.max() ** 2, 50.0 * x.max() ** 2
+    if mean_w(lo) < 0:            # even the most generous c cannot spend the budget: the live ones share it evenly
+        w[live] = len(xi) / live.sum()
+        return w
+    c = optimize.brentq(mean_w, lo, hi)
+    w[live] = special.ndtr(-(x / 2 + c / x)) / alpha
+    return w
 
 
 def adjusted(p: np.ndarray) -> np.ndarray:

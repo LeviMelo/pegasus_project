@@ -844,8 +844,8 @@ A lead is selected on data and confirmed only by **units that took no part in th
 - **Their limit:** five chapter-IX fields and Q02, thinned to five sizes. The designed grid of §10.2 replaces them.
 
 **Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the **negative controls and null worlds** stays ≤ q (§10.2–10.4). It is the empirical-calibration idea of observational-health research networks, applied to the search itself. It is the region of practical equivalence of the departure models (§7.0) and of the pair screens.
-- **Calibrated so far:** δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005), 0.1 for E_b|Z in maps (ADR-0013); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate); marks 1.5 % (PESO negatives).
-- **Provisional elsewhere:** θ0 = 1.2 for outbreak, change point and space–time; trend divergence 1.5 at the municipality, 1.2 at region and state; group disparity sd 0.2, **not calibratable** on the spatial negatives (MSR holds only from sd 1.0 at the state). Values live in `scans/lenses.py`.
+- **Calibrated so far:** δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005), 0.1 for E_b|Z in maps (ADR-0013); marks 1.5 % (PESO negatives).
+- **Re-made on the grid (ADR-0026, 2026-10-06):** θ0 = 1.1 for outbreak, change point, space–time and trend divergence at every scale; spatial cluster 1.5 on SIM and 2.0 on SIH. Each is the smallest value at which refitted model worlds and space negatives of three fields hold q. Group disparity sd 0.2 stays provisional, **not calibratable** on the spatial negatives (MSR holds only from sd 1.0 at the state). Values live in `scans/lenses.py`.
 - **The minimum effect is a statement of relevance, not of detectability.** A field that cannot see it is weighted, not dropped.
 
 **Why minimum effects at all** (evaluation 2026-10-04, chapter IX). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
