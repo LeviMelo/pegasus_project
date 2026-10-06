@@ -1,0 +1,18 @@
+# Handoff: ARCHITECTURE 4.1 exposure and groups (coverage gaps 1-2), ADR-0020
+Started 2026-10-05. Front: kappa (system completeness), N^(SUS) for SIH, race in the groups g. Do not touch monolith eta.
+## Design (decided)
+- Exposure modifiers ride on the population source string: `popsvs+kappa`, `popsvs+sus`, `hybrid+kappa` ... `gateway.population(..., dataset=)` applies them (N <- kappa_{UF,t} N, or q_{u,s,a} N; s <- quadrature). Keys: `population` = the string, `population_model` = the model versions. No change to eta: kappa and SUS live in the offset.
+- SUS: only 2021-23 exist (sus-dependent-2, 17 bands, by place/sex). Extension backwards = the 2021-23 mean share per cell, with a random-walk sd measured on 2021->2023 drift. pegasus_data work to propose: ANS TabNet beneficiaries by municipality x age x sex, Dec 2008-2020 (PDA-024 starts 2021-05).
+## State
+(updated below)
+- [coded, uncommitted] gateway: `split_source`, `completeness`, `sus_share`, `_modified` (kappa, sus), `event_counts(race=)`, `population(..., race=)`, `_confusion*`, `declared_ratios`, `_recorded_exposure`; monolith: `assemble` passes dataset/race to `gateway.population`, `default_population(race=)` -> account-3(+confusion for SIM). scripts/measure_exposure.py: targets sih_ix, births_r{1,2,4}, xvi_r{1,2,4} (fit/eval span 2014-23, train 2014-19), by-macro shifts.
+- gateway.py also carries ANOTHER front's uncommitted hunks (survivors_only in event_counts): stage mine only (git apply --cached of a filtered patch).
+- Checked: popsvs+kappa N ratio 0.939 (2010) -> 0.966 (2023); popsvs+sus 0.765 -> 0.762 of POPSVS, 5570 places, s 0.06 (2012, extended) -> 0.006 (2023).
+## Running (2026-10-05, heavy queue saturated by other agents)
+- Stage 1 fits: ix, births x popsvs+kappa x full/train -> logs data/exposure/fit_{ix,births}_kappa_{full,train}.log. Then `eval ix popsvs popsvs+kappa`, `eval births popsvs popsvs+kappa` (EXPOSURE_SUFFIX=_k) -> data/exposure/{ix,births}_k.json.
+- Stage 2 fits: sih_ix popsvs/popsvs+sus x full/train (data/exposure/fit_sih_ix_*.log). Then `eval sih_ix popsvs popsvs+sus` (EXPOSURE_SUFFIX=_sus).
+- Stage 3 not fitted yet: births_r{1,2,4}, xvi_r{1,2,4} (popsvs-free: account-3, xvi with +confusion vs naive account-3), needs declared_ratios (45 SIM counts) first.
+## Waiting on the heavy queue (2026-10-05, ~100 tool calls used)
+- All 6 heavy slots held for 80-300 min by other agents' surveys; my fits were queued 30+ min and the first launches were killed by the default 30-min background limit. Relaunched with timeout 7200000: fit-births-kappa-{full,train}, fit-ix-kappa-{full,train}, fit-sihix-sus-full (logs data/exposure/fit_*.log; look for "fitted"). SIH train fits dropped (SIH comparison is in-sample B1/B2 NLL, KS, phi against the stored popsvs full fit). data/exposure/race_probe.py (log race_probe.log) runs declared_ratios (45 SIM counts) + the recorded exposure check.
+- NEXT when fits land: `EXPOSURE_SUFFIX=_k python scripts/heavy.py --label eval-ix-k -- python scripts/measure_exposure.py eval ix popsvs popsvs+kappa > data/exposure/eval_ix_k.log`, same for births, `EXPOSURE_SUFFIX=_sus ... eval sih_ix popsvs popsvs+sus` (EXPOSURE_TIERS=B0,B1,B2 to skip BP there). Compare declared_ratios() with truth in data/agent_race/rates2_2021.csv, rates2_2022.csv (Brazil rows: truth per 1,000: 2022 Branca 9.92, Preta 15.05, Parda 13.36, Indigena 25.46 -> ratios 1, 1.52, 1.35, 2.57).
+- ARCHITECTURE.md rows for kappa and groups already edited (3.1/4.1) as if adopted: revise if the numbers say otherwise. Still to write: ADR-0020, DECISIONS row, ARCH 13 rows, evaluation entry + EVALUATION row, coverage rows (gaps 1-2, lines 24-25, 79-80, 95-99), check_docs, commit own hunks.

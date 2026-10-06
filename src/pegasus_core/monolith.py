@@ -111,11 +111,14 @@ def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str) -
     return at0 / total if total else 0.0
 
 
-def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", **_) -> str:
+def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", race: str | None = None,
+                       **_) -> str:
     """The exposure a field reads when none is named (and ``PEGASUS_POPULATION`` is unset): ``hybrid`` (POPSVS and
     the account's age 0) for a newborn-exposure field, defined by its data as a block of which at least
     ``NEWBORN_SHARE`` of the events are at age 0 (SIM chapter XVI: 0.9; chapter IX: 0.002), else ``popsvs``
     (ADR-0010 amended). Only event counts are classified; code-list and mark readers keep POPSVS."""
+    if race is not None:      # a race group: the account's race slice; a death's recorded race through the infant matrix (ADR-0020)
+        return "account-3+confusion" if dataset == "SIM.DO" else "account-3"
     if source != "events":
         return "popsvs"
     return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version()) >= NEWBORN_SHARE else "popsvs"
@@ -138,7 +141,7 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     ys = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, ys.tolist(), source, **source_args)
-    pop = gateway.population(ys.tolist(), source=population)
+    pop = gateway.population(ys.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
     h = hashlib.sha256()
     for name in pop.column_names:
         h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
@@ -215,7 +218,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         dataset, event, block, years.tolist(), source, **source_args)
     edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
     nB = len(edges)
-    pop = gateway.population(years.tolist(), source=population)
+    pop = gateway.population(years.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
     tidx = {int(y): i for i, y in enumerate(years)}
     N = np.zeros((len(places), len(years), 2 * nB))

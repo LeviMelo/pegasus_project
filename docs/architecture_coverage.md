@@ -21,8 +21,8 @@
 
 | # | gap | ARCH | why it ranks here | §13 |
 |---|---|---|---|---|
-| 1 | **No completeness term κ and no SUS-dependent population variant.** Every block is per resident of POPSVS; SIH and SIA are not rates of the people they serve. pegasus_data ships `system-completeness-1/2` (SIM, SINASC × UF × 2000-2023) and `sus-dependent-1` (2021-22 only) | 4.1, 3.1 | SIH rates are per resident, not per SUS-dependent person, and SIH geography is two utilization factors (50 % of the variance, ADR-0018); whether the missing exposure explains part of the first is untested (ADR-0018 ties it weakly to SUS beds). Completeness was tried only as an explanation of the 57 replicated SIM claims and explained none (`E:replicated-claims-read`), never as a term. `sus-dependent-1` covers 2021-22; the fits cover 2010-2023 | no |
-| 2 | **Race is not in the groups g.** No recorded-race confusion Σ C(k\|j) μ; groups are sex × age band only. pegasus_data has `race_confusion_infant`, `race_confusion_women` (ADR-0143, 0149) and the account's race dimension (account-3+). PegaSUS only measured the bridge (`E:race-bridge-infant`) | 4.1, 3.1 | The author asked for it by name; race is the one stratum whose raw rates invert the ordering (2022 infant mortality per 1,000, Preta: 5.5 raw, 15.8 bridged, 15.1 truth; STATUS race-bridge row). No lens or pair can see a racial disparity | no |
+| 1 | **Completeness κ and the SUS-dependent population are built as opt-in exposure modifiers (ADR-0020, 2026-10-05); their refits are not read.** (Original gap: no completeness term κ and no SUS-dependent population variant.) Every block is per resident of POPSVS; SIH and SIA are not rates of the people they serve. pegasus_data ships `system-completeness-1/2` (SIM, SINASC × UF × 2000-2023) and `sus-dependent-1` (2021-22 only) | 4.1, 3.1 | SIH rates are per resident, not per SUS-dependent person, and SIH geography is two utilization factors (50 % of the variance, ADR-0018); whether the missing exposure explains part of the first is untested (ADR-0018 ties it weakly to SUS beds). Completeness was tried only as an explanation of the 57 replicated SIM claims and explained none (`E:replicated-claims-read`), never as a term. `sus-dependent-1` covers 2021-22; the fits cover 2010-2023 | no |
+| 2 | **Race groups are built as race-stratified blocks (ADR-0020), unmeasured.** (Original gap: race is not in the groups g.) No recorded-race confusion Σ C(k\|j) μ; groups are sex × age band only. pegasus_data has `race_confusion_infant`, `race_confusion_women` (ADR-0143, 0149) and the account's race dimension (account-3+). PegaSUS only measured the bridge (`E:race-bridge-infant`) | 4.1, 3.1 | The author asked for it by name; race is the one stratum whose raw rates invert the ordering (2022 infant mortality per 1,000, Preta: 5.5 raw, 15.8 bridged, 15.1 truth; STATUS race-bridge row). No lens or pair can see a racial disparity | no |
 | 3 | **The low-rank place × time interaction ψωτ is not built.** Patterns across blocks (CP-APR) are a stand-in that never reached the survey | 4.2, 4.3, 7.4 | The only model term for a shared place-time factor; without it SIH relations are patched in Z (ADR-0018) and the dependency map is read net of factors by hand | yes (4.2) |
 | 4 | **The horseshoe on tree levels is not built:** iid Gaussian per level, per block | 4.3 | Tree pooling is the model's main device for sparse categories; the shrinkage is not the one declared and pooling per chapter was never measured (`P` row 5.4) | yes (4.3) |
 | 5 | **No top model, no two-level fit, no model-choice loop.** Blocks are fitted independently; nothing shares hyperpriors or offsets; held-out choice is a script run on chapter IX twice (graph, then profile) | 5.4 | The profile=category fit on IX scores 2.143 deviance per event held out against 2.218 for the default (profile=group): 3.4 % better, in `data/logs/heldout_ix.log` only, in no evaluation, with OQ-3 still open and the default unchanged | **no** |
@@ -76,8 +76,8 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | structure: ordinal, cyclic | BM | `structures.random_walk` | none |
 | graph | P | contiguity (border length), contiguity01, distanceH, knnK in `graphs.py` | care-flow, REGIC, health-region graphs and mixtures unused |
 | population: POPSVS and accounts | BM | `E:exposure`, `E:census-coverage`, ADR-0010 | POPSVS default; the account loses to it except at age 0 (`hybrid`) |
-| population: SUS-dependent variant | NB | pegasus_data `sus-dependent-1` (2021-22) | not read |
-| population: completeness by system, place, year | NB | pegasus_data `system-completeness-1/2` | not read as a term; diagnostic in `E:replicated-claims-read` |
+| population: SUS-dependent variant | BU | `gateway.sus_share` (`sus-dependent-2`, 2021-23) | unmeasured, see 4.1 row |
+| population: completeness by system, place, year | P | `gateway.completeness` (`system-completeness-2`, UF × year) | read as a modifier, opt-in; no municipal completeness exists |
 | aggregates: sparse counts, mark accumulators | P | `gateway.event_counts`, `mark_moments` (own DuckDB SQL) | pegasus_data's `logmoments` aggregate not used |
 | records and linked persons | P | `scans/cohort.py`; links used in `data/cohort_infant.py`, `data/agent_race/` | no API: `cohort()` and `records()` of §9.3 absent |
 | lattice cell (u, t, g) | BM | `monolith.BlockData` | none |
@@ -92,11 +92,11 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | item | status | evidence | gap |
 |---|---|---|---|
 | 4.1 NegBin with block dispersion φ_b | BM | `E:chapter-ix-first-fit` (φ 5.98), ADR-0006 | none |
-| 4.1 κ_{s,u,t} completeness of the system | NB | no `kappa` in `monolith.py` | not in §13 |
+| 4.1 κ_{s,u,t} completeness of the system | P | `gateway.completeness`, `popsvs+kappa` (ADR-0020); `E:exposure-41` refit-free: IX NLL -0.12 %, residual slope 2.3 | opt-in; refits `popsvs+kappa` queued; SIH, SINAN have none | yes (4.1) |
 | 4.1 N^(v): all residents | BM | `E:exposure` | none |
-| 4.1 N^(v): SUS-dependent for SIH, SIA | NB | | not in §13 (gap 1) |
+| 4.1 N^(v): SUS-dependent for SIH, SIA | BU | `gateway.sus_share`, `popsvs+sus` (ADR-0020) | 2021-23 only (earlier: frozen share with measured σ); SIH IX fit queued; ANS TabNet 2008-2020 needed in pegasus_data | yes (4.1) |
 | 4.1 exposure variance of N | BM | `Monolith.exposure_variance`; ADR-0010 (double counts φ, off by default) | §13 row open |
-| 4.1 race in groups, μ^rec = Σ_j C(k\|j) μ_j | NB | | not in §13 (gap 2); pegasus_data bridges exist |
+| 4.1 race in groups, μ^rec = Σ_j C(k\|j) μ_j | BU | `race=` blocks, `+confusion`, `declared_ratios` (ADR-0020) | race-stratified, not an axis of G; fits and the ratio check against the linked truth not run | yes (4.1) |
 | 4.2 θ_e along the tree path | P | `th_grp`, `th_cat` | two levels (ICD block, category); no deeper path |
 | 4.2 list terms θ_L | NB | | not in §13 |
 | 4.2 g_e(u) carried to ℓ_g | P | `s_all, v_all, s_grp, v_grp, v_cat` | §13 row 4.2 (v_cat added) |
