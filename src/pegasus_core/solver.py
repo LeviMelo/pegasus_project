@@ -1020,6 +1020,72 @@ class StructuredNewton:
         return out
 
 
+    # ------------------------------------------------------------------ Laplace draws
+
+    def nb_factors(self, x: dict[str, torch.Tensor], phi: float) -> Factors:
+        """The negative binomial's expected information as cell weights, w = φμ/(φ + μ) over every cell (the
+        Laplace posterior's, `laplace.Posterior`): not factorisable over the empty cells, so each leaf's slab
+        [U, T, G] is streamed once and its sums kept as the leaf's own features (the mark models' path)."""
+        m = self.m
+        with torch.no_grad():
+            LP = m._leaf_place(x)
+            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + (x["s_grp"] + x["v_grp"])[:, :, None]
+            EX = torch.exp(lin)
+            Fk = torch.exp(x["f_all"] + x["f_grp"])
+            J = torch.exp(m._I(x)) if getattr(m, "ix_on", False) else None
+            E, U, T, G = self.E, self.U, self.T, self.G
+            mm = torch.empty((E, U), dtype=LP.dtype)
+            dPk = torch.empty((E, U, T), dtype=LP.dtype)
+            dR = torch.empty((E, U, G), dtype=LP.dtype)
+            mubar = torch.empty((E, T, G), dtype=LP.dtype)
+            pos = _np(m.ixpos) if J is not None else None
+            for e in range(E):
+                k = int(self.grp[e])
+                xt = EX[k] if J is None or pos[e] < 0 else EX[k] * J[int(pos[e])]
+                mu = LP[e][:, None, None] * xt[:, :, None] * m.N * Fk[k][None, None, :]
+                w = mu if not np.isfinite(phi) else mu * (phi / (phi + mu))
+                dPk[e] = w.sum(2)
+                dR[e] = w.sum(1)
+                mm[e] = dPk[e].sum(1)
+                mubar[e] = w.sum(0)
+        K = self.K
+        return Factors(np.ones((E, U)), np.zeros((K, U, T)), np.zeros((K, G)),
+                       np.bincount(self.grp, minlength=K)[:, None] * np.ones((1, U)), np.zeros((K, U, T)),
+                       np.zeros((K, U)), np.zeros((K, U, G)), _np(mm), _np(mubar), float(mm.sum()),
+                       act=np.arange(E, dtype=np.int64), dPk=_np(dPk), dPu=_np(mm), dR=_np(dR))
+
+    def draws(self, f: Factors, n: int, seed: int) -> dict[str, np.ndarray]:
+        """``n`` exact draws of the effects' displacement from N(0, H⁻¹) restricted to the centred subspace, H the
+        Hessian whose cell weights ``f`` carries (`nb_factors`, or a mark model's own `factors`):
+        - the place and global coordinates from their marginal precision (the Schur complement of the leaf-place
+          block, which the arrowhead factors as MMᵀ, M = [[L, 0], [Yᵀ, L_S]]): x = M⁻ᵀz, one multi-RHS solve;
+        - the leaf-place block given them: v = Z(D^½ z − Bx), Z the block's inverse under its centring (Var ZDZ = Z);
+        - the centrings across places by conditioning by kriging, x − V(AV)⁻¹Ax.
+        Returns effect-shaped arrays with a trailing axis of draws."""
+        from scipy.linalg import solve_triangular
+        rng = np.random.default_rng(seed)
+        vs = self._v_stats(f)
+        fac = self.factor(self.assemble(f, vs))
+        d, inv_d, s = vs[0], vs[1], vs[2]
+        z_l = rng.standard_normal((self.nl_red, n))
+        z_g = rng.standard_normal((self.ng_red, n))
+        x_g = solve_triangular(fac.Sc.T, z_g, lower=False)
+        x_lp = fac.L.lower_t(z_l - fac.Y @ x_g)
+        x_l = np.empty_like(x_lp)
+        x_l[fac.p] = x_lp
+        x_r = np.vstack([x_l, x_g])
+        b_v = np.sqrt(d)[..., None] * rng.standard_normal((self.E, self.U, n))
+        feat = self._features(f)
+        _, _, back = _vk()
+        gptr, gleaves = self._groups()
+        dot, dth = self._B_parts(f, feat, x_r)
+        if f.act is not None:
+            b_v[f.act] -= f.LP[f.act][:, :, None] * self._active_dot(f, x_r, dth)
+        x_v = back(np.ascontiguousarray(b_v), inv_d, s, f.LP, f.Pu, self.grp, gptr, gleaves, dot, dth, np.empty_like(b_v))
+        x_v, x_r = self._krige(fac, f, vs, x_v, x_r)
+        return self._to_effects_multi(x_v, x_r)
+
+
 def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, solver: StructuredNewton | None = None) -> int:
     """The mean's MAP at fixed strengths by exact Newton (the v1 replacement of `Monolith._fit_mean`): a step from
     `StructuredNewton.step`, then Armijo backtracking on the model's own objective; stops when Newton's predicted

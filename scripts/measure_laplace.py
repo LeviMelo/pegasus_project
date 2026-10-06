@@ -92,9 +92,7 @@ def run(make_ex, fields_tiers, label: str) -> dict:
                   flush=True)
         if draws:
             for key, post in ex._posteriors.items():
-                its = [s.iterations for s in post.solves]
-                res.setdefault("posterior", {})[str(key)] = {
-                    "cg_mean": float(np.mean(its)), "cg_max": int(max(its)), "cg_residual_max": max(s.residual for s in post.solves)}
+                res.setdefault("posterior", {})[str(key)] = {"draw_seconds": round(post.seconds, 2)}
                 if device == "cuda":
                     res["posterior"][str(key)]["gpu_peak_gb"] = torch.cuda.max_memory_allocated() / 1e9
     return res

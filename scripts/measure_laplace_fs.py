@@ -11,8 +11,6 @@ import json
 import sys
 import time
 
-import numpy as np
-
 from pegasus_core import laplace, monolith
 
 mode = sys.argv[1]
@@ -39,8 +37,7 @@ for label, poisson in (("poisson_full", True), ("nb_full", False)):
     post = laplace.Posterior(m, poisson=poisson)
     post.sample(S)
     res[label] = post.fellner_schall()
-    its = [s.iterations for s in post.solves]
-    print(f"{label}: {S} draws in {time.time() - t:.0f}s, CG iterations mean {np.mean(its):.0f} max {max(its)}", flush=True)
+    print(f"{label}: {S} exact draws in {time.time() - t:.0f}s", flush=True)
     out[label + "_seconds"] = time.time() - t
 
 print(f"{'component':8} {'tau':>10} {'FS diag':>10} {'Poisson full':>13} {'NB full':>10}   rank  tr(diag)  tr(P full)  tr(NB full)")

@@ -415,14 +415,20 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 - **LAML is also a model-choice criterion** (§5.6), beside held-out deviance.
 - **The dispersion φ** stays maximum likelihood with μ fixed (§5.2). A joint estimate inside LAML is a measured option.
 
-### 5.5 Uncertainty (v0 built, v1 to build)
+### 5.5 Uncertainty (v1 built 2026-10-06: exact Laplace draws)
 
-**v0** (`laplace.py`, off by default): perturb-and-MAP draws (Papandreou–Yuille), each solved by CG with a block-Jacobi preconditioner (40–90 iterations per draw). The per-cell variance has relative error √(2/S). It moved in-sample calibration by ≤ 0.01 KS (evaluation 2026-10-05, Laplace).
+**v1** (`laplace.Posterior`, `solver.StructuredNewton.draws`; off by default, `Expectations(laplace=S)`): draws from the Laplace posterior N(θ̂, H⁻¹) on the centred subspace. They are exact, not perturb-and-MAP:
+- H carries the negative binomial's expected information w = φμ/(φ + μ) for counts (each leaf's slab streamed once, its sums kept as the leaf's own features) and the family's Fisher weights for a mark model;
+- the place and global coordinates come from their marginal precision, factored as MMᵀ: x = M⁻ᵀz, all draws in one multi-RHS solve;
+- the leaf-place block is drawn given them in closed form, v = Z(D^½z − Bx);
+- the centrings by conditioning by kriging;
+- with the low-rank interaction, the draws are of the other effects, the interaction at its MAP.
 
-**v1** reads everything from the factor of §5.3:
-- **marginal variances of every effect by selected inversion**, exact;
-- **joint draws x̂ + L⁻ᵀz**, one triangular solve each, where an aggregate's predictive needs the joint;
-- **the predictive matched by moments** as before: 1/φ_eff = (E[Σμ²]/φ + Var(Σμ))/m².
+Over 2,000 draws on IX, the variance of random projections equals the exact aᵀH⁻¹a within its Monte-Carlo error (ratios 0.96–1.04 against ±0.03), and the centrings hold to 10⁻¹⁰ (evaluation 2026-10-06, solver v1). The per-cell variance has relative error √(2/S). The predictive is matched by moments: 1/φ_eff = (E[Σμ²]/φ + Var(Σμ))/m².
+
+**v0** (replaced): perturb-and-MAP draws (Papandreou–Yuille), each solved by CG with a block-Jacobi preconditioner (40–90 iterations per draw). It moved in-sample calibration by ≤ 0.01 KS (evaluation 2026-10-05, Laplace).
+
+**Not built:** marginal variances of every effect by selected inversion (draws give them with error √(2/S)).
 
 **Centring of the predictive.** In-sample tiers are centred on the MAP's μ, and BP on the posterior mean. BP adds the history's forecast error.
 
@@ -1134,9 +1140,9 @@ A solver change is measured on the benchmark before it is adopted.
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
 | marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
-| mean solver | 5.3 | v1, **the default for every model** since 2026-10-06 (exact Newton; IX cold 59 s against v0's 501 s, a better optimum and held-out; monthly grain, the interaction, marks and shares verified against autodiff); v0 kept until the uncertainty (laplace.py) and the horseshoe move to v1 | O1 |
+| mean solver | 5.3 | v1, **the default for every model** since 2026-10-06 (exact Newton; IX cold 59 s against v0's 501 s, a better optimum and held-out; monthly grain, the interaction, marks and shares verified against autodiff); v0 kept until the horseshoe moves to v1 | O1 |
 | strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
-| uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
+| uncertainty | 5.5 | v1: exact Laplace draws from the factor (off by default); selected inversion not built | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
 | lenses and their nulls | 7.1–7.2 | v0, now screens | O5, O6 |
 | departure models | 7.0 | not built | O6 |
@@ -1163,7 +1169,7 @@ A solver change is measured on the benchmark before it is adopted.
 | 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
 | 4.2, 5.4 | the low-rank interaction ψωτ for every leaf, ψ, ω, τ all learned scales | built (ADR-0021) on the active leaves (≥ 0.1 % of the block's events), ψ and τ strengths fixed, ω ICAR + iid, annual grain, no Laplace draws, no top-model sharing of ω across blocks; the rank is chosen per block by held-out deviance on a script, not by a model-choice loop | the cube's cost is E·U·T per Hessian-vector product; fixing two of the three scales identifies the product; the cross-block shared factor needs the top model (§5.4), not built |
 | 5.2 | every strength is learned (P7), the dispersion by place group included | φ_extra is a hierarchy (field, macro-region, state); the block's φ is one value per block | the block's φ by macro-region gained 0.009 nats per event held out on dengue and −0.0007 to +0.002 on chapters IX, X and XVIII (ADR-0006) |
-| 5.3–5.5 | exact Newton on the assembled Hessian; LAML for the strengths; selected inversion for uncertainty | v0: Newton–CG on autodiff HVPs; Fellner–Schall with the Poisson Fisher diagonal per effect (the full-Hessian update exists in `Posterior.fellner_schall` and is not in the fit; on IX it proposes τ_s 5× lower); perturbation draws, off by default | the v1 solver is O1; the v0 is measured in §5.3 and §5.8 |
+| 5.3–5.5 | exact Newton on the assembled Hessian; LAML for the strengths; selected inversion for uncertainty | v1 for every model: exact Newton, safeguarded Newton on log τ with exact global traces and probes, exact Laplace draws; selected inversion measured and not adopted (probes) | the v0 path's removal after the horseshoe |
 | 6.1 | B2s on every field; BP is a mixture over the history's regimes, not the RW2 forecast | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the annual grain damps the last slope (0.5 per year) and adds each place's damped B2 trend; at the monthly grain h is not extrapolated but drawn from the fit's years (a flat level36 baseline reached obs/expected 2.2 on dengue, the climatology 1.2; the outbreak-robust and level36 point baselines of evaluation 2026-10-05, baseline history, remain as `history=`) | the last two months' slope is noise at that grain; an epidemic series has no level to extrapolate; places drift apart (evaluation 2026-10-05, BP level) |
 | 10.1, 7.5 | lagged relations are estimated by distributed-lag terms; marks recover a documented event | E_w only (a screen): cold → respiratory admissions (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at the monthly municipal grain; arbovirus → microcephaly not recovered at region or, prewhitened, at state grain; marks: none declared | the relation models are O7; no citable mark shift ≥ 4 % |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the cell lenses pass places × time. Group disparity is a per-unit G² over the groups (not a subset scan of them), at the municipality, region and state scales (`scans/scales.py`); the trend lens reads the same scales | a subset scan over groups × places needs the per-group surprise in the scanner; the G² at three scales answered the documented departures (evaluation 2026-10-05-lens-positives). `Session.survey` runs the gated combinations (§7.1); a multi-municipality locus is a story of its own, its trend replication untested, and the group lens runs only `--ungated` |
