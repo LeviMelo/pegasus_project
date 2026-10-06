@@ -27,7 +27,7 @@ from scipy import optimize, stats
 class LagCurve:
     """A fitted lag–response curve: β(ℓ) per lag with its standard error, the cumulative effect Σβ with its own, the
     lags where the simultaneous 95 % band excludes zero (``band``: its critical |z|), the penalty's strength and the
-    deviance explained."""
+    NB deviance the term explains (2 Δℓ)."""
     lags: np.ndarray
     beta: np.ndarray
     se: np.ndarray
@@ -80,18 +80,29 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
         """The penalised MAP at τ = exp(log_tau); returns β, the penalised information, the Laplace log marginal."""
         tau = np.exp(log_tau)
         P = tau * K + 1e-8 * np.eye(n)       # RW2 leaves level and slope unpenalised: a vanishing ridge keeps it proper
+        def objective(b: np.ndarray) -> float:
+            lam = mv * np.exp(np.clip(Xv @ b, -30, 30))
+            return float(np.sum(yv * np.log(lam) - (yv + ph) * np.log1p(lam / ph))) - 0.5 * b @ P @ b
+
         b = np.zeros(n)
+        f0 = objective(b)
         for _ in range(iterations):
-            eta = np.clip(Xv @ b, -20, 20)
+            eta = np.clip(Xv @ b, -30, 30)
             lam = mv * np.exp(eta)
             w = lam / (1.0 + lam / ph)                      # NB information
             g = Xv.T @ ((yv - lam) / (1.0 + lam / ph)) - P @ b
             H = Xv.T @ (Xv * w[:, None]) + P
             step = np.linalg.solve(H, g)
-            b = b + step
-            if np.abs(step).max() < 1e-9:
+            t = 1.0
+            while t > 1e-6:                                 # step halving on the penalised likelihood (IRLS safeguard)
+                f1 = objective(b + t * step)
+                if f1 >= f0 - 1e-10:
+                    break
+                t *= 0.5
+            b, f0 = b + t * step, f1
+            if np.abs(t * step).max() < 1e-9:
                 break
-        eta = np.clip(Xv @ b, -20, 20)
+        eta = np.clip(Xv @ b, -30, 30)
         lam = mv * np.exp(eta)
         w = lam / (1.0 + lam / ph)
         H = Xv.T @ (Xv * w[:, None]) + P
@@ -108,11 +119,10 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
     se = np.sqrt(np.diag(cov))
     one = np.ones(n)
     cum, cum_se = float(one @ b), float(np.sqrt(one @ cov @ one))
-    lam0 = mv
-    lam1 = mv * np.exp(np.clip(Xv @ b, -20, 20))
+    def loglik(lam: np.ndarray) -> float:
+        return float(np.sum(stats.nbinom.logpmf(yv, ph, ph / (ph + lam))))
 
-    def dev(lam: np.ndarray) -> float:
-        return float(2 * np.sum(np.where(yv > 0, yv * np.log(np.maximum(yv, 1e-300) / lam), 0.0) - (yv - lam)))
+    gain = 2 * (loglik(mv * np.exp(np.clip(Xv @ b, -30, 30))) - loglik(mv))   # the NB likelihood the fit maximises
 
     # the window from a simultaneous band (the max |z| over lags under the curve's own covariance; mgcv's simulated
     # band): per-lag 95 % intervals marked a lag in 22 of 100 null worlds, the band in its 5
@@ -120,5 +130,5 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
     draws = np.random.default_rng(0).multivariate_normal(np.zeros(n), corr, size=20000, method="cholesky")
     band = float(np.quantile(np.abs(draws).max(1), 0.95))
     window = [int(ell) for ell in range(n) if abs(b[ell]) > band * se[ell]]
-    return LagCurve(np.arange(n), b, se, cum, cum_se, float(np.exp(res.x)), window, band, dev(lam0) - dev(lam1),
+    return LagCurve(np.arange(n), b, se, cum, cum_se, float(np.exp(res.x)), window, band, gain,
                     int(sel.sum()))

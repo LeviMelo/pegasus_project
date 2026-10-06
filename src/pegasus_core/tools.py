@@ -38,6 +38,7 @@ from . import (
     graphs,
     leads,
     monolith,
+    relations,
     replication,
     store,
     surprise,
@@ -213,6 +214,64 @@ class Session:
         tot = y.sum(0)
         mu = mu * np.divide(tot, mu.sum(0), out=np.ones_like(tot), where=mu.sum(0) > 0)[None]
         return y, mu
+
+    def exposure(self, sources: list[tuple[str, str]], per: float = 1000.0) -> np.ndarray:
+        """[U, T] an exposure on this session's places and periods: the events of ``sources`` ((dataset, event) pairs,
+        summed: e.g. the three arboviruses' notifications) by residence and period, per ``per`` residents, as
+        log(1 + rate): an epidemic month's rate (tens per 1,000) makes a linear term's exp() explode and is no plausible
+        dose–response. Monthly sessions count by the month of each event's date; a year a source has not published
+        counts as none."""
+        block = next(iter(self.expectations._models), None) or self._blocks()[0]
+        d = self.expectations.model(block).data
+        index = {int(p): i for i, p in enumerate(d.places)}
+        monthly = d.grain == "month"
+        x = np.zeros(d.N.shape[:2])
+        y0 = int(d.years[0])
+        for dataset, event in sources:
+            for year in d.years:
+                reader = gateway.monthly_counts if monthly else gateway.event_counts
+                try:
+                    t = reader(dataset, event, int(year), places=pa.array(d.places, pa.int32())).counts
+                except LookupError:                      # nothing published for that year (NothingPublished)
+                    continue
+                rows = np.array([index.get(int(a), -1) for a in t.column("u").to_numpy()])
+                yr = t.column("year").to_numpy()
+                k = (yr - y0) * 12 + t.column("month").to_numpy() - 1 if monthly else yr - y0
+                ok = (rows >= 0) & (k >= 0) & (k < x.shape[1])
+                np.add.at(x, (rows[ok], k[ok]), t.column("y").to_numpy()[ok])
+        residents = d.N.sum(2) * (12.0 if monthly else 1.0)        # person-months back to residents
+        return np.log1p(np.divide(x * per, residents, out=np.zeros_like(x), where=residents > 0))
+
+    def relation(self, node: str, exposure: np.ndarray, max_lag: int, scale: str = "ibge_immediate_region",
+                 within: list[int] | None = None, reverse: bool = False) -> relations.LagCurve:
+        """The distributed-lag relation of an exposure [U, T] (`exposure`) to field ``node``'s rate (ARCHITECTURE §7.5,
+        `relations.distributed_lag`): both aggregated to ``scale`` (the exposure as a resident-weighted rate), the
+        outcome read against its B1 expectation, NB at its block's dispersion. ``within`` keeps the units whose places
+        lie in these macro-regions (1–5); ``reverse`` reverses time, so the regressor at lag ℓ is the exposure ℓ periods
+        later (a negative control: the outcome leading its exposure)."""
+        f = self.expectations.field(node)
+        m = self.expectations.model(f.block)
+        s1 = self.surprise(node, "B1")
+        places = m.data.places
+        unit = np.asarray(gateway.regions(places, scale)) if scale != "municipality" else places.astype(str)
+        codes, uid = np.unique(unit, return_inverse=True)
+        residents = m.data.N.sum(2)
+
+        def agg(a: np.ndarray) -> np.ndarray:
+            out = np.zeros((len(codes), a.shape[1]))
+            np.add.at(out, uid, a)
+            return out
+
+        Y, M = agg(s1.y), agg(s1.mu)
+        rate = np.expm1(exposure)                            # the unit's rate from its places' (`exposure` is log1p)
+        X = np.log1p(np.divide(agg(rate * residents), agg(residents), out=np.zeros(M.shape), where=agg(residents) > 0))
+        rows = None
+        if within is not None:
+            macro = np.array([int(str(places[np.nonzero(uid == k)[0][0]])[0]) for k in range(len(codes))])
+            rows = np.nonzero(np.isin(macro, within))[0]
+        if reverse:
+            Y, M, X = Y[:, ::-1], M[:, ::-1], X[:, ::-1]
+        return relations.distributed_lag(Y, M, X, max_lag, phi=m.phi, rows=rows)
 
     def held_out(self, node: str, places: list[int], years: list[int]) -> dict[str, Any]:
         """A locus's effect read against the fit with the locus held out (`monolith.Monolith.without`): observed

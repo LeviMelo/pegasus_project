@@ -131,6 +131,20 @@ def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "
 
 
 @app.command()
+def relation(dataset: str, event: str, node: str, exposure: list[str], years: str = Years, graph: str = "contiguity",
+             grain: str = "month", max_lag: int = 12, scale: str = "ibge_immediate_region",
+             within: str = typer.Option(None, help="macro-regions, e.g. 2 for the Northeast"),
+             reverse: bool = typer.Option(False, help="the negative control: the outcome leading its exposure")) -> None:
+    """The distributed-lag relation of an exposure (DATASET:EVENT sources, summed, per 1,000 residents) to a field's
+    rate (§7.5): the lag curve, its cumulative effect and the lags its simultaneous band separates from zero."""
+    s = _session(dataset, event, years, graph, grain)
+    x = s.exposure([tuple(e.split(":", 1)) for e in exposure])
+    c = s.relation(node, x, max_lag, scale=scale, within=[int(w) for w in within.split(",")] if within else None,
+                   reverse=reverse)
+    console.print_json(json.dumps(c.summary(), default=float))
+
+
+@app.command()
 def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     """The lead register, best rank first."""
     from . import leads as register
