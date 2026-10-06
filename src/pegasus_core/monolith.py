@@ -45,6 +45,9 @@ MAX_TAU_STEP = np.log(10.0)  # Fellner–Schall updates are damped to ×10 per o
 IX_SHARE = 1e-3                                # a leaf carries the interaction when it holds this share of the block's events
 IX = ("ix_psi", "ix_os", "ix_ov", "ix_t")     # the interaction's parameters: ψ[R,E], ω = ix_os + ix_ov [R,U], τ [R,T]
 HS = ("th_grp", "th_cat")    # the tree levels a horseshoe prior scales node by node (ARCHITECTURE §4.3)
+# the parametrisation's centring, stored with every fit: 2 since 2026-10-06 (the age–sex profile over both sexes, the iid
+# place effects uncentred); a fit stored without it is read through `_legacy_centring`
+CENTRING = 2
 SHRUNK = 1e5                 # a τ above this leaves its effect at a negligible size (sd < 0.003)
 
 
@@ -806,6 +809,7 @@ class Monolith:
         arrays = store.get_arrays("monolith", cand["key"]) if cand else None
         if cand is None or arrays is None:
             return None
+        arrays = _legacy_centring(arrays, cand)
         carried, partial = [], []
         grain = self.data.grain
         my_first, theirs_first = _periods_of(mine)[0], _periods_of(cand["key"])[0]
@@ -1296,7 +1300,7 @@ class Monolith:
                 "phi": self.phi, "dispersion_check": getattr(self, "dispersion_check", None), "taus": {k: c.tau for k, c in self.components.items()}, "spatial_share": bym,
                 "fit_seconds": self.history[-1]["seconds"] if self.history else None,
                 "outers": len(self.history), "converged": getattr(self, "converged", None),
-                "stop_reason": getattr(self, "stop_reason", None), "rank": self.rank}
+                "stop_reason": getattr(self, "stop_reason", None), "rank": self.rank, "centring": CENTRING}
 
     # ---- persistence -------------------------------------------------------------
 
@@ -1331,7 +1335,7 @@ class Monolith:
         if arrays is None or meta is None:
             raise LookupError(f"no fitted monolith for {model.key()}")
         with torch.no_grad():
-            for k, v in arrays.items():
+            for k, v in _legacy_centring(arrays, meta).items():
                 if k in model.params:
                     model.params[k].copy_(torch.as_tensor(v))
         for k, tau in meta["taus"].items():
@@ -1864,6 +1868,20 @@ def _within_groups(leaf_group: np.ndarray, n: int) -> structures.Shape:
     """θ_cat: iid, centred within each group (the group carries the mean)."""
     return structures.Shape("iid_within", sp.identity(n, format="csr"), n - len(np.unique(leaf_group)),
                             centred=True, components=leaf_group)
+
+
+def _legacy_centring(arrays: dict, meta: dict) -> dict:
+    """Raw parameters stored under centring 1 rewritten so that the current centring gives the effects they were fitted
+    as: the old centring applied to them (each sex's profile row and each iid place row to its own mean), which the
+    current one then leaves as they are. Without it a stored fit's μ moved by a factor per sex on loading."""
+    if meta.get("centring", 1) >= CENTRING:
+        return arrays
+    out = dict(arrays)
+    for name in ("f_all", "f_grp", "v_all", "v_grp", "v_cat"):
+        if name in out:
+            v = np.asarray(out[name], dtype=np.float64)
+            out[name] = v - v.mean(axis=1, keepdims=True)
+    return out
 
 
 def _centre(x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:

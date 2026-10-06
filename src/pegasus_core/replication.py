@@ -96,7 +96,7 @@ def load_base(dataset: str, event: str, block: str, years: list[int], graph: str
     if arrays is None or meta is None:
         return monolith.Monolith.load(dataset, event, block, years, graph, device=device), full, sides, 1.0
     with torch.no_grad():
-        for k, v in arrays.items():
+        for k, v in monolith._legacy_centring(arrays, meta).items():
             model.params[k].copy_(torch.as_tensor(v))
     for k, tau in meta["taus"].items():
         model.components[k].tau = float(tau)
