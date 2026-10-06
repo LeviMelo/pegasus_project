@@ -17,11 +17,21 @@ from .. import control, graphs, surprise
 from . import scales as scales_mod
 from . import subset
 
-# Minimum relevant effects (P5, ARCHITECTURE §8.4): every lens tests against an effect worth
-# reporting, not against zero. Provisional until the harness calibrates them on negative controls.
-RATE_RATIO = 1.2         # cell lenses: H0 is "the rate is at most 1.2 × expected"
-SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0): calibrated on the MSR negatives, the largest value that keeps Chagas (harness gate)
-TREND_PERIOD = {"municipality": 1.5, "region": 1.2, "state": 1.2}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; the municipality's 1.5 from the time-shift negatives (5/12 worlds at 1.2, 0/12 at 1.5), the coarser scales' 1.2 the grid's lowest value (0/12 in every world)
+# Minimum relevant effects (P5, ARCHITECTURE §8.4, §10.5): every lens tests against an effect worth reporting, not
+# against zero. Re-made on the grid (ADR-0026, evaluation 2026-10-06 minimum effects): the smallest θ0 whose model
+# worlds (refitted, 20 per field) and space-scrambled normal-score negatives keep false leads at q on SIM I60-I69,
+# SIM I00-I02 and SIH-RD J09-J18. v0's 1.2 cost the outbreak lens half its power (place doublings 0.38 against 0.72).
+RATE_RATIO = 1.1         # cell lenses (outbreak, change point, space-time): H0 is "the rate is at most 1.1 × expected"
+SPATIAL_RATE_RATIO = 1.5  # spatial cluster (B0) on SIM: model worlds 2/20 at 1.2, 0/20 at 1.5
+SPATIAL_RATE_RATIO_BY = {"SIH-RD": 2.0}   # SIH's B0 carries its hospital-use geography (ADR-0018): 20/20 worlds at 1.5, 0/20 at 2.0
+TREND_PERIOD = {"municipality": 1.1, "region": 1.1, "state": 1.1}   # trend divergence, per scale: H0 is "the unit's course diverges by at most this ratio over the period"; v0's municipal 1.5 came from raw-score time shifts, whose single real shock cell the normal scores remove
+
+
+def spatial_rate_ratio(field_id: str) -> float:
+    """The spatial cluster's θ0 for a field (its dataset is the id's first part)."""
+    return SPATIAL_RATE_RATIO_BY.get(field_id.split(":")[0], SPATIAL_RATE_RATIO)
+
+
 GROUP_SD = {"municipality": 0.2, "region": 0.2, "state": 0.2}   # group disparity, per scale: H0 is "the groups' log-SIRs spread by at most this sd" (weighted by expected events)
 GC_MIN_UNITS = 500       # a scale with fewer units takes no genomic-control factor
 MARK_LOG = 0.015        # marks: H0 is "the mean log mark departs by at most 1.5%": calibrated on the PESO negatives (0/30 false-lead worlds at 1.5%, space-time 6/30 at 1%, 30/30 at 0.5%; evaluation 2026-10-05 lens positives)
@@ -49,7 +59,7 @@ def spatial_cluster(s: surprise.Surprise, edges: np.ndarray, ledger: control.Led
     """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan.
     ``rate_ratio`` overrides the minimum effect θ0 (the grid's calibration, §10.5)."""
     return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True,
-                  rate_ratio=SPATIAL_RATE_RATIO if rate_ratio is None else rate_ratio)
+                  rate_ratio=spatial_rate_ratio(s.field.id) if rate_ratio is None else rate_ratio)
 
 
 def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
