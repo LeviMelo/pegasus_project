@@ -39,7 +39,11 @@
    - Recording processes are measurement terms where identified.
    - Only tested explanations remove a lead.
    - A changed rule is re-applied to the stored state.
-7. **Roadmap (§12).** Work packages O1–O8, in that order: solver, settle, characterise, departures, relations, recording, breadth, top model and surveillance.
+7. **Race and the ICD ontology** (added the same day, on the author's objection that race was missing from the architecture and that the model needs an ICD ontology).
+   - **P15:** race is an axis, not an option. G = age × sex × race from 2000. Recorded race is read through its measured misclassification and missingness (§3.4, §4.1). Disparities are estimands (§4.2, §7.0).
+   - **The ICD ontology is a pegasus_data product the model consumes (§3.3):** attributes, age plausibility, ICD-9 and its bridge, ICD-O, lists, external-cause axes, relations.
+   - Work packages O3 and O4; the later packages renumbered O5–O10.
+8. **Roadmap (§12).** Work packages O1–O10, in that order: solver, settle, characterise, departures, relations, recording, breadth, top model and surveillance.
 
 ## Alternatives
 

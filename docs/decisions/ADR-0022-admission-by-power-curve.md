@@ -1,6 +1,6 @@
 # ADR-0022: Admission is read from the harness's power curves, not set; a miscalibrated field stays out of pair scans
 
-**Date.** 2026-10-05. **Status.** Active until O3 of ARCHITECTURE §12; **amended by ADR-0023** (2026-10-06). Exclusion by power is replaced by weighting by power (IHW), and the power curves become inputs of the weights and of each result's minimum detectable effect. Items 2, 4 and 5 stand. Closes the admission half of gap 9 of `docs/architecture_coverage.md`; ARCHITECTURE §8.4, §11.4.
+**Date.** 2026-10-05. **Status.** Active until O5 of ARCHITECTURE §12; **amended by ADR-0023** (2026-10-06). Exclusion by power is replaced by weighting by power (IHW), and the power curves become inputs of the weights and of each result's minimum detectable effect. Items 2, 4 and 5 stand. Closes the admission half of gap 9 of `docs/architecture_coverage.md`; ARCHITECTURE §8.4, §11.4.
 
 **Evidence.** `docs/evaluation/2026-10-05-admission.md`: the lenses' power for a rate ratio of 1.5 over one macro-region and window, measured with the production lenses on six fitted fields thinned to five sizes.
 

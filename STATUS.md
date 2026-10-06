@@ -67,23 +67,25 @@
 
 | package | what | state |
 |---|---|---|
-| O0 | the revision: review, principles, §5, §7.0, §7.5, §8.4, §8.6, §10, §12, §13 (ADR-0021, ADR-0023) | done |
+| O0 | the revision: review, principles (P11–P15), the ICD ontology and race (§3.3–3.4), §5, §7.0, §7.5, §8.4, §8.6, §10, §12, §13 (ADR-0021, ADR-0023) | done |
 | O1 | the solver: assembled arrowhead Hessian, sparse Cholesky, Schur, BYM2, LAML, selected inversion, the benchmark (`bench`, O1) | next |
 | O2 | settle on the fast stack: the interaction's rank, the horseshoe, the SUS exposure and race groups, SINAN wave 1 | measurements running |
-| O3 | characterise: the planted grid, null worlds, constants re-made, IHW weights, the gate retired | |
-| O4 | departure models | |
-| O5 | relation models: distributed lag, shared component, endemic–epidemic | |
-| O6 | recording: graded re-triage of the stored register (running), rule versions, conserved-level fields, coding regimes | started |
-| O7 | breadth: SINAN, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link | |
-| O8 | top model, model choice, prospective surveillance | |
+| O3 | race as an axis: pegasus_data's tensor fixes (2000 undeclared, bands, sample vs full count, 1991), G = age × sex × race, the recording model, disparities | |
+| O4 | the ICD ontology: pegasus_data's `icd_ontology` (attributes, age rules, ICD-9 bridge, lists, external-cause axes, relations); subcategory leaves, lists, structural zeros, conserved levels from the relations | |
+| O5 | characterise: the planted grid, null worlds, constants re-made, IHW weights, the gate retired | |
+| O6 | departure models | |
+| O7 | relation models: distributed lag, shared component, endemic–epidemic | |
+| O8 | recording: graded re-triage of the stored register (running), rule versions, conserved-level fields, coding regimes | started |
+| O9 | breadth: SINAN, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link | |
+| O10 | top model, model choice, prospective surveillance | |
 
 **Carried into the overhaul from the v0 backlog** (the rest is done; its history is in git):
 
 | item | package |
 |---|---|
-| an epidemic-level component for BP (dengue's prospective forecast 2.0–2.8× off) | O4 (cell excess; alarm baselines against Farrington/Noufaily) |
+| an epidemic-level component for BP (dengue's prospective forecast 2.0–2.8× off) | O6 (cell excess; alarm baselines against Farrington/Noufaily) |
 | Laplace follow-ups: an MCMC reference; τ's at the full Hessian | O1 (LAML), §10.6 |
-| positives declared for trend divergence, group disparity, marks; the dengue–climate lag | O3 (held out), O5 |
+| positives declared for trend divergence, group disparity, marks; the dengue–climate lag | O5 (held out), O7 |
 | race in the groups g; exposure re-asked on population-account-3/4 | O2 |
 | pegasus_data: open question 71 (DF region-code windows); roles bound to the derived columns, with the gateway switch at the next re-warm; streaming aggregation; SIDRA series across census universes; registration completeness rebuilt on population-account-2; account horizons of 1–3 years | requested through `docs/handoffs/`, with the package that needs them |
 | tools over MCP: built (ADR-0008), **paused by the author**; use and integration to be planned together | not scheduled |

@@ -40,6 +40,8 @@ PegaSUS:
 
 Later (phase 4, ADR-0004), the same model and lenses run **prospectively**, as surveillance across every diagnosis code and system.
 
+**Who it happens to.** Departures and relations are read by age, sex **and race**. Brazil's health inequalities are among the first things a reading of its data must show. Race is an axis of the lattice from 2000 (§3.4), read through how each system records it (§4.1). Every estimand has its race-specific and its disparity form (§4.2, §7.0).
+
 Leads are statistical objects, not conclusions.
 
 **Principles.** P1–P10 answer documented failures of the 2026 engine (`docs/discussion/2026-10-03-what-was-built.md`). P9 is rewritten, and P11–P14 added, after the 2026-10-06 review of this engine's own first versions.
@@ -60,6 +62,7 @@ Leads are statistical objects, not conclusions.
 | P12 | **Departures and relations are model terms.** A lead is a posterior statement about a term of the model (its size, its certainty, its minimum relevant effect), not the tail of a residual statistic under a method-specific null. Scans search; models infer (§7). |
 | P13 | **Structure is exploited, and speed is budgeted.** Computation follows the model's sparsity: an arrowhead Hessian, GMRF precisions, factorised totals (§5.3). Every component has a time budget, and a benchmark is run on every change to the solver (§5.8). |
 | P14 | **Recording is measured, never used to dissolve.** Recording processes are model terms where the data identify them, and graded explanations where they do not. A lead is re-scoped to its conserved level, never removed by an untested explanation. A changed rule is re-applied to the stored state (§8.6). |
+| P15 | **Race is an axis, not an option.** Where the population carries race, the lattice does. Recorded race is read through its measured misclassification and missingness, never taken as the declared race, and never dropped because it is hard. |
 
 ---
 
@@ -97,7 +100,7 @@ Leads are statistical objects, not conclusions.
 **Lattice cell.** `c = (u, t, g)`:
 - u, a place (municipality, comparable area or health region);
 - t, a time (year, or month for dense families);
-- g, a group: age band × sex (× race).
+- g, a group: age band × sex × race (§3.4; from 2000, the year the population tensor's race begins; race `total` before).
 
 The **population tensor** P = U × T × G holds N_c.
 
@@ -132,6 +135,65 @@ Field
 
 **Lead.** A test result admitted by error control, with its replication, robustness and provenance (§9.1).
 
+### 3.3 The ICD ontology (revision 2; O4)
+
+**The model is built on the ICD.** Its tree carries the levels, its profiles and its pooling. The ICD is therefore an ontology PegaSUS consumes, not a code column.
+
+**It is a pegasus_data product** (§2, rule 2): versioned, typed, read through `gateway`.
+
+**What exists (2026-10-06):**
+- **The tree.** pegasus_data ships the ICD-10 tree (chapter → group → category → subcategory; 14,563 nodes, with validity windows).
+- **Seven concept lists:** CID-BR-10, the tabulation lists 2 and 4, avoidable causes for ages 0–4 and 5–74, ICSAP conditions and groups.
+- **What PegaSUS uses:** the tree down to the 3-character category, and nothing else.
+- **Harvested, not built:** DATASUS's own CID-10 release (`sources/cid10csv_v2008.zip`: chapters, groups, categories, 12,451 subcategories, and ICD-O). It carries per code:
+  - `CLASSIF`: dagger or asterisk;
+  - `RESTRSEXO`: the sex restriction;
+  - `CAUSAOBITO`: acceptable as an underlying cause of death;
+  - `REFER` and `EXCLUIDOS`: cross-references and exclusions.
+
+**The ontology, by component:**
+
+| component | content | source | what PegaSUS does with it |
+|---|---|---|---|
+| **hierarchy** | WHO ICD-10 with the Brazilian additions (U codes), validity per year | `code_trees` (shipped) | tree effects (§4.2); leaves down to the **subcategory** where the data support it (the 4th character is in SIM and SIH), pooled to the category by the tree prior |
+| **code attributes** | dagger/asterisk, sex restriction, acceptability as underlying cause, references, exclusions | the DATASUS CID-10 release (2008 harvested; the current release to fetch) | **structural zeros**: a sex-restricted code has no exposure in the other sex; an asterisk code is never an underlying cause; unacceptable underlying causes become recording-quality fields (§8.6) |
+| **age plausibility** | age limits per code (perinatal, obstetric, congenital, senility) | the critique tables of SIM and SIH; SIGTAP's CID table | structural zeros by age; impossible records flagged, never dropped |
+| **ICD-9 and its bridge** | the ICD-9 tree (SIM 1979–1995) and an ICD-9 → ICD-10 map with comparability ratios | to locate (pegasus_data open question 69) | the SIM series from 1979 in one tree, with the bridge's uncertainty |
+| **ICD-O** | morphology of neoplasms | in the DATASUS release | oncology fields (SIH, APAC) |
+| **analytical lists** | the seven shipped; to add: WHO mortality list 1, the SIH morbidity list (`LISTA10`, pegasus_data open question 69), garbage codes by level (GBD, licence checked), the work-related disease list (LDRT, Portaria 2.309/2020), notifiable diseases ↔ ICD | list tables | list effects θ_L (§4.2, not built); fields that cross the tree |
+| **external-cause axes** | intent × mechanism (WHO / CDC external-cause matrix); place of occurrence by the 4th character of W00–Y34 | derived from the tree and the matrix | intent and mechanism fields across chapter XX (homicide, suicide, accident, undetermined, whatever the code) |
+| **relations** (a typed graph) | *sequela of* (I69 → I60–I67, B90–B94, T90–T98, Y85–Y89); dagger → asterisk; exclusions; **exchange pools**, the codes coders trade (unspecified ↔ specified, R00–R99, Y10–Y34, C76–C80, garbage → targets); procedure ↔ diagnosis (SIGTAP compatibility); notifiable disease ↔ ICD (SINAN) | documented relations from the release and the WHO rules; exchange pools from the literature and from this data's measured exchanges | the conserved levels of §8.6 (no longer a list inside triage code); corroboration rules (§8.3, no longer `corroborate.RULES`); the coding-regime term and redistribution sensitivity |
+
+### 3.4 Race (revision 2; O3)
+
+**Race is an axis of the lattice** wherever the population carries it. It is read through how each system records it.
+
+**Declared race: the population tensor.** pegasus_data's `population-account-3/4` (pegasus_data decision 0151) gives total plus five races, 2000–2030, municipality × single age × sex, with intervals.
+
+*Its census inputs:*
+- **2010 and 2022:** the full count by single age (SIDRA 9606).
+- **2000:** the sample by IBGE's bands (SIDRA 2093: five-year bands to 29, ten-year bands 30–79, then 80+).
+- **Between censuses:** cohort composition, the log race shares linear along each birth cohort, with a state reclassification rate per year. Calibrated out of sample on 2010.
+- **Each census year has exactly one source:** 2010's sample in table 2093 is never mixed with its full count.
+
+*Known limits, to fix in pegasus_data (O3):*
+1. **2000's "sem declaração".** 1.207 M people, 0.71 % of the sample, are dropped: the five races' shares are taken among the declared, so the undeclared are split like the declared. The 2010 and 2022 full counts leave 6,608 and 11,119 people outside the five races.
+2. **2000's bands are spread flat over their ages** before smoothing, including the ten-year bands. The within-band shape of the cohort, seen by single age in 2010, is the better prior.
+3. **2000 is a sample and 2010–2022 are full counts.** The two kinds differ: in 2010 the sample's white count is 90.62 M against the full count's 91.05 M. 2010 has both, so the correction can be measured there and applied to 2000. It is not yet.
+4. **1991–1999 carry the total only.** The 1991 census's race is not read. SIM records race from 1996.
+
+**Recorded race in the events:**
+- SIM `RACACOR` (from 1996);
+- SINASC `RACACORMAE` (the mother's declaration) and the newborn's `RACACOR` (equal to the mother's in 50,078 of 50,078 linked records);
+- SIH `RACA_COR`, flagged per hospital and month, never relabelled (pegasus_data decision 0128);
+- SINAN `CS_RACA`;
+- SIA/APAC.
+
+**How the recording is measured:**
+- confusion matrices of recorded against declared race: infant deaths, anchored on the mother's declaration at birth (pegasus_data decision 0143); women aged 15–49, measured through their births (pegasus_data decision 0149);
+- the share recorded as unknown, by system, place and year (and by facility for SIH).
+- Other adults' confusion is not measured; §4.1 gives how they are read.
+
 ---
 
 ## 4. The monolith: model
@@ -149,7 +211,7 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
 |---|---|---|
 | **N^{(v)}_c** | person-years of population variant v: all residents (SIM, SINASC, SINAN) or SUS-dependent (SIH, SIA) | pegasus_data, source `popsvs`, `account-2` or `account-3/4` (§3.1). With the account, log N_c ~ N(log N̂_c, s_c²) and Var(Σ_g μ_g) = Σ μ_g²(e^{s²}−1) + ρ[(Σ μ_g s_g)² − Σ μ_g² s_g²] enters the predictive's variance beside Var(η) (`Monolith.exposure_variance`, `surprise.py`) |
 | **κ_{s,u,t}** | completeness of system s (1 where unmodelled) | pegasus_data `system_completeness` (SIM, SINASC by UF × year 2000–2023, 80 % intervals); an exposure modifier of the source string, `popsvs+kappa`: N ← κ_{UF(u),t} N, σ in quadrature (`gateway.population`, ADR-0020) |
-| **groups with race** | the expected *recorded* count by recorded race k is `μ^{rec}_{e,(u,t,a,s,k)} = Σ_j C_σ(k|j) · μ_{e,(u,t,a,s,j)}`, with C_σ the setting's confusion matrix | pegasus_data modelled tier. Built as race-stratified blocks (`race=` in the source arguments, ADR-0020, §13): births by the mother's declared race; infant deaths by recorded race with the exposure `Σ_j C(k|j) r_j N_j` (`+confusion`). Adult deaths stay recorded race |
+| **race** (revision 2, §3.4; O3) | **groups g = age × sex × race** (2000 on). The *recorded* count by recorded race k ∈ {five races, unknown} is `μ^{rec}_{e,(u,t,a,s,k)} = (1 − m_{s,u,t}) Σ_j C_{s,σ}(k\|j) μ_{e,(u,t,a,s,j)}` for a race, and `m_{s,u,t} Σ_j μ_{e,(u,t,a,s,j)}` for unknown. `C_{s,σ}` is the measured confusion of system s in setting σ: infant deaths, women 15–49. Where no confusion is measured (other adults, SIH, SINAN), C is the identity, with a sensitivity band from the nearest measured matrix, and the estimand is named *recorded-race*. `m` is the unknown share (a smooth field over place and year, by facility for SIH), assumed not to depend on race; the sensitivity of that assumption is reported | pegasus_data modelled tier (`race_confusion_infant`, `race_confusion_women`). v0 built: race-stratified blocks (`race=` in the source arguments, ADR-0020), births by the mother's declared race, infant deaths with the exposure `Σ_j C(k\|j) r_j N_j` (`+confusion`); none measured, and the women's matrix is not wired |
 
 ### 4.2 Linear predictor
 
@@ -171,6 +233,17 @@ y_{e,c} ~ NegBin( mean μ_{e,c}, dispersion φ_b )            Var = μ + μ²/φ
 
 - **Profile nodes.** p(e) is the ancestor of e at the profile level ℓ_f (default: ICD block; SIGTAP subgroup). Age–sex profiles below that level are not separately estimated: **age-specific geography is a lead** (the group lens, §7.1), not a model term.
 - **The low-rank interaction (`Monolith(rank=R)`, annual grain, ADR-0021).** Σ_r ψ[r,e] ω[r,u] τ[r,t] acts on the *active* leaves, those holding at least 0.1 % of the block's events (the others have ψ = 0), so the cube is |E_active|·U·T. ψ ~ N(0, 1) is fixed and centred within each group's active leaves, which makes the term orthogonal to the effects the leaves of a group share; ω = scaled ICAR + iid, both centred over the places, with learned strengths (the amplitude lives there); τ = RW1 scaled like the other shapes plus a unit prior on its level, strength fixed. The strengths of ψ and τ are fixed so the three factors' scales are not a ridge. A fit runs the base model, then starts the interaction from a weighted alternating least squares of the base fit's working-residual cube (a zero start is a saddle), then iterates the same Newton–CG and Fellner–Schall (the Gauss–Newton diagonals of the three factors replace the first-derivative mass). Forecast: ω and ψ as fitted, τ flat at its last value (the RW1 mean). Laplace draws are not built for it. The interaction is *within the block*: it carries a place–time pattern shared by some leaves with different loadings; a place level shared by whole chapters is the block's main place effect and cannot be separated here (evaluation 2026-10-05, low-rank).
+- **Race terms (revision 2, O3).** η gains, for declared race j:
+  - a race effect per tree node, shrunk along the tree like θ;
+  - a race × age deviation of the profile (RW2 per race, shrunk to the common profile);
+  - a race × place contrast at a coarse scale (BYM2 over states or immediate regions: municipal race-specific counts are too sparse);
+  - a race × time contrast (RW1).
+
+  A **disparity** is the exponentiated race contrast, a rate ratio with its posterior, by place, period, age and node. The cells grow fivefold. The race contrasts join the place and global classes of §5.3, so the solver's structure is unchanged.
+- **The ICD ontology in the predictor (revision 2, O4; §3.3).**
+  - Leaves go down to the subcategory where the data support it.
+  - List effects θ_L are carried by every member code (CID-BR-10, avoidable causes, ICSAP, garbage levels).
+  - Sex- and age-impossible cells are structural zeros of the exposure, not low rates.
 - **Context fields are not in the default predictor.** A relation between a context field and an outcome must stay discoverable (§7.5), not absorbed as "boring". Context enters only in adjusted estimands (E_b|Z) and in explaining away (§7.7).
 
 ### 4.3 Priors: one per shape (P6, P7)
@@ -472,6 +545,7 @@ Each estimand declares its own δ, taken from the field's established method (P1
 | **step** (change point) | a step per place with a discrete location and a shrunk size; the posterior over (location, size) | Bayesian change-point components (product partitions or a step basis with a shrinkage prior) | trailing-window NB tails with Bonferroni |
 | **spatial cluster** | a BYM2 excess over B0 (or the field's place effect); exceedance probabilities P(RR_u > θ0 \| y), for irregular shapes a Bayesian spatial scan | disease mapping (Richardson et al. 2004 exceedance rule); Neill, Moore & Cooper (2006) | the B0 Poisson scan with its MSR-calibrated θ0 |
 | **group disparity** | a place × group interaction, shrunk within the place and over the graph; the exceedance of the minimum effect | the hierarchical interaction of the monolith's own priors | the per-unit G² against a non-central χ² |
+| **race disparity** (O3) | the race contrast's departure, by place and period, from its own national course; for each pair of races, the exceedance of a minimum rate ratio | the race terms of §4.2, read through the recording model of §4.1 | nothing: v0 read no race |
 | **observation** fields | the same terms on recording-practice fields | as above | |
 
 **What a departure model reports:**
@@ -810,7 +884,7 @@ Lead
 - **Documented real events (§10.1)** are a held-out check of face validity. **They are never used to tune a constant, a rule or a design choice.**
   - Tuning happens on the planted grid.
   - The v0 history (θ0, the alarm history rule chosen on dengue 2019–23, the trend reference chosen because the positives were state-level) is recorded where it happened.
-  - Those choices are re-made on the grid in work package O3 (§12).
+  - Those choices are re-made on the grid in work package O5 (§12).
 
 ### 10.1 Documented events (held out)
 
@@ -986,21 +1060,23 @@ A solver change is measured on the benchmark before it is adopted.
 
 ## 12. Roadmap: the overhaul (revision 2)
 
-**Phases 0–3 of 2026-10-04** (harness, monolith, lenses, pairs, replication, maps, institutions' first stage) were built as v0 by 2026-10-05. Phase 4, prospective surveillance (ADR-0004), stands as the goal (O8).
+**Phases 0–3 of 2026-10-04** (harness, monolith, lenses, pairs, replication, maps, institutions' first stage) were built as v0 by 2026-10-05. Phase 4, prospective surveillance (ADR-0004), stands as the goal (O10).
 
 **The overhaul's work packages** run in this order: speed first, because every later measurement waits on it. Each package ends with its measurement, its evaluation entry and its decision. Details, acceptance and the running state are in `docs/plans/2026-10-06-overhaul.md`.
 
 | package | builds | accepted when |
 |---|---|---|
-| **O0** | this revision: review, principles P9 and P11–P14, §5, §7.0, §7.5 relation models, §8.4, §8.6, §10, this roadmap (ADR-0023) | written (2026-10-06) |
+| **O0** | this revision: review, principles P9 and P11–P15, the ICD ontology (§3.3) and race (§3.4), §5, §7.0, §7.5 relation models, §8.4, §8.6, §10, this roadmap (ADR-0023) | written (2026-10-06) |
 | **O1, solver** | `solver`: the assembled arrowhead Hessian (checked against autodiff), elimination, sparse Cholesky, Schur complement, constraints; BYM2; LAML in log τ; selected inversion; the benchmark (`bench`, O1) | the v0 optimum is reached on the four benchmark blocks, and the §5.8 budgets are met or revised with the reason |
 | **O2, settle** | refit the fitted blocks on the new solver; decide what waited on slow fits: the interaction's rank (ADR-0021), the tree prior (horseshoe), the SUS exposure and race groups (ADR-0020), the SINAN wave-1 families | each decision has its held-out measurement |
-| **O3, characterise** | the designed grid of planted signals (§10.3) and null worlds over real fields of every system; v0 constants re-made on the grid; IHW weights (§8.4); the gate retired in code, the method record on every lead | every v0 lens has its power surface and null-world FDR; no documented event tunes anything |
-| **O4, departures** | departure models (§7.0): unusual trend (BaySTDetect), cell excess (local fdr / shrinkage), step, cluster exceedance, group interaction; Bayesian FDR | each beats or matches its v0 lens on the grid at equal FDR, else the lens stays the inference and the reason is recorded |
-| **O5, relations** | the distributed-lag term in the monolith; the shared-component model; the endemic–epidemic term for infectious families; negative controls | the arbovirus → microcephaly lag recovered (declared before the run), cold → respiratory admissions estimated with its interval, null worlds held |
-| **O6, recording** | conserved-level fields as standard; the graded re-triage of the stored register (running, 2026-10-06); rule versions on verdicts; the coding-regime term | no lead removed by an untested explanation; every lead read at its conserved level |
-| **O7, breadth** | on the fast stack: SINAN families beyond wave 1, SIH marks (§4.4), SIA/APAC, CIHA, the SIH↔SIM link's products | each new system calibrated at B1 and surveyed |
-| **O8, top model and surveillance** | the top model and the model-choice loop (§5.6); phase 4 (ADR-0004), with alarm baselines benchmarked against Farrington/Noufaily and published alerts (InfoDengue) | timeliness, false alarms and hits against the benchmark |
+| **O3, race** | pegasus_data: the 2000 census's undeclared race, the within-band prior from 2010's cohorts, the sample-to-full-count correction measured on 2010, the 1991 race; PegaSUS: race as an axis of G, the recording model of §4.1 (unknown share, confusion where measured, the women's matrix wired), the race terms of §4.2, the race-disparity departure | births, infant deaths and one adult chapter fitted with race; recorded against expected by race calibrated at B1; disparities with intervals checked against published rates (held out) |
+| **O4, ICD ontology** | pegasus_data: the ontology product of §3.3 (attributes from the DATASUS release, age plausibility, ICD-9 and its bridge, the lists to add, external-cause axes, the relation graph); PegaSUS: subcategory leaves, list effects θ_L, structural zeros, conserved levels and corroboration rules read from the relations | the ontology served through `gateway`; one chapter refitted with subcategories, lists and zeros, held-out deviance against the category-level fit |
+| **O5, characterise** | the designed grid of planted signals (§10.3) and null worlds over real fields of every system; v0 constants re-made on the grid; IHW weights (§8.4); the gate retired in code, the method record on every lead | every v0 lens has its power surface and null-world FDR; no documented event tunes anything |
+| **O6, departures** | departure models (§7.0): unusual trend (BaySTDetect), cell excess (local fdr / shrinkage), step, cluster exceedance, group interaction; Bayesian FDR | each beats or matches its v0 lens on the grid at equal FDR, else the lens stays the inference and the reason is recorded |
+| **O7, relations** | the distributed-lag term in the monolith; the shared-component model; the endemic–epidemic term for infectious families; negative controls | the arbovirus → microcephaly lag recovered (declared before the run), cold → respiratory admissions estimated with its interval, null worlds held |
+| **O8, recording** | conserved-level fields as standard; the graded re-triage of the stored register (running, 2026-10-06); rule versions on verdicts; the coding-regime term | no lead removed by an untested explanation; every lead read at its conserved level |
+| **O9, breadth** | on the fast stack: SINAN families beyond wave 1, SIH marks (§4.4), SIA/APAC, CIHA, the SIH↔SIM link's products | each new system calibrated at B1 and surveyed |
+| **O10, top model and surveillance** | the top model and the model-choice loop (§5.6); phase 4 (ADR-0004), with alarm baselines benchmarked against Farrington/Noufaily and published alerts (InfoDengue) | timeliness, false alarms and hits against the benchmark |
 
 **What pegasus_data must supply** for each package is requested in `docs/handoffs/`, as before (§2, rule 2).
 
@@ -1015,22 +1091,24 @@ A solver change is measured on the benchmark before it is adopted.
 | model (§4): levels, profiles, geography, history, season | 4 | v1 (the established LGM), BYM instead of BYM2 | O1 |
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
-| marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O7 |
+| marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
 | mean solver | 5.3 | v0 (Newton–CG on autodiff HVPs) | O1 |
 | strengths | 5.4 | v0 (Fellner–Schall fixed point) | O1 |
 | uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
-| lenses and their nulls | 7.1–7.2 | v0, now screens | O3, O4 |
-| departure models | 7.0 | not built | O4 |
+| lenses and their nulls | 7.1–7.2 | v0, now screens | O5, O6 |
+| departure models | 7.0 | not built | O6 |
 | E_b and E_b\|Z pair screens, maps | 7.5–7.6 | v1 as screens (Dutilleul n_eff, MSR negatives) | — |
-| E_w | 7.5 | v0, screen only, failed its positive twice | O5 |
-| relation models (distributed lag, shared component, endemic–epidemic) | 7.5 | not built | O5 |
-| triage | 7.7 | v0 rules with thresholds; graded, re-scoping (ADR-0019) | O6 |
+| E_w | 7.5 | v0, screen only, failed its positive twice | O7 |
+| relation models (distributed lag, shared component, endemic–epidemic) | 7.5 | not built | O7 |
+| triage | 7.7 | v0 rules with thresholds; graded, re-scoping (ADR-0019) | O8 |
 | replication on independent units | 8.3 | v1 (ADR-0015, ADR-0019) | — |
-| admission | 8.4 | v0 exclusion by power (ADR-0022), to be replaced by weighting | O3 |
-| recording as measurement | 8.6 | κ and race built; conserved-level fields and coding regimes not built | O6 |
-| validation | 10 | v0 (positives, negatives, power curves of four lenses, a gate) | O3 |
-| top model, model-choice loop | 5.6 | not built | O8 |
+| admission | 8.4 | v0 exclusion by power (ADR-0022), to be replaced by weighting | O5 |
+| recording as measurement | 8.6 | κ and race built; conserved-level fields and coding regimes not built | O8 |
+| validation | 10 | v0 (positives, negatives, power curves of four lenses, a gate) | O5 |
+| race as an axis, the recording model, disparities | 3.4, 4.1, 4.2 | v0 race-stratified blocks for births and infant deaths, unmeasured; adults, SIH and SINAN read no race | O3 |
+| the ICD ontology | 3.3 | the tree to the category; lists, attributes, ICD-9, relations not used | O4 |
+| top model, model-choice loop | 5.6 | not built | O10 |
 
 ### 13.2 Departures
 
@@ -1045,13 +1123,13 @@ A solver change is measured on the benchmark before it is adopted.
 | 5.2 | every strength is learned (P7), the dispersion by place group included | φ_extra is a hierarchy (field, macro-region, state); the block's φ is one value per block | the block's φ by macro-region gained 0.009 nats per event held out on dengue and −0.0007 to +0.002 on chapters IX, X and XVIII (ADR-0006) |
 | 5.3–5.5 | exact Newton on the assembled Hessian; LAML for the strengths; selected inversion for uncertainty | v0: Newton–CG on autodiff HVPs; Fellner–Schall with the Poisson Fisher diagonal per effect (the full-Hessian update exists in `Posterior.fellner_schall` and is not in the fit; on IX it proposes τ_s 5× lower); perturbation draws, off by default | the v1 solver is O1; the v0 is measured in §5.3 and §5.8 |
 | 6.1 | B2s on every field; BP is a mixture over the history's regimes, not the RW2 forecast | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the annual grain damps the last slope (0.5 per year) and adds each place's damped B2 trend; at the monthly grain h is not extrapolated but drawn from the fit's years (a flat level36 baseline reached obs/expected 2.2 on dengue, the climatology 1.2; the outbreak-robust and level36 point baselines of evaluation 2026-10-05, baseline history, remain as `history=`) | the last two months' slope is noise at that grain; an epidemic series has no level to extrapolate; places drift apart (evaluation 2026-10-05, BP level) |
-| 10.1, 7.5 | lagged relations are estimated by distributed-lag terms; marks recover a documented event | E_w only (a screen): cold → respiratory admissions (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at the monthly municipal grain; arbovirus → microcephaly not recovered at region or, prewhitened, at state grain; marks: none declared | the relation models are O5; no citable mark shift ≥ 4 % |
+| 10.1, 7.5 | lagged relations are estimated by distributed-lag terms; marks recover a documented event | E_w only (a screen): cold → respiratory admissions (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at the monthly municipal grain; arbovirus → microcephaly not recovered at region or, prewhitened, at state grain; marks: none declared | the relation models are O7; no citable mark shift ≥ 4 % |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the cell lenses pass places × time. Group disparity is a per-unit G² over the groups (not a subset scan of them), at the municipality, region and state scales (`scans/scales.py`); the trend lens reads the same scales | a subset scan over groups × places needs the per-group surprise in the scanner; the G² at three scales answered the documented departures (evaluation 2026-10-05-lens-positives). `Session.survey` runs the gated combinations (§7.1); a multi-municipality locus is a story of its own, its trend replication untested, and the group lens runs only `--ungated` |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
 | 3.1, 4.1 | the population carries uncertainty and N enters the predictive with it | `account-2` and `account-3/4` carry it (σ of log N from the 80 % interval; `Monolith.exposure_variance`, ρ = 0), but the default source is POPSVS, which has none | no account is better than POPSVS on chapter IX or births deviance (account-3: births B1 +0.4 %, held-out KS .096 against .059; its births loss sits in 2020–2023 in places of 25–1000 births a year), and its exposure variance double counts the φ already estimated with μ fixed (evaluation 2026-10-05, exposure; ADR-0010). Closes when φ is estimated with the exposure variance in |
 | 2.1 | meaning comes from pegasus_data | `gateway._date_sql` parses raw date text (YYYYMMDD, DDMMYYYY), and `_residence_sql` maps the Federal District's administrative-region codes in SIH-RD 2008–2017 to 530010 | interim; pegasus_data now derives `<COL>_date` and `MUNIC_RES_municipio` (pegasus_data c893b69, 1f88401). Binding the roles to them changes every gateway cache key, so the switch waits for the next re-warm |
-| 8.4 | every field scanned, hypotheses weighted by power (IHW) | v0: admission by exclusion where power < 0.5 at the reference effect (`fields.admission`, `admission_curves.json`, `harness.pair_power`); the survey runs only the gated lens combinations (`tools.SURVEY_PLAN`) | O3 replaces both |
+| 8.4 | every field scanned, hypotheses weighted by power (IHW) | v0: admission by exclusion where power < 0.5 at the reference effect (`fields.admission`, `admission_curves.json`, `harness.pair_power`); the survey runs only the gated lens combinations (`tools.SURVEY_PLAN`) | O5 replaces both |
 | 11.4 | a miscalibrated field never enters a pair scan at the tier where it failed | the map reads B1 for SIM and SIH chapters (the place effects are over B0, which fails by design); SINASC indicators and contexts have no tier | ADR-0022 |
 | 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | spatial cluster θ0 = 1.5 (pooled negatives 0.04, worst family 5/30), where the family rule gives 2.0; single-field negatives are MSR of the residuals on a knn8 graph and a per-place shift, with a normal-scores variant | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |
 | 7.6 | a sparse + low-rank Gaussian graphical model, penalties by StARS, edges also passing the pair test | pairwise E_b and E_b\|Z given the declared contexts, no joint model; run 2026-10-05 (ADR-0013): delta_E|Z 0.1, 0 false edges in 40 surrogate worlds | each pair carries its own spatial n_eff, which a joint likelihood has no place for; the conditional layer conditions on declared contexts as the low-rank part would |

@@ -25,6 +25,8 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 | 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term |
 | 10.3 | the designed grid of planted signals |
 | 10.6 | simulation-based calibration |
+| 3.3, 4.2 | the ICD ontology consumed (subcategory leaves, list effects, structural zeros, relations for the conserved levels) |
+| 3.4, 4.1, 4.2, 7.0 | race as an axis of G, the recording model, the race terms, race disparities |
 
 **Superseded (`SS` by ADR-0023):**
 - the gate (§10.5);
@@ -40,12 +42,12 @@ The rows below audit the v1 text; their section numbers still hold, because revi
 
 **The gaps, re-ranked by the overhaul (ARCHITECTURE §12):**
 1. **The solver (O1).** Every measurement waits on it.
-2. **Validation that characterises (O3)**, because the v0 constants were tuned on the documented events.
-3. **Departure models (O4).**
-4. **Relation models (O5).**
-5. **Recording as measurement (O6)**, including the 14,813 leads reopened on 2026-10-06.
-6. **Breadth (O7)**: the old gaps 6 and 10.
-7. **The top model (O8)**: the old gap 5.
+2. **Validation that characterises (O5)**, because the v0 constants were tuned on the documented events.
+3. **Departure models (O6).**
+4. **Relation models (O7).**
+5. **Recording as measurement (O8)**, including the 14,813 leads reopened on 2026-10-06.
+6. **Breadth (O9)**: the old gaps 6 and 10.
+7. **The top model (O10)**: the old gap 5.
 
 The old gaps 1–3 (κ and SUS, race, the low-rank term) are measurement work inside O2. The old gap 4 (the horseshoe) is built. The ten-gap table below is the 2026-10-05 ranking, kept for its reasons.
 
