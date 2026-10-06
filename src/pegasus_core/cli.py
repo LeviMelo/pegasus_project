@@ -80,12 +80,11 @@ def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, gra
 @app.command()
 def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            blocks: list[str] = typer.Option(None, help="default: every fitted block"),
-           replicates: int = 100,
-           ungated: bool = typer.Option(False, help="also run the lens/estimand/scale combinations that fail their gate")
+           replicates: int = 100
            ) -> None:
-    """The scheduled pass: every admissible field, the gated lenses, error control, leads."""
+    """The scheduled pass: every field with events, every lens combination, error control, leads with their method record."""
     s = _session(dataset, event, years, graph)
-    admitted = s.survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
+    admitted = s.survey(blocks or None, replicates=replicates, log=console.print)
     console.print(f"{len(admitted)} leads admitted")
 
 
@@ -136,9 +135,9 @@ def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     """The lead register, best rank first."""
     from . import leads as register
 
-    t = Table("rank", "id", "kind", "estimand", "gate", "field", "locus", "effect", "q", "R")
+    t = Table("rank", "id", "kind", "estimand", "calibrated", "field", "locus", "effect", "q", "R")
     for x in [x for x in register.Register().current() if kind is None or x.kind == kind][:limit]:
-        t.add_row(f"{x.rank:.2f}", x.id, x.kind, x.estimand, x.gate, x.fields[0].split(":")[-1],
+        t.add_row(f"{x.rank:.2f}", x.id, x.kind, x.estimand, str(x.method.get("calibrated", "")), x.fields[0].split(":")[-1],
                   json.dumps(x.locus)[:50], f"{x.effect:.3g}", f"{x.q:.2g}", x.replication)
     console.print(t)
 
@@ -184,11 +183,10 @@ def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, g
 @app.command("split-survey")
 def split_survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
                  blocks: list[str] = typer.Option(None, help="default: every fitted block"),
-                 replicates: int = 100,
-                 ungated: bool = typer.Option(False, help="also run the combinations that fail their gate")) -> None:
+                 replicates: int = 100) -> None:
     """The survey on side A, then the size of each lead it selects read on side E (§8.3: a size, never a verdict)."""
     s = _session(dataset, event, years, graph)
-    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
+    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print)
     console.print(f"{len(admitted)} leads selected on side A")
     done = s.honest_sizes(log=console.print)
     console.print(f"{sum(1 for x in done if x.replications.get('honest', {}).get('sized'))} sized on side E")
@@ -196,12 +194,11 @@ def split_survey(dataset: str, event: str, years: str = Years, graph: str = "con
 
 @app.command("temporal-survey")
 def temporal_survey(dataset: str, event: str, last: int, years: str = Years, graph: str = "contiguity",
-                    blocks: list[str] = typer.Option(None, help="default: every fitted block"), replicates: int = 100,
-                    ungated: bool = typer.Option(False, help="also run the combinations that fail their gate")) -> None:
+                    blocks: list[str] = typer.Option(None, help="default: every fitted block"), replicates: int = 100) -> None:
     """Select on the years up to LAST (its own register leads_T<LAST>), then test what it selected on the later years of
     ``years`` against a fit that ends at LAST (§8.3, later years). Needs the blocks fitted on the years up to LAST."""
     s = _session(dataset, event, years, graph)
-    admitted = s.train(last).survey(blocks or None, replicates=replicates, log=console.print, ungated=ungated)
+    admitted = s.train(last).survey(blocks or None, replicates=replicates, log=console.print)
     console.print(f"{len(admitted)} leads selected on the years up to {last}")
     done = s.temporal_confirm(last, log=console.print)
     console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on the later years")

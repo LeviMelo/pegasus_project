@@ -52,7 +52,7 @@ async def reading(log: list) -> dict:
         tpl = await client.list_resource_templates()
         print("resources:", [str(r.uri) for r in res.resources], [t.uri_template for t in tpl.resource_templates])
         await call(client, log, "list_blocks", {"dataset": "SIM.DO"})
-        await call(client, log, "gate_status", {})
+        await call(client, log, "method_status", {})
         await call(client, log, "ledger_status", {})
         found = await call(client, log, "search_leads", {"triage_class": "signal", "min_replication": "R1", "limit": 5})
         if not found["leads"]:

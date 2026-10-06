@@ -1,6 +1,6 @@
 # The lens gate: false leads, negatives, power, §10.5 (2026-10-05)
 
-**Regime:** `scripts/harness_gate.py` (`fl`, `pow`, `cal`; env `GATE_KINDS`) over the Surprise objects of fitted blocks, pickled by `data/harness_gate/extract.py`; artefacts `data/harness_gate/*.json` and store kind `gate_lenses`. Fields: SIM chapter IX 2010–2023 (I10–I15, I20–I25, I60–I69, I05–I09, I26–I28), SINASC 2010–2023 birth weight (mark `PESO`) and Q02 (counts); contiguity graph, 5,570 municipalities, 100 scan replicates, commit c221508 plus the harness code of this entry. Each cell is "worlds with any finding / worlds"; q = 0.05; ub = Wilson 95% upper limit.
+**Regime:** `harness_gate.py (removed with the gate, ADR-0028; last at a253922)` (`fl`, `pow`, `cal`; env `GATE_KINDS`) over the Surprise objects of fitted blocks, pickled by `data/harness_gate/extract.py`; artefacts `data/harness_gate/*.json` and store kind `gate_lenses`. Fields: SIM chapter IX 2010–2023 (I10–I15, I20–I25, I60–I69, I05–I09, I26–I28), SINASC 2010–2023 birth weight (mark `PESO`) and Q02 (counts); contiguity graph, 5,570 municipalities, 100 scan replicates, commit c221508 plus the harness code of this entry. Each cell is "worlds with any finding / worlds"; q = 0.05; ub = Wilson 95% upper limit.
 
 ## Worlds
 

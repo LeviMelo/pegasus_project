@@ -224,15 +224,15 @@ def place_story(place: int | None = None, limit: int = 10, triage_class: str | N
                    "matched": len(stories), "provenance": _provenance()})
 
 
-# ---------------------------------------------------------------------------- reading: control and gate
+# ---------------------------------------------------------------------------- reading: control and methods
 
 
 @server.tool()
-def gate_status(lens: str | None = None) -> dict[str, Any]:
-    """The validation harness's standing per lens (ARCHITECTURE §10.5): false-lead shares on null surrogates and
-    negative controls against q, where a power curve was recorded, and the declared known positives. A lens
-    whose false-lead share exceeds q, or that has no declared positive, is not cleared for production."""
-    return _clean({"lenses": tools.gate_status(lens), "provenance": _provenance()})
+def method_status(dataset: str | None = None) -> dict[str, Any]:
+    """Each survey method's record (ARCHITECTURE §10.5): its tier, its minimum effect, whether its false-discovery rate
+    is calibrated where it runs, and the evidence. Leads of an uncalibrated method are reported, marked, after the
+    others."""
+    return _clean({"methods": tools.method_status(dataset), "provenance": _provenance()})
 
 
 @server.tool()

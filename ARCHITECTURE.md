@@ -839,9 +839,11 @@ A lead is selected on data and confirmed only by **units that took no part in th
 - For the departure models (§7.0), the posterior probabilities already carry the power: a field with little information has wide posteriors and rarely crosses the minimum effect. Their FDR is the Bayesian one of §8.2.
 - **Every reported result carries its minimum detectable effect**, read from the power surface (§10.2). A "nothing found" in a sparse field says how large an effect it could have missed.
 
-**The v0 curves stay as measurements.** `harness.region_power`, `admission_curves.json` and `harness.pair_power` are inputs of the weights and of the minimum detectable effect, not gates. They come from the production lens run on planted loci.
-- **The detection criterion:** a finding lying at least half inside the planted macro-region-year. A macro-region-year is far larger than one cell or the scanner's 30-place neighbourhood.
-- **Their limit:** five chapter-IX fields and Q02, thinned to five sizes. The designed grid of §10.2 replaces them.
+**Built (ADR-0028, 2026-10-06).**
+- Every field with an event is scanned, and every lead carries its method's record (`tools.method_record`): tier, θ0, whether its false-discovery rate is calibrated where it ran, and the evidence.
+- The v0 admission curves and power functions are removed; the grid of §10.3 replaces them as the measurement of power.
+- Weighted BH and Roeder–Wasserman weights are in `control` and are not yet applied.
+- `harness.pair_power` stays as the pair screens' power.
 
 **Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the **negative controls and null worlds** stays ≤ q (§10.2–10.4). It is the empirical-calibration idea of observational-health research networks, applied to the search itself. It is the region of practical equivalence of the departure models (§7.0) and of the pair screens.
 - **Calibrated so far:** δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005), 0.1 for E_b|Z in maps (ADR-0013); marks 1.5 % (PESO negatives).
@@ -1183,7 +1185,7 @@ A solver change is measured on the benchmark before it is adopted.
 | relation models (distributed lag, shared component, endemic–epidemic) | 7.5 | not built | O7 |
 | triage | 7.7 | v0 rules with thresholds; graded, re-scoping (ADR-0019) | O8 |
 | replication on independent units | 8.3 | v1 (ADR-0015, ADR-0019) | — |
-| admission | 8.4 | v0 exclusion by power (ADR-0022), to be replaced by weighting | O5 |
+| admission | 8.4 | v1: no exclusion, every lead with its method's record (ADR-0028); the weights built and not yet applied | O5 |
 | recording as measurement | 8.6 | κ and race built; conserved-level fields and coding regimes not built | O8 |
 | validation | 10 | v0 (positives, negatives, power curves of four lenses, a gate) | O5 |
 | race as an axis, the recording model, disparities | 3.4, 4.1, 4.2 | v0 race-stratified blocks for births and infant deaths, unmeasured; adults, SIH and SINAN read no race | O3 |
@@ -1209,7 +1211,7 @@ A solver change is measured on the benchmark before it is adopted.
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
 | 3.1, 4.1 | the population carries uncertainty and N enters the predictive with it | `account-2` and `account-3/4` carry it (σ of log N from the 80 % interval; `Monolith.exposure_variance`, ρ = 0), but the default source is POPSVS, which has none | no account is better than POPSVS on chapter IX or births deviance (account-3: births B1 +0.4 %, held-out KS .096 against .059; its births loss sits in 2020–2023 in places of 25–1000 births a year), and its exposure variance double counts the φ already estimated with μ fixed (evaluation 2026-10-05, exposure; ADR-0010). Closes when φ is estimated with the exposure variance in |
 | 2.1 | meaning comes from pegasus_data | `gateway._date_sql` parses raw date text (YYYYMMDD, DDMMYYYY), and `_residence_sql` maps the Federal District's administrative-region codes in SIH-RD 2008–2017 to 530010 | interim; pegasus_data now derives `<COL>_date` and `MUNIC_RES_municipio` (pegasus_data c893b69, 1f88401). Binding the roles to them changes every gateway cache key, so the switch waits for the next re-warm |
-| 8.4 | every field scanned, hypotheses weighted by power (IHW) | v0: admission by exclusion where power < 0.5 at the reference effect (`fields.admission`, `admission_curves.json`, `harness.pair_power`); the survey runs only the gated lens combinations (`tools.SURVEY_PLAN`) | O5 replaces both |
+| 8.4 | every field scanned, hypotheses weighted by power (IHW) | every field scanned and every combination run (ADR-0028); the hypotheses are not yet weighted: `control.bh(weights=)` and `optimal_weights` are built, and the weights are a priori (Roeder & Wasserman 2009), not IHW's learned ones | prior weights from each hypothesis's own expectation and dispersion keep FDR control without cross-weighting folds; within-field gain measured at about 10 % of power (O5 plan) |
 | 11.4 | a miscalibrated field never enters a pair scan at the tier where it failed | the map reads B1 for SIM and SIH chapters (the place effects are over B0, which fails by design); SINASC indicators and contexts have no tier | ADR-0022 |
 | 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | re-made on the grid (ADR-0026): θ0 1.1 for the cell lenses and trend divergence, spatial cluster 1.5 on SIM and 2.0 on SIH; refitted model worlds beside the MSR (knn8) and per-place-shift negatives on normal scores | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |
 | 7.6 | a sparse + low-rank Gaussian graphical model, penalties by StARS, edges also passing the pair test | pairwise E_b and E_b\|Z given the declared contexts, no joint model; run 2026-10-05 (ADR-0013): delta_E|Z 0.1, 0 false edges in 40 surrogate worlds | each pair carries its own spatial n_eff, which a joint likelihood has no place for; the conditional layer conditions on declared contexts as the low-rank part would |

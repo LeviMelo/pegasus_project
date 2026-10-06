@@ -55,18 +55,51 @@ SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergen
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
 
-# The survey's lens/estimand/scale combinations, by what the gate allows (evaluation 2026-10-05-lens-positives,
-# "Lens redesign"): per lens, (reference, scales that pass, scales that fail). Failing combinations run only with
-# ``survey(ungated=True)``, as their own family, and their leads carry ``gate="failed"``.
+# The survey's lens/estimand/scale combinations (ARCHITECTURE §10.5, O5): every one runs, and each lead carries its
+# method's record (`method_record`) in place of v0's gate.
 SURVEY_PLAN = (
-    ("outbreak", None, ("municipality",), ()),
-    ("change_point", None, ("municipality",), ()),
-    ("trend_divergence", "national", ("region", "state"), ("municipality",)),    # municipality: time-shift negatives
-    ("trend_divergence", "neighbours", (), ("municipality", "region", "state")),  # recovers no positive
-    ("space_time", None, ("municipality",), ()),
-    ("spatial_cluster", None, ("municipality",), ()),
-    ("group_disparity", None, (), ("municipality", "region", "state")),            # fails its negatives
+    ("outbreak", None, ("municipality",)),
+    ("change_point", None, ("municipality",)),
+    ("trend_divergence", "national", ("municipality", "region", "state")),
+    ("trend_divergence", "neighbours", ("municipality", "region", "state")),
+    ("space_time", None, ("municipality",)),
+    ("spatial_cluster", None, ("municipality",)),
+    ("group_disparity", None, ("municipality", "region", "state")),
 )
+
+#: What the evidence says of a method where it runs: (lens, reference, dataset or None for any, calibrated, evidence).
+#: The first match wins; a method with no entry is calibrated on the grid of ADR-0026/0027.
+METHOD_EVIDENCE = (
+    ("trend_divergence", None, "SIH-RD", False, "SIH trends: time-shift negatives find trends at every θ0, half of them "
+                                                 "with the place × time interaction (ADR-0026; evaluation 2026-10-06, "
+                                                 "minimum effects)"),
+    ("trend_divergence", "neighbours", None, False, "the neighbours estimand recovers no documented positive "
+                                                    "(evaluation 2026-10-05, lens positives)"),
+    ("group_disparity", None, None, False, "fails its spatial negatives below sd 1.0 at the state (ARCHITECTURE §8.4)"),
+    ("spatial_cluster", None, None, True, "θ0 1.5 on SIM, 2.0 on SIH: model worlds within q (ADR-0026)"),
+    ("change_point", None, None, True, "the past course on B1, calibrated on three fields; sparse fields' time "
+                                       "negatives fail (ADR-0027)"),
+    ("outbreak", None, None, True, "every other year's course on B1, calibrated on three fields (ADR-0027)"),
+)
+
+
+def method_record(dataset: str, lens: str, reference: str | None, prospective: bool = False) -> dict[str, Any]:
+    """The record a lead carries of its method (ARCHITECTURE §10.5): its tier, its minimum effect, whether its
+    false-discovery rate is calibrated where it ran, and the evidence."""
+    calibrated, evidence = True, "calibrated on the grid (ADR-0026)"
+    for ln, ref, ds, cal, ev in METHOD_EVIDENCE:
+        if ln == lens and (ref is None or ref == reference) and (ds is None or ds == dataset):
+            calibrated, evidence = cal, ev
+            break
+    if lens == "spatial_cluster":
+        theta0: Any = lenses.spatial_rate_ratio(dataset + ":")
+    elif lens == "trend_divergence":
+        theta0 = lenses.TREND_PERIOD
+    elif lens == "group_disparity":
+        theta0 = lenses.GROUP_SD
+    else:
+        theta0 = lenses.RATE_RATIO
+    return {"tier": lens_tier(lens, prospective), "theta0": theta0, "calibrated": calibrated, "evidence": evidence}
 
 
 def lens_tier(lens: str, prospective: bool = False) -> str:
@@ -76,9 +109,6 @@ def lens_tier(lens: str, prospective: bool = False) -> str:
     if lens not in PROSPECTIVE_TIERS:
         raise ValueError(f"the {lens} lens has no prospective tier (one of {sorted(PROSPECTIVE_TIERS)})")
     return PROSPECTIVE_TIERS[lens]
-
-
-UNGATED = "|ungated"                # suffix of the survey family of the failing combinations
 
 
 FIT_YEARS = list(range(2010, 2024))      # the years of the production fits (the dependency map reads their calibration)
@@ -121,45 +151,20 @@ class Session:
 
     # ---- reading ---------------------------------------------------------------
 
-    def admission(self, block: str) -> dict[str, dict[str, tuple[bool, str]]]:
-        """Per node of a fitted block, the lenses that scan it (ARCHITECTURE §8.4: the power of the lens for a rate ratio
-        of 1.5 over a macro-region-year at the node's counts, `fields.admission`) and why not for the others."""
+    def fields(self, block: str, lens: str | None = None) -> list[fields.Field]:
+        """Every field of a fitted block with an event in the fit, top-down. No field is left out for low power
+        (ARCHITECTURE §8.4, P9): a lens's BH runs within each field, so a weak field dilutes no other, and its leads
+        carry their method's record. ``lens`` is accepted and unused."""
         m = self.expectations.model(block)
         reg = self.expectations.registry
-        leaf_index = {c: i for i, c in enumerate(m.data.leaves)}
-        # admission reads all the events even when the model is a side's (`replication.load_a`): the same fields
-        # are scanned on A as on all the data, and the choice does not depend on which events landed on A
-        e, u, y = getattr(m, "full_counts", (m.data.e, m.data.u, m.data.y))
-        macro = self.expectations.macroregions(m.data.places)
-        codes, region = np.unique(macro, return_inverse=True)
-        by_leaf = np.zeros((len(m.data.leaves), len(codes)))
-        np.add.at(by_leaf, (e, region[u]), y)
-        years = len(m.data.years)
+        leaf = {c: i for i, c in enumerate(m.data.leaves)}
+        events = np.bincount(m.data.e, weights=m.data.y, minlength=len(m.data.leaves))
 
-        def verdict(node: str) -> dict[str, tuple[bool, str]]:
-            idx = [leaf_index[c] for c in reg.leaves(node) if c in leaf_index]
-            if not idx:
-                return dict.fromkeys(fields.COUNT_LENSES, (False, "no leaf in the fit"))
-            return {lens: fields.admission(lens, by_leaf[idx].sum(0), years) for lens in fields.COUNT_LENSES}
+        def has_events(node: str) -> bool:
+            idx = [leaf[c] for c in reg.leaves(node) if c in leaf]
+            return bool(idx) and events[idx].sum() > 0
 
-        out, stack = {}, [block]
-        while stack:
-            node = stack.pop()
-            out[node] = verdict(node)
-            stack.extend(reg.children.get(node, []))
-        return out
-
-    def fields(self, block: str, lens: str | None = None) -> list[fields.Field]:
-        """The admissible fields of a fitted block, top-down (§8.4): a node is a field of ``lens`` when that lens's power
-        for the reference effect reaches 0.5 at its counts, of the block when some lens scan reaches it (trend
-        divergence and group disparity, which have no curve at the reference effect, read the fields any lens admits).
-        The tree is descended only while children stay admissible."""
-        verdict = self.admission(block)
-        if lens is not None and lens not in fields.COUNT_LENSES:
-            lens = None
-        return self.expectations.registry.walk(
-            block, lambda node: node in verdict and (any(v[0] for v in verdict[node].values()) if lens is None
-                                                     else verdict[node][lens][0]))
+        return reg.walk(block, has_events)
 
     def surprise(self, node: str, tier: str = "B1", train_last: int | None = None) -> surprise.Surprise:
         """The field's expectation at ``tier``; the prospective tiers (BP the expectation, BPA the alarm baseline,
@@ -284,11 +289,10 @@ class Session:
 
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
                "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
-               workers: int | None = None, ungated: bool = False, prospective: int | None = None) -> list[leads.Lead]:
-        """The scheduled pass over every admissible field; returns the leads admitted. Only the combinations the
-        gate allows run (`SURVEY_PLAN`: trend against the national course at regions and states, the outbreak,
-        change-point and space-time lenses at the municipality); ``ungated`` adds the failing ones, each a family
-        of its own, their leads marked ``gate="failed"``. A call's scales are its multiplicity (BH within each
+               workers: int | None = None, prospective: int | None = None) -> list[leads.Lead]:
+        """The scheduled pass over every field with events; returns the leads admitted. Every combination of
+        `SURVEY_PLAN` runs, and each lead carries its method's record (`method_record`: tier, θ0, whether its
+        false-discovery rate is calibrated where it ran). A call's scales are its multiplicity (BH within each
         scale at q / number of scales). Fields are scanned by ``workers`` threads (default `survey_workers`; 1: in
         order, in this thread) over the one loaded model; the lenses of a field share its tiers' expectations. The
         findings are merged in the fields' order, so the leads do not depend on the number of workers.
@@ -301,24 +305,16 @@ class Session:
         found: dict[str, list[lenses.Finding]] = {}
         log_lock = threading.Lock()
         calls = []                  # (lens, reference, scale names, family suffix)
-        for lens, reference, passing, failing in SURVEY_PLAN:
+        for lens, reference, scale_names in SURVEY_PLAN:
             if lens not in lens_names or (prospective is not None and reference):
                 continue
-            tag = "|national" if reference == "national" else ""
-            if passing:
-                calls.append((lens, reference, passing, tag))
-            if ungated and failing:
-                calls.append((lens, reference, failing, tag + UNGATED))
-
-        admitted_by = {b: self.admission(b) for b in blocks or self._blocks()}
+            calls.append((lens, reference, scale_names, "|national" if reference == "national" else ""))
 
         def one(block: str, f: fields.Field) -> list[tuple[str, list[lenses.Finding]]]:
             self._local.memo = {}      # B2 serves three lenses: computed once per field
             out = []
             try:
                 for lens, reference, scale_names, tag in calls:
-                    if lens in fields.COUNT_LENSES and not admitted_by[block][f.node][lens][0]:
-                        continue        # the lens's power at the reference effect is below 0.5 at this field's counts
                     kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster", "change_point") else {}
                     if lens in ("trend_divergence", "group_disparity"):
                         kw["scales"] = scale_names
@@ -370,7 +366,8 @@ class Session:
                           null="Gumbel on NB replicates" if h.lens in ("space_time", "spatial_cluster", "change_point")
                           else "NB predictive",
                           calibrated=bool(h.stats.get("calibrated", True)), robustness={},
-                          gate="failed" if family.endswith(UNGATED) else "passed", train_last=train_last,
+                          method=method_record(self.dataset, h.lens, h.stats.get("estimand"), train_last is not None),
+                          train_last=train_last,
                           provenance={"graph": self.graph, "stats": h.stats})
 
     # ---- on demand -------------------------------------------------------------------
@@ -943,54 +940,12 @@ def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict
                                         for r in claims[-10:]]}}
 
 
-def gate_status(lens: str | None = None) -> dict[str, Any]:
-    """The validation harness's standing per lens (ARCHITECTURE §10.5), from the records in the store: the
-    false-lead shares on the surrogate and negative worlds (``gate_lenses`` section ``fl``, and production
-    ``gate`` runs), where a power curve was recorded, and the known positives declared for the lens
-    (`harness.POSITIVES`). Recovery of a positive is written up in an evaluation entry, not stored."""
-    import pyarrow.parquet as pq
-
-    from . import harness
-
-    false_leads: dict[str, dict[str, list[int]]] = {}
-    power: dict[str, set[str]] = {}
-    for d in sorted((config.home() / "harness").glob("*/manifest.json")):
-        key = json.loads(d.read_text(encoding="utf-8"))["key"]
-        kind = key.get("kind")
-        if kind not in ("gate_lenses", "gate"):
-            continue
-        res = json.loads(pq.read_table(d.parent / "table.parquet").column("result")[0].as_py())
-        if kind == "gate":
-            power.setdefault(res["lens"], set()).add(res["field"])
-            n = int(res["false_leads"]["surrogates"])
-            acc = false_leads.setdefault(res["lens"], {}).setdefault("production surrogates", [0, 0])
-            acc[0] += round(res["false_leads"]["share_with_any"] * n)
-            acc[1] += n
-        elif key.get("section") == "fl":
-            for name, v in res["lenses"].items():
-                lens_name, world = name.split("|")[:2]
-                acc = false_leads.setdefault(lens_name, {}).setdefault(world, [0, 0])
-                acc[0] += int(v["any"])
-                acc[1] += int(res["worlds"])
-        elif key.get("section") == "pow":
-            for lens_name in res.get("power", {}):
-                power.setdefault(lens_name, set()).add(res["field"])
-    out = {}
-    for name in sorted(set(false_leads) | set(power) | set(LENS_TIERS)):
-        if lens and name != lens:
-            continue
-        worlds = false_leads.get(name, {})
-        # the rule is on the NB surrogates and the MSR negatives; the raw time shifts keep the field's own shocks
-        worst = max((a / b for w, (a, b) in worlds.items() if b and w in ("nb", "space", "production surrogates")),
-                    default=None)
-        out[name] = {"tier": LENS_TIERS.get(name), "q": harness.Q,
-                     "worlds_with_a_false_lead": {w: f"{a}/{b}" for w, (a, b) in worlds.items()},
-                     "worst_world_share": worst,
-                     "false_leads_within_q": None if worst is None else worst <= harness.Q,
-                     "power_recorded_on": sorted(power.get(name, [])),
-                     "declared_positives": [p.name for p in harness.POSITIVES if p.lens == name],
-                     "positive_recovery": "not stored: docs/evaluation/2026-10-05-harness-gate.md"}
-    return out
+def method_status(dataset: str | None = None) -> dict[str, Any]:
+    """Each survey method's record (ARCHITECTURE §10.5): tier, minimum effect, whether its false-discovery rate is
+    calibrated, and the evidence, per combination of `SURVEY_PLAN` (for ``dataset``; SIM by default)."""
+    ds = dataset or "SIM.DO"
+    return {" ".join(x for x in (lens, reference) if x): method_record(ds, lens, reference)
+            for lens, reference, _ in SURVEY_PLAN}
 
 
 def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only: bool = False,

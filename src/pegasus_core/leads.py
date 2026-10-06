@@ -54,7 +54,7 @@ class Lead:
     robustness: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
     status: str = "open"           # open | replicated | rescoped | explained | retired
-    gate: str = "passed"           # "failed": the lens/estimand/scale failed its gate (tools.SURVEY_PLAN); an exploratory lead
+    method: dict[str, Any] = field(default_factory=dict)   # the method's record (tools.method_record): tier, θ0, calibrated, evidence
     train_last: int | None = None  # a prospective lead (tier BP/BPA, ADR-0012): the last year of the fit it was read against
     purpose: str | None = None     # ... and which object: "expectation" (BP) or "alarm" (BPA)
     note: str = ""
@@ -63,8 +63,6 @@ class Lead:
     def __post_init__(self):
         if self.kind not in KINDS:
             raise ValueError(f"lead kind {self.kind!r} not in {KINDS}")
-        if self.gate not in ("passed", "failed"):
-            raise ValueError(f"gate {self.gate!r}")
         if self.scale not in SCALES:
             raise ValueError(f"effect scale {self.scale!r} not in {SCALES}")
         if self.train_last is not None and self.purpose is None:
@@ -102,7 +100,8 @@ class Register:
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         rows = [{"id": x.id, "at": now, "rank": x.rank, "status": x.status, "kind": x.kind, "family": x.family,
                  "q": x.q, "effect": x.effect, "replication": x.replication,
-                 "gate": x.gate, "body": json.dumps(asdict(x), default=_json)} for x in leads]
+                 "calibrated": bool(x.method.get("calibrated", True)), "body": json.dumps(asdict(x), default=_json)}
+                for x in leads]
         pq.write_table(pa.Table.from_pylist(rows), self.path / f"part-{now.replace(':', '')}-{uuid.uuid4().hex[:8]}.parquet")
 
     def current(self) -> list[Lead]:
@@ -114,9 +113,8 @@ class Register:
         latest: dict[str, dict] = {}
         for r in sorted(rows, key=lambda r: r["at"]):
             latest[r["id"]] = r
-        out = [Lead(**{k: (tuple(v) if k == "interval" and v is not None else v)
-                       for k, v in json.loads(r["body"]).items()}) for r in latest.values()]
-        return sorted(out, key=lambda x: (x.gate == "failed", -x.rank))      # gate-failed leads after the others
+        out = [Lead(**_body(json.loads(r["body"]))) for r in latest.values()]
+        return sorted(out, key=lambda x: (uncalibrated(x), -x.rank))      # leads of an uncalibrated method after the others
 
     def get(self, lead_id: str) -> Lead:
         for x in self.current():
@@ -129,6 +127,22 @@ class Register:
             setattr(lead, k, v)
         self.add([lead])
         return lead
+
+
+def _body(d: dict[str, Any]) -> dict[str, Any]:
+    """A stored lead's fields; a lead stored before the method record carries its v0 gate inside it."""
+    d = dict(d)
+    gate = d.pop("gate", None)
+    if "method" not in d:
+        d["method"] = {"v0_gate": gate, "calibrated": gate != "failed"} if gate else {}
+    if d.get("interval") is not None:
+        d["interval"] = tuple(d["interval"])
+    return d
+
+
+def uncalibrated(x: Lead) -> bool:
+    """Whether the lead's method has no calibrated false-discovery rate where it ran (its record says so)."""
+    return x.method.get("calibrated") is False
 
 
 def trend_reference(x: Lead) -> str:
@@ -192,10 +206,10 @@ def stories(register: list[Lead], max_subset: int = 1) -> list[Story]:
                 flags.append(f"substitution in {parent}: up {','.join(sorted(set(by_sign[1])))} / "
                              f"down {','.join(sorted(set(by_sign[-1])))}")
         places = list(members[0].locus.get("places", []))
-        if any(m.gate == "failed" for m in members):
-            flags.append("gate failed: " + ",".join(sorted({m.estimand for m in members if m.gate == "failed"})))
-        out.append(Story(key, places, sorted(members, key=lambda m: (m.gate == "failed", -m.rank)),
-                         sum(m.rank for m in members if m.gate != "failed"), fields_, flags))
+        if any(uncalibrated(m) for m in members):
+            flags.append("uncalibrated method: " + ",".join(sorted({m.estimand for m in members if uncalibrated(m)})))
+        out.append(Story(key, places, sorted(members, key=lambda m: (uncalibrated(m), -m.rank)),
+                         sum(m.rank for m in members if not uncalibrated(m)), fields_, flags))
     return sorted(out, key=lambda st: -st.rank)
 
 

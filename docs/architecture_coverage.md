@@ -310,7 +310,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 10.2 negatives: Moran spectral randomisation, series shift | BM | ADR-0005, `E:harness-gate` | |
 | 10.3 planted signals, power curves | BM | `E:harness-gate` | |
 | 10.4 null surrogates, false-lead rate | BM | `E:harness-gate` (worst 2/350) | |
-| 10.5 gate | P | `tools.gate_status`, the lead's `gate` field ("passed" on 11,817 leads) | applied as a flag, not a block |
+| 10.5 gate | SS | ADR-0028: the gate retired; the lead's `method` record (`tools.method_record`, `method_status`) | old leads keep their v0 gate inside the record |
 
 ## §11 Code
 
@@ -421,7 +421,7 @@ Counted with `Session.fields(block)` on 2010-2023 on the audit day (`nodes` = ch
 
 The admission rule keeps 36 % of SIM nodes against 80 % of SIH nodes: the 3-character causes of death are rarer than those of admission, so the SIM survey sees the common causes and the rare ones (chapters VII, VIII, XII, XV) are outside every lens.
 
-**Default survey** (`tools.SURVEY_PLAN`, `Session.survey`, `lens_names` default): four lens × tier × scale combinations run; the others need `--ungated`.
+**Default survey** (`tools.SURVEY_PLAN`, `Session.survey`, `lens_names` default). *Superseded 2026-10-06 (ADR-0028): every combination runs and every lead carries its method's record. The table below is the v0 state, kept for the counts.*
 
 | lens | tier | scales | status in the default survey |
 |---|---|---|---|
