@@ -43,3 +43,15 @@ The change point lens stays nearly blind at any θ0 (a place step ×3: 0.11 at 1
 
   Those fields carry slow, persistent place-level departures that the model does not hold, and they survive a time shift. That is misspecification, and a missing model term (the place × time interaction, O6's departure models) has to answer it, not a threshold.
 - Until then, SIH trend-divergence leads have no calibrated false-discovery rate. That covers the 18,575 of the stored register, which predate the refits anyway.
+
+**Does a model term answer the SIH trend failures?** (`data/rank_negatives.py`, `data/probes/grid/rank_negatives_SIH_J09-J18.json`; SIH-RD X 2010–2023 refitted at rank 1, 440 s.)
+
+Declared before running: the rank-1 interaction absorbs the persistent place × time structure, so the time-negative worlds with findings fall to at most 1/20. The rival: a time shift keeps real place trends whatever the model.
+
+| | rank 0 | rank 1 |
+|---|---|---|
+| real trend-divergence leads, J09-J18 | 1,426 | 636 |
+| time-negative worlds with findings | 20/20 (50.4 per world) | 20/20 (20.2 per world) |
+| space-negative worlds with findings | 0/20 | 0/20 |
+
+Half the structure is the shared place × time factor the interaction holds: SIH's utilisation shifts, as in ADR-0018. The prediction fails nonetheless, because every shifted world still has findings. What remains is place-specific persistent courses, which a time shift carries whatever the model. A negative of this kind cannot say whether they are disease or recording. Of the leads that survive rank 1, the facility layer has to decide (ADR-0014/0016), not a threshold.
