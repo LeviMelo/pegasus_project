@@ -407,10 +407,10 @@ class Monolith:
             "h_all": Component("h_all", rw_t, 1),
             "h_grp": Component("h_grp", rw_t, nGrp, free=(nGrp - 1) / nGrp),
             "s_all": Component("s_all", icar, 1),
-            "v_all": Component("v_all", structures.iid(nU), 1),
+            "v_all": Component("v_all", structures.iid(nU, centred=False), 1),
             "s_grp": Component("s_grp", icar, nGrp, free=(nGrp - 1) / nGrp),
-            "v_grp": Component("v_grp", structures.iid(nU), nGrp, free=(nGrp - 1) / nGrp),
-            "v_cat": Component("v_cat", structures.iid(nU), nE, free=(nE - nGrp) / nE),
+            "v_grp": Component("v_grp", structures.iid(nU, centred=False), nGrp, free=(nGrp - 1) / nGrp),
+            "v_cat": Component("v_cat", structures.iid(nU, centred=False), nE, free=(nE - nGrp) / nE),
         }
         if data.grain == "month":
             season = structures.random_walk(12, order=2, cyclic=True)
@@ -623,11 +623,18 @@ class Monolith:
         """One component's centring (linear): along its structure's components, then group deviations summing to zero
         across groups and a leaf's place effect centred within its group. `effects` and the v1 solver's projectors
         (`solver.StructuredNewton`) both read it."""
+        if name == "f_all":
+            # the age profile is centred over both sexes together, not within each: the sex difference is a direction
+            # of the RW2's null space the data inform. Centred within each sex, no component carried it, and IX's
+            # youngest bands were fitted 0.57-0.77x and 1.4-3.0x observed in the two sexes (2026-10-06)
+            return raw - raw.mean()
+        if name == "f_grp":
+            v = raw.reshape(-1, 2 * self.nB)
+            v = v - v.mean(dim=1, keepdim=True)                       # each group over both sexes (its level is θ_grp)
+            return (v - v.mean(dim=0, keepdim=True)).reshape(raw.shape)  # across groups (f_all's)
         v = _centre(raw, self._labels[name]) if self.components[name].shape.centred else raw
         if name in ("h_grp", "s_grp", "v_grp", "c_grp"):
             v = v - v.mean(dim=0, keepdim=True)
-        elif name == "f_grp":
-            v = (v.reshape(-1, 2, self.nB) - v.reshape(-1, 2, self.nB).mean(dim=0, keepdim=True)).reshape(v.shape)
         elif name == "v_cat":
             v = _centre(v.T.contiguous(), self.grp).T
         return v
@@ -725,6 +732,7 @@ class Monolith:
         converged fit is (the fixed point of the same update); they change how many outers, and how much work
         in each, reach it."""
         start = time.time()
+        self._laml_prev = self.laml = None
         self._initialise()
         self.warm_info = self.warm_start(warm) if warm else None
         changes = [0.0] if self.warm_info else [np.inf]
@@ -758,7 +766,8 @@ class Monolith:
                                  "change": max(changes), "move": move, "cg": self.cg_iterations, "mean_seconds": t1 - t0, "tau_seconds": time.time() - t1,
                                  "taus": {k: c.tau for k, c in self.components.items()}, "seconds": time.time() - start})
             taus = " ".join(f"{k}={c.tau:.3g}" for k, c in self.components.items())
-            log(f"outer {it}: objective {self.history[-1]['objective']:.1f}, max τ change {max(changes):.3f}, "
+            laml = f", LAML {self.laml:.1f} (gain {self.laml_gain:.2g})" if getattr(self, "laml", None) is not None else ""
+            log(f"outer {it}: objective {self.history[-1]['objective']:.1f}, max τ change {max(changes):.3f}{laml}, "
                 f"{time.time() - start:.0f}s | {taus}")
             if max(changes) < tol:
                 self.converged, self.stop_reason = True, f"max τ change {max(changes):.3f} < {tol}"
@@ -827,23 +836,36 @@ class Monolith:
         return {"from": cand["key"], "carried": carried, "shifted": partial}
 
     def _initialise(self) -> None:
-        """Closed-form marginal starting values: the block's rate, then log observed/expected
-        by age–sex, by year and by leaf (each against the block's flat rate)."""
+        """Starting values: the Poisson maximum likelihood of the main-effects model leaf + year + age–sex, by iterative
+        proportional fitting (the ML of a log-linear model; Bishop, Fienberg and Holland 1975, ch. 3), written into the
+        centred parametrisation so that the effects reproduce it: the profiles' means and the leaves' mean level go to
+        b0, the group levels to θ_grp, the rest to θ_cat. A margin with no events counts half an event. The earlier
+        start (each margin against the flat rate, then centred) began IX at an objective of 4.3·10⁸ against 1.6·10⁷
+        with θ_cat at zero, and took ten Newton steps to reach the optimum's basin (2026-10-06)."""
         d = self.data
-        nE = len(d.leaves)
-        rate = d.y.sum() / (d.N.sum() * nE)
-        def ratio(obs: np.ndarray, exposure: np.ndarray) -> np.ndarray:
-            # an unexposed group (a mother's male cells) starts at the flat rate, log 0
-            return np.divide(obs, exposure, out=np.ones_like(obs), where=exposure > 0)
-
-        by_g = ratio(np.bincount(d.g, weights=d.y, minlength=d.N.shape[2]), d.N.sum(axis=(0, 1)) * nE * rate)
-        by_t = ratio(np.bincount(d.t, weights=d.y, minlength=d.N.shape[1]), d.N.sum(axis=(0, 2)) * nE * rate)
-        by_e = ratio(np.bincount(d.e, weights=d.y, minlength=nE), np.full(nE, d.N.sum() * rate))
+        nE, (nT, nG) = len(d.leaves), d.N.shape[1:]
+        Ntg = d.N.sum(axis=0).astype(np.float64)                       # [T, G]: every leaf shares the exposure
+        obs = [np.maximum(np.bincount(idx, weights=d.y, minlength=n), 0.5) for idx, n in ((d.e, nE), (d.t, nT), (d.g, nG))]
+        exposed_t, exposed_g = Ntg.sum(axis=1) > 0, Ntg.sum(axis=0) > 0
+        a, b, c = np.zeros(nE), np.zeros(nT), np.zeros(nG)
+        for _ in range(100):
+            a_old = a.copy()
+            a = np.log(obs[0]) - np.log((np.exp(b)[:, None] * np.exp(c)[None, :] * Ntg).sum())
+            den = np.exp(a).sum() * (Ntg * np.exp(c)[None, :]).sum(axis=1)
+            b = np.where(exposed_t, np.log(obs[1]) - np.log(np.where(exposed_t, den, 1.0)), 0.0)
+            den = np.exp(a).sum() * (Ntg * np.exp(b)[:, None]).sum(axis=0)
+            c = np.where(exposed_g, np.log(obs[2]) - np.log(np.where(exposed_g, den, 1.0)), 0.0)
+            if np.abs(a - a_old).max() < 1e-10:
+                break
+        grp = np.asarray(d.leaf_group)
+        nK = int(grp.max()) + 1
+        level = np.bincount(grp, weights=a, minlength=nK) / np.maximum(np.bincount(grp, minlength=nK), 1)
         with torch.no_grad():
-            self.params["b0"].fill_(float(np.log(rate)))
-            self.params["f_all"].copy_(torch.as_tensor(np.log(np.clip(by_g, 1e-6, None))).reshape(2, -1))
-            self.params["h_all"].copy_(torch.as_tensor(np.log(np.clip(by_t, 1e-6, None)))[None, :])
-            self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
+            self.params["b0"].fill_(float(level.mean() + b.mean() + c[exposed_g].mean()))
+            self.params["th_grp"].copy_(torch.as_tensor(level - level.mean())[None, :])
+            self.params["th_cat"].copy_(torch.as_tensor(a - level[grp])[None, :])
+            self.params["h_all"].copy_(torch.as_tensor(b - b.mean())[None, :])
+            self.params["f_all"].copy_(torch.as_tensor(np.where(exposed_g, c - c[exposed_g].mean(), 0.0)).reshape(2, -1))
 
     def _uses_v1(self) -> bool:
         """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every count block without the interaction (the
@@ -1047,18 +1069,40 @@ class Monolith:
         self._Q[name] = _torch_sparse(c.shape.Q, self.dtype, self.device)
 
     def _score_taus(self, nw) -> list[float]:
-        """A Newton step on ρ = log τ (v1; ARCHITECTURE §5.4) for the Laplace marginal likelihood, W's dependence on
-        the mean dropped: the gradient g_j = ½(r_j − τ_j xᵀQ_jx − τ_j tr(ΣQ_j)) with exact traces, and the observed
+        """A safeguarded Newton step on ρ = log τ (v1; ARCHITECTURE §5.4) for the Laplace marginal likelihood (LAML),
+        W's dependence on the mean dropped: the gradient g_j = ½(r_j − τ_j xᵀQ_jx − τ_j tr(ΣQ_j)), and the observed
         negative Hessian −H_ij = ½δ_ij τ_j(tr(ΣQ_j) + xᵀQ_jx) − ½τ_iτ_j tr(ΣQ_iΣQ_j) − τ_iτ_j xᵀQ_iΣQ_jx (zero, as it
         must be, for a component the data do not inform). Away from the optimum −H can be indefinite: its spectrum
-        is shifted to positive before the solve, and each step is clipped to ×10. The fixed point is Fellner–Schall's
-        (g = 0)."""
+        is floored before the solve. **The safeguard is mgcv's** (Wood 2011, §3): the LAML itself is evaluated at each
+        new mean, and a step that lowered it is halved from where it started instead of being followed by a new one.
+        Steps are clipped to ×100; a strength past `SHRUNK` and still rising has shrunk its effect away and stops.
+        The fixed point is Fellner–Schall's (g = 0)."""
+        names = [n for n, c in self.components.items() if c.rank > 0 and not c.fixed]
+        rho_now = np.log([self.components[n].tau for n in names])
+        rank = np.array([self.components[n].rank for n in names])
+        laml = (-float(self.objective()) * self._objective_norm() + 0.5 * float(rank @ rho_now)
+                - 0.5 * nw.logdet_constrained())
+        self.laml = laml
+        prev = getattr(self, "_laml_prev", None)
+        # the step aims at the fixed point without W's derivative, which sits a few per cent of τ from the LAML's own
+        # optimum (IX, 2026-10-06): a fall of a few units is that difference, not an overshoot
+        if prev is not None and laml < prev["laml"] - 2.0 and prev["halvings"] < 8:
+            step = prev["step"] / 2
+            self._laml_prev = {**prev, "step": step, "halvings": prev["halvings"] + 1}
+            for n, r0, dlt in zip(names, prev["rho"], step, strict=True):
+                self.components[n].tau = float(np.clip(np.exp(r0 + dlt), *TAU_BOUNDS))
+            self.laml_gain = float("inf")
+            out = dict(zip(names, np.abs(rho_now - (prev["rho"] + step)), strict=True))
+            return [out.get(n, 0.0) for n in self.components]
         tr, quad, T, R, names = nw.scoring(probes=int(os.environ.get("PEGASUS_SCORING_PROBES", "16")))
         tau = np.array([self.components[n].tau for n in names])
-        rank = np.array([self.components[n].rank for n in names])
         q = np.array([quad[n] for n in names])
         t = np.array([tr[n] for n in names])
         g = 0.5 * (rank - tau * q - tau * t)
+        # the place traces are probe estimates: a gradient within twice its standard error is noise (on IX it reached
+        # ±13 for v_all, which kept the predicted gain above the stop for a dozen outers), so g is shrunk by it
+        se = 0.5 * tau * np.array([getattr(nw, "trace_se", {}).get(n, 0.0) for n in names])
+        g = np.sign(g) * np.maximum(np.abs(g) - 2.0 * se, 0.0)
         tt = np.outer(tau, tau)
         negH = np.diag(0.5 * tau * (t + q)) - 0.5 * tt * T - tt * R
         negH = (negH + negH.T) / 2
@@ -1073,16 +1117,22 @@ class Monolith:
         fs = np.log(np.maximum(rank - tau * t, 1e-12) / np.maximum(tau * q, 1e-300))
         bolder = (np.sign(fs) == np.sign(step)) & (np.abs(fs) > np.abs(step))
         step = np.where(bolder, fs, step)
-        step = np.clip(step, -MAX_TAU_STEP, MAX_TAU_STEP)
+        # no jump to a boundary: from the first outer's τ = 1, Newton's step overran the clip for s_all and v_all on IX,
+        # and sent to 10·SHRUNK they stayed there (the LAML is flat out there): held-out NB log-likelihood −1.63793
+        # against −1.63716 (2026-10-06)
+        step = np.clip(step, -np.log(100.0), np.log(100.0))
+        gone = (tau > SHRUNK) & (step > 0)
+        step = np.where(gone, 0.0, step)
         # the step's own predicted gain in the marginal likelihood: along the BYM ridge (s against v) the likelihood
         # is flat and τ can wander without changing the fit, so convergence is read from the gain, not from Δρ
         self.laml_gain = float(0.5 * g @ step)
         if self.laml_gain < float(os.environ.get("PEGASUS_LAML_TOL", "0.1")):
             return [0.0] * len(self.components)
+        self._laml_prev = {"rho": rho_now, "laml": laml, "step": step, "halvings": 0}
         out = {}
         for n, tau_n, d in zip(names, tau, step, strict=True):
             new = float(np.clip(tau_n * np.exp(d), *TAU_BOUNDS))
-            out[n] = 0.0 if min(new, tau_n) > SHRUNK else abs(np.log(new / tau_n))
+            out[n] = abs(np.log(new / tau_n))
             self.trace_log.append((n, self.components[n].rank, quad[n], tr[n], tau_n, new))
             self.components[n].tau = new
         return [out.get(n, 0.0) for n in self.components]

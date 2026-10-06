@@ -33,7 +33,6 @@ pegasus-core = "pegasus_core.cli:app"
 pegasus-mcp = "pegasus_core.mcp_server:main"
 
 [project.optional-dependencies]
-gpu = ["cupy-cuda12x>=13"]   # the v1 solver's many-column Schur products on the GPU (CPU otherwise)
 dev = ["ruff>=0.6", "mypy>=1.10"]
 mcp = ["mcp>=2"]   # the tools over MCP (ADR-0008, paused)
 

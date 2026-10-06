@@ -31,8 +31,8 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | serve the tools over MCP (paused, ADR-0008) | `$PY -m pip install -e .[mcp]` once, then `pegasus-core mcp` (stdio, read-only) | not registered with any client; `--allow-confirm` lets `confirm_claim` spend the reserve |
 | exercise the MCP server | `$PY scripts/mcp_demo.py [--spend]` | a real stdio client against `pegasus_home`; `--spend` uses a copy of the ledger |
 
-**The environment** (2026-10-06). The v1 solver needs CHOLMOD (scikit-sparse), numba and, for the many-column products, CuPy:
+**The environment** (2026-10-06). The v1 solver needs CHOLMOD (scikit-sparse) and numba:
 - `conda install -n pegasus -c conda-forge scikit-sparse --no-deps` plus its SuiteSparse libraries, with `--no-deps` as well. **Never let conda solve it in:** the solver swapped the CUDA PyTorch for a CPU build and removed geopandas, shapely and pillow.
 - PyTorch with CUDA: `$PY -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121`.
 - The pip PyTorch bundles its own `torch/lib/libiomp5md.dll`, which collides with conda's `intel-openmp` (MKL, numpy): "OMP: Error #15", then a fatal error inside numpy's LAPACK. It is renamed `libiomp5md.dll.bak`, so PyTorch uses the conda runtime.
-- CuPy: `$PY -m pip install cupy-cuda12x`.
+- CuPy is not needed: in float64 the CPU beats this GPU on the solver's products (2026-10-06).

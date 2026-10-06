@@ -77,37 +77,13 @@ class Arrowhead:
         bl, bg = b[: self.nl], b[self.nl:]
         many = self.L is not None and b.shape[1] >= 8
         yl = lower_solve(self.L, bl[self.p]) if many else self.fa.solve(bl[self.p], system="L")
-        rhs = bg - self._Yt_times(yl, many)
+        rhs = bg - self.Y.T @ yl
         xg = np.linalg.solve(self.Sc.T, np.linalg.solve(self.Sc, rhs))
-        z = lower_solve_t(self.L, yl - self._Y_times(xg, many)) if many else self.fa.solve(yl - self.Y @ xg, system="Lt")
+        z = lower_solve_t(self.L, yl - self.Y @ xg) if many else self.fa.solve(yl - self.Y @ xg, system="Lt")
         xl = np.empty_like(z)
         xl[self.p] = z
         out = np.vstack([xl, xg])
         return out[:, 0] if one else out
-
-    def _gpu_Y(self):
-        """Y on the GPU (float64), uploaded once per factorisation, for the many-column products: Yᵀy and Y·x cost
-        2·n_place·n_global per column, about 27 GFLOP for the kriging's 117 columns (2026-10-06)."""
-        if getattr(self, "_Yg", None) is None:
-            try:
-                import cupy as cp
-                self._cp = cp
-                self._Yg = cp.asarray(self.Y)
-            except Exception:  # noqa: BLE001 - no GPU: the CPU products
-                self._Yg = False
-        return self._Yg
-
-    def _Yt_times(self, y: np.ndarray, many: bool) -> np.ndarray:
-        Yg = self._gpu_Y() if many else False
-        if Yg is False or Yg is None:
-            return self.Y.T @ y
-        return self._cp.asnumpy(Yg.T @ self._cp.asarray(y))
-
-    def _Y_times(self, x: np.ndarray, many: bool) -> np.ndarray:
-        Yg = self._gpu_Y() if many else False
-        if Yg is False or Yg is None:
-            return self.Y @ x
-        return self._cp.asnumpy(Yg @ self._cp.asarray(x))
 
     def logdet(self) -> float:
         return float(self.fa.logdet()) + 2.0 * float(np.log(np.diag(self.Sc)).sum())
@@ -133,6 +109,7 @@ class StructuredNewton:
         self._constraints()
         self._symbolic = None
         self.timing: dict[str, float] = {}
+        self._last_reused = False
 
     # ------------------------------------------------------------------ layouts
 
@@ -181,8 +158,8 @@ class StructuredNewton:
 
     def _constraints(self) -> None:
         """The centrings across places, as rows over the reduced (ℓ, γ) coordinates plus the v part: each component of
-        s_all and s_grp's contrasts per connected component of the graph; v_all and v_grp's contrasts over all
-        places; each leaf of v_cat over all places."""
+        s_all and s_grp's contrasts per connected component of the graph; v_all, v_grp's contrasts and each leaf of
+        v_cat over all places where their shape is centred (the iid place effects are not, since 2026-10-06)."""
         m = self.m
         U, K = self.U, self.K
         comp = _np(m._labels["s_all"].to(torch.float64)).astype(np.int64)
@@ -193,11 +170,14 @@ class StructuredNewton:
             for j in range(K - 1):
                 rows_l.append((places * self.npl_red + 2 + j, np.ones(len(places))))
         allp = np.arange(U)
-        rows_l.append((allp * self.npl_red + 1, np.ones(U)))
-        for j in range(K - 1):
-            rows_l.append((allp * self.npl_red + 2 + (K - 1) + j, np.ones(U)))
+        if m.components["v_all"].shape.centred:
+            rows_l.append((allp * self.npl_red + 1, np.ones(U)))
+        if m.components["v_grp"].shape.centred:
+            for j in range(K - 1):
+                rows_l.append((allp * self.npl_red + 2 + (K - 1) + j, np.ones(U)))
         self.con_l = rows_l
-        self.con_v = list(range(self.E))                 # one per leaf: Σ_u v[e, u] = 0
+        # one per leaf, Σ_u v[e, u] = 0, where v_cat is centred
+        self.con_v = list(range(self.E)) if m.components["v_cat"].shape.centred else []
 
     # ------------------------------------------------------------------ factors and gradient
 
@@ -558,7 +538,8 @@ class StructuredNewton:
         x = {k: v.detach() for k, v in m.effects().items()}
         f = self.factors(x)
         g = self.gradient(x, f)
-        if reuse and getattr(self, "_last", None) is not None:
+        self._last_reused = bool(reuse and getattr(self, "_last", None) is not None)
+        if self._last_reused:
             fac, f, vs = self._last
         else:
             vs = self._v_stats(f)
@@ -586,6 +567,14 @@ class StructuredNewton:
             p = m.params[n]
             out[n] = torch.as_tensor(val.reshape(p.shape), dtype=p.dtype, device=p.device)
         return out, info
+
+    def refactor(self) -> None:
+        """Factor the Hessian at the model's current parameters (the last factor's point otherwise)."""
+        x = {k: v.detach() for k, v in self.m.effects().items()}
+        f = self.factors(x)
+        vs = self._v_stats(f)
+        self._last = (self.factor(self.assemble(f, vs)), f, vs)
+        self._last_reused = False
 
     def _krige(self, fac, f, vs, x_v, x_r):
         """Impose the centrings across places: δ ← δ − V (A V)⁻¹ A δ, V = H⁻¹Aᵀ. Any V gives Aδ = 0 exactly; V from the
@@ -660,6 +649,7 @@ class StructuredNewton:
         Vg = Vr[self.nl_red:]
         Sg = Sinv - Vg @ np.linalg.lstsq(AV, Vg.T, rcond=None)[0]
         Sx = self.Cg @ Sg @ self.Cg.T
+        self._Sx = Sx
         for nm in self.gnames:
             if nm == "b0":
                 continue
@@ -695,9 +685,10 @@ class StructuredNewton:
         quadratic forms xᵀQ_jx, T_ij = tr(ΣQ_iΣQ_j) by probes z solved exactly (tr(ΣQ_iΣQ_j) = E[(Q_iΣz)ᵀ(ΣQ_jz)],
         in chunks so the leaf-place right-hand sides stay small), and R_ij = xᵀQ_iΣQ_jx from J exact solves."""
         m = self.m
-        tr = self.traces(probes=int(__import__("os").environ.get("PEGASUS_TRACE_PROBES", "32")))   # exact globals; probes for the rest
-        fac, f, vs = self._last
         need_T = probes > 0    # a T reused across outers misdirected the weakly identified s/v strengths (2026-10-06)
+        # the globals' traces exactly; the place components' from the same probes as T (their Σz), unless T is skipped
+        tr = self.traces(probes=0 if need_T else 32)
+        fac, f, vs = self._last
         Vv, Vr = self._V
         AV = self._apply_A(Vv, Vr)
         x = {k: v.detach() for k, v in m.effects().items()}
@@ -723,29 +714,59 @@ class StructuredNewton:
 
         rng = np.random.default_rng(seed)
         J = len(names)
+        # the global pairs exactly from the globals' covariance block (as their traces); the probes only carry ΣQ_jz for
+        # the place and leaf-place j, which also give every (global, place) pair: E[(Q_iΣz)ᵀ(ΣQ_jz)] for any i
+        glob = [j for j, nm in enumerate(names) if nm in self.goff]
+        plc = [j for j, nm in enumerate(names) if nm not in self.goff]
+        Jp = len(plc)
         F = np.zeros((J, J))
+        tr_acc, tr_sq = np.zeros(J), np.zeros(J)
         done = 0
-        while done < probes:
+        while done < probes and need_T:
             n = min(chunk, probes - done)
             z = {nm: rng.choice([-1.0, 1.0], size=shapes[nm] + (n,)) for nm in names}
             v = csolve(z)                                                     # Σz
             Qv = {nm: apply_Q(nm, v[nm].reshape(shapes[nm] + (n,))) for nm in names}
-            if not need_T:
-                done += n
-                continue
-            # ΣQ_jz for every j at once: J·n right-hand sides
-            stacked = {nm: np.zeros(shapes[nm] + (J * n,)) for nm in names}
-            for j, nm in enumerate(names):
-                stacked[nm][..., j * n:(j + 1) * n] = apply_Q(nm, z[nm])
+            for j in plc:
+                per = (z[names[j]] * Qv[names[j]]).reshape(-1, n).sum(0)     # E[zᵀQ_jΣz] = tr(ΣQ_j), per probe
+                tr_acc[j] += float(per.sum())
+                tr_sq[j] += float((per * per).sum())
+            # ΣQ_jz for every place j at once: Jp·n right-hand sides
+            stacked = {nm: np.zeros(shapes[nm] + (Jp * n,)) for nm in names}
+            for c, j in enumerate(plc):
+                stacked[names[j]][..., c * n:(c + 1) * n] = apply_Q(names[j], z[names[j]])
             s_all = csolve(stacked)
             for i, ni in enumerate(names):
-                for j in range(J):
-                    sj = s_all[ni].reshape(shapes[ni] + (J * n,))[..., j * n:(j + 1) * n]
-                    F[i, j] += float((Qv[ni] * sj).sum())
+                si = s_all[ni].reshape(shapes[ni] + (Jp * n,))
+                for c, j in enumerate(plc):
+                    F[i, j] += float((Qv[ni] * si[..., c * n:(c + 1) * n]).sum())
             done += n
         if need_T:
             F /= probes
-            F = (F + F.T) / 2
+            self.trace_se = {}
+            for j in plc:
+                tr[names[j]] = tr_acc[j] / probes
+                self.trace_se[names[j]] = float(np.sqrt(max(tr_sq[j] / probes - tr[names[j]] ** 2, 0.0) / max(probes - 1, 1)))
+            for j in plc:
+                for i in glob:
+                    F[j, i] = F[i, j]
+            Fp = F[np.ix_(plc, plc)]
+            F[np.ix_(plc, plc)] = (Fp + Fp.T) / 2
+            Sx = self._Sx
+            def block(nm):
+                c = m.components[nm]
+                o = self.goff[nm]
+                nn = c.batch * c.shape.Q.shape[0]
+                return slice(o, o + nn), sp.kron(sp.identity(c.batch), c.shape.Q, format="csr")
+            blocks = {j: block(names[j]) for j in glob}
+            for i in glob:
+                si, Qi = blocks[i]
+                for j in glob:
+                    if j < i:
+                        continue
+                    sj, Qj = blocks[j]
+                    Sij = Sx[si, sj]
+                    F[i, j] = F[j, i] = float(np.sum((Qi @ (Qj @ Sij.T).T) * Sij))
             self._T = F
         F = self._T if need_T else np.zeros((J, J))
         # R_ij = xᵀQ_i Σ Q_j x: one exact solve per component
@@ -759,6 +780,21 @@ class StructuredNewton:
             R[i] = (qx[ni][..., i][..., None] * ui).reshape(-1, J).sum(0)
         R = (R + R.T) / 2
         return tr, quad, F, R, names
+
+    def logdet_constrained(self) -> float:
+        """log det of the Hessian on the constrained subspace, at the last factor (the Laplace marginal likelihood's
+        determinant): the leaf-place blocks under their within-group centring, det(D)·(1ᵀD⁻¹1)/n per (group, place);
+        the arrowhead; and the kriging term, log det(A H⁻¹ Aᵀ) over its non-zero spectrum (det NᵀHN = det H ·
+        det AH⁻¹Aᵀ / det AAᵀ, the last constant in τ and dropped)."""
+        fac, f, vs = self._last
+        d, s = vs[0], vs[2]
+        self._krige(fac, f, vs, np.zeros((self.E, self.U, 1)), np.zeros((self.nl_red + self.ng_red, 1)))
+        n_k = np.bincount(self.grp, minlength=self.K)
+        v_part = float(np.log(d).sum() + np.log(s).sum() - self.U * np.log(n_k).sum())
+        AV = self._apply_A(*self._V)
+        w = np.linalg.eigvalsh((AV + AV.T) / 2) if AV.size else np.zeros(0)
+        krig = float(np.log(w[w > w.max() * 1e-12]).sum()) if w.size else 0.0
+        return fac.logdet() + v_part + krig
 
     def _apply_A(self, xv: np.ndarray, xr: np.ndarray) -> np.ndarray:
         nc_l = len(self.con_l)
@@ -854,6 +890,10 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
         ratio = (f0 - f1) / max(info["predicted"], 1e-300)
         streak = streak + 1 if info.get("reused") else 0
         reuse = step == 1.0 and 0.8 < ratio < 1.25 and streak < 4
+    if getattr(nw, "_last", None) is not None and nw._last_reused:
+        # the strengths read the factor (traces, T, the LAML's determinant): after chord steps it belongs to a point
+        # up to four steps back, which put the LAML's derivative off by 10²-10³ on IX (2026-10-06); factor here
+        nw.refactor()
     model.refit_decrement = 0.0 if last is None else (first - last) / scale
     return steps
 

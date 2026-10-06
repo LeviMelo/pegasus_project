@@ -273,7 +273,8 @@ Every structured effect is a **Gaussian Markov random field** whose precision is
 | **low-rank interaction** | ψ, ω, τ | ω on the graph's ICAR, τ RW1, ψ Gaussian. Rank R_b chosen by held-out deviance (§5.4). |
 
 - **Graph choice.** Each block's geography may use one graph, or a mixture (one BYM2 term per graph, each with its own σ). The graph family comes from pegasus_data: contiguity weighted by border length, population-weighted distance, care flows, REGIC, health regions. **The selected graph and ρ are reported per field:** they are findings.
-- **Identifiability.** Every GMRF is constrained to sum to zero over its index. Tree levels are centred within siblings. The interaction loadings are orthogonalised against the main effects.
+- **Identifiability.** Every intrinsic GMRF (ICAR, RW) is constrained to sum to zero over each connected component of its index. Proper iid place effects (v_all, v_grp, v_cat) are not: their own prior identifies them, which is INLA's convention, and it removes 87 of IX's 117 constraints across places (2026-10-06). Tree levels are centred within siblings. The interaction loadings are orthogonalised against the main effects.
+- **The age–sex profile is centred over both sexes together** (f_all over its 2 × bands; f_grp per group over both sexes, then across groups). The sex difference lies in the RW2's null space and is informed by the data. Until 2026-10-06 each sex was centred separately, so no component carried the sex level. IX's youngest bands were fitted at 0.57–0.77× observed in one sex and 1.4–3.0× in the other; held-out deviance per death went from 2.21828 to 2.21699 with the correction (evaluation 2026-10-06, solver v1).
 - **Unequal places.** BYM2's unstructured part carries population-scaled precision. Graph weights use border length and population-weighted distance, never bare adjacency. A corner touch (border length 0; 514 edges in 2022) keeps its edge at a 1 km floor.
 
 ### 4.4 Marks
@@ -366,6 +367,8 @@ H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP
 3. **Schur complement onto γ:** dense, a few hundred to a few thousand, factored densely.
 4. **Back-substitute.** The Newton step is exact, and the iteration converges quadratically under the line search.
 
+**The start** is the Poisson maximum likelihood of the main effects leaf + year + age–sex, by iterative proportional fitting (the ML of a log-linear model), written into the centred parametrisation: 0.06 s. The earlier start (each margin against the flat rate, then centred) began IX at an objective of 4.3·10⁸ against the optimum's 2.6·10⁶ (2026-10-06).
+
 **Constraints.** Constraints local to a place (groups' deviations summing to zero, leaves centred within groups) and to the globals (h_grp over groups) are imposed by contrast bases inside the blocks. The few constraints across places (ICAR sum-to-zero per connected component) are imposed by conditioning by kriging on the factor (Rue & Held 2005, §2.3.3).
 
 **When γ is large** (the monthly grain: h_grp over 168 months), the factor of the place system with an approximate Schur complement becomes the preconditioner of a CG on the exact assembled product. A handful of iterations is expected, against the v0's 50-iteration cap. This is measured, not assumed (§5.8).
@@ -391,9 +394,13 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
   - Newton on ρ with the observed negative Hessian of LAML (W's derivative dropped): ½δ_ij τ_j(tr_j + q_j) − ½τ_iτ_j tr(ΣQ_iΣQ_j) − τ_iτ_j xᵀQ_iΣQ_jx.
   - Floored on each component's own scale, with Fellner–Schall's step where it agrees in sign and goes further.
   - It stops when the step's predicted LAML gain is below 0.1 (the BYM ridge is flat).
-  - The traces are exact for the globals and use 32 probes solved exactly with the factor for the rest; tr(ΣQ_iΣQ_j) uses 16 probes.
+  - **Safeguarded as in mgcv** (Wood 2011, §3). The LAML itself is evaluated at every new mean: −objective + ½Σ rank_j ρ_j − ½ log|H| on the constrained subspace (the leaf-place blocks under their centring, the arrowhead, the kriging term). A step that lowered it by more than 2 units is halved from where it started. The step's target omits W's derivative, which on IX sits 1–4 % of τ from the LAML's own optimum; the tolerance absorbs that. Steps are clipped to ×100.
+  - **Noise-aware.** The place traces are probe estimates, so each gradient component is shrunk toward zero by twice its standard error. On IX the noise reached ±13 for v_all and kept the predicted gain above the stop for a dozen outers.
+  - The factor the strengths read is built at the converged mean. After chord steps the last factor belonged to a point up to four steps back, which put the LAML's derivative off by 10²–10³.
+  - The globals' traces and their pairs in tr(ΣQ_iΣQ_j) are exact, from the globals' covariance block. The place components use 16 probes solved exactly with the factor: one Σz per probe gives their traces, and ΣQ_jz for the place j only gives every pair that involves them.
   - Selected inversion was measured and not adopted at this size: a numba Takahashi recursion took 44 s against about 2 s for 32 exactly solved probes, which agree with it to 10⁻³ (evaluation 2026-10-06, solver v1). A supernodal selected inversion would change that.
-  - On IX: 11 outers cold, against 12–40.
+  - On IX: 8 outers cold, against 12–40 for v0; VII converges in 5, where the unsafeguarded step oscillated for 40.
+  - **Open:** a strength heading for its boundary (IX's v_grp, an iid part that the ICAR part absorbs) climbs ×100 per outer, three outers in all. Sending it to the boundary in one step was measured and rejected (evaluation 2026-10-06, solver v1). BYM2's bounded mixing parameter is the fix.
 - **LAML is also a model-choice criterion** (§5.6), beside held-out deviance.
 - **The dispersion φ** stays maximum likelihood with μ fixed (§5.2). A joint estimate inside LAML is a measured option.
 
@@ -431,7 +438,7 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 | arrays, sparse algebra | numpy, scipy |
 | **sparse Cholesky, selected inversion** | **CHOLMOD via scikit-sparse** (installed into the environment; SuperLU fallback); per-place dense blocks by batched `torch.linalg.cholesky` on the GPU |
 | automatic differentiation, GPU contractions and GEMM | **PyTorch 2.5 (CUDA)**; JAX's GPU builds do not run natively on Windows. Autodiff checks the assembled Hessian; it is not the solver's engine |
-| fused kernels where a contraction is not enough | numba (CPU), CuPy 14 (GPU, conda-forge). `torch.compile` does not run on this machine: no Triton and no compiler toolchain, tested 2026-10-06 |
+| fused kernels where a contraction is not enough | numba (CPU). CuPy was tried for the Schur products: in float64 this GPU took 0.15–0.26 s where the CPU took 0.08 s, so it was dropped (2026-10-06). `torch.compile` does not run on this machine: no Triton and no compiler toolchain, tested 2026-10-06 |
 | columnar I/O, aggregation | pyarrow, duckdb, polars |
 | scan loops (sorting, LTSS) | numba |
 | reference GLMs for checks | statsmodels |
@@ -458,7 +465,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
 | SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
-| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 154–169 s cold (6 outers), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 164 s cold (8 outers, safeguarded strengths, sex-centred profile), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
 | IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |

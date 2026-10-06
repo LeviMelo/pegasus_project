@@ -45,7 +45,7 @@ for spec in args.blocks.split(","):
     model = monolith.Monolith(data, graphs.graph(data.places, "contiguity"), "contiguity")
     t1 = time.time()
     model.fit(outer=args.outer, warm="auto" if args.warm else None, mean_tol=1.0, accelerate=args.accel,
-              log=lambda line, b=block: print(f"  {b} {line[:160]}", flush=True))
+              log=lambda line, b=block: print(f"  {b} {line[:400]}", flush=True))
     secs = time.time() - t1
     nw = getattr(model, "_solver_v1", None)
     row = {"block": spec, "years": args.years, "solver": args.solver, "start": "warm" if args.warm else "cold", "accel": args.accel,

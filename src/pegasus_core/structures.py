@@ -27,9 +27,10 @@ class Shape:
     components: np.ndarray | None = None  # component label per index, for per-component centring
 
 
-def iid(n: int) -> Shape:
-    """Independent effects, centred: the sum-to-zero constraint leaves n − 1 free dimensions."""
-    return Shape("iid", sp.identity(n, format="csr"), n - 1, centred=True)
+def iid(n: int, centred: bool = True) -> Shape:
+    """Independent effects. Centred, the sum-to-zero constraint leaves n − 1 free dimensions; uncentred (INLA's
+    default for a proper iid effect, which its own prior identifies), all n."""
+    return Shape("iid", sp.identity(n, format="csr"), n - 1 if centred else n, centred=centred)
 
 
 def random_walk(n: int, order: int = 2, cyclic: bool = False) -> Shape:
