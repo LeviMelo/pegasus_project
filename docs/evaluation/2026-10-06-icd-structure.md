@@ -133,16 +133,16 @@ ADR-0024's defaults (block profiles, group geography, admissibility, the correct
 |---|---|---|---|---|
 | IX | -1.63715* | -1.63487 | +0.0023 | 37 (5 outers) |
 | II | -2.45893 | -2.38341 | +0.0755 | 88 (11 outers) |
-| I | — | -6.01338 | — | 574 (10 outers) |
-| IV | — | -2.04721 | — | 97 (9 outers) |
+| I | -6.01400 | -6.01338 | +0.0006 | 574 (10 outers) |
+| IV | -2.04701 | -2.04721 | -0.0002 | 97 (9 outers) |
 | XV | -8.10559 | -8.09767 | +0.0079 | 77 (10 outers) |
 | XIII | -4.49440 | -4.44564 | +0.0488 | 95 (11 outers) |
-| VI | — | -2.08184 | — | 179 (14 outers) |
+| VI | -2.08184 | -2.08184 | -0.0000 | 179 (14 outers) |
 | VII | -10.32000* | -10.22396 | +0.0960 | 101 (9 outers) |
 | XX | -3.33967 | -3.22976 | +0.1099 | 257 (7 outers) |
 
 - `*` marks the group carrier's earlier fit, before the admissibility rules, which leave out at most two of the block's records.
-- I, IV and VI have no matched baseline yet.
+- I, IV and VI: level (within 0.0006). Block profiles cost nothing where a group's categories share their ages and sexes.
 - I's held-out years span the fall of COVID-19 deaths (B34: 425,098 in 2021, 66,088 in 2022, 10,444 in 2023), which no course fitted to 2010–2021 anticipates. How much of its −6.01 per death (deviance 26.5) that accounts for is not measured.
 
 ## BYM2 coordinates for the strengths: not adopted
@@ -195,4 +195,6 @@ The default is now 1.0. XIII's outers end on the strengths' change, not on the g
 | IX | −0.0016 | 4 (21 s against 37 s) |
 | XX | −0.0116 | 6 |
 
-XX loses about 3,500 units over 304 k deaths: transport accidents, falls and homicides do not share a geography. The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
+XX loses about 3,500 units over 304 k deaths: transport accidents, falls and homicides do not share a geography.
+
+Chapter I goes the other way: −4.22388 against −6.01338, in 53 s and 4 outers against 574 s. The geography carrier also carries each group's course. I's held-out years follow the fall of COVID-19 deaths in B25-B34, so the per-group course extrapolated from 2020–21 is the first suspect. Not tested yet. The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
