@@ -1067,7 +1067,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 |---|---|---|
 | `gateway` | the **only** importer of pegasus_data: roles, event types, structures, graphs, population, aggregates, records; returns Arrow; records data versions | pegasus_data |
 | `config` | homes, versions, seeds | — |
-| `fields` | field specs, registry, admission (§8.4), common-support lifting, overlap requests | gateway |
+| `fields` | field specs, registry, list and conserved fields, common-support lifting, overlap requests (admission retired, ADR-0028) | gateway |
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), the fit's outer loop (§5.4), blocks and model choice (§5.6), marks' likelihoods (§4.4), prediction for any slice | structures, fields, solver |
@@ -1082,7 +1082,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year), the per-lead facility tally for the `facility` triage class (§7.7), the supply term of a block's expectation and the institution lattice (§4.5) | gateway, store, config |
 | `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
-| `harness` | positives, negatives, planted signals, surrogates, power curves, the gate (§10) | all of the above |
+| `harness` | positives, negatives, surrogates, the designed grid of planted signals in refitted worlds and its power surfaces (§10.3; the gate retired, ADR-0028) | all of the above |
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
