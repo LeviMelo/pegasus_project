@@ -32,3 +32,13 @@ Terms as PegaSUS uses them. The definitions are in ARCHITECTURE; this is the sho
 | **harness** | known positives, known negatives, planted signals and null surrogates on real data: the gate of every lens | §10 |
 | **gateway** | the one module that imports pegasus_data | §2, §11.1 |
 | **modelled tier** | pegasus_data's estimated products (population account, completeness, race misclassification), typed and versioned | §2 |
+| **maturity** | v0 a first version that runs; v1 the field's established method for the estimand; v2 v1 measured against its alternatives on this data | §1, §13.1 |
+| **block-arrowhead Hessian** | the shape of a block's Hessian: diagonal in the leaf-place effects, block-diagonal by place plus the graph's sparsity, dense only in the few hundred globals; what the v1 solver factors exactly | §5.3 |
+| **LAML** | the Laplace approximate marginal likelihood of the strengths τ; maximised in log τ, its root is Fellner–Schall's fixed point | §5.4 |
+| **selected inversion** | the entries of H⁻¹ on the factor's sparsity pattern (Takahashi recursions): exact marginal variances and the traces LAML needs | §5.4–5.5 |
+| **departure model** | a field's model with the monolith's expectation as offset and an estimand-specific departure term δ; a lead is a posterior statement about δ | §7.0 |
+| **screen** | a cheap search (a lens, a subset scan, a pair correlation) that proposes supports or pairs for a model to read | §7.0, §7.5 |
+| **distributed-lag term** | an exposure's lagged values in an outcome's rate with a smooth coefficient over lag: the lag–response curve as an estimate | §7.5 |
+| **shared-component model** | two outcomes' place effects with a common spatial component; its share of each field's variance is the relation | §7.5 |
+| **IHW** | independent hypothesis weighting: hypotheses weighted by a covariate of their power, FDR kept; replaces exclusion by power | §8.4 |
+| **conserved level** | the pool a coding change exchanges deaths with: the ICD family, R00–R99 and undetermined intent; every lead is read there too | §8.6 |

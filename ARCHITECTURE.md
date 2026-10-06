@@ -1,6 +1,13 @@
 # ARCHITECTURE.md: PegaSUS
 
-**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). It supersedes the design drafts (`docs/discussion/2026-10-04-design-v0.2.md` holds the reasoning behind each choice). When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
+**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). **Revision 2, 2026-10-06 (ADR-0023),** on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It replaces how the model is solved (§5), how departures and relations are read (§7), how methods are validated (§8.4, §10), and the roadmap (§12). The model itself (§4) and the boundary with pegasus_data (§2) stand. The design drafts are in `docs/discussion/2026-10-04-design-v0.2.md`. When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
+
+**Maturity.** Each component is at one of three levels, stated where it is described and summarised in §13:
+- **v0**, a first version that runs;
+- **v1**, the field's established method for the estimand, implemented;
+- **v2**, v1 measured against its alternatives on this data.
+
+A v0 is never the end state.
 
 Section map:
 
@@ -13,12 +20,12 @@ Section map:
 | 5 | the monolith: estimation and computation |
 | 6 | expectation tiers, calibration, surprise |
 | 7 | scans |
-| 8 | error control, replication, admission |
+| 8 | error control, replication, weighting by power, recording as measurement |
 | 9 | leads, the ledger, use |
-| 10 | the validation harness |
+| 10 | validation: characterisation, not permission |
 | 11 | code: package, artefacts, invariants |
-| 12 | phases and gates |
-| 13 | departures |
+| 12 | roadmap: the overhaul's work packages |
+| 13 | maturity by component; departures |
 
 ---
 
@@ -35,7 +42,7 @@ Later (phase 4, ADR-0004), the same model and lenses run **prospectively**, as s
 
 Leads are statistical objects, not conclusions.
 
-**Principles.** Each answers a documented failure of the 2026 engine (`docs/discussion/2026-10-03-what-was-built.md`).
+**Principles.** P1–P10 answer documented failures of the 2026 engine (`docs/discussion/2026-10-03-what-was-built.md`). P9 is rewritten, and P11–P14 added, after the 2026-10-06 review of this engine's own first versions.
 
 | # | principle |
 |---|---|
@@ -45,10 +52,14 @@ Leads are statistical objects, not conclusions.
 | P4 | **Estimands are declared.** Between places, within places over time, between groups, between institutions: separate statistics, separate nulls. |
 | P5 | **Effects are tested against a minimum relevant effect,** and the multiplicity of the whole search is designed before it runs. |
 | P6 | **Structure priors act on levels, never on relations.** Taxonomies never decide which quantities may co-vary. |
-| P7 | **Every strength is learned or measured.** No unmeasured constant is a gate. |
+| P7 | **Every strength is learned or measured.** Strengths are learned by the marginal likelihood (§5.4) or held-out data, never by a heuristic fixed point. No unmeasured constant is a gate. |
 | P8 | **Observed stays observed.** Modelled inputs come from pegasus_data's modelled tier, typed, with uncertainty. |
-| P9 | **Nothing is trusted before the harness** (§10) has scored it on real data. |
+| P9 | **Validation characterises; it does not license.** Every method carries its measured operating characteristics: calibration, power over a designed grid of planted signals, and false discoveries on null worlds (§10). No question is excluded for being hard: it is weighted by its power and reported with its minimum detectable effect (§8.4). Documented events are a held-out check, never a tuning target. |
 | P10 | **No dense object larger than the population tensor** is ever built (§5). |
+| P11 | **Established method first.** Before a statistic is designed, the field's standard for that estimand is named. It is then used, or beaten by measurement. A check, gate or threshold is not an answer to a modelling problem. |
+| P12 | **Departures and relations are model terms.** A lead is a posterior statement about a term of the model (its size, its certainty, its minimum relevant effect), not the tail of a residual statistic under a method-specific null. Scans search; models infer (§7). |
+| P13 | **Structure is exploited, and speed is budgeted.** Computation follows the model's sparsity: an arrowhead Hessian, GMRF precisions, factorised totals (§5.3). Every component has a time budget, and a benchmark is run on every change to the solver (§5.8). |
+| P14 | **Recording is measured, never used to dissolve.** Recording processes are model terms where the data identify them, and graded explanations where they do not. A lead is re-scoped to its conserved level, never removed by an untested explanation. A changed rule is re-applied to the stored state (§8.6). |
 
 ---
 
@@ -240,41 +251,94 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
 
-### 5.3 Optimisation and uncertainty
+### 5.3 The mean: structured Newton (v0 built, v1 to build)
 
-- **Optimiser.** The mean's MAP comes from truncated Newton–CG given the τ's. The τ's are then updated by Fellner–Schall, and the two alternate.
-  - **The Newton step:** CG on exact Hessian–vector products (double backward through the factorised total), diagonal preconditioner, Eisenstat–Walker forcing, Armijo line search.
-  - **The likelihood's linear part** Σ y·η comes from sufficient statistics computed once.
-  - **L-BFGS was replaced** (open question 6 (resolved), evaluation 2026-10-04). It used every iteration it was given, and from a perturbed start it diverged. Chapter IX now fits in 229 s.
-- **Fit throughput (ADR-0017).** Fits come in families (train and full, rolling origins, splits, another exposure), and each variant used to start from nothing.
-  - **Warm start.** `Monolith.fit(warm="auto")` starts from the best related stored fit (same dataset, event, block, graph, profile, source and grain; the same exposure, then the most years in common): parameters where shapes agree, histories shifted onto the shared periods, every τ. A start only changes where the iteration begins; the fit runs to its own convergence.
-  - **Anderson acceleration** (depth 4, on log τ) of the Fellner–Schall fixed point, which it leaves unchanged; the reported change stays the plain update's residual.
-  - **Mean fit.** Each outer's Newton steps stop at `mean_tol` = 1 log-likelihood unit (the parameters persist; the last fit runs to full tolerance). A block-Jacobi preconditioner was measured and is no better than the diagonal.
-  - **Stopping.** Besides max τ change < 0.02, a fit (opt-in `move_tol`) stops when two successive τ updates each moved the mean's MAP by less than `move_tol` log-likelihood units (½ΔθᵀHΔθ, posterior standard deviations squared and halved): the weakly identified τ's (spatial s against v, BYM) drift along a ridge the fit does not feel. The summary records `converged` and `stop_reason`; a fit that reaches its outer cap says so.
-  - **BlockData** is memoised in the store (kind `blockdata`, §11.3).
-- **Uncertainty.** The Laplace approximation at the mode (`laplace.py`), never forming the Hessian: with the NB expected information w = φμ/(φ+μ), FᵀWF needs only the pairwise marginals of w per leaf (one pass over the slabs), and a Hessian–vector product is three small einsums and one vjp.
-  - **Draws, not selected inversion or Hutchinson probes.** Perturb-and-MAP draws (Papandreou–Yuille) solved by CG with a block-Jacobi preconditioner per effect (sparse LU of diag(Σw) + τQ), tolerance 10⁻³: about 40–90 iterations per draw. Their per-cell variance has relative error √(2/S) whatever the correlation; against an exact dense inverse it sits at that floor (evaluation 2026-10-05, Laplace). The diagonal preconditioner capped at 1,000 iterations.
-  - **Off by default** (`Expectations(laplace=0)`): it moves in-sample calibration by ≤ 0.01 KS.
-- **Posterior predictive.** The aggregate's NB is matched to the draws' moments, 1/φ_eff = (E[Σμ²]/φ + Var(Σμ))/m². In-sample tiers are centred on the MAP's μ (the score equations tie it to the data; the posterior mean overshoots by `exp(Var η/2)`), BP on the posterior mean, and BP adds the history's forecast error (annual: the RW2 forecast variance; monthly: an empirical level-change variance, a heuristic).
-- **The approximation is checked, not assumed.** On a random sample of fields and states (never only the densest slice), the Laplace fit is compared with an exact MCMC or INLA fit. Agreement criteria and results are evaluation entries.
+**The v0 solver** is truncated Newton–CG on autodiff Hessian–vector products (double backward through the factorised total), with a diagonal preconditioner, Eisenstat–Walker forcing and an Armijo line search; L-BFGS before it diverged (evaluation 2026-10-04). Warm starts, `mean_tol` and Anderson acceleration of the outer loop are ADR-0017.
+- **Measured** on chapter IX 2010–2021 (552,046 parameters; 2026-10-06): the first ten Newton steps take 1–3 CG iterations each; from the fourteenth, every step hits the 50-iteration cap and gains less than 10⁻³.
+- One Hessian–vector product costs 0.15–0.5 s, against 0.017 s for one evaluation of the total.
+- The conditioning is the coupling between effects that explain the same cells. A diagonal or per-effect block-Jacobi preconditioner cannot see it (block-Jacobi measured no better, evaluation 2026-10-05).
 
-### 5.4 Blocks, model choice, two-level fit
+**The v1 solver: exact Newton on the assembled Hessian.** The parameters of a block fall into three classes:
 
-1. **Top model.** All blocks' top-level nodes (chapters) with shared population and graph terms. It gives the chapter-level effects and the hyperparameter priors.
-2. **Block models.** Each block with the top-level effects as an offset, in parallel on CPU cores, each using the GPU in turn.
-3. **Model choice: held-out deviance on the last two years, never in-sample.** The choices are:
+| class | members | size (chapter IX annual) |
+|---|---|---|
+| **leaf-place** v | v_cat[e, u] | E·U = 428,890 |
+| **place** ℓ_u | s_all[u], v_all[u], s_grp[·, u], v_grp[·, u], the interaction's ω[·, u] | (2 + 2K + 2R) per place; 122,540 at R = 0 |
+| **global** γ | b0, θ_grp, θ_cat, f_all, f_grp, h_all, h_grp, season, the interaction's ψ and τ | 616 |
+
+With W the working weights (μ for the Poisson quasi-likelihood of counts; the mark and share models' own), the data part of the Hessian is JᵀWJ, every entry a sum of W over the cells two parameters share.
+
+**The structure:**
+- a leaf-place parameter shares cells only with its own place's ℓ_u and with the globals of its leaf and group, so H_vv is **diagonal**;
+- two places share no cell, so the data part of H_ℓℓ is **block-diagonal by place**, and places couple only through the graph precision τQ of the ICAR terms;
+- the globals couple to everything, and there are few of them.
+
+H is **block-arrowhead**. Every block is a contraction of the factorised μ = LP[e,u] · PT[k,u,t,g] (§5.1): the same factors, summed over different index pairs. No cell array is formed (P10).
+
+**The solve, in order:**
+1. **Eliminate v in closed form.** The diagonal Schur complement onto (ℓ, γ) is a sum of outer products over (e, u), accumulated by contraction.
+2. **Factor the place system:** per-place dense blocks of size 2 + 2K + 2R, coupled by the graph's sparsity. Sparse Cholesky with a fill-reducing ordering (CHOLMOD through scikit-sparse; SuperLU where CHOLMOD is absent).
+3. **Schur complement onto γ:** dense, a few hundred to a few thousand, factored densely.
+4. **Back-substitute.** The Newton step is exact, and the iteration converges quadratically under the line search.
+
+**Constraints.** Constraints local to a place (groups' deviations summing to zero, leaves centred within groups) and to the globals (h_grp over groups) are imposed by contrast bases inside the blocks. The few constraints across places (ICAR sum-to-zero per connected component) are imposed by conditioning by kriging on the factor (Rue & Held 2005, §2.3.3).
+
+**When γ is large** (the monthly grain: h_grp over 168 months), the factor of the place system with an approximate Schur complement becomes the preconditioner of a CG on the exact assembled product. A handful of iterations is expected, against the v0's 50-iteration cap. This is measured, not assumed (§5.8).
+
+**BYM2.** The geography is reparametrised as BYM2: one σ and a mixing ρ (Riebler et al. 2016, §4.3). The v0's two separate τ's for the ICAR and iid parts form a ridge, which is the ill-conditioning the `move_tol` stopping rule steps around.
+
+### 5.4 Strengths: the Laplace marginal likelihood (v0 built, v1 to build)
+
+**v0:** Fellner–Schall fixed point, damped to ×10 per outer, with the Poisson Fisher diagonal per effect, Anderson-accelerated. It converges linearly: 12–40 outers per fit, each repeating the mean fit.
+
+**v1:** the log strengths ρ_j = log τ_j (and the interaction's, and BYM2's σ and ρ) maximise the Laplace approximate marginal likelihood:
+
+```
+LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H_ρ = JᵀWJ + Q_ρ
+∂LAML/∂ρ_j = ½ [ rank_j − τ_j x̂ᵀQ_j x̂ − τ_j tr(H⁻¹Q_j) ]   (+ the term from W's dependence on x̂, Wood 2011)
+```
+
+- **Fellner–Schall's fixed point is this gradient's root.** The v1 reaches the same optimum by Newton or BFGS in ρ: Wood (2011) for the outer Newton, Wood & Fasiolo (2017) for the relation to the fixed point. 5–10 outer iterations are expected.
+- **Every quantity comes from the factor of §5.3:**
+  - log|H| from its diagonal;
+  - tr(H⁻¹Q_j) by selected inversion (Takahashi recursions on the sparse factor; the Schur part densely), which replaces the probes and per-row dense solves of `_trace_inv_times`.
+- **LAML is also a model-choice criterion** (§5.6), beside held-out deviance.
+- **The dispersion φ** stays maximum likelihood with μ fixed (§5.2). A joint estimate inside LAML is a measured option.
+
+### 5.5 Uncertainty (v0 built, v1 to build)
+
+**v0** (`laplace.py`, off by default): perturb-and-MAP draws (Papandreou–Yuille), each solved by CG with a block-Jacobi preconditioner (40–90 iterations per draw). The per-cell variance has relative error √(2/S). It moved in-sample calibration by ≤ 0.01 KS (evaluation 2026-10-05, Laplace).
+
+**v1** reads everything from the factor of §5.3:
+- **marginal variances of every effect by selected inversion**, exact;
+- **joint draws x̂ + L⁻ᵀz**, one triangular solve each, where an aggregate's predictive needs the joint;
+- **the predictive matched by moments** as before: 1/φ_eff = (E[Σμ²]/φ + Var(Σμ))/m².
+
+**Centring of the predictive.** In-sample tiers are centred on the MAP's μ, and BP on the posterior mean. BP adds the history's forecast error.
+
+**The approximation is checked, not assumed** (OQ-2): against MCMC on sampled fields and states (§10.1).
+
+### 5.6 Blocks, model choice, two-level fit
+
+1. **Top model (not built).** All blocks' top-level nodes (chapters), with shared population and graph terms. It gives the chapter-level effects and the hyperparameter priors.
+2. **Block models.** Each block with the top-level effects as an offset.
+3. **Model choice.** Held-out deviance on the last two years, together with LAML (§5.4); never in-sample deviance. The choices:
    - rank R_b;
    - graph selection or mixture;
-   - which trees and lists pool (tree pooling is turned off per chapter where it does not improve held-out deviance).
+   - the tree prior (Gaussian or horseshoe, §4.3);
+   - which trees and lists pool.
 
-### 5.5 Hardware and stack
+   Held-out deviance decides for the forecasting tiers. LAML decides where the held-out years cannot (a pattern absent from the last two years).
 
-**Target machine:** 32 GB RAM, 20 logical cores, NVIDIA RTX 4050 laptop GPU (6 GB, CUDA 12.1), about 177 GB free disk. The decision record is ADR-0003.
+### 5.7 Hardware and stack
+
+**Target machine:** 32 GB RAM (about 20 GB usable), 20 logical cores, NVIDIA RTX 4050 laptop GPU (6 GB, CUDA 12.1), about 177 GB free disk. The decision record is ADR-0003.
 
 | need | library |
 |---|---|
-| arrays, sparse algebra, sparse factorisation (GMRF) | numpy, scipy (`scipy.sparse`, SuperLU, CHOLMOD via scikit-sparse where installable) |
-| automatic differentiation, GPU contractions and GEMM | **PyTorch 2.5 (CUDA)**. JAX's GPU builds do not run natively on Windows. |
+| arrays, sparse algebra | numpy, scipy |
+| **sparse Cholesky, selected inversion** | **CHOLMOD via scikit-sparse** (installed into the environment; SuperLU fallback); per-place dense blocks by batched `torch.linalg.cholesky` on the GPU |
+| automatic differentiation, GPU contractions and GEMM | **PyTorch 2.5 (CUDA)**; JAX's GPU builds do not run natively on Windows. Autodiff checks the assembled Hessian; it is not the solver's engine |
 | columnar I/O, aggregation | pyarrow, duckdb, polars |
 | scan loops (sorting, LTSS) | numba |
 | reference GLMs for checks | statsmodels |
@@ -282,22 +346,31 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 
 **Numerics:**
 - float32 on the GPU with float64 accumulation for sums over cells;
-- float64 on CPU for the GMRF solves;
+- float64 for the factorisations;
 - every random draw seeded from (field id, cell, purpose), so every surprise is reproducible.
 
 **Memory:**
 - no array larger than the population tensor × the profile nodes of one block;
-- GPU work is chunked to 4 GB;
-- the non-empty cells stream in batches from Parquet;
-- a survey scans fields on `PEGASUS_SURVEY_WORKERS` threads (default a quarter of the cores, at most 4, cut to free RAM) over one loaded model, the lenses of a field sharing its tiers' expectations; the scan's null runs on the GPU in batches (evaluation 2026-10-05-survey-throughput).
+- GPU work chunked to 4 GB;
+- the non-empty cells stream in batches from Parquet.
 
-**Budgets** are measured in phase 1 and recorded as evaluation entries. **The starting setup:** SIM, SINASC, SIH and SINAN, municipality × year, 2010–2023, 18 ages × 2 sexes, codes to three characters, population tensor 2.8 M cells. Its estimates, to be confirmed:
+**Jobs** (`scripts/heavy.py`). A heavy job gets the machine's cores. Few fat jobs are preferred to many thin ones: six fits of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone (2026-10-06). Surveys have their own pool. A chain of jobs runs through `data/chain.py`, never `bash`, which on this machine resolves to WSL's and cannot see the C: paths.
 
-| task | estimate |
-|---|---|
-| all blocks of the four systems | under an hour |
-| subset scan | seconds to a minute per field |
-| pair scans for one estimand | minutes |
+### 5.8 Performance budgets and the benchmark
+
+**Speed is a requirement (P13).** The benchmark (`bench`, to build in O1) fits a fixed set of blocks cold and warm and records seconds, outers, Newton steps, inner iterations, peak memory and the optimum reached. It runs on every change to the solver, and its result is an evaluation entry.
+
+| benchmark block | v0 measured | budget |
+|---|---|---|
+| SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer, 25 outers cap | ≤ 10 s cold |
+| SIM.DO IX 2010–2021 (2.07 M non-empty cells, 552 k parameters) | 664–1,683 s cold (exposure variants, 2026-10-05); 191 s warm | ≤ 120 s cold, ≤ 30 s warm |
+| SIH-RD X 2010–2023 annual | about 1 h | ≤ 10 min |
+| SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | ≤ 10 min |
+| survey of one chapter (all lenses and their nulls) | hours | ≤ 10 min |
+
+**Budgets are design targets.** The first v1 measurement either meets them or revises them, with the reason.
+
+**The optimum is the acceptance criterion.** v1 must reach the v0's optimum on the same data: objective within one log-likelihood unit, τ's within the convergence tolerance, the same calibration.
 
 ---
 
@@ -376,7 +449,39 @@ flags_c                          denominator tension | unreliable recording (peg
 
 Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family and null.
 
-### 7.1 Lenses: one field
+### 7.0 Two layers: departure models infer, scans search (revision 2)
+
+**Detection has two layers (P12):**
+- **Departure models (§7.0, v1, to build) are the inference.** A lead is a posterior statement about a model term.
+- **Scans (§7.1–7.4, v0, built) are the search.** They propose supports cheaply, and the departure models read those supports.
+
+Until a departure model exists for an estimand, its v0 lens stands as the inference, and its leads say so (`method_maturity`).
+
+**The departure model of a field.** The monolith's expectation, with its uncertainty, is the offset:
+
+```
+y_{u,t} ~ NB( μ̂_{u,t} · exp(δ_{u,t}),  φ_field )        δ = the estimand's departure term
+```
+
+Each estimand declares its own δ, taken from the field's established method (P11):
+
+| estimand | departure term δ | established method | replaces |
+|---|---|---|---|
+| **unusual trend** of a place | a two-component mixture per place: the common course, or a place-specific course; the posterior probability of "unusual" | BaySTDetect (Li, Best, Hansell et al. 2012) | trend divergence's posterior-sd contrast and its δ grid |
+| **cell excess** (outbreak) | a sparse excess per cell (horseshoe or spike-and-slab), or the two-group model on the PIT scores; the local false discovery rate per cell | Efron (2004, 2010); for prospective baselines, Farrington / Noufaily (2013) as the benchmark | the outbreak lens's BH on PIT tails at θ0 |
+| **step** (change point) | a step per place with a discrete location and a shrunk size; the posterior over (location, size) | Bayesian change-point components (product partitions or a step basis with a shrinkage prior) | trailing-window NB tails with Bonferroni |
+| **spatial cluster** | a BYM2 excess over B0 (or the field's place effect); exceedance probabilities P(RR_u > θ0 \| y), for irregular shapes a Bayesian spatial scan | disease mapping (Richardson et al. 2004 exceedance rule); Neill, Moore & Cooper (2006) | the B0 Poisson scan with its MSR-calibrated θ0 |
+| **group disparity** | a place × group interaction, shrunk within the place and over the graph; the exceedance of the minimum effect | the hierarchical interaction of the monolith's own priors | the per-unit G² against a non-central χ² |
+| **observation** fields | the same terms on recording-practice fields | as above | |
+
+**What a departure model reports:**
+- the **posterior of the effect** (rate ratio, slope ratio, step size), with its interval;
+- the **posterior probability that it exceeds the minimum relevant effect (P5)**, which keeps its role as the region of practical equivalence, calibrated on null worlds (§8.4);
+- **the set of reported departures, chosen so that its expected false discovery proportion**, computed from those posterior probabilities, is at most q (Bayesian FDR; Newton et al. 2004; Müller, Parmigiani & Rice 2006).
+
+**Scale.** Departure models are fitted per field on its aggregate cells (place × period), not on the 10¹² implicit cells. They reuse the solver of §5.3, so they cost a fraction of the block's fit. Scales (§7.1) are the same models on lifted cells (`surprise.lift`).
+
+### 7.1 Lenses (v0): one field, now the screens
 
 | lens | statistic | null |
 |---|---|---|
@@ -389,7 +494,14 @@ Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family 
 
 **Scales (`scans/scales.py`).** A per-place lens reads a **scale**: municipality, IBGE immediate region (about 510 units) or state (27). A trend shared by a whole state cancels between a municipality and its neighbours and is a divergence only at the state; a sex-age pattern too thin to show in a municipality shows in the state. Every unit of every scale is tested in one family, with BH **within each scale at q / (number of scales)** (FDR ≤ q overall; one BH over all units charged the 27 states at the price of the 5,570 municipalities). The unit's B2 trend is the same Newton as the municipality's (`surprise.refit_place` on Σy against the offset Σμ, vague prior), and its locus is its member municipalities. Two trend estimands are declared (P4): against the neighbours and against the national course.
 
-**The survey runs what the gate allows** (`tools.SURVEY_PLAN`; evaluation 2026-10-05-lens-positives). By default: outbreak, change point and space–time at the municipality, and the trend against the **national course at the region and state scales** (BH at q/2). Not run: the trend against the neighbours (recovers no positive), the national trend at the municipality (fails the time-shift negatives), group disparity (fails its negatives). `survey --ungated` runs them as families of their own (suffix `|ungated`, scales as multiplicity) and their leads carry `gate="failed"`: they sort after every gate-passed lead, a story built only on them has rank 0 and a `gate failed` flag. A region or state lead's trend replication is not defined (it reads a municipality's contrast with its neighbours): `untested`.
+**The survey runs every lens on every field (revision 2).** The gate is retired (§10.5). Admission becomes weighting by power (§8.4).
+- Lenses that failed their checks are run, and their characteristics travel with their leads:
+  - the trend against the neighbours (recovered no positive);
+  - the national trend at the municipality (failed the time-shift negatives);
+  - group disparity (failed its negatives).
+- `gate="failed"` becomes `method_status`, which a lead's rank reads. It is no longer a reason not to look.
+- A region or state lead's trend replication is not defined (it reads a municipality's contrast with its neighbours): `untested`.
+- v0 history: the survey ran only the gated combinations (`tools.SURVEY_PLAN`; evaluation 2026-10-05-lens-positives).
 
 ### 7.2 Subset scanning
 
@@ -414,6 +526,8 @@ F(S) = Y log(Y/M) + M − Y    if Y > M,   else 0
 
 **Recursion.** After the top subset is reported, its cells are conditioned out (μ set to y), and the scan is repeated until the next score's p exceeds the family threshold.
 
+**Revision 2.** A subset is a **proposal**. The departure model of its estimand (§7.0) reads the proposed support, and the lead carries that posterior. The scan's Gumbel p stays as the search's own stopping rule.
+
 ### 7.3 Many dimensions at once
 
 Subset scanning across fields: the field is a dimension (a subset of fields within one family). This finds the same subset of places and times departing across several related causes.
@@ -433,7 +547,7 @@ minimise Σ_c [ μ_c m_c − y_c log(μ_c m_c) ]  over  m_c = Σ_r λ_r a_r(u) b
 
 **Each component is a multiplicative departure shared by places, times and fields.** A coding substitution appears as a component positive on one code and a matching one negative on another, in the same places and times.
 
-### 7.5 Pairs
+### 7.5 Pairs (screens) and relation models
 
 **Fields X and Y are compared at their common support** (the finest support both lift to by their laws).
 
@@ -441,7 +555,7 @@ minimise Σ_c [ μ_c m_c − y_c log(μ_c m_c) ]  over  m_c = Σ_r λ_r a_r(u) b
 |---|---|---|
 | **E_b, between places** | weighted correlation ρ̂ over units of place effects b̂(u) (the posterior mean of a field-specific place intercept over B0, shrunk), pair weight `√(w_X w_Y)` with `w = 1/se²`, each field centred by its own weighted mean | **Dutilleul's modified t:** `n_eff = 1 + n² / tr(R̂_X R̂_Y)`, with R̂ from each field's spatial correlogram on the graph's distance classes |
 | **E_b\|Z, adjusted** | partial correlation given a declared adjustment set Z (urbanisation, income, macro-region) | same, with n_eff − dim(Z) |
-| **E_w, within places, lag ℓ** | `ρ̂_ℓ = Σ_{u,t} w z^X_{u,t} z^Y_{u,t+ℓ} / norm`, pooled over places, on B2 surprises | per place, `n_eff,u = T_u (1−φ̂_X φ̂_Y)/(1+φ̂_X φ̂_Y)` (AR(1)); summed over places; divided by the design effect `1 + (U−1) ρ̄_space` for cross-place correlation at equal t |
+| **E_w, within places, lag ℓ** (v0; a screen only, revision 2: failed the arbovirus → microcephaly positive at the region-month grain and, prewhitened, at the state grain) | `ρ̂_ℓ = Σ_{u,t} w z^X_{u,t} z^Y_{u,t+ℓ} / norm`, pooled over places, on B2 surprises | per place, `n_eff,u = T_u (1−φ̂_X φ̂_Y)/(1+φ̂_X φ̂_Y)` (AR(1)); summed over places; divided by the design effect `1 + (U−1) ρ̄_space` for cross-place correlation at equal t |
 | **E_i, between institutions** | as E_b on the institution lattice; first stage: a facility's step against its catchment-expected events (§4.5), no pair yet | as E_b, on the care-flow graph |
 | **across systems** | the same quantity in two systems (notifications against admissions): E_w on the log ratio | as E_w |
 
@@ -467,6 +581,25 @@ tr(R_X R_Y) = n + Σ_k n_k r_X(k) r_Y(k)
 This is the same Gram form, so n_eff comes for every pair at once.
 
 **Nonlinear dependence:** rank (Spearman) versions in v1. HSIC only on pairs short-listed by another statistic, with a calibrated null and a CKA effect floor.
+
+**Relation models (revision 2; v1, to build).** A pair screen proposes; a relation model estimates. Each relation estimand has its established model, fitted with the solver of §5.3:
+
+| relation | model | estimand reported |
+|---|---|---|
+| **an exposure leads an outcome by a delay** (arbovirus → microcephaly; cold → respiratory admissions; a disaster → admissions) | a **distributed-lag term** in the outcome's rate: `log μ_Y(u,t) += Σ_{ℓ=0..L} β(ℓ) · x(u, t−ℓ)`, with β(ℓ) a GMRF over lag (RW2, strength learned) and x the exposure's excess or rate at the grain where it is measured, lifted to the outcome's places. Heterogeneity across macro-regions as a hierarchical β. The outcome keeps its own season, trend and place course, so shared seasonality is not read as a lead. | **the lag–response curve with its uncertainty**, its cumulative effect, and the window where it departs from zero (Gasparrini, Armstrong & Kenward 2010, DLNM) |
+| **two outcomes share their geography** | a **shared-component model**: both fields' place effects carry a common BYM2 component, scaled per field, plus their own | the shared share of each field's spatial variance, with its interval (Knorr-Held & Best 2001); multivariate extension as MCAR (Gelfand & Vounatsou 2003) |
+| **infectious series drive one another** (between places, between notified diseases) | an **endemic–epidemic** term: the expected count includes the lagged counts of other places or series, weighted by the graph (care flows, contiguity) | the epidemic coupling coefficients (Held, Höhle & Hofmann 2005; Meyer, Held & Höhle 2017, `hhh4`) |
+| **the same quantity in two systems** | the log ratio of the two systems' counts as a field with its own departure model (§7.0) | a recording or completeness departure |
+
+**Guards that every relation model carries:**
+- **Negative-control outcomes** that share the confounding and not the mechanism (Q90 for microcephaly), and **negative-control exposures** (the exposure's own future: a lead of the outcome over the exposure). Both are standard (Lipsitch, Tchetgen Tchetgen & Cohen 2010) and are reported beside the estimate.
+- **The declared adjustment set** (§7.5, E_b|Z).
+- **The relation is an association** between expectations' departures or rates, not a causal effect. Causal language needs a design (§7.8 cohorts, natural experiments) that the lead points to.
+
+**The screens that propose relations:**
+- E_b over all pairs (the Gram matrix);
+- a prewhitened cross-correlation at a coarse grain for lagged pairs (`pairs.within(prewhiten=p)` on lifted surprises). It is a screen only; it failed the microcephaly positive at the state grain (evaluation 2026-10-05, re-test 2026-10-06).
+
 
 ### 7.6 Dependency maps (phase 3)
 
@@ -494,7 +627,19 @@ D'_S is the same with the augmented μ'.
 
 **Decomposition.** The change in expected events between two periods, split into population size, age–sex composition, place mix and risk (η). Each by counterfactual substitution of one component at a time, averaged over all orders (Shapley; exact for these four components). The risk part is reported by place and by group.
 
-**Triage (`explain.triage`, `Session.triage`).** A lead is read against what the data at hand can say about it, in order, and the first rule that fires gives its class (`lead.robustness["triage"]`; artefacts become `explained`): *system* (the denominator broke; the code's national level moved; the ill-defined chapter moved opposite; a residual category trending), *substitution* (siblings under the same parent undo the change), *noise* (too few events or too small an effect), *facility*, otherwise *signal*, which means **unexplained by the data at hand, not confirmed**. Evaluation 2026-10-05, lead triage.
+**Triage (`explain.triage`, `Session.triage`).** A lead is read against what the data at hand can say about it, in order. The first rule that fires gives its class (`lead.robustness["triage"]`):
+- *system*: the denominator broke; the code's national level moved; the ill-defined chapter moved opposite; a residual category trending.
+- *substitution*: siblings under the same parent undo the change.
+- *noise*: too few events, or too small an effect.
+- *facility*.
+- otherwise *signal*, which means **unexplained by the data at hand, not confirmed**.
+
+**Revision 2 (P14).**
+- **A class is an explanation with a grade (ADR-0019), and only a *tested* explanation marks a lead `explained`.** A code-level class re-scopes the lead to its conserved level (§8.6).
+- **The thresholds of these rules are v0 constants.** They are FAC_K = 3, FAC_SHARE = 70 %, ×1.6, z ≥ 3. Each is replaced by a measured model as §8.6 builds it.
+- **The stored state was re-run.** 14,813 leads marked `explained` before the grading existed were reopened on 2026-10-06, with their old verdict kept (`triage.superseded`); their graded re-triage is a work package (§12).
+
+Evaluation 2026-10-05, lead triage.
 
 **Facility (`facility`).** The event cube by residence × recording facility × 3-character code × year (SIH-RD `CNES`, SIM-DO `CODESTAB`; one gateway-cached table per year). A lead is `facility` when at most `FAC_K` = 3 facilities carry at least `FAC_SHARE` = 70 % of its change (window against base years), that concentration is not what the facilities' size would carry (one-sided binomial p < 10^-3 against their share of the block's base-year events, unless they are the whole place), and a mechanism shows in the facilities' own behaviour: the same facilities' residents of *other* places show the same step in the lead-code share of the block (z >= 3, at least half the inside log ratio), or the facilities' volume without the lead's events stepped by x1.6. Concentrated but the others do not move: `place_specific`, the lead stays a signal. The class says the change is attributable to one institution's recording or volume; it does not say whether the institution coded differently or served a real event (a referral hospital receives both). SIM names a facility for 71-73 % of deaths only, so the read is partial there.
 
@@ -507,7 +652,7 @@ On linked cohorts from pegasus_data (person-level records): every attribute × e
 
 ---
 
-## 8. Error control, replication, admission
+## 8. Error control, replication, weighting, recording
 
 ### 8.1 Families
 
@@ -518,6 +663,8 @@ A **family** is (lens or estimand, tier, field family or pair of field families,
 - **Within a family:** Benjamini–Hochberg at q = 0.05. Benjamini–Yekutieli where p-values within a family are not positively dependent.
 - **Across families:** Benjamini–Bogomolov selective inference. Families are selected by their Simes p-value at level q; then within each selected family BH at `q · |selected| / |families|`.
 - **Down code trees:** TreeBH (Bogomolov et al. 2021) when a lens tests the nodes of a classifier tree.
+- **Departure and relation models (§7.0, §7.5; revision 2).** The reported set is chosen so that its expected false discovery proportion, computed from the posterior probabilities of exceeding the minimum effect, is at most q (Bayesian FDR; Newton et al. 2004). Across families, the same Benjamini–Bogomolov selection applies, with each family's evidence summarised by its smallest local fdr.
+- **Weights (§8.4).** The frequentist families are weighted by power (IHW), not pruned by it.
 - **Agents.** Exploratory tests are logged but carry no claim. Claims pass through `confirm` (§9.3) on the reserve (§8.3), whose stream is controlled by online FDR (LOND).
 
 ### 8.3 Replication (ADR-0015)
@@ -540,32 +687,28 @@ A lead is selected on data and confirmed only by **units that took no part in th
 
 **The confirmation reserve is a reserved period** (`control.RESERVED_PERIODS`: SIM.DO 2024, final after every fit and survey on 2010-2023). `monolith.assemble` and `Session` refuse it (`ReservedPeriod`); only `confirm_many` opens it (`reserve_open`). A claim (a persistence claim: fixed places and direction) is tested once on it against the fit on the session's years, and its p-value enters one LOND stream (§8.2) whose state is read back from the ledger (`control.Reserve`, split `period:reserve`); the order of the claims is fixed before the reserve is read. Preliminary years are added only when final.
 
-### 8.4 Admission and minimum effects (calibrated, not set)
+### 8.4 Weighting by power, and minimum effects (revision 2)
 
-**Admission (measured, ADR-0022).** A field enters a lens or pair scan if the harness's power curve for that lens (§10.3) gives power ≥ 0.5 for its reference effect:
+**No field is excluded for low power (P9).**
+- **v0 (ADR-0022):** a field entered a lens only where the lens's power at a reference effect reached 0.5.
+- **The objection:** FDR already controls the false discoveries of weak hypotheses. Their only cost is a dilution of the others' power, and weighting answers that.
 
-| scan | reference effect | read at |
-|---|---|---|
-| lenses | rate ratio 1.5 over one macro-region and window | the expected count of that locus in the field's median macro-region: a region-year (outbreak, space–time), the last three years (change point), the whole period (spatial cluster) |
-| pairs | ρ = 0.3 shared latent | the field's own refitted place effect against a partner of its spectrum (`harness.pair_power`), E_b at δ_E |
+**v1 (to build): weighted multiple testing.**
+- Each hypothesis carries a weight from a covariate that is independent of its p-value under the null: the expected count of its locus, the power curve read at it, the field's sparsity.
+- The weights are learned by **independent hypothesis weighting** (Ignatiadis, Klaus, Zaugg & Huber 2016), with cross-weighting so that the data choosing a weight never test the hypothesis it weights. FDR control holds.
+- For the departure models (§7.0), the posterior probabilities already carry the power: a field with little information has wide posteriors and rarely crosses the minimum effect. Their FDR is the Bayesian one of §8.2.
+- **Every reported result carries its minimum detectable effect**, read from the power surface (§10.2). A "nothing found" in a sparse field says how large an effect it could have missed.
 
-The curves are the production lens run on planted loci (`harness.region_power`, `scripts/measure_admission.py`, stored in `admission_curves.json`): a locus counts as detected when a finding lies at least half inside it, because a macro-region-year is far larger than one cell or the scanner's 30-place neighbourhood. Trend divergence and group disparity have no locus of this kind (trend divergence is blind below a threefold change, §10.3); they read the fields any lens admits. **A code tree is descended only while children stay admissible.** The former provisional rule (1,000 events over the window and events in 5% of units) is gone.
+**The v0 curves stay as measurements.** `harness.region_power`, `admission_curves.json` and `harness.pair_power` are inputs of the weights and of the minimum detectable effect, not gates. They come from the production lens run on planted loci.
+- **The detection criterion:** a finding lying at least half inside the planted macro-region-year. A macro-region-year is far larger than one cell or the scanner's 30-place neighbourhood.
+- **Their limit:** five chapter-IX fields and Q02, thinned to five sizes. The designed grid of §10.2 replaces them.
 
-**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the harness's **negative controls** stays ≤ q. Negative controls keep each field's own dependence and remove the relation (§10.2).
+**Minimum effect δ_E per estimand.** The smallest δ for which the false-lead rate on the **negative controls and null worlds** stays ≤ q (§10.2–10.4). It is the empirical-calibration idea of observational-health research networks, applied to the search itself. It is the region of practical equivalence of the departure models (§7.0) and of the pair screens.
+- **Calibrated so far:** δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005), 0.1 for E_b|Z in maps (ADR-0013); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate); marks 1.5 % (PESO negatives).
+- **Provisional elsewhere:** θ0 = 1.2 for outbreak, change point and space–time; trend divergence 1.5 at the municipality, 1.2 at region and state; group disparity sd 0.2, **not calibratable** on the spatial negatives (MSR holds only from sd 1.0 at the state). Values live in `scans/lenses.py`.
+- **The minimum effect is a statement of relevance, not of detectability.** A field that cannot see it is weighted, not dropped.
 
-This is the empirical-calibration idea of observational-health research networks, applied to the search itself. **Provisional δ = 0.1 until calibrated.** Calibrated so far: δ_E = 0.03 for E_b, 0.05 for E_b|Z (ADR-0005); the spatial cluster's θ0 = 1.5 (evaluation 2026-10-05, lens gate).
-
-**Every lens tests against its minimum effect.** Provisional values, in `scans/lenses.py`:
-
-| lens | H0 (boundary) | provisional |
-|---|---|---|
-| outbreak, change point, space–time | rate ≤ θ0 × expected; the null's replicates are drawn at θ0μ | θ0 = 1.2 |
-| spatial cluster (B0) | the same | θ0 = 1.5, calibrated on the MSR negatives (evaluation 2026-10-05, lens gate) |
-| trend divergence | \|β_u − β̄_N(u)\| ≤ δ (or \|β_u\| ≤ δ), with δ a ratio between the period's first and last year, per scale | municipality 1.5 (time-shift negatives: 5/12 worlds at 1.2); region, state 1.2 (grid's lowest; 0 false leads in 30 worlds of each negative) |
-| group disparity | the groups' log-SIRs spread with sd ≤ sd_scale: G² against non-central χ²(df, sd²·Σμ/k), per scale | 0.2 at every scale, **not calibratable** on the spatial negatives: MSR holds only from sd 1.0 at the state (evaluation 2026-10-05-lens-positives) |
-| marks (all lenses) | \|mean log departure\| ≤ δ | 1.5%, calibrated on the PESO negatives (space–time MSR 30/30 worlds at 0.5%, 6/30 at 1%, 0/30 at 1.5% and 3%) |
-
-**Measured on IX** (evaluation 2026-10-04). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
+**Why minimum effects at all** (evaluation 2026-10-04, chapter IX). Testing against zero flooded the survey with trivially small departures, because tens of thousands of deaths make anything significant:
 - hypertension (I10–I15): trend divergence fell from 116 to 38 places, group disparity from 121 to 7;
 - the strongest signals survived, São Borja among them.
 
@@ -578,6 +721,30 @@ overlap(X, Y) = |events(X) ∩ events(Y)| / min(|events(X)|, |events(Y)|)
 It is computed from records by pegasus_data. Pairs with overlap > 0.05 are not tested for dependence: they are nested codes, alternative classifiers, or "any mention" against underlying cause. They may be tested on their non-shared events.
 
 ---
+
+### 8.6 Recording as measurement (revision 2, P14)
+
+**A departure in a recorded count is a change in events, in how they were recorded, or both.** v0 separated them after the fact, with triage rules and thresholds (§7.7). Revision 2 moves as much as the data identify into the model, and grades the rest.
+
+1. **Conserved-level fields are standard (to build).**
+   - For every node, the field of its conserved level is fitted and surveyed beside it: the ICD family, plus R00–R99, plus (for external causes) undetermined intent Y10–Y34, the pools a coding change exchanges with. These are list structures across blocks (§3.1).
+   - A lead is reported at its own level and at its conserved level. A coding exchange shows as a node lead with no conserved-level lead, which is the *tested* reading of ADR-0019's exchange, available for every lead instead of on demand.
+2. **Recording processes are measurement terms where the data identify them:**
+
+   | process | term | state |
+   |---|---|---|
+   | completeness κ of SIM/SINASC (UF × year) | exposure modifier | built; opt-in (2026-10-06: absorbed by the place terms at B1/B2/BP; B0 changed by −4,149 to +14,709 negative log score, mixed in sign) |
+   | race misclassification | confusion matrix on the expected recorded counts (§4.1) | built for infants and births; adults stay recorded race |
+   | coding regimes of a jurisdiction and era | a confusion between sibling codes and the conserved pools, by state and period, estimated from the exchanges of item 1; garbage-code redistribution (GBD style, Naghavi et al. 2010) as a sensitivity tier, not the default | to build |
+   | a facility's coding or volume | the institution lattice (§4.5) and E_i | first stage built |
+
+3. **Graded explanations, never dissolution (ADR-0019).**
+   - Only a *tested* explanation marks a lead `explained`; *bound* and *consistent* explanations stay attached.
+   - A code-level explanation **re-scopes** the lead to its conserved level, and the lead is re-tested there.
+4. **A changed rule is re-applied to the stored state.**
+   - Every stored verdict carries the version of the rule that produced it.
+   - When a rule changes, the verdicts of the old version are reopened and re-run.
+   - The 2026-10-06 audit found 14,813 leads removed under a rule that predated grading.
 
 *(§8.4–§8.5 were lost in commit 4c0397a and restored from 4c0397a^ on 2026-10-05. Later changes to the values they name live in the evaluations: the marks floor of 1.5% (lens positives, redesign section); δ_E for E_b|Z in maps 0.1 (ADR-0013).)*
 
@@ -592,7 +759,9 @@ Lead
   effect              estimate, interval, scale (rate ratio | ρ | log RR | share absorbed)
   test                statistic, p, q, family, null, calibration status
   replication         R0..R3, with each replication's effect
-  robustness          C-robust (race), denominator tension, recording flags, overlap, triage class (§7.7)
+  robustness          C-robust (race), denominator tension, recording flags, overlap, triage class with its grade and rule version (§7.7, §8.6)
+  conserved           the same reading at the lead's conserved level (§8.6)
+  method              the method's maturity and status, its power at the lead's size and support, its false-discovery rate on null worlds, the minimum detectable effect (§10.5)
   provenance          data versions (pegasus_data), monolith version, code version, ledger id
   rank                evidence × effect × replication; never p alone
 ```
@@ -631,16 +800,26 @@ Lead
 
 ---
 
-## 10. The validation harness (phase 0)
+## 10. Validation: characterisation, not permission (revision 2)
 
-### 10.1 Known positives
+### 10.0 What validation is for (P9)
 
-Each with its lens, tier, locus and pass criterion (locus overlap ≥ 0.5 Jaccard; effect sign):
+**Validation measures a method's operating characteristics.** It does not decide whether the method may run.
+- **The model:** whether the fit recovers what generated the data, and whether its predictive is calibrated (§10.6, §6.2).
+- **A detector or relation method:** its power over a designed grid of planted signals (§10.3), and its false discoveries on null worlds (§10.2, §10.4).
+- **Documented real events (§10.1)** are a held-out check of face validity. **They are never used to tune a constant, a rule or a design choice.**
+  - Tuning happens on the planted grid.
+  - The v0 history (θ0, the alarm history rule chosen on dengue 2019–23, the trend reference chosen because the positives were state-level) is recorded where it happened.
+  - Those choices are re-made on the grid in work package O3 (§12).
+
+### 10.1 Documented events (held out)
+
+Each event is declared before it is scored, with its estimand, tier, locus and criterion (locus overlap ≥ 0.5 Jaccard; effect sign). A failure is a finding about the method, recorded with its reasons; it does not take the method out of the survey.
 
 | signal | lens / estimand | locus |
 |---|---|---|
 | microcephaly and congenital anomalies | space-time, B2 | Northeast, 2015–16 |
-| arbovirus notifications → microcephaly births | E_w, lag 6–9 months (monthly) | Northeast, 2015–16 |
+| arbovirus notifications → microcephaly births | a distributed-lag term on Q02 births (§7.5), the lag curve's mass at 5–9 months; v0: E_w, lag 6–9 months (monthly) | Northeast, 2015–16. **v0 not recovered twice:** E_w at region-month (ρ ≈ 0.12 flat over lags 0–6) and prewhitened at state-month (lag 0, ρ 0.20; declared in `21c771e`, evaluation 2026-10-05 and its 2026-10-06 re-test) |
 | COVID-19 excess deaths | space–time and outbreak, **BP** (train ≤ 2019) on groups and chapters (SIM codes COVID-19 as B34.2) | national, 2020–21; Amazonas, January 2021 |
 | dengue epidemics | outbreak and space–time, **BP** (trained before the epidemic; measured 2026-10-05: B2s absorbs epidemics into each place's fitted history) | by state |
 | dengue seasonality | calibration and season amplitude, B2s | by region |
@@ -671,20 +850,50 @@ Each negative keeps a field's own dependence and removes the relation:
 
 **Withdrawn from this list:** "random partitions of one system's events into two fields". Both halves inherit the same place risk, so they correlate by construction. That makes them a positive for power, not a negative.
 
-### 10.3 Planted signals
+### 10.3 Planted signals: a designed grid
 
-For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a known θ. For pairs, inject a shared latent field into both fields' intensities. Recovery against θ gives each lens's **power curve**, which feeds §8.4.
+For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a known θ. For pairs, inject a shared latent field into both fields' intensities. For a lagged relation, inject into the outcome a distributed-lag response to the exposure's own series.
+
+**v0:** power curves of four lenses on five chapter-IX fields and Q02, at one locus type (a macro-region-year), thinned to five sizes (ADR-0022).
+
+**v1 (to build): a designed grid.** Each method is characterised over:
+
+| axis | levels |
+|---|---|
+| locus | one cell; one place over a window; a graph-connected cluster; an immediate region; a state; a macro-region |
+| shape | spike; step; trend change; seasonal shift; group-specific excess; a lagged response to another field |
+| size | rate ratio 1.1, 1.2, 1.5, 2, 3 (lag responses: cumulative RR) |
+| duration | 1 period; 3; whole remaining series |
+| field sparsity | expected events per place-year in five quantile bins of the real fields |
+
+- **Fields are real.** The backgrounds are fitted fields of every system: SIM, SIH, SINASC, SINAN, monthly and annual.
+- **The outputs:**
+  - each method's **power surface**;
+  - the **calibration of its posterior probabilities** (departure models): do 90 % exceedances hold 90 % of the time;
+  - its **bias in the estimated effect**.
+- The surface gives every result its minimum detectable effect, and the weights of §8.4.
 
 ### 10.4 Null surrogates
 
 The full pipeline is run on `y* ~ NB(μ̂, φ̂)`, independent across fields. **The leads found are the false-lead rate per lens.**
 
-### 10.5 Gate
+### 10.5 No gate: what replaces it
 
-A lens or estimand runs in production only after it:
-1. recovers its positives;
-2. holds its false-lead rate on surrogates at or below q;
-3. has a published power curve.
+**v0:** a lens ran in production only after it recovered its positives, held its false-lead rate on surrogates, and had a published power curve.
+
+**Revision 2:** every method runs, and every lead carries its method's record:
+- maturity (v0, v1, v2);
+- its measured power at the lead's size and support;
+- its false-discovery rate on null worlds;
+- its documented-event record.
+
+A method that fails its null worlds (false discoveries above q at its minimum effect) is not silenced. Its minimum effect is recalibrated until it holds, and the recalibration is an evaluation entry.
+
+### 10.6 The model's own checks
+
+1. **Simulation-based calibration** (Talts et al. 2018). Data simulated from a fitted block's posterior are refitted, and the ranks of the true parameters among the posterior's draws must be uniform. This checks the Laplace approximation and the solver together.
+2. **Exact against approximate.** On sampled fields and states (never only the densest slice), the Laplace fit is compared with MCMC (OQ-2).
+3. **Held-out deviance and calibration of the forecasting tiers** (§5.6, §6.2).
 
 Harness results are evaluation entries.
 
@@ -705,11 +914,13 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `fields` | field specs, registry, admission (§8.4), common-support lifting, overlap requests | gateway |
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
-| `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), fit and Laplace (§5.3), blocks and model choice (§5.4), marks (§4.4), prediction for any slice | structures, fields |
+| `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), the fit's outer loop (§5.4), blocks and model choice (§5.6), marks' likelihoods (§4.4), prediction for any slice | structures, fields, solver |
+| `solver` (to build) | the assembled block-arrowhead Hessian, per-place elimination, the graph's sparse Cholesky, the Schur complement on the globals, constraints by contrast bases and kriging, selected inversion, LAML and its gradient (§5.3–5.5) | structures (scikit-sparse, torch) |
+| `marks` | the mark models' fitting per chapter: specs (length of stay, cost, death, ICU), empirical-Bayes facility effects, the mark lead's facility triage (§4.4) | monolith, facility |
 | `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |
 | `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
-| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps`, `map_inputs` and `utilization` (§7.6), `explain` (§7.7), `cohort` (§7.8) | surprise, monolith, fields |
+| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps`, `map_inputs` and `utilization` (§7.6), `explain` (§7.7), `cohort` (§7.8); `departures` (§7.0, to build) and `relations` (§7.5's relation models, to build) | surprise, monolith, fields, solver |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
 | `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year), the per-lead facility tally for the `facility` triage class (§7.7), the supply term of a block's expectation and the institution lattice (§4.5) | gateway, store, config |
@@ -761,6 +972,10 @@ Pairs with measured overlap above 0.05 are never tested as independent.
 No array larger than the population tensor × profile nodes is materialised.
 A modelled input carries its model version; an artefact carries its data versions.
 Every random draw is seeded from (object, cell, purpose).
+No question is excluded for low power; it is weighted and reported with its minimum detectable effect.
+No constant, rule or design choice is tuned on a documented event.
+Only a tested explanation removes a lead; a changed rule is re-applied to the stored state.
+A solver change is measured on the benchmark before it is adopted.
 ```
 
 ### 11.5 Verification
@@ -769,39 +984,74 @@ Every random draw is seeded from (object, cell, purpose).
 
 ---
 
-## 12. Phases and gates
+## 12. Roadmap: the overhaul (revision 2)
 
-| phase | builds | needs from pegasus_data (`docs/handoffs/`) | gate |
-|---|---|---|---|
-| **0** | harness (§10); `gateway`; `store`; `control` (ledger) | aggregates; event types for SIM, SINASC, SIH | the harness runs end to end on surrogates |
-| **1** | `fields`; `structures`; `monolith` (annual; SIM, SINASC, SIH); `surprise`; lenses; subset scanning | roles and event types; code structures; contiguity and distance graphs; POPSVS | univariate positives recovered; false-lead rates; measured compute budgets; **first measurements:** tree pooling by chapter, graph choice |
-| **2** | pairs (E_b, E_w, E_b\|Z); FDR across families; replication; explaining away; decomposition; cohort scans; SINAN; sub-annual grain for dense families | care-flow graph; population account v1 (2022 hold-out); linked cohorts | pair positives; negatives; calibrated δ and admission |
-| **3** | patterns across blocks; dependency maps; tools over MCP (built, ADR-0008; paused: its use and integration are to be planned with the author); institution lattice (first stage built, ADR-0016: the supply term and the facility steps for SIH; crossed place × facility effects at the node level remain); agents | race measurement; new population sources; CNES fields; APAC families | each with its own positives |
-| **4** | prospective surveillance (ADR-0004): weekly grain; an outbreak-robust alarm baseline; a nowcast from in-record delays; alarms controlled by a false-alarm rate; syndromic scans across SIM, SIH and SINAN | dates of notification, entry and processing typed in every family; snapshots of the preliminary files (for revisions) | a benchmark against published alerts (InfoDengue) and confirmed epidemics: timeliness, false alarms, hits |
+**Phases 0–3 of 2026-10-04** (harness, monolith, lenses, pairs, replication, maps, institutions' first stage) were built as v0 by 2026-10-05. Phase 4, prospective surveillance (ADR-0004), stands as the goal (O8).
+
+**The overhaul's work packages** run in this order: speed first, because every later measurement waits on it. Each package ends with its measurement, its evaluation entry and its decision. Details, acceptance and the running state are in `docs/plans/2026-10-06-overhaul.md`.
+
+| package | builds | accepted when |
+|---|---|---|
+| **O0** | this revision: review, principles P9 and P11–P14, §5, §7.0, §7.5 relation models, §8.4, §8.6, §10, this roadmap (ADR-0023) | written (2026-10-06) |
+| **O1, solver** | `solver`: the assembled arrowhead Hessian (checked against autodiff), elimination, sparse Cholesky, Schur complement, constraints; BYM2; LAML in log τ; selected inversion; the benchmark (`bench`, O1) | the v0 optimum is reached on the four benchmark blocks, and the §5.8 budgets are met or revised with the reason |
+| **O2, settle** | refit the fitted blocks on the new solver; decide what waited on slow fits: the interaction's rank (ADR-0021), the tree prior (horseshoe), the SUS exposure and race groups (ADR-0020), the SINAN wave-1 families | each decision has its held-out measurement |
+| **O3, characterise** | the designed grid of planted signals (§10.3) and null worlds over real fields of every system; v0 constants re-made on the grid; IHW weights (§8.4); the gate retired in code, the method record on every lead | every v0 lens has its power surface and null-world FDR; no documented event tunes anything |
+| **O4, departures** | departure models (§7.0): unusual trend (BaySTDetect), cell excess (local fdr / shrinkage), step, cluster exceedance, group interaction; Bayesian FDR | each beats or matches its v0 lens on the grid at equal FDR, else the lens stays the inference and the reason is recorded |
+| **O5, relations** | the distributed-lag term in the monolith; the shared-component model; the endemic–epidemic term for infectious families; negative controls | the arbovirus → microcephaly lag recovered (declared before the run), cold → respiratory admissions estimated with its interval, null worlds held |
+| **O6, recording** | conserved-level fields as standard; the graded re-triage of the stored register (running, 2026-10-06); rule versions on verdicts; the coding-regime term | no lead removed by an untested explanation; every lead read at its conserved level |
+| **O7, breadth** | on the fast stack: SINAN families beyond wave 1, SIH marks (§4.4), SIA/APAC, CIHA, the SIH↔SIM link's products | each new system calibrated at B1 and surveyed |
+| **O8, top model and surveillance** | the top model and the model-choice loop (§5.6); phase 4 (ADR-0004), with alarm baselines benchmarked against Farrington/Noufaily and published alerts (InfoDengue) | timeliness, false alarms and hits against the benchmark |
+
+**What pegasus_data must supply** for each package is requested in `docs/handoffs/`, as before (§2, rule 2).
 
 ---
 
-## 13. Departures
+## 13. Departures and maturity
+
+### 13.1 Maturity by component (2026-10-06)
+
+| component | § | maturity | raised by |
+|---|---|---|---|
+| model (§4): levels, profiles, geography, history, season | 4 | v1 (the established LGM), BYM instead of BYM2 | O1 |
+| tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1 built; v2 pending: held-out on XVII shows no difference (2026-10-06), I and IX running | O2 |
+| low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); rank not chosen: held-out deviance on IX falls monotonically R0 → R3 (2.2185, 2.1938, 2.1840, 2.1799) | O2 |
+| marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O7 |
+| mean solver | 5.3 | v0 (Newton–CG on autodiff HVPs) | O1 |
+| strengths | 5.4 | v0 (Fellner–Schall fixed point) | O1 |
+| uncertainty | 5.5 | v0 (perturbation draws, off by default) | O1 |
+| tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
+| lenses and their nulls | 7.1–7.2 | v0, now screens | O3, O4 |
+| departure models | 7.0 | not built | O4 |
+| E_b and E_b\|Z pair screens, maps | 7.5–7.6 | v1 as screens (Dutilleul n_eff, MSR negatives) | — |
+| E_w | 7.5 | v0, screen only, failed its positive twice | O5 |
+| relation models (distributed lag, shared component, endemic–epidemic) | 7.5 | not built | O5 |
+| triage | 7.7 | v0 rules with thresholds; graded, re-scoping (ADR-0019) | O6 |
+| replication on independent units | 8.3 | v1 (ADR-0015, ADR-0019) | — |
+| admission | 8.4 | v0 exclusion by power (ADR-0022), to be replaced by weighting | O3 |
+| recording as measurement | 8.6 | κ and race built; conserved-level fields and coding regimes not built | O6 |
+| validation | 10 | v0 (positives, negatives, power curves of four lenses, a gate) | O3 |
+| top model, model-choice loop | 5.6 | not built | O8 |
+
+### 13.2 Departures
 
 *Where the code knowingly departs from this document, with the reason. Each row closes when the code catches up.*
 
 | § | the document says | the code does | why |
 |---|---|---|---|
-| 4.3 | horseshoe on tree levels, one variance per level per top branch | iid Gaussian per level, τ by Fellner–Schall, per block (= per top branch) | the horseshoe needs sampling or a reweighted penalty; the iid level is its first step |
-| 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the same model reparametrised, its τ's learned by the same updates as every other effect; the priors differ |
+| 4.3 | horseshoe on tree levels, one variance per level per top branch | the default stays iid Gaussian per level; the horseshoe is built as `prior="horseshoe"` (a reweighted penalty, the closed mean-field fixed point of the half-Cauchy's auxiliary form, 2026-10-06) | the default changes only if held-out deviance favours it (O2); on XVII it made no difference (leaf-total deviance 949.3 against 949.8) |
+| 4.3 | BYM2 with a learned mixing ρ | BYM: separate τ for the scaled ICAR and the iid part; ρ reported from the two τ's | the two τ's form a ridge that stalls the solver (§5.3); BYM2 comes with the v1 solver (O1) |
 | 4.2 | geography carried down to a declared level ℓ_g | groups carry ICAR + iid; categories carry an iid `v_cat[e, u]`, centred within the group | the category-level place deviation is real (chapter IX: sd ≈ 0.47), and the coding-substitution leads read it |
 | 4.2, 5.4 | the low-rank interaction ψωτ for every leaf, ψ, ω, τ all learned scales | built (ADR-0021) on the active leaves (≥ 0.1 % of the block's events), ψ and τ strengths fixed, ω ICAR + iid, annual grain, no Laplace draws, no top-model sharing of ω across blocks; the rank is chosen per block by held-out deviance on a script, not by a model-choice loop | the cube's cost is E·U·T per Hessian-vector product; fixing two of the three scales identifies the product; the cross-block shared factor needs the top model (§5.4), not built |
 | 5.2 | every strength is learned (P7), the dispersion by place group included | φ_extra is a hierarchy (field, macro-region, state); the block's φ is one value per block | the block's φ by macro-region gained 0.009 nats per event held out on dengue and −0.0007 to +0.002 on chapters IX, X and XVIII (ADR-0006) |
-| 5.3 | Laplace uncertainty; marginal sds by selected inversion and Hutchinson–Lanczos | built (`laplace.py`), measured, off by default: perturbation draws on the exact NB information, CG with a block-Jacobi preconditioner; the predictive matched by moments | the draws match the exact inverse at their Monte-Carlo floor; parameter uncertainty is at most 10 % of the overdispersion and does not repair dengue's or BP's miscalibration (evaluation 2026-10-05, Laplace); the check against MCMC/INLA remains OQ-2 |
-| 5.3 | Fellner–Schall on the full Hessian | Fellner–Schall with the Poisson Fisher diagonal per effect (block-diagonal), damped to ×10 per iteration; a τ above 10⁵ counts as converged. The full-Hessian update exists (`Posterior.fellner_schall`, from the draws) and is not in the fit | on IX it proposes τ_s 5× lower (425 → 72–81) and τ_s,grp 5× lower; whether a refit there calibrates better is untested |
+| 5.3–5.5 | exact Newton on the assembled Hessian; LAML for the strengths; selected inversion for uncertainty | v0: Newton–CG on autodiff HVPs; Fellner–Schall with the Poisson Fisher diagonal per effect (the full-Hessian update exists in `Posterior.fellner_schall` and is not in the fit; on IX it proposes τ_s 5× lower); perturbation draws, off by default | the v1 solver is O1; the v0 is measured in §5.3 and §5.8 |
 | 6.1 | B2s on every field; BP is a mixture over the history's regimes, not the RW2 forecast | the monthly grain (season: cyclic RW2 over 12) is built for event counts; B2s refits trend + one harmonic per place; marks and code lists stay annual. BP at the annual grain damps the last slope (0.5 per year) and adds each place's damped B2 trend; at the monthly grain h is not extrapolated but drawn from the fit's years (a flat level36 baseline reached obs/expected 2.2 on dengue, the climatology 1.2; the outbreak-robust and level36 point baselines of evaluation 2026-10-05, baseline history, remain as `history=`) | the last two months' slope is noise at that grain; an epidemic series has no level to extrapolate; places drift apart (evaluation 2026-10-05, BP level) |
-| 10.1 | marks and E_w each recover a documented positive | marks: none declared; E_w: the cold → respiratory admissions effect (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at monthly municipal grain, below δ 0.1; arbovirus → microcephaly not recovered at region grain | no citable mark shift ≥ 4%; the E_w documented effects are weak at this grain (evaluation 2026-10-05-lens-positives) |
+| 10.1, 7.5 | lagged relations are estimated by distributed-lag terms; marks recover a documented event | E_w only (a screen): cold → respiratory admissions (RR 1.07, Requia et al. 2023) gives ρ −0.02 to −0.07 at the monthly municipal grain; arbovirus → microcephaly not recovered at region or, prewhitened, at state grain; marks: none declared | the relation models are O5; no citable mark shift ≥ 4 % |
 | 7.2 | groups as a free dimension of every subset scan | the scanner takes any free dimensions; the cell lenses pass places × time. Group disparity is a per-unit G² over the groups (not a subset scan of them), at the municipality, region and state scales (`scans/scales.py`); the trend lens reads the same scales | a subset scan over groups × places needs the per-group surprise in the scanner; the G² at three scales answered the documented departures (evaluation 2026-10-05-lens-positives). `Session.survey` runs the gated combinations (§7.1); a multi-municipality locus is a story of its own, its trend replication untested, and the group lens runs only `--ungated` |
 | 8.2 | TreeBH (Bogomolov et al. 2021) | TreeBH with Simes aggregation at each node | the exact combination is a later refinement |
 | 11.3 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version, plus the sha256 of the shipped resource for artefacts derived from one (code structures, graphs); the commit is recorded in each manifest | pegasus_data exposes no publication-level data versions yet, and its commit changes with every edit |
 | 3.1, 4.1 | the population carries uncertainty and N enters the predictive with it | `account-2` and `account-3/4` carry it (σ of log N from the 80 % interval; `Monolith.exposure_variance`, ρ = 0), but the default source is POPSVS, which has none | no account is better than POPSVS on chapter IX or births deviance (account-3: births B1 +0.4 %, held-out KS .096 against .059; its births loss sits in 2020–2023 in places of 25–1000 births a year), and its exposure variance double counts the φ already estimated with μ fixed (evaluation 2026-10-05, exposure; ADR-0010). Closes when φ is estimated with the exposure variance in |
 | 2.1 | meaning comes from pegasus_data | `gateway._date_sql` parses raw date text (YYYYMMDD, DDMMYYYY), and `_residence_sql` maps the Federal District's administrative-region codes in SIH-RD 2008–2017 to 530010 | interim; pegasus_data now derives `<COL>_date` and `MUNIC_RES_municipio` (pegasus_data c893b69, 1f88401). Binding the roles to them changes every gateway cache key, so the switch waits for the next re-warm |
-| 8.4 | admission by the power curve at the reference effect; θ0 calibrated per lens | admission as written for the four cell lenses (`fields.admission`, `admission_curves.json`) and for pairs (`harness.pair_power`); trend divergence and group disparity read the fields any cell lens admits; the curves' detection criterion is a finding at least half inside the locus | no curve at RR 1.5 exists for the trend and group lenses (trend is blind below ×3); a macro-region-year exceeds the scanner's neighbourhood (ADR-0022) |
+| 8.4 | every field scanned, hypotheses weighted by power (IHW) | v0: admission by exclusion where power < 0.5 at the reference effect (`fields.admission`, `admission_curves.json`, `harness.pair_power`); the survey runs only the gated lens combinations (`tools.SURVEY_PLAN`) | O3 replaces both |
 | 11.4 | a miscalibrated field never enters a pair scan at the tier where it failed | the map reads B1 for SIM and SIH chapters (the place effects are over B0, which fails by design); SINASC indicators and contexts have no tier | ADR-0022 |
 | 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | spatial cluster θ0 = 1.5 (pooled negatives 0.04, worst family 5/30), where the family rule gives 2.0; single-field negatives are MSR of the residuals on a knn8 graph and a per-place shift, with a normal-scores variant | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |
 | 7.6 | a sparse + low-rank Gaussian graphical model, penalties by StARS, edges also passing the pair test | pairwise E_b and E_b\|Z given the declared contexts, no joint model; run 2026-10-05 (ADR-0013): delta_E|Z 0.1, 0 false edges in 40 surrogate worlds | each pair carries its own spatial n_eff, which a joint likelihood has no place for; the conditional layer conditions on declared contexts as the low-rank part would |

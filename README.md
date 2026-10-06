@@ -12,9 +12,9 @@ Each lead carries its size, its certainty, its checks and its replication record
 It reads all its data through **[pegasus_data](../pegasus_data)**, the project's data module: DATASUS decoded and labelled, linked records, populations and context.
 
 **State:**
-- architecture accepted (2026-10-04);
-- package `pegasus_core` set up;
-- **phase 0 next:** the validation harness.
+- architecture accepted (2026-10-04); **revision 2** (2026-10-06, ADR-0023): established methods first, model-based detection and relations, validation that characterises, a structured solver with time budgets;
+- a v0 engine is built and fitted on SIM, SIH, SINASC and SINAN (`STATUS.md`);
+- **development resumes with the overhaul** (`docs/plans/2026-10-06-overhaul.md`), starting with the solver.
 
 | document | what it holds |
 |---|---|

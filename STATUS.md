@@ -1,6 +1,8 @@
 # Status
 
-**2026-10-04.** Every module of ARCHITECTURE §11.1 exists. The first block (ICD chapter IX, SIM 2010–2023) is fitted and read end to end: surprises at B0, B1 and B2, lenses, pairs (evaluation 2026-10-04).
+**2026-10-06. Development is paused for ARCHITECTURE revision 2** (ADR-0023), on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It resumes with work package O1 (the structured solver) of `docs/plans/2026-10-06-overhaul.md`. What follows describes the v0 engine that the revision builds on.
+
+**2026-10-04.** Every module of ARCHITECTURE §11.1 existed. The first block (ICD chapter IX, SIM 2010–2023) was fitted and read end to end: surprises at B0, B1 and B2, lenses, pairs (evaluation 2026-10-04).
 
 **Coverage of the architecture** (2026-10-05): [docs/architecture_coverage.md](docs/architecture_coverage.md) maps every ARCHITECTURE item to built / measured / partial / not built / superseded, with the data and scan coverage and the ten gaps that matter most. It reads the code and the evaluations, not this file; re-run it when a status changes.
 
@@ -23,11 +25,11 @@
   - `cli` (`pegasus-core`).
 - **Known departures** are listed in ARCHITECTURE §13.
 
-**Fitted (contiguity):**
-- **SIM:** IX, I, X (II, XX and XVIII are running).
+**Fitted (contiguity, v0 solver):**
+- **SIM:** 19 chapters (I–XVIII, XX), XVII refitted under the `hybrid` exposure on 2026-10-06.
+- **SIH-RD:** 20 chapters, annual. The fits on ≤ 2019 for replication are running.
 - **SINASC:** births; anomalies (XVII, from CODANOMAL); birth weight (mark model).
-
-**Running:** held-out IX (graph and pooling), the harness on IX fields, the first survey of IX, and the microcephaly positive.
+- **SINAN:** DENG and LEPT; wave 1 (eleven families) being fitted.
 
 **The first lead examined:** São Borja (RS), acute MI ×2 in 2018 against flat neighbours (evaluation 2026-10-04, SINASC entry).
 
@@ -61,64 +63,29 @@
 | 14,813 of 33,228 register leads (SIM 5,826, SIH 8,987) were `explained` by triage verdicts that predate grading ("the code's national level moves ×0.24"): a code-level shift had removed the lead instead of re-scoping it | a rule change is applied to the stored state, not only to new runs: verdicts of a superseded rule are reopened and re-run (`triage.superseded`) | coverage matrix (register line); re-triage running |
 | a known cross-system link (dengue → microcephaly, Northeast 2015–16) is plain in the regional totals (Q02 25×, a 6–7 month delay) and invisible to E_w at the unit-month grain (ρ ≈ 0.12 flat over lags 0–6, none admitted: expected Q02 0.03 per cell, one wave per series) | a cross-system lagged link must be tested at the grain where the outcome is not rare: an aggregated lagged test (the outcome's surprise against the lagged exposure surprise, summed per region) and a joint space-time scan (an excess in X followed by an excess in Y in the same area); E_w at the unit grain stays for common outcomes | positive-arbovirus-microcephaly evaluation; to build (backlog) |
 
-**Fronts (2026-10-04).** Development runs as parallel fronts. Each front is owned end to end by one agent: code, live validation, evaluation entry. This file is where the fronts are coordinated.
+**The overhaul (2026-10-06).** The order of work is ARCHITECTURE §12. The detail, acceptance and running jobs are in `docs/plans/2026-10-06-overhaul.md`:
 
-| front | ARCHITECTURE | state |
+| package | what | state |
 |---|---|---|
-| dengue monthly: **done** (evaluation 2026-10-05). Seasonality calibrated (B2s KS 0.011); epidemics by BP: recall 0.78 (2015–16) and 0.92 (2019–23), precision 0.57 against a trough baseline; φ = 0.235 | §6.1, §10.1 | done |
-| replication redesigned on independent units (ADR-0015: later years, other places, another system, reserved period SIM.DO 2024): code in, smoke-tested; sizes/power, real-block tiers and the register re-tier not yet run (OQ 7, handoff `data/handoffs/replication.md`); the side-A survey (old code, sizes only now) is still running | §8.3 | agent |
-| SINAN positives: leptospirosis RS 2024, Chagas, schistosomiasis, arbovirus → microcephaly E_w; then an outbreak-robust BP | §10.1, ADR-0004 | agent |
-| general SIDRA interface: the compendium's ~100 tables, catalog detection, a normalised fact store; it replaces census.py | §3.1 | agent (pegasus_data) |
-| census coverage 2000/2010/2022: which tables are adjusted; what is the 2022 truth | §3.1 | agent (research) |
-| preliminary-file snapshots, scheduled daily | ADR-0004 | agent (pegasus_data) |
-| SIH blocks (fit, survey); the winter respiratory B2s positive | §10.1, §12 phase 1 | agent |
-| population account: **shipped** `population-account-1` (pegasus_data decision 0145). Municipal median error 0.057 against vital-only 0.079 on the PES-corrected 2022; 80% intervals cover 0.79–0.81 | §3.1, §12 phase 2 | done |
-| SIM survey and infant cohort readout | §7.1–7.8, §9 | agent |
-| pegasus_data hygiene: **done**. Dengue representation fallback; SINAN, SIM, SINASC and SIH dates typed; the race labels corrected; Brasília residence codes in SIH 2008–2017 (SIA and CNES windows open in pegasus_data); ANS and INEP fields | §3.1 | done (pegasus_data 53ea78b…80fa8a6) |
-| performance and memory: the decode memory fixed (×8), machine-wide admission control; next: catalog growth, label-pack rebuild, streaming aggregation | §5.5 | agent |
-| surveillance feasibility: **done** (ADR-0004 updated): weekly alarms feasible for arboviruses only; preliminary-file snapshots must start now | ADR-0004 | done |
-| race bridge: **infant bridge shipped** (pegasus_data fcc1444 (its ADR 0143), `race_confusion_infant`). Out of sample, the count error is 6% against 27% for one national matrix. Infant mortality per 1,000, 2022, raw / bridged / truth: Preta 5.5 / 15.8 / 15.1, Branca 14.3 / 10.1 / 9.9; raw rates invert the ordering. Indígena is not bridged. Adults: not identified; next is SIM women 15–49 ↔ SINASC mothers, or a transported sensitivity band. Next for PegaSUS: race in groups g, through the bridge | §2, §4.2, §12 phase 3 | infant done; adult and groups next wave |
-| E_b gate: **passed** (evaluation 2026-10-05, ADR-0005): MSR on the normalised graph, δ_E 0.03 / 0.05; sanitation pairs admitted, smooth-field pairs not (low power) | §7.5, §8.4, §10.5 | agent |
-| **backlog, in order** (one fresh agent each; ≤ 5 at a time):
-1. Laplace uncertainty layer: **done** (evaluation 2026-10-05, Laplace): cheap draws (block-Jacobi, 40–90 CG iterations), off by default; the verdict: parameter uncertainty is not what miscalibrates; next is OQ 6 (φ_extra per region; an epidemic-level effect).
-2. SIH readout: winter respiratory B2s, calibration, the survey leads.
-3. SINAN: arbovirus → microcephaly E_w; an outbreak-robust BP.
-4. The lens gate: **done** (evaluation 2026-10-05, lens gate): false leads ≤ q on surrogates; outbreak, space–time, E_b pass; spatial cluster fails the negatives (θ0 1.5 set); change point, trend divergence, group disparity and marks have no declared positive. Next: declare positives for them.
-5. Race in the groups g (infant through the bridge; the adult sensitivity band).
-6. The SUS-dependent population (ANS) and completeness by system (modelled tier).
-7. Lead triage: the SIM survey's leads, the coding-substitution and artefact classes.
-8. The low-rank interaction ψωτ and patterns across blocks (§4.2, §7.4).
-9. The horseshoe on tree levels (§4.3).
-10. Phase 3: the institution lattice (CNES); APAC families; dependency maps. **Tools over MCP: built (ADR-0008) and PAUSED by the author (2026-10-05).** How they are used and integrated is to be planned together.
-11. The adult race bridge (SIM women ↔ SINASC mothers).
-12. Phase 4: the weekly grain and the nowcast (ADR-0004).
-13. pegasus_data: pegasus_data open question 71 (the DF region-code windows); roles bound to the derived columns; the gateway switch at the next re-warm; streaming aggregation.
-14. The PegaSUS exposure switch: the gateway's population from `population-account-1` (pegasus_data decision 0145) with its intervals, in place of POPSVS (P8). After the Laplace merge, because every cache key changes.
-15. **Population account v2.** The independent check (2000→2010, pegasus_data 581e99e) found no skill over vital-only (median error 0.077 against 0.076) and 80% intervals covering 0.69 (N 0.54, CO 0.55). v1's 2010→2022 advantage (0.057 against 0.079) does not replicate. Needed: migration covariates (economy, the care-flow graph, region-specific widening) and validation on both intervals before PegaSUS adopts it (item 14 waits on this).
-16. SIDRA follow-ups: series stitched across census universes (literacy 10+ against 15+); the SIDRA store served to the gateway's context fields; an ingestion check once phaseb/c/d finish.
-17. Regenerate pegasus_data's shipped seed (build_resources.py) once all curation is committed: fresh installs still read SIM RACACOR as Bra/Amar/Indig.
-18. An epidemic-level effect for BP: dengue's prospective forecast is 2.0–2.8× off whatever its variance (the Laplace evaluation, 2026-10-05). A state-year or regime component in the extrapolation.
-20. Regional dispersion: **done** (ADR-0006; evaluation 2026-10-05, dispersion): φ_extra by macro-region and state; B1 calibrates 30 of 33 fields (28 with one value). OQ 6 keeps the epidemic level and dengue's Southeast.
-19. Laplace follow-ups: an MCMC/INLA reference; a refit at the full-Hessian Fellner–Schall τ's (spatial τ about 5× lower on IX).
-21. Rebuild pegasus_data's registration/system completeness on population-account-2 (pegasus_data decision 0148 notes its births shortfall came from v1).
-22. Population account: horizons of 1–3 years from a census untested; the 2022 urban share is 2010's.
-23. Positives declared before running, for trend divergence (homicide NE↑ / SE↓ 2000s, full chapter XX fit, Atlas da Violência tables), group disparity (Atlas tables), marks (a citable birth-weight shift); E_w's dengue–climate run. The coordinator's review of 2026-10-05: only change point passes, at BP.
-24. Race in the groups g: births by the mother's declared race; infant deaths through `race_confusion_infant`; adult deaths kept as recorded race (the infant matrix does not transport: pegasus_data decision 0149). After the exposure and BP fronts land.
-25. **Population account v3: the complete tensor. DONE** (pegasus_data decision 0151, account-3 to -5: 1991–2030, all 5,570 municipalities, single ages, race from 2000, intervals; forecast calibrated to 8–12 years; backcast validated on the Contagem 1996 (median 0.028–0.030, 80% coverage 0.83)). Original terms: The author's terms:
-    - all 5,570 municipalities every year 2000–2023 (11 missing in v2), including municipal 2000–2009, with post-2000 municipalities backcast through the lineage and flagged;
-    - single-year ages (at least 0 / 1–4);
-    - race with a reclassification term between censuses, hold-out validated;
-    - intervals on every cell.
-    The old engine's tensor (140.7M rows, municipality × year × single age × sex × race) is the floor to match.
-    Also: a FORECAST to at least 2030, with intervals calibrated by horizon on pseudo-forecasts (base 2000 → h = 1…10; base 2010 → 2022), and a BACKCAST before 2000 (Census 1991, Contagem 1996; 1996 held out). Cells flagged census / intercensal / backcast / forecast.
-26. **Exposure, re-asked on population-account-3/4** (pegasus_data decision 0151: all 5,570 municipalities, single ages including age 0, race, 2000–2030). Account v2 lost to POPSVS (ADR-0010) partly for lacking age 0 and pooling 16 municipalities; v3 removes both. Re-run the ADR-0010 comparison (chapter IX, births BP).
-27. **Race in the groups g is unblocked by v3's race dimension:** births by the mother's declared race; infant deaths via `race_confusion_infant`; adult deaths kept as recorded race (backlog 24).
-| | queue |
+| O0 | the revision: review, principles, §5, §7.0, §7.5, §8.4, §8.6, §10, §12, §13 (ADR-0021, ADR-0023) | done |
+| O1 | the solver: assembled arrowhead Hessian, sparse Cholesky, Schur, BYM2, LAML, selected inversion, the benchmark (`bench`, O1) | next |
+| O2 | settle on the fast stack: the interaction's rank, the horseshoe, the SUS exposure and race groups, SINAN wave 1 | measurements running |
+| O3 | characterise: the planted grid, null worlds, constants re-made, IHW weights, the gate retired | |
+| O4 | departure models | |
+| O5 | relation models: distributed lag, shared component, endemic–epidemic | |
+| O6 | recording: graded re-triage of the stored register (running), rule versions, conserved-level fields, coding regimes | started |
+| O7 | breadth: SINAN, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link | |
+| O8 | top model, model choice, prospective surveillance | |
 
-**Next:**
-1. **Held-out deviance** (fit 2010–2021, score 2022–2023). It serves two first measurements: contiguity against kNN, and tree pooling.
-2. **The first survey across the fitted chapters**, and E_b|Z with the ill-defined share.
-3. **The harness** on surrogates and planted signals: false-lead rates and power curves per lens.
-4. **SINASC and SIH** through the gateway.
+**Carried into the overhaul from the v0 backlog** (the rest is done; its history is in git):
 
-**Unblocked:** ICD-10 U07/U09/U10 now exist (pegasus_data 70b56fc), so chapter XXII (COVID-19) can be fitted.
+| item | package |
+|---|---|
+| an epidemic-level component for BP (dengue's prospective forecast 2.0–2.8× off) | O4 (cell excess; alarm baselines against Farrington/Noufaily) |
+| Laplace follow-ups: an MCMC reference; τ's at the full Hessian | O1 (LAML), §10.6 |
+| positives declared for trend divergence, group disparity, marks; the dengue–climate lag | O3 (held out), O5 |
+| race in the groups g; exposure re-asked on population-account-3/4 | O2 |
+| pegasus_data: open question 71 (DF region-code windows); roles bound to the derived columns, with the gateway switch at the next re-warm; streaming aggregation; SIDRA series across census universes; registration completeness rebuilt on population-account-2; account horizons of 1–3 years | requested through `docs/handoffs/`, with the package that needs them |
+| tools over MCP: built (ADR-0008), **paused by the author**; use and integration to be planned together | not scheduled |
+
+**Unblocked:** ICD-10 U07/U09/U10 exist (pegasus_data 70b56fc), so chapter XXII (COVID-19) can be fitted (O2).

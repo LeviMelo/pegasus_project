@@ -6,6 +6,49 @@
 
 **Found while auditing:** `ARCHITECTURE.md` lost §8.4 (admission, minimum effects, calibrated δ and θ0) and §8.5 (mechanical overlap) in commit 4c0397a (ADR-0015 rewrote §8.3). Thirty-two citations in `ARCHITECTURE.md`, eleven modules and one script, plus three ADRs and four evaluation entries, still point to them (`git show 4c0397a^:ARCHITECTURE.md`, lines 521-558, has the text). `check_docs.py` does not check section references.
 
+## Revision 2 (2026-10-06, ADR-0023)
+
+The rows below audit the v1 text; their section numbers still hold, because revision 2 inserted sections instead of renumbering. What the revision changes:
+
+**New items, all `NB`:**
+
+| § | item |
+|---|---|
+| 5.3 | exact Newton on the assembled arrowhead Hessian |
+| 5.3, 4.3 | BYM2 |
+| 5.4 | the strengths by LAML |
+| 5.5 | selected inversion and exact draws |
+| 5.8 | the benchmark (`bench`, O1) and the time budgets |
+| 7.0 | departure models per estimand, with Bayesian FDR |
+| 7.5 | relation models: distributed lag, shared component, endemic–epidemic; negative controls |
+| 8.4 | IHW weights and minimum detectable effects |
+| 8.6 | conserved-level fields as standard; rule versions on stored verdicts; the coding-regime term |
+| 10.3 | the designed grid of planted signals |
+| 10.6 | simulation-based calibration |
+
+**Superseded (`SS` by ADR-0023):**
+- the gate (§10.5);
+- admission by exclusion (§8.4; ADR-0022 amended);
+- `tools.SURVEY_PLAN` as a limit on what runs;
+- E_w as an inference (it stays a screen);
+- the Fellner–Schall fixed point and the autodiff Newton–CG as the end state of §5.3–5.4 (v0, replaced in O1).
+
+**Built on 2026-10-06, `BU` until O2 measures them:**
+- the horseshoe tree prior (`prior="horseshoe"`; XVII held out: no difference);
+- `surprise.lift`;
+- `pairs.within(prewhiten=)`, which failed the microcephaly positive at the state grain (a screen).
+
+**The gaps, re-ranked by the overhaul (ARCHITECTURE §12):**
+1. **The solver (O1).** Every measurement waits on it.
+2. **Validation that characterises (O3)**, because the v0 constants were tuned on the documented events.
+3. **Departure models (O4).**
+4. **Relation models (O5).**
+5. **Recording as measurement (O6)**, including the 14,813 leads reopened on 2026-10-06.
+6. **Breadth (O7)**: the old gaps 6 and 10.
+7. **The top model (O8)**: the old gap 5.
+
+The old gaps 1–3 (κ and SUS, race, the low-rank term) are measurement work inside O2. The old gap 4 (the horseshoe) is built. The ten-gap table below is the 2026-10-05 ranking, kept for its reasons.
+
 ## Counts
 
 | status | items |

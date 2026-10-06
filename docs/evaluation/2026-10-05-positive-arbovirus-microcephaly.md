@@ -31,3 +31,16 @@ n_eff is 60–100 on the Northeast units. **No lag is admitted** (p 0.42–0.80 
 - **The plateau at lags 0–6 is shared slow variation**: in a 36-month series with one wave in each variable, any lag within the wave's width correlates; E_w, which corrects for autocorrelation through n_eff, finds nothing beyond that.
 - **The proxy is partial.** The large 2016 dengue and chikungunya epidemics (Feb–Mar 2016) were not followed by microcephaly (Q02 16–29 per month in August–November 2016 against 3.9 expected), so arboviral transmission as such is not the cause; Zika specifically, with the 2015 epidemic's immunity behind it, is. With the Zika file starting in 2016, that distinction is outside what this data can resolve.
 - **Verdict.** BP recovers the outcome (25×) and the proxy's 2015 surge; the lagged E_w at the immediate-region grain does **not** recover the link at the 6–9 month window. I would not count it as a positive of the pairs layer. A test that sums over the Northeast before correlating, or tests the outcome's surprise against the lagged signal at one coarse geographic grain, is the way to a recovery; the ecological timing above is consistent with a first-trimester infection, but it is two curves, not an estimate.
+
+## Re-test at a coarse grain with prewhitening (2026-10-06): FAIL
+
+Declared in `harness.POSITIVES` (commit `21c771e`) before running `data/positive_lagged_microcephaly.py` (artefact `data/logs/positive_lagged_microcephaly.json`): BP surprises lifted to states (`surprise.lift`, unit-month φ_extra from the training B2s) and to immediate regions, each series prewhitened by its own pooled AR(2) (`pairs.within(prewhiten=2)`), lags 0-12, δ_E 0.1, Bonferroni over 13 lags.
+
+| variant | dengue → Q02, ρ by lag 0 … 12 | best lag (ρ, p) |
+|---|---|---|
+| state, AR(2) (primary) | +.20 +.07 +.01 +.03 −.03 −.01 +.01 +.06 +.04 +.07 −.08 +.03 −.11 | 0 (0.20, 0.10) |
+| state, raw | +.12 flat to lag 8, then falling | 7 (0.14, 0.45; n_eff 16) |
+| region, AR(2) | all ≤ 0.03 | — |
+| state, AR(2), 2015 signal only | +.24 at 0, nothing at 5-9 | 0 (0.24, 0.06) |
+
+Control (Q90) and reverse direction clean in every variant. **The pass criterion fails:** prewhitening removes the plateau, and what is left is a lag-0 coincidence of the two series' innovations, not a 6-9 month lead. A correlation of surprises, one number per lag, is a screen and cannot carry this question: one exposure wave, a partial proxy (dengue for Zika, followed in 2016 by a larger wave with no microcephaly), and an outcome window spread over a trimester. The next design estimates the lag curve inside the model (a distributed-lag covariate term on the outcome's rate, smooth over lag, with its own uncertainty) instead of testing lags one at a time.
