@@ -447,7 +447,7 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
 - GPU work chunked to 4 GB;
 - the non-empty cells stream in batches from Parquet.
 
-**Jobs** (`scripts/heavy.py`). A heavy job gets the machine's cores. Few fat jobs are preferred to many thin ones: six fits of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone (2026-10-06). Surveys have their own pool. A chain of jobs runs through `data/chain.py`, never `bash`, which on this machine resolves to WSL's and cannot see the C: paths.
+**Jobs** (`scripts/heavy.py`). A heavy job gets the machine's cores and states its share (`--threads`, set for its BLAS, OpenMP and numba); a GPU job takes the single GPU slot (`--gpu`). Few fat jobs are preferred to many thin ones: six fits of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone (2026-10-06). Surveys have their own pool. A chain of jobs runs through `data/chain.py`, never `bash`, which on this machine resolves to WSL's and cannot see the C: paths.
 
 ### 5.8 Performance budgets and the benchmark
 

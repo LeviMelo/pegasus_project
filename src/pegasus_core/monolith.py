@@ -846,9 +846,11 @@ class Monolith:
             self.params["th_cat"].copy_(torch.as_tensor(np.log(np.clip(by_e, 1e-6, None)))[None, :])
 
     def _uses_v1(self) -> bool:
-        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits a count block without the interaction when
-        ``PEGASUS_SOLVER=v1``; the mark and share models and the interaction keep the v0 Newton–CG until ported."""
-        return os.environ.get("PEGASUS_SOLVER", "v0") == "v1" and type(self) is Monolith and not self.ix_on and not self.rank
+        """The v1 solver (`solver.StructuredNewton`, ARCHITECTURE §5.3) fits every count block without the interaction (the
+        default since 2026-10-06: IX cold 154-169 s against v0's 501 s calm, a better optimum, held-out 2.21828 against
+        2.21851); ``PEGASUS_SOLVER=v0`` restores the v0 Newton–CG, which the mark and share models and the interaction
+        keep until ported."""
+        return os.environ.get("PEGASUS_SOLVER", "v1") == "v1" and type(self) is Monolith and not self.ix_on and not self.rank
 
     def _mean(self, iterations: int, loglik_tol: float = 0.0) -> int:
         """The mean's MAP at fixed strengths, by the v1 exact Newton where it applies, else the v0 Newton–CG."""
