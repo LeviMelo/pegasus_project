@@ -81,7 +81,7 @@ class Expectations:
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
                  structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
                  center: str = "plugin", population: str | None = None,
-                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False):
+                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False, rank: int = 0):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
         "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
@@ -92,6 +92,7 @@ class Expectations:
         predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
         correlation ``exposure_rho`` between a place-year's cells (None: ignored)."""
         self.population, self.exposure_rho = population, exposure_rho
+        self.rank = int(rank)       # the low-rank interaction's R of the stored fits (ADR-0021); 0: the base model
         self.supply = supply        # fit the facility-supply term onto each loaded count block (facility.attach_supply, ADR-0016)
         self.supplies: dict = {}
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
@@ -107,7 +108,7 @@ class Expectations:
         if block not in self._models:
             cls = monolith.model_class(self.source)
             self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
-                                           device=self.device, **self._reader())
+                                           device=self.device, **self._reader(), **({"rank": self.rank} if self.rank else {}))
             if self.supply and cls is monolith.Monolith and self._models[block].data.grain == "year":
                 self.supplies[block] = facility.attach_supply(self._models[block], self.dataset, self.event)
         return self._models[block]
@@ -156,7 +157,8 @@ class Expectations:
         cls = monolith.model_class(self.source)
         if issubclass(cls, monolith.MarkModel):
             raise NotImplementedError("the prospective tier is for counts")
-        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader())
+        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader(),
+                         **({"rank": self.rank} if self.rank else {}))
         if purpose not in PURPOSE_TIER:
             raise ValueError(f"purpose {purpose!r}: one of {sorted(PURPOSE_TIER)}")
         regime = monolith.regime_history(model, history, purpose)

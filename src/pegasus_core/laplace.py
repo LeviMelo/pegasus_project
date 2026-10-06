@@ -49,6 +49,8 @@ class Posterior:
     def __init__(self, model: monolith.Monolith, phi: float | None = None, poisson: bool = False):
         if isinstance(model, monolith.MarkModel):
             raise NotImplementedError("the Laplace posterior is built for count blocks")
+        if getattr(model, "ix_on", False):
+            raise NotImplementedError("the Laplace posterior is built for effects linear in η; the low-rank interaction is not (ADR-0021)")
         self.m = model
         self.dtype, self.device = model.dtype, model.device
         phi = model.phi if phi is None else phi
