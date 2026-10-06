@@ -91,6 +91,10 @@ class Registry:
                 if all(m in self.level for m in members):
                     self.members[node], self.level[node], self.label[node] = members, "axis", label
                     self.parent[node] = "XX"
+        # list fields (ARCHITECTURE §3.3, §8.6): the Ministry's concept lists' items (pegasus_data `code_lists`) as
+        # nodes across blocks, `LIST[<list>=<item>]`, read through `list_fields`; their blocks are their members'
+        # chapters (`blocks`). Built on demand: the lists hold some 70 k memberships
+        self._lists: dict[str, list[str]] | None = None
 
     def chapter(self, code: str) -> str:
         node = code
@@ -99,12 +103,51 @@ class Registry:
         return node
 
     def field(self, node: str) -> Field:
+        if node not in self.level and node.startswith("LIST[") and "=" in node:
+            self.list_fields(node[5:].split("=", 1)[0])           # a list's items are registered on first use
         if node not in self.level:
             raise KeyError(f"{node!r} is not a node of {self.structure}")
         return Field(id=f"{self.dataset}:{self.event}:{self.classifier}:{node}", dataset=self.dataset,
                      event=self.event, classifier=self.classifier, structure=self.structure, node=node,
-                     level=self.level[node], block=self.chapter(node), label=self.label.get(node) or "",
+                     level=self.level[node],
+                     block=("+".join(self.blocks(node)) if self.level[node] == "list" else self.chapter(node)),
+                     label=self.label.get(node) or "",
                      signature={self.classifier: self.prefixes(node)})
+
+    def list_fields(self, name: str) -> list[Field]:
+        """The items of a concept list (pegasus_data `code_structure(name)`, e.g. ``SIM-POUCO-UTEIS``) as fields across
+        blocks. A list's codes are read at the leaves' grain: an item holds a category when it lists the category or
+        every one of its subcategories; an item that holds part of a category is left out (counted in
+        ``self.partial[name]``), never rounded to the whole category."""
+        if self.structure != "ICD10":
+            return []
+        t = gateway.code_structure(name)
+        items, codes = t.column("item").to_pylist(), t.column("code").to_pylist()
+        subs: dict[str, set[str]] = {}
+        for c, lv in self.level.items():
+            if lv == "subcategory":
+                subs.setdefault(c[:3], set()).add(c)
+        by_item: dict[str, set[str]] = {}
+        for it, c in zip(items, codes, strict=True):
+            by_item.setdefault(str(it), set()).add(str(c))
+        self.partial = getattr(self, "partial", {})
+        out, partial = [], 0
+        for it, cs in sorted(by_item.items()):
+            cats = {c[:3] for c in cs if c[:3] in self.level and self.level[c[:3]] == "category"}
+            whole = [k for k in cats if k in cs or (subs.get(k) and subs[k] <= cs)]
+            if len(whole) < len(cats) or not whole:
+                partial += 1
+                continue
+            node = f"LIST[{name}={it}]"
+            self.members[node], self.level[node], self.label[node] = sorted(whole), "list", f"{name}: {it}"
+            self.parent[node] = None
+            out.append(self.field(node))
+        self.partial[name] = partial
+        return out
+
+    def blocks(self, node: str) -> list[str]:
+        """The chapters a node's leaves fall in (one for a tree node or an axis, several for a list item)."""
+        return sorted({self.chapter(c) for c in self.leaves(node)})
 
     def leaves(self, node: str, leaf_level: str = "category") -> list[str]:
         """The leaf-level codes under a node (the node itself when it is a leaf; an axis node's members)."""
@@ -119,7 +162,7 @@ class Registry:
 
     def prefixes(self, node: str) -> list[str]:
         """Code prefixes whose records belong to the node: its categories (I20, I21…)."""
-        return self.leaves(node) if self.level.get(node) in ("chapter", "group", "axis") else [node]
+        return self.leaves(node) if self.level.get(node) in ("chapter", "group", "axis", "list") else [node]
 
     def walk(self, block: str, admissible) -> list[Field]:
         """Every field of a block, top-down, descending only into admissible nodes."""

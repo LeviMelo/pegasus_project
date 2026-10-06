@@ -221,6 +221,58 @@ class Expectations:
                                                 if n >= NEW_CATEGORY_ALARM]
         return out
 
+    def _surprise_across(self, f: fields.Field, tier: str) -> Surprise:
+        """A field whose leaves lie in several blocks (a list item, ARCHITECTURE §3.3 and §8.6): each block's part from
+        its own fit, summed. The blocks are fitted independently, so the expectations and their extra-Poisson
+        variances add, Σ_b Σμ²/φ_b, carried at φ = 1. The population's uncertainty is one source for every block, so
+        its standard deviations add, not its variances. B2's refit runs on the sum. Laplace draws are per block and
+        are not combined here."""
+        if self.laplace:
+            raise NotImplementedError("Laplace draws across blocks: a field across blocks is read at the MAP")
+        y = mu = mu2 = ev_sd = None
+        m0 = None
+        phis: dict[str, float] = {}
+        for b in self.registry.blocks(f.node):
+            m = self.model(b)
+            leaves = np.array([m.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in m.data.leaves])
+            if len(leaves) == 0:
+                continue
+            if m0 is None:
+                m0 = m
+            elif not np.array_equal(m.data.places, m0.data.places) or not np.array_equal(m.data.periods(), m0.data.periods()):
+                raise ValueError(f"{f.id}: blocks {m0.data.block} and {b} do not share places and periods")
+            mb, mb2 = m.expected(leaves, spatial=SPATIAL[tier])
+            first = mb
+            if tier == "B0":
+                mb, mb2 = _relevel_b0(m, leaves, mb, mb2)
+            ex2 = mb2 / m.phi if np.isfinite(m.phi) else np.zeros_like(mb2)
+            ev = self._exposure(m, leaves, SPATIAL[tier])
+            sd = None if ev is None else np.sqrt(ev) * np.divide(mb, first, out=np.ones_like(mb), where=first > 0)
+            yb = m.observed(leaves)
+            phis[b] = float(m.phi)
+            y, mu, mu2 = (yb, mb, ex2) if y is None else (y + yb, mu + mb, mu2 + ex2)
+            ev_sd = sd if ev_sd is None else (ev_sd + sd if sd is not None else ev_sd)
+        if m0 is None:
+            raise LookupError(f"{f.id}: none of its leaves is in a fitted block")
+        extras: dict = {}
+        mu_point = mu
+        if tier == "B2":
+            axis = m0.data.years if m0.data.grain == "year" else np.arange(y.shape[1], dtype=float)
+            mu, extras = refit_place_trend(y, mu, mu2, 1.0, axis)
+        elif tier == "B2s":
+            mu, extras = refit_place_season(y, mu, mu2, 1.0, m0.data.month_of_year)
+        if tier in ("B2", "B2s"):
+            mu2 = mu2 * np.divide(mu, mu_point, out=np.ones_like(mu), where=mu_point > 0) ** 2
+        extras.pop("eta_var", None)
+        var = None if ev_sd is None else (ev_sd * np.divide(mu, mu_point, out=np.ones_like(mu), where=mu_point > 0)) ** 2
+        out = _assemble(f, tier, m0, y, mu, mu2, 1.0, self.macroregions(m0.data.places), var=var)
+        if out.calibration.get("phi_source") == "block":
+            # φ = 1 is the carrier of the summed Σμ²/φ_b, not a dispersion: report each block's
+            out.calibration["phi"] = None
+            out.calibration["phi_by_block"] = phis
+        out.extras = {**extras, "blocks": self.registry.blocks(f.node)}
+        return out
+
     def place_effects(self, node: str | fields.Field) -> tuple[np.ndarray, np.ndarray]:
         """E_b's input: the field's own place intercept over B0 (shrunk), with its posterior sd."""
         s = self.surprise(node, "B0")
@@ -239,6 +291,8 @@ class Expectations:
         f = node if isinstance(node, fields.Field) else self.field(node)
         if tier not in TIERS:
             raise KeyError(tier)
+        if "+" in f.block or self.registry.level.get(f.node) == "list":
+            return self._surprise_across(f, tier)
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
@@ -293,6 +347,13 @@ class Expectations:
             store.put_table("surprise", key, out.table(), {"calibration": out.calibration,
                                                             **{k: v.tolist() for k, v in extras.items()}})
         return out
+
+
+def _relevel_b0(m: monolith.Monolith, leaves: np.ndarray, mu: np.ndarray, mu2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """B0's re-levelling to the national total of each year (see `Expectations.surprise`)."""
+    ref, _ = m.expected(leaves, spatial=True)
+    c = ref.sum(0) / np.maximum(mu.sum(0), 1e-300)
+    return mu * c, mu2 * c ** 2
 
 
 def _recentre(mom: dict, mu_point: np.ndarray, center: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

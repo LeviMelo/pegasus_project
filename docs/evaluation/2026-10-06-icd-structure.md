@@ -269,3 +269,23 @@ One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of 
   - It gains everywhere over 2022–23 (I +1.39).
   - `level` wins slightly more often, but loses 0.0026 on XIII without a shock.
   - Outside I, the two are level: 2018–19 +0.0070 against +0.0069; 2022–23 +0.0205 against +0.0240.
+
+
+## Fields across blocks (lists)
+
+**Items.** The Ministry's lists' items are fields across blocks (`Registry.list_fields`). An item enters when it holds whole categories:
+
+| list | fields | left out (part of a category) |
+|---|---|---|
+| CID-BR-10 | 129 | 0 |
+| AVOIDABLE-5-74 | 73 | 7 |
+| ICSAP-GROUPS | 14 | 5 |
+| SIM-POUCO-UTEIS | 2 (Tp 3, Tp 5) | 3 (Tp 1, 2 and 4 are written at the 4th character) |
+
+**The expectation** is each block's fit summed (`Expectations._surprise_across`):
+- the extra-Poisson variances add, Σ_b Σμ²/φ_b;
+- the population's standard deviations add.
+
+**Checked at B1 on SIM 2010–2023 refits,** on the five ICSAP groups that span two chapters:
+- each total equals its parts' sum: heart failure, IX + X: 396,240 + 38,436 observed, 434,675 expected;
+- every one is calibrated, KS 0.004–0.020.
