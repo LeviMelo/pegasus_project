@@ -2144,14 +2144,15 @@ def _baseline_level(h: np.ndarray, kind: str) -> float:
     raise ValueError(f"unknown history forecast {kind!r}")
 
 
-def heldout(model: Monolith, test: BlockData, interaction: bool = True) -> dict:
+def heldout(model: Monolith, test: BlockData, interaction: bool = True, history: str = "auto") -> dict:
     """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
     h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
     Returns the Poisson deviance over every test cell (empty cells through the factorised
     total) and the NB log-likelihood of the non-empty cells at the fitted φ, and of every cell
     (``nb_loglik_all``, the empty ones through the factorised sum). ``interaction=False`` scores the same fit with
-    its low-rank interaction switched off, which separates the term's gain from a better-converged base."""
-    tm, x = extrapolate(model, test)
+    its low-rank interaction switched off, which separates the term's gain from a better-converged base. ``history``
+    is `extrapolate`'s forecast of the courses."""
+    tm, x = extrapolate(model, test, history=history)
     if not interaction:
         x = {k: (torch.zeros_like(v) if k.startswith("ix_") else v) for k, v in x.items()}
     with torch.no_grad():
