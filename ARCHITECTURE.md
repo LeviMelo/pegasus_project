@@ -399,8 +399,8 @@ LAML(ρ) = ℓ(x̂) − ½ x̂ᵀQ_ρx̂ + ½ log|Q_ρ|₊ − ½ log|H_ρ|,   H
   - The factor the strengths read is built at the converged mean. After chord steps the last factor belonged to a point up to four steps back, which put the LAML's derivative off by 10²–10³.
   - The globals' traces and their pairs in tr(ΣQ_iΣQ_j) are exact, from the globals' covariance block. The place components use 16 probes solved exactly with the factor: one Σz per probe gives their traces, and ΣQ_jz for the place j only gives every pair that involves them.
   - Selected inversion was measured and not adopted at this size: a numba Takahashi recursion took 44 s against about 2 s for 32 exactly solved probes, which agree with it to 10⁻³ (evaluation 2026-10-06, solver v1). A supernodal selected inversion would change that.
-  - On IX: 8 outers cold, against 12–40 for v0; VII converges in 5, where the unsafeguarded step oscillated for 40.
-  - **Open:** a strength heading for its boundary (IX's v_grp, an iid part that the ICAR part absorbs) climbs ×100 per outer, three outers in all. Sending it to the boundary in one step was measured and rejected (evaluation 2026-10-06, solver v1). BYM2's bounded mixing parameter is the fix.
+  - On IX: 7 outers cold, against 12–40 for v0; VII converges in 5, where the unsafeguarded step oscillated for 40.
+  - **Open:** a strength heading for its boundary (IX's v_grp, an iid part that the ICAR part absorbs) climbs ×100 per outer, three outers in all. Sending it to the boundary in one step was measured and rejected, and PC priors on the place strengths did not stop it (evaluation 2026-10-06, solver v1). It stops at `SHRUNK` = 10³ (sd < 0.03). BYM2's mixing parameter is the reparametrisation that removes the ridge.
 - **LAML is also a model-choice criterion** (§5.6), beside held-out deviance.
 - **The dispersion φ** stays maximum likelihood with μ fixed (§5.2). A joint estimate inside LAML is a measured option.
 
@@ -465,7 +465,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
 | SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
-| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 164 s cold (8 outers, safeguarded strengths, sex-centred profile), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 136 s cold (7 outers, safeguarded strengths, sex-centred profile), 74 s warm** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
 | IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |

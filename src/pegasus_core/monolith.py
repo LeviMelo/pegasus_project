@@ -48,7 +48,7 @@ HS = ("th_grp", "th_cat")    # the tree levels a horseshoe prior scales node by 
 # the parametrisation's centring, stored with every fit: 2 since 2026-10-06 (the age–sex profile over both sexes, the iid
 # place effects uncentred); a fit stored without it is read through `_legacy_centring`
 CENTRING = 2
-SHRUNK = 1e5                 # a τ above this leaves its effect at a negligible size (sd < 0.003)
+SHRUNK = 1e3                 # a τ above this leaves its effect at a negligible size (sd < 0.03; 1e5 until 2026-10-06)
 
 
 def age_band(age: np.ndarray, edges: list[int] | None = None) -> np.ndarray:
@@ -760,7 +760,9 @@ class Monolith:
         for it in range(outer):
             # the mean need not be precise while the τ's still move: a few Newton steps until they settle
             t0 = time.time()
-            steps = self._mean(inner if max(changes) < 0.1 else 10, loglik_tol=mean_tol)
+            # the first outer's strengths step is clipped far from the optimum anyway: its mean needs few steps (4 against
+            # 10 saved 12 s on IX cold, 2026-10-06)
+            steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10), loglik_tol=mean_tol)
             t1 = time.time()
             changes = self._update_taus(accel)
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
@@ -883,7 +885,7 @@ class Monolith:
         if self._uses_v1():
             from . import solver
             nw = getattr(self, "_solver_v1", None) or solver.StructuredNewton(self)
-            return solver.fit_mean(self, iterations=max(iterations, 8), loglik_tol=max(loglik_tol, 1e-3), solver=nw)
+            return solver.fit_mean(self, iterations=iterations, loglik_tol=max(loglik_tol, 1e-3), solver=nw)
         return self._fit_mean(iterations, loglik_tol=loglik_tol)
 
     def _fit_mean(self, iterations: int, tolerance: float = 1e-9, loglik_tol: float = 0.0) -> int:
