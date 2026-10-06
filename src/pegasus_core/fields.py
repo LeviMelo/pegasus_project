@@ -81,6 +81,16 @@ class Registry:
         self.children: dict[str | None, list[str]] = {}
         for c, p in self.parent.items():
             self.children.setdefault(p, []).append(c)
+        # fields that cross the tree (ARCHITECTURE §3.3): chapter XX's categories by intent and by mechanism (NCHS's
+        # External Cause of Injury Mortality Matrix, pegasus_data `code_attributes`), where a category carries one value
+        # (firearm deaths span W32-W34, X72-X74, X93-X95 and Y22-Y24). Each is a node under XX with its members listed,
+        # not a child in the tree (a category keeps its one parent)
+        self.members: dict[str, list[str]] = {}
+        if self.structure == "ICD10":
+            for node, label, members in _external_cause_axes():
+                if all(m in self.level for m in members):
+                    self.members[node], self.level[node], self.label[node] = members, "axis", label
+                    self.parent[node] = "XX"
 
     def chapter(self, code: str) -> str:
         node = code
@@ -97,7 +107,9 @@ class Registry:
                      signature={self.classifier: self.prefixes(node)})
 
     def leaves(self, node: str, leaf_level: str = "category") -> list[str]:
-        """The leaf-level codes under a node (the node itself when it is a leaf)."""
+        """The leaf-level codes under a node (the node itself when it is a leaf; an axis node's members)."""
+        if node in self.members:
+            return list(self.members[node])
         if self.level.get(node) == leaf_level:
             return [node]
         out: list[str] = []
@@ -107,7 +119,7 @@ class Registry:
 
     def prefixes(self, node: str) -> list[str]:
         """Code prefixes whose records belong to the node: its categories (I20, I21…)."""
-        return self.leaves(node) if self.level.get(node) in ("chapter", "group") else [node]
+        return self.leaves(node) if self.level.get(node) in ("chapter", "group", "axis") else [node]
 
     def walk(self, block: str, admissible) -> list[Field]:
         """Every field of a block, top-down, descending only into admissible nodes."""
@@ -120,6 +132,7 @@ class Registry:
             out.append(self.field(node))
             if self.level.get(node) != "category":
                 frontier.extend(sorted(self.children.get(node, []), reverse=True))
+        out.extend(self.field(n) for n in sorted(self.members) if self.parent[n] == block and admissible(n))
         return out
 
     def related(self, a: str, b: str) -> bool:
@@ -131,6 +144,23 @@ class Registry:
                 out.add(x)
             return out
         return a in ancestors(b) or b in ancestors(a)
+
+
+@cache
+def _external_cause_axes() -> list[tuple[str, str, list[str]]]:
+    """(node, label, member categories) for every intent and mechanism value chapter XX's categories carry."""
+    a = gateway.code_attributes("ICD10")
+    cols = {c: a.column(c).to_pylist() for c in ("code", "level", "chapter", "intent", "mechanism")}
+    out = []
+    for axis in ("intent", "mechanism"):
+        by: dict[str, list[str]] = {}
+        for code, level, chap, value in zip(cols["code"], cols["level"], cols["chapter"], cols[axis], strict=True):
+            if level == "category" and chap == "XX" and value:
+                by.setdefault(value, []).append(code)
+        for value, members in sorted(by.items()):
+            slug = value.lower().replace("/", "-").replace(" ", "-")           # ids may become paths
+            out.append((f"XX[{axis}={slug}]", f"{axis}: {value} (NCHS matrix)", sorted(members)))
+    return out
 
 
 @cache
