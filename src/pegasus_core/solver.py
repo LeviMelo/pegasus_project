@@ -372,9 +372,11 @@ class StructuredNewton:
         if f.act is not None:
             ka = self.grp[f.act]
             LPa = f.LP[f.act]
-            np.add.at(WPu, ka, LPa * f.dPu)
-            np.add.at(Ht, ka, np.einsum("au,aut->at", LPa, f.dPk))
-            np.add.at(Fg, ka, np.einsum("au,aug->ag", LPa, f.dR))
+            for k in np.unique(ka):                       # a few active leaves per group: plain sums, not np.add.at
+                sel = np.nonzero(ka == k)[0]
+                WPu[k] += (LPa[sel] * f.dPu[sel]).sum(axis=0)
+                Ht[k] += np.einsum("au,aut->t", LPa[sel], f.dPk[sel], optimize=True)
+                Fg[k] += np.einsum("au,aug->g", LPa[sel], f.dR[sel], optimize=True)
         return WPu, Ht, Fg
 
     def _dfeatures(self, f: Factors) -> np.ndarray:
@@ -400,16 +402,22 @@ class StructuredNewton:
         K, U, nf = feat.shape
         G1 = np.zeros((K, U, nf))
         H1 = np.zeros((K, U, nf))
-        np.add.at(G1, ka, (LPa * zeta[act])[:, :, None] * df)
-        np.add.at(H1, ka, (LPa * inv_d[act])[:, :, None] * df)
         w2 = LPa * LPa * inv_d[act]                                            # [A, U]
         AA = np.zeros((K, nf, nf))
         AA0 = np.zeros((K, U, nf))
+        # per group: plain sums over its few active leaves, and the Gram matrices as one BLAS product each
+        # (np.add.at and unoptimised einsum contractions took 41 of a rank-1 IX fit's 198 s, 2026-10-06)
+        za, ia = LPa * zeta[act], LPa * inv_d[act]
         for k in np.unique(ka):
             sel = np.nonzero(ka == k)[0]
-            dk = df[sel]
-            AA[k] = np.einsum("au,auf,aug->fg", w2[sel], dk, dk) - np.einsum("uf,ug,u->fg", H1[k], H1[k], 1.0 / s[k])
-            AA0[k] = np.einsum("au,au,auf->uf", w2[sel], dk[:, :, 0], dk) - H1[k][:, :1] * H1[k] / s[k][:, None]
+            dk = df[sel]                                                       # [a, U, nf]
+            G1[k] = (za[sel][:, :, None] * dk).sum(axis=0)
+            H1[k] = (ia[sel][:, :, None] * dk).sum(axis=0)
+            wd = np.sqrt(w2[sel])[:, :, None] * dk
+            X = wd.reshape(-1, nf)
+            Hs = H1[k] / np.sqrt(s[k])[:, None]
+            AA[k] = X.T @ X - Hs.T @ Hs
+            AA0[k] = (w2[sel][:, :, None] * dk[:, :, :1] * dk).sum(axis=0) - H1[k][:, :1] * H1[k] / s[k][:, None]
         return df, G1, H1, AA, AA0
 
     # ------------------------------------------------------------------ the v block
