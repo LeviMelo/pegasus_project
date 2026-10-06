@@ -470,7 +470,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | benchmark block | v0 measured (calm machine, 2026-10-06, unless noted) | target, cold / warm |
 |---|---|---|
 | SIM.DO VII 2010–2021 (277 deaths) | about 10 s per outer under load, 25-outer cap | 2 s / 1 s |
-| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 67 s cold (6 outers, 12 Newton steps; IPF and moment start, safeguarded strengths, binned φ)** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
+| SIM.DO IX 2010–2021 annual (2.07 M non-empty cells, 552 k parameters) | v0 calm: 501 s cold, 17 outers, 7,768 CG iterations (664–1,683 s under load). **v1: 59 s cold (6 outers, 9 Newton steps; IPF and moment start, safeguarded strengths, binned φ)** (evaluation 2026-10-06, solver v1) | 20 s / 5 s |
 | IX with race × single child ages (G 36 → 330) | — | 90 s / 20 s |
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |

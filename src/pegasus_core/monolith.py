@@ -762,11 +762,12 @@ class Monolith:
             t0 = time.time()
             # the first outer's strengths step is clipped far from the optimum anyway: its mean needs few steps (4 against
             # 10 saved 12 s on IX cold, 2026-10-06)
-            # v1's outers stop their Newton steps below 100 log-likelihood units of predicted decrease: the step taken
-            # last leaves only its quadratic remainder, which the strengths' LAML test absorbs (IX 104 → 96 s, VII 93 →
-            # 62 s, held-out unchanged; 2026-10-06); the mean after the loop converges fully
+            # v1's outers stop their Newton steps below 1,000 log-likelihood units of predicted decrease, so most end
+            # on one full step and the strengths read its factor, one step back (IX 67 → 59 s, XV 54 → 50 s, held-out
+            # unchanged; IX's s_all ends 7 % off along the flat BYM ridge; 2026-10-06); the mean after the loop
+            # converges fully
             steps = self._mean(inner if max(changes) < 0.1 else (4 if np.isinf(max(changes)) else 10),
-                               loglik_tol=max(mean_tol, 100.0) if self._uses_v1() else mean_tol)
+                               loglik_tol=max(mean_tol, 1000.0) if self._uses_v1() else mean_tol)
             t1 = time.time()
             changes = self._update_taus(accel)
             move = max(self.refit_decrement, 0.0) * self._objective_norm()   # log-likelihood units the last τ update moved the MAP by
