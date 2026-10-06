@@ -67,7 +67,7 @@ class Arrowhead:
     (CHOLMOD) and Y = L⁻¹PB: S = C − YᵀY = L_S L_Sᵀ, and a solve is one forward and one back substitution with L
     plus a dense solve with L_S."""
 
-    def __init__(self, fa, Y: np.ndarray, B: np.ndarray, Sc: np.ndarray, nl: int, L: sp.csc_matrix | None = None):
+    def __init__(self, fa, Y: np.ndarray, B: np.ndarray, Sc: np.ndarray, nl: int, L: Supernodal | None = None):
         self.fa, self.Y, self.B, self.Sc, self.nl, self.L = fa, Y, B, Sc, nl, L
         self.p = np.asarray(fa.perm)
 
@@ -76,10 +76,10 @@ class Arrowhead:
         b = b[:, None] if one else b
         bl, bg = b[: self.nl], b[self.nl:]
         many = self.L is not None and b.shape[1] >= 8
-        yl = lower_solve(self.L, bl[self.p]) if many else self.fa.solve(bl[self.p], system="L")
+        yl = self.L.lower(bl[self.p]) if many else self.fa.solve(bl[self.p], system="L")
         rhs = bg - self.Y.T @ yl
         xg = np.linalg.solve(self.Sc.T, np.linalg.solve(self.Sc, rhs))
-        z = lower_solve_t(self.L, yl - self.Y @ xg) if many else self.fa.solve(yl - self.Y @ xg, system="Lt")
+        z = self.L.lower_t(yl - self.Y @ xg) if many else self.fa.solve(yl - self.Y @ xg, system="Lt")
         xl = np.empty_like(z)
         xl[self.p] = z
         out = np.vstack([xl, xg])
@@ -438,22 +438,24 @@ class StructuredNewton:
     # ------------------------------------------------------------------ solves
 
     def factor(self, parts) -> Arrowhead:
-        """Factor the arrowhead: CHOLMOD on the place system (its symbolic analysis kept across steps), Y = L⁻¹PB for
-        the globals' columns (B already in reduced global coordinates), and the dense Cholesky of S = C − YᵀY."""
+        """Factor the arrowhead: CHOLMOD on the place system (supernodal, its symbolic analysis kept across steps), Y =
+        L⁻¹PB for the globals' columns (B already in reduced global coordinates) by the supernodal solve, and the dense
+        Cholesky of S = C − YᵀY."""
         from sksparse.cholmod import cho_factor
         Al, Bl, Hgg = parts
         t0 = time.time()
         if self._symbolic is None:
-            self._symbolic = cho_factor(Al, lower=True)
+            # supernodal: 4.1 s against 12.9 s simplicial on SIM chapter I 2010-2023 (31 M non-zeros in L), the same
+            # factor (2026-10-06)
+            self._symbolic = cho_factor(Al, lower=True, supernodal_mode="supernodal")
         else:
             self._symbolic.factorize(Al)
         fa = self._symbolic
         t1 = time.time()
         B = Bl @ self.Cg                                              # [n_place_red, ng_red]
         p = np.asarray(fa.perm)
-        L = sp.csc_matrix(fa.get_factor("LL"))
-        L.sort_indices()
-        Y = lower_solve(L, B[p])
+        L = Supernodal(fa.get_factor("LL"))
+        Y = L.lower(B[p])
         t2 = time.time()
         S = self.Cg.T @ ((Hgg + Hgg.T) * 0.5) @ self.Cg - Y.T @ Y
         ds = np.diag(S)
@@ -898,83 +900,168 @@ def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, so
     return steps
 
 
-def _lower_solve_kernel():
-    from numba import njit, prange
+class Supernodal:
+    """A sparse lower-triangular factor L (from CHOLMOD) cut into its fundamental supernodes, runs of columns with
+    nested patterns, each stored as a dense block, for solves with many right-hand sides. A thread takes a chunk of
+    the right-hand sides through every supernode: the diagonal block by substitution, the rows below by one matrix
+    product. Against a column-by-column sweep: 3.75 s against 11.3 s for SIM chapter I's 1,179 Schur columns, 0.35 s
+    against 0.83 s for IX's 537 (2026-10-06); CHOLMOD's own solve takes four right-hand sides at a time."""
 
-    @njit(parallel=True, cache=True, fastmath=False)
-    def solve(indptr, indices, data, Y, chunk):
-        """Y ← L⁻¹Y in place, L lower triangular CSC with the diagonal first in each column; Y [n, r] row-major. The
-        right-hand sides are split into chunks of columns solved in parallel; within a chunk each column of L
-        updates contiguous rows of Y."""
-        n, r = Y.shape
-        nchunks = (r + chunk - 1) // chunk
-        for c in prange(nchunks):
-            lo, hi = c * chunk, min(r, (c + 1) * chunk)
-            for j in range(n):
-                p0, p1 = indptr[j], indptr[j + 1]
-                d = data[p0]
-                for k in range(lo, hi):
-                    Y[j, k] /= d
-                for p in range(p0 + 1, p1):
-                    i = indices[p]
-                    lij = data[p]
-                    for k in range(lo, hi):
-                        Y[i, k] -= lij * Y[j, k]
-        return Y
-
-    @njit(parallel=True, cache=True, fastmath=False)
-    def solve_t(indptr, indices, data, Y, chunk):
-        """Y ← L⁻ᵀY in place (back substitution over the columns of L, last first)."""
-        n, r = Y.shape
-        nchunks = (r + chunk - 1) // chunk
-        for c in prange(nchunks):
-            lo, hi = c * chunk, min(r, (c + 1) * chunk)
-            for j in range(n - 1, -1, -1):
-                p0, p1 = indptr[j], indptr[j + 1]
-                for p in range(p0 + 1, p1):
-                    i = indices[p]
-                    lij = data[p]
-                    for k in range(lo, hi):
-                        Y[j, k] -= lij * Y[i, k]
-                d = data[p0]
-                for k in range(lo, hi):
-                    Y[j, k] /= d
-        return Y
-
-    return solve, solve_t
-
-
-_LSOLVE = None
-
-
-def lower_solve(L: sp.csc_matrix, B: np.ndarray, chunk: int = 32) -> np.ndarray:
-    """L⁻¹B for a sparse lower-triangular L (CSC, diagonal stored first) and many right-hand sides: the numba kernel of
-    `_lower_solve_kernel` (CHOLMOD's factor here is simplicial, and its multi-RHS solve ran at about 4 GFLOP/s)."""
-    return _tri(L, B, chunk, transpose=False)
-
-
-def lower_solve_t(L: sp.csc_matrix, B: np.ndarray, chunk: int = 32) -> np.ndarray:
-    """L⁻ᵀB, as `lower_solve`."""
-    return _tri(L, B, chunk, transpose=True)
-
-
-def _tri(L, B, chunk, transpose):
-    global _LSOLVE
-    if _LSOLVE is None:
-        _LSOLVE = _lower_solve_kernel()
-    if not (sp.issparse(L) and L.format == "csc" and L.has_sorted_indices):
+    def __init__(self, L):
         L = sp.csc_matrix(L)
         L.sort_indices()
-    Y = np.array(B, dtype=np.float64, order="C", copy=True)
-    # the 64-bit index arrays once per factor (copying CHOLMOD's 32-bit ones cost 0.2 s per strengths update), and the
-    # columns split over every thread: in chunks of 32, the 8-40 columns of a probe batch ran on one or two threads
-    idx = getattr(L, "_idx64", None)
-    if idx is None:
-        idx = L._idx64 = (L.indptr.astype(np.int64), L.indices.astype(np.int64))
-    from numba import get_num_threads
-    chunk = max(1, min(chunk, -(-Y.shape[1] // get_num_threads())))
-    args = (idx[0], idx[1], L.data, Y, chunk)
-    return _LSOLVE[1](*args) if transpose else _LSOLVE[0](*args)
+        self.n = L.shape[0]
+        self.parts = _sn_kernels()[0](L.indptr.astype(np.int64), L.indices.astype(np.int64), L.data, self.n)
+
+    def _run(self, B: np.ndarray, transpose: bool) -> np.ndarray:
+        from numba import get_num_threads
+        from threadpoolctl import threadpool_limits
+        Y = np.array(B, dtype=np.float64, order="C", copy=True)
+        chunk = max(1, -(-Y.shape[1] // get_num_threads()))
+        with threadpool_limits(1, user_api="blas"):      # the products run inside numba's threads
+            return _sn_kernels()[2 if transpose else 1](*self.parts, Y, chunk)
+
+    def lower(self, B: np.ndarray) -> np.ndarray:
+        """L⁻¹B."""
+        return self._run(B, False)
+
+    def lower_t(self, B: np.ndarray) -> np.ndarray:
+        """L⁻ᵀB."""
+        return self._run(B, True)
+
+
+_SN = None
+
+
+def _sn_kernels():
+    global _SN
+    if _SN is not None:
+        return _SN
+    from numba import njit, prange
+
+    @njit(cache=True)
+    def build(indptr, indices, data, n):
+        starts = np.empty(n + 1, np.int64)
+        starts[0] = 0
+        ns = 1
+        for j in range(1, n):
+            a0, a1 = indptr[j - 1], indptr[j]
+            b0, b1 = indptr[j], indptr[j + 1]
+            same = (a1 - a0) == (b1 - b0) + 1 and indices[a0 + 1] == j
+            if same:
+                for q in range(b1 - b0):
+                    if indices[a0 + 1 + q] != indices[b0 + q]:
+                        same = False
+                        break
+            if not same:
+                starts[ns] = j
+                ns += 1
+        starts[ns] = n
+        starts = starts[:ns + 1]
+        rowptr = np.empty(ns + 1, np.int64)
+        valptr = np.empty(ns + 1, np.int64)
+        rowptr[0] = 0
+        valptr[0] = 0
+        for sn in range(ns):
+            nr = indptr[starts[sn] + 1] - indptr[starts[sn]]
+            rowptr[sn + 1] = rowptr[sn] + nr
+            valptr[sn + 1] = valptr[sn] + nr * (starts[sn + 1] - starts[sn])
+        rows = np.empty(rowptr[ns], np.int64)
+        vals = np.zeros(valptr[ns])
+        for sn in range(ns):
+            c0, c1 = starts[sn], starts[sn + 1]
+            w = c1 - c0
+            p0 = indptr[c0]
+            for i in range(indptr[c0 + 1] - p0):
+                rows[rowptr[sn] + i] = indices[p0 + i]
+            for jj in range(w):                     # column c0+jj holds rows[jj:], in order
+                q0 = indptr[c0 + jj]
+                for i in range(indptr[c0 + jj + 1] - q0):
+                    vals[valptr[sn] + (jj + i) * w + jj] = data[q0 + i]
+        return starts, rowptr, rows, valptr, vals
+
+    @njit(parallel=True, cache=True)
+    def lower(starts, rowptr, rows, valptr, vals, Y, chunk):
+        r = Y.shape[1]
+        ns = len(starts) - 1
+        for c in prange((r + chunk - 1) // chunk):
+            lo, hi = c * chunk, min(r, (c + 1) * chunk)
+            for sn in range(ns):
+                c0, c1 = starts[sn], starts[sn + 1]
+                w = c1 - c0
+                r0, nr = rowptr[sn], rowptr[sn + 1] - rowptr[sn]
+                v0 = valptr[sn]
+                for i in range(w):
+                    d = vals[v0 + i * w + i]
+                    for k in range(lo, hi):
+                        Y[c0 + i, k] /= d
+                    for ii in range(i + 1, w):
+                        lv = vals[v0 + ii * w + i]
+                        if lv != 0.0:
+                            for k in range(lo, hi):
+                                Y[c0 + ii, k] -= lv * Y[c0 + i, k]
+                nb = nr - w
+                if nb == 0:
+                    continue
+                if w * nb >= 64:
+                    T = np.dot(vals[v0 + w * w: v0 + nr * w].reshape(nb, w), np.ascontiguousarray(Y[c0:c1, lo:hi]))
+                    for i in range(nb):
+                        row = rows[r0 + w + i]
+                        for k in range(hi - lo):
+                            Y[row, lo + k] -= T[i, k]
+                else:
+                    for i in range(w, nr):
+                        row = rows[r0 + i]
+                        for jj in range(w):
+                            lv = vals[v0 + i * w + jj]
+                            for k in range(lo, hi):
+                                Y[row, k] -= lv * Y[c0 + jj, k]
+        return Y
+
+    @njit(parallel=True, cache=True)
+    def lower_t(starts, rowptr, rows, valptr, vals, Y, chunk):
+        r = Y.shape[1]
+        ns = len(starts) - 1
+        for c in prange((r + chunk - 1) // chunk):
+            lo, hi = c * chunk, min(r, (c + 1) * chunk)
+            m = hi - lo
+            for sn in range(ns - 1, -1, -1):
+                c0, c1 = starts[sn], starts[sn + 1]
+                w = c1 - c0
+                r0, nr = rowptr[sn], rowptr[sn + 1] - rowptr[sn]
+                v0 = valptr[sn]
+                nb = nr - w
+                if nb > 0:
+                    if w * nb >= 64:
+                        G = np.empty((nb, m))
+                        for i in range(nb):
+                            row = rows[r0 + w + i]
+                            for k in range(m):
+                                G[i, k] = Y[row, lo + k]
+                        T = np.dot(vals[v0 + w * w: v0 + nr * w].reshape(nb, w).T, G)
+                        for i in range(w):
+                            for k in range(m):
+                                Y[c0 + i, lo + k] -= T[i, k]
+                    else:
+                        for i in range(w, nr):
+                            row = rows[r0 + i]
+                            for jj in range(w):
+                                lv = vals[v0 + i * w + jj]
+                                for k in range(lo, hi):
+                                    Y[c0 + jj, k] -= lv * Y[row, k]
+                for i in range(w - 1, -1, -1):
+                    for ii in range(i + 1, w):
+                        lv = vals[v0 + ii * w + i]
+                        if lv != 0.0:
+                            for k in range(lo, hi):
+                                Y[c0 + i, k] -= lv * Y[c0 + ii, k]
+                    d = vals[v0 + i * w + i]
+                    for k in range(lo, hi):
+                        Y[c0 + i, k] /= d
+        return Y
+
+    _SN = (build, lower, lower_t)
+    return _SN
 
 
 def _v_kernels():
