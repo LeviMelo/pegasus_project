@@ -197,7 +197,11 @@ The default is now 1.0. XIII's outers end on the strengths' change, not on the g
 
 XX loses about 3,500 units over 304 k deaths: transport accidents, falls and homicides do not share a geography.
 
-Chapter I goes the other way: −4.22388 against −6.01338, in 53 s and 4 outers against 574 s. The geography carrier also carries each group's course. I's held-out years follow the fall of COVID-19 deaths in B25-B34, so the per-group course extrapolated from 2020–21 is the first suspect. Not tested yet. The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
+Chapter I goes the other way: −4.22388 against −6.01338, in 53 s and 4 outers against 574 s. The geography carrier also carries each group's course. **Tested** (`data/heldout_by_group_I.json`, held-out 2022–23 by group):
+- **Group geography.** B25-B34's own course, continued linearly from 2020–21, expects 2,548,583 deaths against 76,813 observed. That holds 97 % of the chapter's deviance; the other groups are near their observed counts (A30-A49: 66,644 against 61,105).
+- **Chapter geography.** The shared course spreads the surge over every group: A00-A09 expects 103,173 against 10,671, and B25-B34 1,273,186. The total deviance is smaller only because the shock is diluted.
+
+Chapter I's held-out figures therefore measure the history's extrapolation across a shock, not the carriers (OPEN_QUESTIONS 9). The groups' place effects carry signal, so the group stays the geography carrier. `chapter` remains an option of the same mechanism.
 
 ## Small geography carriers pooled (adopted)
 
@@ -211,4 +215,4 @@ Chapter I goes the other way: −4.22388 against −6.01338, in 53 s and 4 outer
 
 - **The default is now `GEO_POOL = 0.01`.** The data key names it only where pooling happens.
 - **The losses on IV and XX** are about 200 units each.
-- **I's gain** is its forecasting anomaly again (see chapter geography above). Its reading waits for `data/heldout_by_group_I.json`.
+- **I's gain** is the same extrapolation artefact (above) and does not count for or against pooling. The decision rests on IV and XX and on the speed.
