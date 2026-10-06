@@ -245,4 +245,27 @@ One fit per block (SIM.DO 2010–2021, current defaults), and every forecast of 
 
 - The flat forecasts beat the linear one on every block. `level`, which at the annual grain is flat at the course's last fitted value (a damped slope with d = 0; the twelve-period mean is the monthly grain's), is best on six of seven; X prefers `robust` and `median`.
 - **This window follows COVID-19:** every chapter's 2020–21 rose, and the linear continuation overshoots (IX 849,703 expected against 787,877).
-- A window without a shock (fitted 2010–2017, held out 2018–19, `data/history_compare_2018.json`) decides before any default changes: PENDING.
+- **Both windows, with Gardner & McKenzie's damped trend** (the last slope damped by d per year; `data/history_compare_damped.json`). Each cell is the change in held-out NB log-likelihood per death against linear:
+
+| window | block | damped8 | damped5 | level | robust |
+|---|---|---|---|---|---|
+| 2018-2019 | I | +0.0033 | +0.0062 | +0.0072 | -0.0004 |
+| 2018-2019 | IX | +0.0005 | +0.0007 | +0.0002 | -0.0037 |
+| 2018-2019 | II | -0.0000 | -0.0000 | -0.0000 | -0.0001 |
+| 2018-2019 | XX | +0.0015 | +0.0029 | +0.0041 | -0.0018 |
+| 2018-2019 | XIII | -0.0002 | -0.0009 | -0.0026 | -0.0224 |
+| 2018-2019 | IV | +0.0001 | +0.0001 | -0.0002 | -0.0038 |
+| 2018-2019 | X | +0.0022 | +0.0042 | +0.0054 | +0.0033 |
+| 2022-2023 | I | +0.6822 | +1.3900 | +2.0544 | +1.8292 |
+| 2022-2023 | IX | +0.0011 | +0.0020 | +0.0021 | -0.0011 |
+| 2022-2023 | II | +0.0001 | +0.0001 | +0.0001 | -0.0004 |
+| 2022-2023 | XX | +0.0008 | +0.0012 | +0.0009 | -0.0079 |
+| 2022-2023 | XIII | +0.0020 | +0.0043 | +0.0068 | -0.0026 |
+| 2022-2023 | IV | +0.0017 | +0.0035 | +0.0049 | +0.0002 |
+| 2022-2023 | X | +0.0054 | +0.0094 | +0.0092 | +0.0243 |
+
+- **The adopted annual default is `damped5`** (d = 0.5), the BP tier's own annual default.
+  - Over 2018–19, a window without a shock, it is never worse than linear by more than 0.0009 per death.
+  - It gains everywhere over 2022–23 (I +1.39).
+  - `level` wins slightly more often, but loses 0.0026 on XIII without a shock.
+  - Outside I, the two are level: 2018–19 +0.0070 against +0.0069; 2022–23 +0.0205 against +0.0240.

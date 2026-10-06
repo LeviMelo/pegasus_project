@@ -243,6 +243,10 @@ Each step's measurement goes into one evaluation entry for O1, written when O1 c
 
 B's construction became a column copy (the feature map has weight-1 entries only; the Newton step is unchanged to 10⁻⁹). The supernodal solves had rescanned the process's libraries through `threadpool_limits` at every call (36 ms each, 2 s per fit); one cached controller removes it. The next levers are the factorisation count (9 for 11 steps) and the probes.
 
+**SIH-RD 2010–2023 refits under ADR-0024** (warm-started, beside three to five other jobs; `data/logs/refit3_sih_2023.log`):
+- 16 chapters took 1,013 s; most took 8–80 s, I 133 s and XIX 282 s (23 groups, none under the pooling share);
+- all 20 SIH chapters are within the 30-minute target, on a loaded machine.
+
 ## 9. Risks and their fallbacks
 
 - **Selected inversion in Python.** No maintained Python binding exposes it. The fallback is Hutchinson probes with exact factor solves: the LAML gradient's noise is then √(2/S) of the trace, and BFGS tolerates it with S = 30.

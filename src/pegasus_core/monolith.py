@@ -2018,7 +2018,12 @@ def model_class(source: dict | None) -> type[Monolith]:
 def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tuple[Monolith, dict[str, torch.Tensor]]:
     """A fit carried to later periods: every effect as fitted, the histories h extrapolated.
     ``history`` chooses the forecast of h:
-      linear    the RW2's forecast mean, linear from the last two fitted periods (the annual default);
+      linear    the RW2's forecast mean, linear from the last two fitted periods;
+      damped5   the last slope damped by half each year (Gardner & McKenzie's damped trend; the annual default since
+                2026-10-06: against linear, held out on seven SIM chapters, never worse by more than 0.001 per death
+                over 2018-19 and better over 2022-23, where the straight line carried COVID-19's 2020-21 rise on and
+                expected 33 times B25-B34's deaths; evaluation 2026-10-06, ICD structure);
+      damped8   the same with 0.8;
       level     flat at the mean of the last twelve months;
       level36   flat at the mean of the last thirty-six months (the monthly default: on dengue 2019–23
                 precision 0.57 -> 0.64 for recall 0.92 -> 0.91; median and robust reach precision 0.71
@@ -2050,7 +2055,7 @@ def extrapolate_effects(model: Monolith, tm: Monolith, effects: dict[str, torch.
     test periods of ``tm`` (see `extrapolate`)."""
     monthly = model.data.grain == "month"
     if history == "auto":
-        history = "level36" if monthly else "linear"
+        history = "level36" if monthly else "damped5"
     test = tm.data
     with torch.no_grad():
         x = {k: v.detach().clone() for k, v in effects.items()}
@@ -2146,7 +2151,7 @@ def _baseline_level(h: np.ndarray, kind: str) -> float:
 
 def heldout(model: Monolith, test: BlockData, interaction: bool = True, history: str = "auto") -> dict:
     """Score a fit on later years (ARCHITECTURE §5.4): every effect as fitted, the histories
-    h extrapolated as the RW2's forecast mean (linear from the last two fitted years).
+    h extrapolated by ``history`` (`extrapolate`; the annual default is the damped trend).
     Returns the Poisson deviance over every test cell (empty cells through the factorised
     total) and the NB log-likelihood of the non-empty cells at the fitted φ, and of every cell
     (``nb_loglik_all``, the empty ones through the factorised sum). ``interaction=False`` scores the same fit with
