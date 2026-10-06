@@ -1240,6 +1240,8 @@ class Monolith:
             # 1.5 … units), and an alternation below two log-likelihood units ends it
             for _ in range(iterations):
                 gain = solver.ix_sweep(self)
+                # a chord start on the sweep's last factor was measured and dropped: rank-1 IX took 63 Newton steps and
+                # 228 s against 36 and 178 s (2026-10-06)
                 steps += solver.fit_mean(self, iterations=iterations, loglik_tol=tol, solver=nw)
                 if gain < max(2.0, min(tol, 1e3)):
                     break
