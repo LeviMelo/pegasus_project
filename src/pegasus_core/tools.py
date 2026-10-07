@@ -1257,3 +1257,35 @@ def joint(fields: list[tuple[str, str, str]], years: list[int], graph: str = "co
         surps.append(s.surprise(node, "B1"))
     first = next(iter(sessions.values()))
     return departures.joint_excess(surps, first.ledger, q=q, replicates=replicates)
+
+
+def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
+            lags: int = 2, q: float = 0.05) -> list[dict]:
+    """Do two fields move together, at which spatial scale and lag (ARCHITECTURE §9.3, `compare`)? The relation map
+    of the two (`relations.relation_map`: N1 innovations by graph band, the factor model, directness, and the national
+    and macro-regional courses where the bands cannot be identified), each field as (dataset, event, node) at B1.
+    Every row is returned, ``reported`` marking the relations at q."""
+    from . import multiscale, relations
+
+    sessions: dict = {}
+    surps = []
+    for ds, ev, node in (x, y):
+        s = sessions.setdefault((ds, ev), Session(ds, ev, years, graph))
+        surps.append(s.surprise(node, "B1"))
+    first = next(iter(sessions.values()))
+    spectrum = multiscale.GraphSpectrum(first.edges(), len(surps[0].places))
+    return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q)["rows"]
+
+
+def records(dataset: str, event: str, year: int, columns: list[str], places: list[int] | None = None):
+    """The records of one event type and year through pegasus_data, the event type's status applied
+    (`gateway._records`), raw-coded; ``places`` keeps the residences given (six-digit IBGE codes). Personal
+    identifiers pass through unmodified, flagged by pegasus_data's roles (`pegasus_data.roles`)."""
+    import pyarrow.compute as pc
+
+    t = gateway._records(dataset, event, year, columns)
+    if places is not None:
+        res = gateway._strata(dataset)["residence"]
+        code = pc.utf8_slice_codeunits(pc.cast(t[res], pa.string()), 0, 6)
+        t = t.filter(pc.is_in(code, value_set=pa.array([str(p) for p in places])))
+    return t

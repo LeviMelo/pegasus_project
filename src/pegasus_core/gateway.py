@@ -676,8 +676,10 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
         label = str(row.get(f"{column}_label") or "").strip().lower()
         out[str(row[column])] = 1 if label in ("m", "masculino", "male") else 2 if label in ("f", "feminino", "female") \
             else None
-    if not any(v == 1 for v in out.values()) or not any(v == 2 for v in out.values()):
-        raise LookupError(f"{dataset}.{column}: pegasus_data labels no male and female codes among {codes} "
+    # a system of one sex is legitimate when its labels say so (HIV in pregnancy, SINAN HIVG, records only women);
+    # what fails is a column no code of which is labelled either sex
+    if not any(v in (1, 2) for v in out.values()):
+        raise LookupError(f"{dataset}.{column}: pegasus_data labels no male or female code among {codes} "
                           f"(system {system}): {labelled}")
     return out
 

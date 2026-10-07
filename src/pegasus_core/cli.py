@@ -248,6 +248,21 @@ def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g.
 
 
 @app.command()
+def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = typer.Argument(..., help="DATASET:EVENT:NODE"),
+            years: str = Years, q: float = 0.05) -> None:
+    """Do two fields move together, at which spatial scale and lag?"""
+    from . import tools
+
+    rows = tools.compare(tuple(x.split(":", 2)), tuple(y.split(":", 2)), _years(years), q=q)
+    t = Table("support", "follower", "leader", "lag", "ρ", "direct", "p", "reported")
+    for r in sorted(rows, key=lambda r: r["p"])[:30]:
+        t.add_row(r["support"], r["field"].split(":")[0] + ":" + r["field"].split(":")[-1],
+                  r["leader"].split(":")[0] + ":" + r["leader"].split(":")[-1], str(r["lag"]), f"{r['rho']:+.3f}",
+                  {True: "direct", False: "shared driver"}.get(r.get("direct"), ""), f"{r['p']:.1e}", str(r["reported"]))
+    console.print(t)
+
+
+@app.command()
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod
