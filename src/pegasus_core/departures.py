@@ -14,6 +14,11 @@ empirical null (Efron 2007): BH at q on the one-sided p-values 1 − Φ((z − �
 reads the empirical survival function, where the spline's log-linear tails would make lfdr → 0 at the extremes of a
 null field (5/10 null worlds of SIH pneumonia had findings by mean lfdr, 2026-10-06). Relevance (P5) is the cell's own test against the minimum relevant effect:
 P(Y ≥ y | rate θ0·μ) under the predictive, which a reported cell must also pass at q.
+
+**The ladder of supports.** Every departure model runs on the field at each support of the ladder (municipality,
+immediate region, state: `scans.scales.standard`, the field lifted by sums, `surprise.lift`), and one FDR runs over
+the union, so a regional departure that no single municipality shows is found where it concentrates. A finding names
+its support and the municipalities it covers.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from __future__ import annotations
 import numpy as np
 from scipy import special, stats
 
-from . import control, surprise
+from . import config, control, surprise
 
 BINS = 120
 
@@ -88,48 +93,107 @@ def bayes_select(p_null: np.ndarray, eligible: np.ndarray, q: float) -> np.ndarr
     return order[:k]
 
 
-def fdr_select(z: np.ndarray, fit: dict, q: float) -> np.ndarray:
-    """The upper-tail scores ``z`` rejected by BH at q on their empirical-null p-values, π0-adaptive (Efron 2007's
-    tail-area Fdr): a boolean mask."""
-    p = stats.norm.sf(z, fit["delta0"], fit["sigma0"])
-    n = p.size
-    order = np.argsort(p)
-    ok = fit["pi0"] * p[order] * n / np.arange(1, n + 1) <= q
-    k = int(np.max(np.nonzero(ok)[0])) + 1 if ok.any() else 0
-    mask = np.zeros(n, bool)
-    mask[order[:k]] = True
-    return mask
+def _ladder(s: surprise.Surprise, scales: list | None) -> list[tuple[surprise.Surprise, object]]:
+    """The field at each support: (the Surprise there, its scale; None for the municipality itself)."""
+    if not scales:
+        return [(s, None)]
+    return [(s, None) if sc.name == "municipality" else (surprise.lift(s, sc), sc) for sc in scales]
 
 
-def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None
-                ) -> list:
-    """Cell excess departures of a field (stage C): Efron's two-group model on its predictive scores, the Bayesian
-    FDR at q, and the minimum relevant effect as each reported cell's own test. Returns `lenses.Finding`s whose
-    ``stats`` carry the lfdr, the empirical null and the effect."""
+def _members(s: surprise.Surprise, sc, k: int) -> list[int]:
+    """The municipalities of unit ``k`` of a support (``sc`` None: the municipality itself)."""
+    return [int(s.places[k])] if sc is None else [int(x) for x in s.places[sc.members(k)]]
+
+
+def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
+                scales: list | None = None) -> list:
+    """Cell excess departures of a field (stage C) over the ladder of supports ``scales`` (None: the municipality):
+    at each support Efron's two-group model on its predictive scores, its empirical-null p-values scaled by its π0;
+    one BH at q over every support's cells; the minimum relevant effect as each reported cell's own test. Returns
+    `lenses.Finding`s whose ``stats`` carry the support, the lfdr, the empirical null and the effect."""
     from .scans import lenses
 
     rr = lenses.RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"cell_excess|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "two-group (Efron)", "field": s.field.id,
                                                                     "tier": s.tier}))
-    ok = ((s.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0) & np.isfinite(s.z)
-    z = s.z[ok]
-    fit = two_group(z)
-    lfdr = np.ones(s.z.shape)
-    lfdr[ok] = fit["lfdr"]
-    relevant = lenses._upper_tail(s.y, rr * s.mu, s.phi)                  # P(Y ≥ y | rate θ0·μ)
-    sig = np.zeros(s.z.shape, bool)
-    sig[ok] = fdr_select(z, fit, q)
-    chosen = np.nonzero((sig & (relevant <= q)).ravel())[0]
-    U, T = s.y.shape
-    out = [lenses.Finding("cell_excess", s.field.id, s.tier,
-                          {"places": [int(s.places[i // T])], "years": [int(s.years[i % T])]},
-                          lenses._rr(s.y.flat[i], s.mu.flat[i]), float(lfdr.flat[i]),
-                          {"observed": float(s.y.flat[i]), "expected": float(s.mu.flat[i]), "lfdr": float(lfdr.flat[i]),
-                           "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")}})
-           for i in chosen]
-    ledger.complete(test, float(lfdr.min()) if lfdr.size else 1.0, None,
-                    {"cells": int(ok.sum()), "hits": len(out), "pi0": fit["pi0"], "sigma0": fit["sigma0"]})
+    parts, ps, rel = [], [], []
+    for sk, sc in _ladder(s, scales):
+        ok = ((sk.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0) & np.isfinite(sk.z)
+        fit = two_group(sk.z[ok])
+        lfdr = np.ones(sk.z.shape)
+        lfdr[ok] = fit["lfdr"]
+        p = np.ones(sk.z.shape)
+        p[ok] = fit["pi0"] * stats.norm.sf(sk.z[ok], fit["delta0"], fit["sigma0"])
+        parts.append((sk, sc, fit, lfdr, ok))
+        ps.append(p.ravel())
+        rel.append(lenses._upper_tail(sk.y, rr * sk.mu, sk.phi).ravel())     # P(Y ≥ y | rate θ0·μ)
+    p_all, rel_all = np.concatenate(ps), np.concatenate(rel)
+    sig = control.bh(p_all, q) & (rel_all <= q)
+    out, offset = [], 0
+    for sk, sc, fit, lfdr, _ok in parts:
+        U, T = sk.y.shape
+        for i in np.nonzero(sig[offset:offset + U * T])[0]:
+            out.append(lenses.Finding("cell_excess", s.field.id, s.tier,
+                                      {"places": _members(s, sc, i // T), "years": [int(sk.years[i % T])]},
+                                      lenses._rr(sk.y.flat[i], sk.mu.flat[i]), float(p_all[offset + i]),
+                                      {"support": "municipality" if sc is None else sc.name,
+                                       "unit": str(sk.places[i // T]), "observed": float(sk.y.flat[i]),
+                                       "expected": float(sk.mu.flat[i]), "lfdr": float(lfdr.flat[i]),
+                                       "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")}}))
+        offset += U * T
+    ledger.complete(test, float(p_all.min()) if p_all.size else 1.0, None,
+                    {"cells": int(sum(o.sum() for *_, o in parts)), "hits": len(out),
+                     "null": {("municipality" if sc is None else sc.name): {k: round(f[k], 4) for k in ("pi0", "sigma0")}
+                              for _, sc, f, _, _ in parts}})
+    return out
+
+
+def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.05, rate_ratio: float | None = None,
+           footprints: tuple[float, ...] = (1, 3, 10, 30, 100, 300), replicates: int = 40, shape: str = "spike"
+           ) -> list:
+    """Excess departures of a field at unknown spatial scale (stage C): the multiscale peaks of its standardised kernel
+    excess on the place graph (`multiscale.peaks`, STEM with the peak-height law from the predictive's replicates),
+    one BH at q over every peak of every scale and temporal contrast, the minimum relevant effect as each peak's own
+    one-sided test at q, and overlapping reported peaks merged into the most significant. ``shape`` is the departure's
+    course in time (`multiscale.contrasts`): ``spike`` (one period) or ``step`` (a level from a start to the end, the
+    change-point question at unknown spatial scale). A finding names its scale (the footprint's effective places) and
+    the places holding half its kernel's mass. No zoning enters."""
+    from . import multiscale
+    from .scans import lenses
+
+    rr = lenses.RATE_RATIO if rate_ratio is None else rate_ratio
+    family = f"excess:{shape}|{s.tier}|{s.field.block}"
+    test = ledger.register(control.Hypothesis(family, "departure", {"model": "multiscale graph peaks (STEM)",
+                                                                    "field": s.field.id, "tier": s.tier}))
+    scales = spectrum.scales(footprints)
+    found, null = multiscale.peaks(s, spectrum, scales, shape=shape, replicates=replicates,
+                                   seed=config.seed("excess", shape, s.field.id, s.tier), rate_ratio=rr)
+    if not found:
+        ledger.complete(test, 1.0, None, {"peaks": 0, "hits": 0})
+        return []
+    p = np.array([pk.p for pk in found])
+    keep = control.bh(p, q) & (np.array([pk.relevance_z for pk in found]) >= stats.norm.isf(q))
+    chosen, taken = [], []
+    for i in np.argsort(p):
+        if not keep[i]:
+            continue
+        pk = found[i]
+        fp = set(multiscale.footprint(spectrum, pk.centre, pk.s))
+        overlapping = [(c, other) for (c, other, w) in taken if w[0] < pk.window[1] and pk.window[0] < w[1]]
+        if any(pk.centre in other or c in fp for c, other in overlapping):
+            continue
+        taken.append((pk.centre, fp, pk.window))
+        chosen.append((pk, sorted(fp)))
+    out = [lenses.Finding("excess" if shape == "spike" else f"excess_{shape}", s.field.id, s.tier,
+                          {"places": [int(s.places[u]) for u in fp],
+                           "years": [int(s.years[pk.window[0]]), int(s.years[pk.window[1] - 1])]},
+                          float(pk.rate_ratio), float(pk.p),
+                          {"centre": int(s.places[pk.centre]), "scale_places": round(pk.places, 1), "s": pk.s,
+                           "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3)})
+           for pk, fp in chosen]
+    ledger.complete(test, float(p.min()), None, {"peaks": len(found), "hits": len(out),
+                                                 "null_peaks_per_replicate": {str(round(k, 4)): v for k, v in null.items()}})
     return out
 
 
@@ -163,7 +227,7 @@ def _laplace_glm(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, X: np.ndarray, 
 
 
 def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
-         min_years: int = 2, min_past: int = 3, prior_change: float = 0.05) -> list:
+         min_years: int = 2, min_past: int = 3, prior_change: float = 0.05, scales: list | None = None) -> list:
     """Step departures of a field (stage C): a Bayesian single change point per place (the established product-partition
     form with one change; Barry & Hartigan 1993, Chib 1998). Model M_τ: log μ_t = log μ̂_t + a + b·x_t + δ·1[t ≥ τ],
     τ over the windows that leave ``min_past`` periods before and ``min_years`` after; M_0 has no step. Priors:
@@ -175,20 +239,53 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
     composite-likelihood adjustment for its serial correlation under the predictive (N1). P(step) is the posterior
     mass off M_0, its prior ``prior_change``. Relevance (P5) is P(δ > log θ0 | step) ≥ 0.5 at the most probable τ.
     The reported places are the largest set, in decreasing P(step), whose mean posterior null probability is at most
-    q (the Bayesian FDR). A step is its own term, so the course never takes it in (the absorption of B2)."""
+    q (the Bayesian FDR), over the union of the ladder's supports ``scales`` (None: the municipality). A step is its
+    own term, so the course never takes it in (the absorption of B2)."""
     from .scans import lenses
 
     rr = lenses.RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"step|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "Bayesian single change point",
                                                                     "field": s.field.id, "tier": s.tier}))
+    fits = [(sk, sc, _step_posteriors(sk, rr, min_years, min_past, prior_change)) for sk, sc in _ladder(s, scales)]
+    fits = [(sk, sc, f) for sk, sc, f in fits if f is not None]
+    if not fits:
+        return []
+    p_null = np.concatenate([f["p_null"] for *_, f in fits])
+    eligible = np.concatenate([f["eligible"] for *_, f in fits])
+    chosen = set(bayes_select(p_null, eligible, q).tolist())
+    out, offset = [], 0
+    for sk, sc, f in fits:
+        for i in range(len(f["rows"])):
+            if offset + i not in chosen:
+                continue
+            t0 = int(f["starts"][f["k"][i]])
+            out.append(lenses.Finding("step", s.field.id, s.tier,
+                                      {"places": _members(s, sc, int(f["rows"][i])),
+                                       "years": [int(sk.years[t0]), int(sk.years[-1])]},
+                                      float(np.exp(f["d"][i])), float(f["p_null"][i]),
+                                      {"support": "municipality" if sc is None else sc.name,
+                                       "unit": str(sk.places[f["rows"][i]]), "p_step": float(1 - f["p_null"][i]),
+                                       "delta": float(f["d"][i]), "delta_sd": float(f["sd"][i]),
+                                       "p_relevant": float(f["p_relevant"][i]), "start": int(sk.years[t0])}))
+        offset += len(f["rows"])
+    ledger.complete(test, float(p_null.min()), None, {"units": len(p_null), "hits": len(out)})
+    return out
+
+
+def _step_posteriors(s: surprise.Surprise, rr: float, min_years: int, min_past: int, prior_change: float
+                     ) -> dict | None:
+    """`step`'s model at one support: per unit, the posterior null probability, the most probable start, δ and its
+    sd, P(δ > log θ0), and whether the unit is eligible (an upward, likely relevant step)."""
+    from .scans import lenses
+
     U, T = s.y.shape
     y, mu = s.y, np.maximum(s.mu, 1e-12)
     phi = np.where(np.isfinite(s.phi), s.phi, 1e12) if np.ndim(s.phi) else np.full((U, T), s.phi)
     ok = ((s.flags & surprise.DENOMINATOR) == 0).all(1) & (mu.sum(1) > 0.5)
     rows = np.nonzero(ok)[0]
     if rows.size == 0 or min_past + min_years > T:
-        return []
+        return None
     y, mu, phi = y[rows], mu[rows], phi[rows]
     x = (np.arange(T) - (T - 1) / 2) / max(T - 1, 1)               # the course's slope per series length
     var_a, var_b = 1.0, 0.25
@@ -214,18 +311,8 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
     k = post[:, 1:].argmax(1)
     d, sd = deltas[np.arange(len(rows)), k], dsd[np.arange(len(rows)), k]
     p_relevant = special.ndtr((d - np.log(rr)) / np.maximum(sd, 1e-12))
-    eligible = (p_relevant >= 0.5) & (d > 0)
-    chosen = bayes_select(p_null, eligible, q)
-    out = []
-    for i in chosen:
-        t0 = int(starts[k[i]])
-        out.append(lenses.Finding("step", s.field.id, s.tier,
-                                  {"places": [int(s.places[rows[i]])], "years": [int(s.years[t0]), int(s.years[-1])]},
-                                  float(np.exp(d[i])), float(p_null[i]),
-                                  {"p_step": float(1 - p_null[i]), "delta": float(d[i]), "delta_sd": float(sd[i]),
-                                   "p_relevant": float(p_relevant[i]), "start": int(s.years[t0])}))
-    ledger.complete(test, float(p_null.min()), None, {"places": len(rows), "hits": len(out)})
-    return out
+    return {"rows": rows, "p_null": p_null, "eligible": (p_relevant >= 0.5) & (d > 0), "k": k, "starts": starts,
+            "d": d, "sd": sd, "p_relevant": p_relevant}
 
 
 class _Municipal:

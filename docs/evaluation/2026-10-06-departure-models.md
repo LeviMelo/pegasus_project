@@ -16,7 +16,7 @@
 | null worlds with findings | 0/10 | 0/10 | 0/10 | 0/10 |
 | false share in planted worlds | 0.037 | 0 | 0.004 | 0 |
 
-**Accepted: cell excess replaces the outbreak lens.** All power is lower than in the grids before N1, because the worlds now carry the fields' measured serial dependence and extra variance.
+**Accepted: cell excess takes over the retrospective cell question from the outbreak lens.** The lens stays for what cell excess does not yet do: the prospective alarm on BPA. All power is lower than in the grids before N1, because the worlds now carry the fields' measured serial dependence and extra variance.
 
 **Step** (`departures.step`) is a Bayesian single change point per place:
 - **Evidence.** Laplace marginal likelihoods, tempered by the serial correlation.

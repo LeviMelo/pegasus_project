@@ -15,18 +15,24 @@ outcome's history has absorbed part of the lagged effect (evaluation 2026-10-06,
 The term inside the monolith's joint fit is the v2. It is the **pairwise confirmation** of a relation the joint model
 reports (ADR-0029, stage D), never the search.
 
-**The joint model** (`factor_model`; docs/plans/2026-10-06-o7-joint-relations.md): every field's departures from its
-expectation (stage B), r_{f,u,t} = log((y + ½)/(μ + ½)) with its sampling variance v_{f,u,t} from B's predictive and
-noise structure (N1), are explained together by K shared space–time factors (spatial dynamic factor analysis; Lopes,
-Salazar & Gamerman 2008; the shared-component model of Knorr-Held & Best 2001):
+**The joint model** (stage D; docs/plans/2026-10-06-o7-joint-relations.md): which fields move together over places
+and periods, at which spatial scale, and which leads which. One pipeline, no pairwise search and no zoning:
 
-    r_{f,u,t} = Σ_k λ_{f,k} F_{k,u,t} + ε_{f,u,t},   ε ~ N(0, v_{f,u,t} + σ_f²),
-    F_{·,u,t} ~ N(0, I) per cell (the space–time GMRF prior of the design note is the next step),
-    λ_{f,k} ~ N(0, γ_k), γ_k by automatic relevance determination (a factor no field needs shrinks away: K by evidence).
+1. `innovations`: every field's departures whitened by its own predictive (N1): per place, the Pearson residuals
+   times L⁻¹, LLᵀ the covariance over periods that B states. Under the model they are i.i.d. N(0, 1), so whatever
+   co-varies across fields afterwards is shared, not each field's own serial dependence.
+2. `bands`: the innovations on the graph Fourier basis of the place graph (`multiscale.GraphSpectrum`), split into
+   frequency bands: a continuum of spatial scales from the whole country to a few neighbouring towns, set by the
+   graph and not by administrative units. The transform is orthonormal, so the noise stays i.i.d. per coefficient.
+3. `lagged`: each field stacked with its own past (the stacked form of a dynamic factor model).
+4. `factor_model`: per band, the EM of probabilistic factor analysis with automatic relevance determination
+   (Rubin & Thayer 1982; Bishop 1999): z ~ N(0, I) per coefficient, r = Λz + ε, K chosen by the ARD.
+5. `relation_table`: every pair of distinct fields at every lag and band, its implied correlation ρ = (ΛΛᵀ)_fg over
+   the total variances, z = ρ·√n (exact under step 1's i.i.d. null), one BH over everything.
 
-A relation is two fields loading on one factor. The fit is the EM of probabilistic factor analysis (`factor_model`):
-the cells' factor posteriors, then every field's K loadings by a small weighted ridge regression, independent across
-fields. The cost grows with F·U·T·K², never with F².
+A relation is two fields loading on one factor: statistical, never causal by itself (P16). Measured on a planted world
+over the real municipal graph (evaluation 2026-10-07, factor model): no false relation in a null world and none in a
+planted one, the planted lead found at its scale and lag. The cost grows with F·n·K², never with F².
 """
 
 from __future__ import annotations
@@ -161,34 +167,6 @@ class Departures:
     v: np.ndarray
 
 
-def departures(surprises: list, support: str = "municipality") -> Departures:
-    """The departures matrix from fields' expectations (`surprise.Surprise`, one tier each) over their common places
-    and periods, lifted by sums to ``support`` (`fields.lift`; the ladder of supports): r = log((y + ½)/(μ + ½)),
-    v = Var(y)/(μ + ½)² with Var(y) the predictive's under its noise structure, summed over the support's places (the
-    delta method). A regional relation concentrates at a coarser support, where the municipal noise averages out."""
-    from . import fields as fields_
-    from . import surprise as sp_
-
-    places = surprises[0].places
-    periods = np.asarray(surprises[0].years)
-    for s in surprises[1:]:
-        places = np.intersect1d(places, s.places)
-        periods = np.intersect1d(periods, np.asarray(s.years))
-    rs, vs, units = [], [], None
-    for s in surprises:
-        ui = np.searchsorted(s.places, places)
-        ti = np.searchsorted(np.asarray(s.years), periods)
-        y, mu = s.y[np.ix_(ui, ti)], s.mu[np.ix_(ui, ti)]
-        phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[np.ix_(ui, ti)]
-        bad = ((s.flags[np.ix_(ui, ti)] & (sp_.DENOMINATOR | sp_.NO_INFORMATION)) != 0) | ~np.isfinite(mu)
-        var = np.where(bad, 0.0, sp_.cell_variance(mu, phi, s.noise))
-        y, mu = np.where(bad, 0.0, y), np.where(bad, 0.0, mu)
-        units, (y, mu, var) = fields_.lift(y, places, support)[0], (fields_.lift(x, places, support)[1] for x in (y, mu, var))
-        rs.append(np.log((y + 0.5) / (mu + 0.5)))
-        vs.append(np.where(mu > 0, var / (mu + 0.5) ** 2, np.inf))
-    return Departures([s.field.id for s in surprises], units, periods, np.stack(rs), np.stack(vs))
-
-
 @dataclass
 class Factors:
     """A fitted joint factor model: loadings λ [F, K] with their conditional sd (given the scores: too small to test
@@ -231,24 +209,25 @@ def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float =
     F, U, T = d.r.shape
     n = U * T
     ok = np.isfinite(d.v.reshape(F, n))
-    R = torch.as_tensor(np.where(ok, d.r.reshape(F, n), 0.0), dtype=torch.float64, device=dev)
-    V = torch.as_tensor(np.where(ok, d.v.reshape(F, n), 0.0), dtype=torch.float64, device=dev)
+    f32, f64 = torch.float32, torch.float64      # the cells' contractions in single precision (a laptop GPU runs
+    R = torch.as_tensor(np.where(ok, d.r.reshape(F, n), 0.0), dtype=f32, device=dev)   # double at 1/64 the rate),
+    V = torch.as_tensor(np.where(ok, d.v.reshape(F, n), 0.0), dtype=f32, device=dev)   # the sums and M-step in double
     OK = torch.as_tensor(ok, device=dev)
-    sigma2 = torch.zeros(F, dtype=torch.float64, device=dev)
+    sigma2 = torch.zeros(F, dtype=f32, device=dev)
     W = torch.where(OK, 1.0 / torch.where(OK, V, torch.ones_like(V)), torch.zeros_like(V))
     Z = R * W.sqrt()
     ev, vec = torch.linalg.eigh(Z @ Z.T / n)
     top = torch.argsort(ev, descending=True)[:K]
     lam = vec[:, top] * torch.sqrt(torch.clamp(ev[top], min=1e-6))
-    gamma = torch.ones(K, dtype=torch.float64, device=dev)
-    eye = torch.eye(K, dtype=torch.float64, device=dev)
+    gamma = torch.ones(K, dtype=f64, device=dev)
+    eye = torch.eye(K, dtype=f32, device=dev)
     trace, prev = [], None
     for it in range(iterations):
         W = torch.where(OK, 1.0 / torch.where(OK, V + sigma2[:, None], torch.ones_like(V)), torch.zeros_like(V))
-        A = torch.zeros((F, K, K), dtype=torch.float64, device=dev)
-        b = torch.zeros((F, K), dtype=torch.float64, device=dev)
+        A = torch.zeros((F, K, K), dtype=f64, device=dev)
+        b = torch.zeros((F, K), dtype=f64, device=dev)
         ll = 0.0
-        resid2 = torch.zeros(F, dtype=torch.float64, device=dev)
+        resid2 = torch.zeros(F, dtype=f64, device=dev)
         for a0 in range(0, n, chunk):                                   # E-step by chunks of cells
             w, r = W[:, a0:a0 + chunk], R[:, a0:a0 + chunk]
             P = eye + torch.einsum("fn,fk,fj->nkj", w, lam, lam)
@@ -256,23 +235,24 @@ def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float =
             S = torch.cholesky_inverse(L)                                # Σ_n
             m = torch.einsum("nkj,nj->nk", S, (w * r).T @ lam)            # m_n
             Ezz = S + m[:, :, None] * m[:, None, :]
-            A += torch.einsum("fn,nkj->fkj", w, Ezz)
-            b += (w * r) @ m
+            A += torch.einsum("fn,nkj->fkj", w, Ezz).double()
+            b += ((w * r) @ m).double()
             fit = lam @ m.T
             resid2 += torch.where(OK[:, a0:a0 + chunk], (r - fit) ** 2 + torch.einsum("fk,nkj,fj->fn", lam, S, lam),
-                                  torch.zeros_like(r)).sum(1)
+                                  torch.zeros_like(r)).double().sum(1)
             # the marginal log likelihood of the chunk: −½ Σ (w r² − (Λᵀ W r)ᵀ Σ (Λᵀ W r) − log|W| + log|P|)
             g = (w * r).T @ lam
-            ll += float(-0.5 * ((w * r * r).sum() - torch.einsum("nk,nk->", g, m)
-                                - torch.log(torch.where(w > 0, w, torch.ones_like(w))).sum()
-                                + 2 * torch.log(torch.diagonal(L, dim1=1, dim2=2)).sum()))
+            ll += float(-0.5 * ((w * r * r).double().sum() - (g * m).double().sum()
+                                - torch.log(torch.where(w > 0, w, torch.ones_like(w))).double().sum()
+                                + 2 * torch.log(torch.diagonal(L, dim1=1, dim2=2)).double().sum()))
         # M-step: the loadings with their ARD prior, then the ARD variances and the extra noise variances
         H = A + torch.diag_embed((1.0 / gamma).expand(F, K))
-        lam = torch.linalg.solve(H, b[..., None])[..., 0]
+        lam64 = torch.linalg.solve(H, b[..., None])[..., 0]
         cov = torch.linalg.inv(H)
-        gamma = torch.clamp((lam ** 2 + torch.diagonal(cov, dim1=1, dim2=2)).mean(0), min=1e-10)
-        sigma2 = torch.clamp((resid2 - torch.where(OK, V, torch.zeros_like(V)).sum(1)) / OK.sum(1).clamp(min=1),
-                             min=0.0)
+        gamma = torch.clamp((lam64 ** 2 + torch.diagonal(cov, dim1=1, dim2=2)).mean(0), min=1e-10)
+        lam = lam64.float()
+        sigma2 = torch.clamp((resid2 - torch.where(OK, V, torch.zeros_like(V)).double().sum(1)) / OK.sum(1).clamp(min=1),
+                             min=0.0).float()
         trace.append(round(ll, 3))
         if log and (it % 10 == 0):
             log(f"iteration {it}: log likelihood {ll:.6g}, γ {np.round(gamma.cpu().numpy(), 5).tolist()}")
@@ -292,3 +272,107 @@ def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float =
     noise_var = c(OK.sum(1) / W.sum(1))
     cells = float(np.median(c(W.sum(1)) ** 2 / c((W ** 2).sum(1))))           # Kish's effective n, the fields' median
     return Factors(d.fields, c(lam), c(sd), c(Fk), c(sigma2), c(gamma), noise_var, cells, trace)
+
+
+def innovations(surprises: list) -> Departures:
+    """Every field's departures whitened by its own predictive (stage B, N1): per place, the Pearson residuals
+    x_t = (y_t − μ_t)/√V_t have the covariance over periods Σ = diag(1 − f) + √(f_t f_s) ρ^|t−s| (f the frailty's
+    share of each cell's variance, ρ the copula's correlation), so e = L⁻¹x with LLᵀ = Σ are i.i.d. N(0, 1) under the
+    model: the GLS innovations. A relation, lagged or not, is read on these (`lagged`, `bands`), never on raw
+    departures: each field's serial correlation, stacked with its own past, was explained by shared factors and read
+    as 2,400 relations in a world of independent fields; an AR pooled over places left 35, because big places carry
+    the frailty's correlation and small ones the Poisson's independence (2026-10-07). Returned with unit v."""
+    from . import surprise as sp_
+
+    places = surprises[0].places
+    periods = np.asarray(surprises[0].years)
+    for s in surprises[1:]:
+        places = np.intersect1d(places, s.places)
+        periods = np.intersect1d(periods, np.asarray(s.years))
+    T = len(periods)
+    lag = np.abs(np.arange(T)[:, None] - np.arange(T)[None, :])
+    out = []
+    for s in surprises:
+        ui = np.searchsorted(s.places, places)
+        ti = np.searchsorted(np.asarray(s.years), periods)
+        y, mu = s.y[np.ix_(ui, ti)], s.mu[np.ix_(ui, ti)]
+        phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[np.ix_(ui, ti)]
+        bad = ((s.flags[np.ix_(ui, ti)] & (sp_.DENOMINATOR | sp_.NO_INFORMATION)) != 0) | ~(mu > 0)
+        V = sp_.cell_variance(mu, phi, s.noise)
+        x = np.where(bad, 0.0, (y - mu) / np.sqrt(np.where(bad, 1.0, V)))
+        f = np.where(bad, 0.0, (V - mu) / np.where(bad, 1.0, V))
+        S = np.sqrt(f[:, :, None] * f[:, None, :]) * s.noise.rho ** lag
+        S[:, np.arange(T), np.arange(T)] = 1.0
+        L = np.linalg.cholesky(S)
+        out.append(np.linalg.solve(L, x[..., None])[..., 0])
+    r = np.stack(out)
+    return Departures([s.field.id for s in surprises], places, periods, r, np.ones(r.shape))
+
+
+def lagged(d: Departures, lags: int) -> Departures:
+    """The departures augmented by each field's own past (the stacked form of a dynamic factor model): field f at lag
+    ℓ is ``f@ℓ``, r_{f@ℓ}(u, t) = r_f(u, t − ℓ), over the periods with every lag observed. A factor loaded by A@0 and
+    B@ℓ is a relation in which A at t moves with B at t − ℓ: B leads A by ℓ periods."""
+    T = len(d.periods)
+    if lags >= T:
+        raise ValueError(f"{lags} lags leave no period of {T}")
+    r = np.concatenate([d.r[:, :, lags - ell:T - ell] for ell in range(lags + 1)])
+    v = np.concatenate([d.v[:, :, lags - ell:T - ell] for ell in range(lags + 1)])
+    names = [f"{f}@{ell}" for ell in range(lags + 1) for f in d.fields]
+    return Departures(names, d.places, d.periods[lags:], r, v)
+
+
+def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
+                                                                        0.2, 0.5, 2.01)) -> dict[str, Departures]:
+    """The departures in graph-frequency bands (`multiscale.GraphSpectrum`; no zoning): each field's departures
+    standardised by their sampling sd (i.i.d. under the null), projected on the Laplacian's eigenvectors (orthonormal,
+    so the noise stays i.i.d. per coefficient), and split by eigenvalue into ``edges_of_bands``. A smooth regional
+    factor concentrates in the low bands, a local one in the high. Each band is a `Departures` over its coefficients
+    with unit sampling variance, keyed by its label: the eigenvalue range and the effective places of the heat kernel
+    at s = 1/λ (the band's spatial scale)."""
+    import torch
+
+    lam, Q = spectrum._eig
+    ok = np.isfinite(d.v) & (d.v > 0)
+    x = np.where(ok, d.r / np.sqrt(np.where(ok, d.v, 1.0)), 0.0)          # [F, U, T]
+    F, U, T = x.shape
+    X = torch.as_tensor(np.transpose(x, (1, 0, 2)).reshape(U, F * T), dtype=Q.dtype, device=Q.device)
+    xh = (Q.T @ X).cpu().numpy().reshape(U, F, T).transpose(1, 0, 2)      # [F, eigen, T]
+    lam_ = lam.cpu().numpy()
+    out = {}
+    for lo, hi in zip(edges_of_bands[:-1], edges_of_bands[1:], strict=True):
+        idx = np.nonzero((lam_ >= lo) & (lam_ < hi))[0]
+        if idx.size < 3:
+            continue
+        mid = float(np.sqrt(max(lo, lam_[idx].min(), 1e-6) * hi))
+        label = f"λ {lo:g}-{hi:g} (~{spectrum.footprint(1.0 / mid):.0f} places)"
+        out[label] = Departures(d.fields, idx, d.periods, xh[:, idx, :], np.ones((F, idx.size, T)))
+    return out
+
+
+def relation_table(fits: dict[str, Factors], q: float = 0.05) -> list[dict]:
+    """Stage D's report over fits at several supports (``fits``: support → `Factors`, on `lagged` departures or not):
+    every pair of distinct fields, at relative lag ℓ ≥ 0 (one of the two at lag 0), its implied correlation and z,
+    a two-sided p, and one BH at q over every pair, lag and support. A relation is statistical (P16): whether it is a
+    cause, a shared driver or a shared recording artefact is stage E's question."""
+    from . import control
+
+    rows = []
+    for support, fit in fits.items():
+        rho, z = fit.relations()
+        base = [n.split("@")[0] for n in fit.fields]
+        lag = [int(n.split("@")[1]) if "@" in n else 0 for n in fit.fields]
+        for i in range(len(base)):
+            for j in range(i + 1, len(base)):
+                if base[i] == base[j] or min(lag[i], lag[j]) != 0:
+                    continue
+                a, b = (i, j) if lag[i] == 0 else (j, i)       # a at lag 0; b at lag ℓ (b leads a by ℓ)
+                rows.append({"support": support, "field": base[a], "leader": base[b], "lag": lag[b],
+                             "rho": float(rho[i, j]), "z": float(z[i, j])})
+    if not rows:
+        return []
+    p = 2 * stats.norm.sf(np.abs([r["z"] for r in rows]))
+    keep = control.bh(p, q)
+    for r, pi, k in zip(rows, p, keep, strict=True):
+        r["p"], r["reported"] = float(pi), bool(k)
+    return rows

@@ -464,7 +464,7 @@ GRID_SHAPES = ("spike", "step", "trend", "group")
 GRID_THETAS = (1.1, 1.2, 1.5, 2.0, 3.0)
 GRID_LOAD = 0.05     # a world's planted excess in any period, at most this share of the field's expected events then (beyond its first plant)
 GRID_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence", "group_disparity")
-MINIMUM_EFFECT_ARG = {"cell_excess": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
+MINIMUM_EFFECT_ARG = {"cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
                       "spatial_cluster": "rate_ratio", "trend_divergence": "ratio", "group_disparity": "sd"}
 
 
