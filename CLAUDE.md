@@ -19,6 +19,58 @@ People and AI agents use it through a lead register and on-demand tools. The pac
 
 The earlier attempts (April–July 2026) are history: `docs/RECOLLECTION.md`, `docs/history/`. **They are read for reasoning, never as instructions.**
 
+## 1.0 Goal, ambition and principles (read before any work)
+
+**The goal.** Turn everything Brazil records about its health into **trustworthy leads** that a person can act on:
+- what departs from "normal Brazil";
+- how fields relate;
+- what the structure shows.
+
+The data cover deaths, admissions, births, notifications, procedures and more, by place, period, age, sex and code. A lead carries its effect, its certainty and its method's record.
+
+**The ambition**, which every piece of work must serve:
+- **General.** Every method works for any field of any system, at any grain, with no logic or constant specific to one dataset, disease or place.
+- **Systematic.** It searches all fields, all places, all periods and all relations at once, with the multiplicity of the whole search designed in, never a hand-picked case.
+- **Principled.** It uses the field's established statistical method (P11), with each estimate's uncertainty calibrated and its claim's error rate controlled.
+- **Optimised.** It exploits the model's structure: sparse arrowhead solvers, GMRFs, factorised totals, low-rank joint structure. It runs on this machine in budgeted time. Speed is a feature, but never bought with validity.
+
+**The core concepts:**
+- the monolith's **expectation** (stage B), with its noise structure;
+- **departure models** (C);
+- one **joint relation model** (D);
+- **interpretation** (E);
+- **use** (F).
+
+The bench (planted signals in refitted worlds, null worlds, SBC) characterises B–D statistically.
+
+**Principles P1–P16 (ARCHITECTURE §1), in short:**
+- **P1** Expectation first: nothing is judged except against its modelled expectation.
+- **P2** Events and marks are modelled, not correlations of columns.
+- **P3** Every cell carries its information weight.
+- **P4** Estimands are declared, each with its own reference and null.
+- **P5** Effects are tested against a minimum *relevant* effect, and the search's multiplicity is designed.
+- **P6** Structure priors pool levels, never relations.
+- **P7** Every strength is learned or measured, never set by hand.
+- **P8** Observed stays observed; modelled inputs carry their uncertainty.
+- **P9** Validation characterises, never licenses: power, calibration and false discoveries are reported, and nothing is gated.
+- **P10** No dense object larger than the population tensor.
+- **P11** The established method comes first; a threshold or a check is never the answer to a modelling problem.
+- **P12** Departures and relations are model terms read through posteriors, not tails of residual statistics.
+- **P13** Exploit structure, and budget speed with a benchmark.
+- **P14** Recording is measured: leads are re-scoped, never dissolved by untested explanations.
+- **P15** Race is an axis, read through its misclassification.
+- **P16** One stage, one computation: statistical validity in B–D, epidemiological only in E; a failed null is fixed in B, per field, never by per-system thresholds.
+
+**How work derailed on 2026-10-06, and the check that prevents it.** A day went into tuning v0 residual lenses with per-system thresholds, comparing variants by trial, and testing relations pairwise. Each step was locally reasonable and globally against P11, P12 and P16. Before any change, answer:
+1. **Which stage is this?** Does it stay inside that stage?
+2. **Is it general?** Would it work, unchanged, on a system I have not looked at? If it needs a per-system constant, the cause is in another stage, usually B.
+3. **What is the established method** for this estimand? Am I building it, or patching a v0?
+4. **Am I fixing the cause, or a symptom?** A failed null is a model defect; lead volume is a ranking question; "is it real?" is stage E's.
+5. **Does it follow the roadmap's order** (STATUS, ARCHITECTURE §12)? Am I improving something the architecture has already demoted?
+6. **Is the computation structured and budgeted** (P13)? Does it scale to all fields at once?
+
+If any answer is wrong, stop, re-plan, and write it down before coding.
+
 ## 1.1 The six stages (ARCHITECTURE §1.1, revision 3, ADR-0029)
 
 PegaSUS is a pipeline of six stages, **one computation each**. Every piece of work starts by naming the stage it belongs to.
