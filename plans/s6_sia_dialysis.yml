@@ -1,0 +1,7 @@
+# S6: SIA's dialysis authorisations (APAC ATD, published from 2014)
+years: 2014-2023
+systems:
+  - {dataset: SIASUS-ATD, event: dialysis_authorisation, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_sia_dialysis.md

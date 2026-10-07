@@ -1,0 +1,8 @@
+# S6: SIA's oncology authorisations (APAC chemotherapy and radiotherapy), every chapter of the ICD-10 tree
+years: 2010-2023
+systems:
+  - {dataset: SIASUS-AQ, event: chemotherapy_authorisation, blocks: [all], levels: [group]}
+  - {dataset: SIASUS-AR, event: radiotherapy_authorisation, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_sia_apac.md

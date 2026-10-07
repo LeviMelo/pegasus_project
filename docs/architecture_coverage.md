@@ -109,7 +109,7 @@ The old gaps 1–3 (κ and SUS, race, the low-rank term) are measurement work in
 | 9 | **The admission rule is now the power-curve rule (ADR-0022, 2026-10-05); θ0 below 1.2 and the map under invariant 8 are still to be read.** Admission: lens power for a rate ratio planted over a macro-region and window, outbreak, space-time and spatial cluster at 2.0 (they never reach 0.5 at 1.5), change point at 1.5; pairs by E_b power at ρ = 0.3; a field miscalibrated at B1 (map) or at its tier (E_w) is excluded from pair scans in code. Open: the θ0 calibration (queued), the map re-run, the survey counts below, trend and group power at the reference | 8.4, 11.4 | Every survey count in this document predates the rule and is measured with the former 1,000 events / 5 %; P5 and P7 lose the admission constant | yes (8.4, 11.4 rows) |
 | 10 | **Coverage of the data is narrow and stale in places.** Fitted: SIM 19 chapters, SIH 20 chapters (production survey: X; the rest running detached), SINASC 3, SINAN DENG and LEPT. Never read: SIA (APAC AQ/AR/AN/ATD, PA), CIHA, CNES-ST events, 54 of 58 SINAN agravos, REGIC and the care-flow graph, the climate field in the gateway (read only by `data/p2` scripts), the SIH-SIM link. `SIM.DO` chapter XVII had no fit under the current exposure key (the `hybrid` default of `3e5c9fb`); refitted 2026-10-06 (φ 8.67, 147,531 deaths), `Session.fields("XVII")` loads 10 fields | 3.1, 12 | The "all the data it reads through pegasus_data" of §1 is four systems and two infections | no |
 
-Also silent in §13 and ranked below these: the imports of `pegasus_data` outside `gateway` (config, corroborate, facility, fields; invariant 1); no survey-per-data-update trigger (§9.3); no `Session.compare`/`subset_scan`/`cohort`/`records`; the `RECORDING` flag is not served; the population-scaled iid part of BYM2; list effects and graph mixtures; scan across fields (§7.3); the observation lens.
+Also silent in §13 and ranked below these: the imports of `pegasus_data` outside `gateway` (config, corroborate, facility, fields; invariant 1); no survey-per-data-update trigger (§9.3); the `RECORDING` flag is not served; the population-scaled iid part of BYM2; list effects and graph mixtures; scan across fields (§7.3); the observation lens.
 
 ---
 
@@ -156,10 +156,10 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | population: SUS-dependent variant | BU | `gateway.sus_share` (`sus-dependent-2`, 2021-23) | unmeasured, see 4.1 row |
 | population: completeness by system, place, year | P | `gateway.completeness` (`system-completeness-2`, UF × year) | read as a modifier, opt-in; no municipal completeness exists |
 | aggregates: sparse counts, mark accumulators | P | `gateway.event_counts`, `mark_moments` (own DuckDB SQL) | pegasus_data's `logmoments` aggregate not used |
-| records and linked persons | P | `scans/cohort.py`; links used in `data/cohort_infant.py`, `data/agent_race/` | no API: `cohort()` and `records()` of §9.3 absent |
+| records and linked persons | P | `tools.cohort`, `tools.records`, `gateway.linked_counts` (identities by pegasus_data's rule, grouped sides; 2026-10-07) | no cohort run on the current code |
 | lattice cell (u, t, g) | BM | `monolith.BlockData` | none |
 | institution cell (f, t) with catchment exposure | P | `facility.institution_lattice`, `E:institutions` | SIH annual only |
-| field (id, kind, law, exposure, signature, provenance) | P | `fields.Field` | only counts are registry fields; no exposure, provenance members; mark fields live outside it |
+| field (id, kind, law, exposure, signature, provenance) | P | `fields.Field`; `fields.declared` lists every declared column as a field or with its reason (measures, compositions, intervals, links, other classifiers' trees; 2026-10-07) | no exposure, provenance members on `Field` |
 | block, monolith (versioned), tier, surprise | BM | `store`, `surprise.py` | none |
 | scan, test, hypothesis; ledger entry | BM | `control.Ledger`: 29,313 tests registered before running | 73 registered tests have no result |
 | lead | P | `leads.py`; 33,228 leads | only `residual` and `subset` kinds exist in the register (7 kinds declared) |
@@ -190,11 +190,11 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 4.3 identifiability: sum-to-zero, centred siblings | BM | `monolith._centre` | interaction orthogonalisation moot (no interaction) |
 | 4.3 unequal places: border-length weights, 1 km corner floor | BM | `graphs.py` | none |
 | 4.3 unequal places: population-scaled iid precision | NB | `structures.iid` is unweighted | not in §13 |
-| 4.4 positive continuous mark, log-normal on log-moments | BM | `MarkModel`, `E:harness-gate` (PESO, δ 1.5 %) | one field only |
-| 4.4 count-valued, bounded-score, binary-share marks | NB | | not in §13 |
-| 4.4 marks of SIH (stay, cost, ICU days, death in hospital) | NB | pegasus_data declares them (`model: mark`) | gap 6 |
-| 4.4 marks of SINASC other than PESO | NB | 19 further SINASC marks declared | |
-| 4.4 case-mix and institution effect on the location | NB | | not in §13 |
+| 4.4 positive continuous mark, log-normal on log-moments | BM | `MarkModel`, `E:harness-gate` (PESO, δ 1.5 %); every declared measure (`fields.measure_source`) | first end-to-end readings running (plans/s1_*) |
+| 4.4 count-valued, bounded-score, binary-share marks | BU | `CountModel` for a domain admitting 0 (surprise: the sum's NB PIT), `ShareModel` for compositions and linked shares; relevance in the events' own SD (`surprise.LOCATION_EFFECT`) | bounded scores read as counts |
+| 4.4 marks of SIH (stay, cost, ICU days, death in hospital) | P | 38 declared with missing codes (pegasus_data ADR-0154); DIAS_PERM in `plans/s1_sih_x.yml` | not yet read out |
+| 4.4 marks of SINASC other than PESO | P | domains and missing codes declared (ADR-0154 addenda); `plans/s1_sinasc_fields.yml` | not yet fitted |
+| 4.4 case-mix and institution effect on the location | BU | case-mix offset from the first alternative classifier (`gateway._mark_frame`), facility effects (`marks.py`) | |
 | 4.5 supply term (opt-in) | BM | `E:institutions` (11 % of the facility class, 6.5 % of signals) | annual only; sole providers stay unreadable |
 | 4.5 institution lattice, facility steps | BM | `E:institutions` (1,744 steps in 5,666 facilities; null 0.0002) | SIH annual; SIM `CODESTAB` has the cube, no lattice |
 | 4.5 facility effect inside the likelihood, crossed effects | NB | | §13 row 4.5 |
@@ -292,7 +292,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 8.2 agents: exploratory logged, claims through `confirm` | P | `mcp_server.confirm_claim` | MCP paused (ADR-0008); no agent runtime |
 | 8.3 later years (`temporal`) | BM | `E:replication-independent-units` (size ≤ 0.014, power 0.9-1.0) | cannot see departures the fit absorbs (0.05-0.18) |
 | 8.3 other places (`spatial`, ADR-0019) | BM | `E:artefact-aware-replication`, `E:replicated-claims-read` | clusters untested; trend (neighbours) leads have no spatial test |
-| 8.3 another system (`corroborated`) | BM | `E:replication-independent-units` (scattered null 0.061) | no SIM signal corroborated; SIA/APAC would add a system |
+| 8.3 another system (`corroborated`) | BM | `E:derived-corroboration`: sources from declarations, 13 of 31 SIM landslide leads corroborated by S2iD's reported harm | SIA/APAC would add a system; statewide epidemics cannot corroborate a place |
 | 8.3 evidence grades (tested, bound, consistent) | BM | `explain.GRADES`, ADR-0019 | |
 | 8.3 event split for sizes | BM | `E:replication` | |
 | 8.3 reserved period SIM.DO 2024 | BU | `control.RESERVED_PERIODS`, `ReservedPeriod` guard | never opened; three `confirm`-family rows are declarations, not spends |

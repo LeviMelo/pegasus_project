@@ -26,7 +26,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from . import config, fields, store
+from . import config, fields, gateway, store
 
 
 @dataclass
@@ -103,6 +103,17 @@ def _links(sys_: System) -> list[str]:
     return list(sys_.links)
 
 
+def _chapters(sys_: System) -> list[str]:
+    """``blocks: [all]``: every chapter of the event type's primary tree (``*`` for an event type without one)."""
+    et = gateway.event_type(sys_.dataset, sys_.event)
+    primary = next((c for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    if primary is None or not primary.get("structure"):
+        return ["*"]
+    tree = gateway.code_tree(primary["structure"])
+    return sorted(c for c, lv in zip(tree.column("code").to_pylist(), tree.column("level").to_pylist(), strict=True)
+                  if lv == "chapter")
+
+
 def _measures(sys_: System) -> list[str]:
     return _declared(sys_, "measure", sys_.measures)
 
@@ -133,21 +144,25 @@ def _mark(key: dict[str, Any], result: dict[str, Any]) -> None:
     store.put_table("update", key, pa.table({"done": [time.strftime("%Y-%m-%dT%H:%M:%S")]}), {**key, **result})
 
 
+resolved: dict[str, list[str]] = {}       # the blocks each system's plan resolved to in the current run
+
+
 def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: bool, log) -> Any:
     """§8.3's later years for a system's answers: the questions asked again on the years up to ``last`` (its own
     fits and register, `Session.train`), what they select tested once on the later years (`Session.temporal_confirm`),
     and each answer given the verdict of the selection that is the same finding (`Session.retier`)."""
-    key = _key("later_years", dataset=sys_.dataset, event=sys_.event, blocks=sys_.blocks, levels=sys_.levels,
+    blocks = resolved.get(sys_.dataset, sys_.blocks)
+    key = _key("later_years", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
                questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers))
     if not force and _done(key):
         return "done on these versions"
     t = s.train(last)
-    for block in sys_.blocks:
+    for block in blocks:
         try:
             t.expectations.model(block)
         except LookupError:
             fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, log=log)
-    t.survey_questions(sys_.blocks, tuple(plan.questions) if plan.questions else None,
+    t.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                        levels=tuple(sys_.levels) if sys_.levels else None, log=log)
     selected = s.temporal_confirm(last, log=log)
     s.register.add(s.retier(answers, selected))
@@ -162,22 +177,32 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
 
     out: dict[str, Any] = {}
     sessions = {}
+    resolved.clear()
     for sys_ in plan.systems:
         s = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph)
         sessions[sys_.dataset] = s
-        for block in sys_.blocks:
+        blocks = _chapters(sys_) if sys_.blocks == ["all"] else sys_.blocks
+        for block in list(blocks):
             key = _key("fit", dataset=sys_.dataset, event=sys_.event, block=block, years=plan.years, graph=plan.graph)
             try:
                 s.expectations.model(block)
                 out[f"fit {sys_.dataset} {block}"] = "fitted already"
             except LookupError:
-                fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, log=log)
+                try:
+                    fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, log=log)
+                except (ValueError, LookupError) as exc:     # "all": a chapter the events never use
+                    if sys_.blocks != ["all"]:
+                        raise
+                    log(f"FAIL fit {sys_.dataset} {block}: {type(exc).__name__}: {exc}")
+                    out[f"fit {sys_.dataset} {block}"] = f"failed: {exc}"
+                    blocks.remove(block)
+                    continue
                 _mark(key, {})
                 out[f"fit {sys_.dataset} {block}"] = "fitted"
-        key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=sys_.blocks, levels=sys_.levels,
+        key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
                    questions=plan.questions, years=plan.years)
         if force or not _done(key):
-            leads = s.survey_questions(sys_.blocks, tuple(plan.questions) if plan.questions else None,
+            leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                        levels=tuple(sys_.levels) if sys_.levels else None, log=log)
             _mark(key, {"answers": len(leads)})
             out[f"questions {sys_.dataset}"] = len(leads)
@@ -189,7 +214,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
         readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
                     for column in _declared(sys_, "interval", sys_.intervals)]
-        readers = [(column, source, sys_.blocks) for column, source in readers]
+        resolved[sys_.dataset] = list(blocks)
+        readers = [(column, source, list(blocks)) for column, source in readers]
         # another classifier's counts: the same events by its own tree, every chapter of it
         readers += [(name, source, roots) for name, source, roots in fields.classifier_sources(sys_.dataset, sys_.event)
                     if sys_.classifiers == "all" or name.split(":", 1)[1] in (sys_.classifiers or [])]

@@ -1,0 +1,7 @@
+# S6: foetal deaths (SIM-DOFET), every chapter of its ICD-10 tree
+years: 2010-2023
+systems:
+  - {dataset: SIM-DOFET, event: foetal_death, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_sim_dofet.md

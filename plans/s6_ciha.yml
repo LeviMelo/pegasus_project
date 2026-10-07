@@ -1,0 +1,7 @@
+# S6: CIHA, admissions outside SIH's billing (published from 2011; 2011 left out as the first, partial year)
+years: 2012-2023
+systems:
+  - {dataset: CIHA, event: hospitalisation, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_ciha.md
