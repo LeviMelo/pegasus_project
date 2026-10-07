@@ -507,7 +507,10 @@ def _neighbours(U: int, edges: np.ndarray) -> list[list[int]]:
 
 def grid_units(places: np.ndarray, edges: np.ndarray, kind: str) -> list[np.ndarray]:
     """The candidate loci of a kind, as arrays of place indices: every municipality, every municipality with its
-    graph neighbours, every immediate region, state and macro-region."""
+    graph neighbours, every immediate region, state and macro-region; or a ``blob``, a connected cluster grown on the
+    graph from each place to a log-uniform size between 3 and 300 places, adding a random frontier place at each step.
+    Blobs follow no partition: a bench of administrative regions favours a method that reads those regions (the
+    ladder of supports won the region plants of 2026-10-07 by matching them unit for unit)."""
     from . import gateway
 
     U = len(places)
@@ -515,6 +518,20 @@ def grid_units(places: np.ndarray, edges: np.ndarray, kind: str) -> list[np.ndar
         return [np.array([u]) for u in range(U)]
     if kind == "cluster":
         return [np.unique([u, *n]) for u, n in enumerate(_neighbours(U, edges))]
+    if kind == "blob":
+        nb = _neighbours(U, edges)
+        rng = np.random.default_rng(config.seed("grid-blobs", U))
+        out = []
+        for u in range(U):
+            size = int(np.exp(rng.uniform(np.log(3), np.log(300))))
+            members, frontier = {u}, set(nb[u])
+            while len(members) < size and frontier:
+                v = list(frontier)[int(rng.integers(len(frontier)))]
+                members.add(v)
+                frontier.discard(v)
+                frontier.update(w for w in nb[v] if w not in members)
+            out.append(np.array(sorted(members)))
+        return out
     code = {"region": lambda: np.asarray(gateway.regions(places, "ibge_immediate_region")),
             "state": lambda: places // 10000, "macro": lambda: places // 100000}[kind]()
     return [np.nonzero(code == c)[0] for c in np.unique(code)]

@@ -76,7 +76,7 @@ class GraphSpectrum:
         lam, Q = self._eig
         rows = Q @ (torch.exp(-s * lam) * self._q1)                      # Σ_u K(c, u)
         squares = self._qsq @ torch.exp(-2 * s * lam)                    # Σ_u K(c, u)² = (K²)_cc
-        return float((rows ** 2 / torch.clamp(squares, min=1e-300)).median())
+        return float((rows ** 2 / torch.clamp(squares, min=1e-300)).nanmedian())
 
     def scales(self, footprints: tuple[float, ...] = (1, 3, 10, 30, 100, 300)) -> list[float]:
         """The s whose median footprint is each of ``footprints`` (bisection on log s; 0 for a single place)."""
@@ -180,9 +180,11 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
           replicates: int = 40, seed: int = 0, rate_ratio: float = 1.0) -> tuple[list[Peak], dict]:
     """The field's multiscale peaks for a departure ``shape`` (`contrasts`) with their STEM p-values (module
     docstring). At scale s and contrast c the statistic is S = Σ_u K(·, u) cᵀ(y_u − μ_u) / √(Σ_u K(·, u)² cᵀΣ_u c),
-    Σ_u the place's covariance over periods under N1 (`contrast_variance`). A peak's p-value is read against the
-    peaks of the same scale and contrast in replicate fields drawn from the predictive. Each peak also carries its
-    relevance statistic, the excess over ``rate_ratio`` times the expectation."""
+    Σ_u the place's covariance over periods under N1 (`contrast_variance`). Each scale's S is calibrated to the
+    replicates' by its median and MAD (the empirical null), and the peaks are the joint maxima over place and scale
+    (scale-space detection: Lindeberg 1998). A peak's p-value is read against the joint peaks of the same scale and
+    contrast in replicate fields drawn from the predictive. Each peak also carries its relevance statistic, the excess
+    over ``rate_ratio`` times the expectation; the returned dict also holds each scale's calibration."""
     torch, dev = _torch()
     U, T = s.y.shape
     phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)
@@ -196,34 +198,62 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     W = torch.as_tensor(np.where(ok.all(1, keepdims=True), contrast_variance(s, C), 0.0), dtype=torch.float32,
                         device=dev)                                                         # [U, m]
     rng = np.random.default_rng(seed)
-    reps = [(np.where(ok, surprise.replicate_correlated(s.mu, phi, s.noise, rng), 0.0) - mu0) @ C
+    noise = surprise.spatial_structure(s, spectrum)                   # N1 with its spatial part, on this graph
+    root = surprise.spatial_root(spectrum, noise.scale) if noise.omega > 0 else None
+    reps = [(np.where(ok, surprise.replicate_correlated(s.mu, phi, noise, rng, root), 0.0) - mu0) @ C
             for _ in range(replicates)]
     Dr = torch.as_tensor(np.concatenate(reps, 1), dtype=torch.float32, device=dev)          # [U, R·m]
     A = (spectrum.neighbours + sp.identity(U)).tocoo()       # a place counts among its own neighbourhood
     rows, cols = A.row, A.col
-    found, null = [], {}
+    # pass 1: the standardised excess at every scale, observed [k, U, m] and replicated [k, U, R, m]
+    S_all, Sr_all, places = [], [], []
     for sc in scales:
         K = torch.eye(U, device=dev) if sc == 0 else spectrum.kernel(sc)
         KW = (K * K) @ W
-        S = (K @ D) / torch_sqrt(KW)
-        Sr = ((K @ Dr) / torch_sqrt(KW.repeat(1, replicates))).reshape(U, replicates, m)
-        is_peak = _local_maxima(S, rows, cols)
-        rpeak = _local_maxima(Sr.reshape(U, -1), rows, cols).reshape(U, replicates, m)
+        S_all.append((K @ D) / torch_sqrt(KW))
+        Sr_all.append(((K @ Dr) / torch_sqrt(KW.repeat(1, replicates))).reshape(U, replicates, m))
+        places.append(spectrum.footprint(sc))                     # in double precision: far rows underflow in single
+        del K, KW
+    S_all, Sr_all = torch.stack(S_all), torch.stack(Sr_all)
+    # the empirical null per scale (Efron's central matching, by median and MAD): the field's own statistic re-centred
+    # and re-scaled to the replicates' wherever the predictive misstates it; a real departure is too rare to move them
+    calibration = {}
+    for k in range(len(scales)):
+        o, r = S_all[k].flatten(), Sr_all[k].flatten()
+        mo, mr = o.median(), r.median()
+        so = (o - mo).abs().median().clamp(min=1e-6)
+        sr = (r - mr).abs().median().clamp(min=1e-6)
+        S_all[k] = (S_all[k] - mo) * (sr / so) + mr
+        calibration[places[k]] = {"shift": round(float(mo - mr), 4), "scale": round(float(so / sr), 4)}
+    # pass 2: joint maxima in place x scale (scale-space: a peak beats its graph neighbours at its own scale and its
+    # own place at the scales either side), so one departure is one test at the scale that fits it best
+    def joint(X):                                   # X [k, U, ...] -> boolean of the same shape
+        flat = X.reshape(len(scales), U, -1)
+        loc = torch.stack([_local_maxima(flat[k], rows, cols) for k in range(len(scales))])
+        up = torch.ones_like(loc)
+        up[:-1] &= flat[:-1] >= flat[1:]
+        up[1:] &= flat[1:] >= flat[:-1]
+        return (loc & up).reshape(X.shape)
+    is_peak, rpeak = joint(S_all), joint(Sr_all)
+    found, null = [], {"calibration": calibration, "noise": {"omega": noise.omega, "places": spectrum.footprint(
+        noise.scale) if noise.omega > 0 else 1.0}}
+    for k, sc in enumerate(scales):
+        K = torch.eye(U, device=dev) if sc == 0 else spectrum.kernel(sc)
+        KW = (K * K) @ W
         KC, KM = K @ (D + CM), K @ CM
-        places = float(((K.sum(1) ** 2) / (K ** 2).sum(1)).median())
-        null[sc] = float(rpeak.sum()) / replicates
+        null[places[k]] = float(rpeak[k].sum()) / replicates
         for j in range(m):
-            null_heights = torch.sort(Sr[:, :, j][rpeak[:, :, j]]).values
-            cs = torch.nonzero(is_peak[:, j], as_tuple=True)[0]
-            if cs.numel() == 0:
+            null_heights = torch.sort(Sr_all[k][:, :, j][rpeak[k][:, :, j]]).values
+            cs = torch.nonzero(is_peak[k][:, j], as_tuple=True)[0]
+            if cs.numel() == 0 or null_heights.numel() == 0:
                 continue
-            h = S[cs, j]
+            h = S_all[k][cs, j]
             p = torch.as_tensor(tail_p(null_heights.cpu().numpy(), h.cpu().numpy()), device=dev)
             rr = KC[cs, j] / torch.clamp(KM[cs, j], min=1e-12)
             zrel = (KC[cs, j] - rate_ratio * KM[cs, j]) / torch_sqrt(KW[cs, j])
             for c, hh, pp, r, zr in zip(cs.tolist(), h.tolist(), p.tolist(), rr.tolist(), zrel.tolist(), strict=True):
-                found.append(Peak(c, windows[j], sc, places, hh, r, zr, pp))
-        del K, S, Sr
+                found.append(Peak(c, windows[j], sc, places[k], hh, r, zr, pp))
+        del K, KW, KC, KM
     return found, null
 
 

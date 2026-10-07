@@ -150,7 +150,8 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
 
 
 def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.05, rate_ratio: float | None = None,
-           footprints: tuple[float, ...] = (1, 3, 10, 30, 100, 300), replicates: int = 40, shape: str = "spike"
+           footprints: tuple[float, ...] = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512), replicates: int = 40,
+           shape: str = "spike"
            ) -> list:
     """Excess departures of a field at unknown spatial scale (stage C): the multiscale peaks of its standardised kernel
     excess on the place graph (`multiscale.peaks`, STEM with the peak-height law from the predictive's replicates),
@@ -193,7 +194,7 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
                            "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3)})
            for pk, fp in chosen]
     ledger.complete(test, float(p.min()), None, {"peaks": len(found), "hits": len(out),
-                                                 "null_peaks_per_replicate": {str(round(k, 4)): v for k, v in null.items()}})
+                                                 "null": {str(k): v for k, v in null.items()}})
     return out
 
 

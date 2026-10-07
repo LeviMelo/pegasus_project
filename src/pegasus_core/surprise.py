@@ -56,13 +56,20 @@ class Noise:
     reference tier) is not noise: it is what the trend and step departure models test (`noise_structure`).
 
     The Surprise's φ already carries κ (`with_noise`); its ``noise`` then keeps κ = 1 and records the estimate in the
-    calibration."""
+    calibration.
+
+    **Space** (`spatial_structure`): the copula's latent field is separable, Cov(ε_ut, ε_vt') = Σs(u, v) ρ^|t−t'|,
+    with Σs = (1 − ω) I + ω H_s* on the place graph, H_s the heat kernel exp(−sL) scaled to unit diagonal. ω = 0 is
+    places independent. Measured on 2026-10-07: the multiscale statistic of stroke deaths spread 1.18× (spikes) and
+    1.39× (steps) wider than the place-independent predictive at 256-place footprints."""
     kappa: float = 1.0
     rho: float = 0.0
+    omega: float = 0.0       # the spatially correlated share of the latent field
+    scale: float = 0.0       # s* of its heat kernel (the graph's own units; `multiscale.GraphSpectrum.footprint`)
 
     @property
     def null(self) -> bool:
-        return self.kappa == 1.0 and self.rho == 0.0
+        return self.kappa == 1.0 and self.rho == 0.0 and self.omega == 0.0
 
     def frailty_variance(self, phi: np.ndarray) -> np.ndarray:
         """κ/φ per cell (0 where φ is infinite)."""
@@ -710,14 +717,92 @@ def suffix_variance(mu: np.ndarray, phi: np.ndarray, noise: Noise, scale: float 
     return np.cumsum((cell_variance(m, phi_, noise) + 2 * row)[:, ::-1], 1)[:, ::-1]
 
 
-def copula_normals(shape: tuple, rho: float, rng: np.random.Generator) -> np.ndarray:
-    """Standard normals [..., T] with an AR(1) correlation ρ over the last axis: the copula's latent field."""
+def copula_normals(shape: tuple, rho: float, rng: np.random.Generator, omega: float = 0.0,
+                   root: np.ndarray | None = None) -> np.ndarray:
+    """Standard normals [..., U, T] with an AR(1) correlation ρ over the last axis and, with ``omega`` > 0, the
+    spatial correlation (1 − ω)I + ωH over the places axis (``root`` [U, U], a square root of H with unit diagonal:
+    `spatial_root`): the copula's latent field."""
+    def innovation() -> np.ndarray:
+        z = rng.standard_normal(shape[:-1])
+        if omega > 0:
+            z = np.sqrt(1.0 - omega) * z + np.sqrt(omega) * (rng.standard_normal(shape[:-1]).astype(np.float32) @ root.T)
+        return z
+
     eps = np.empty(shape)
-    eps[..., 0] = rng.standard_normal(shape[:-1])
+    eps[..., 0] = innovation()
     innov = np.sqrt(max(1.0 - rho ** 2, 0.0))
     for t in range(1, shape[-1]):
-        eps[..., t] = rho * eps[..., t - 1] + innov * rng.standard_normal(shape[:-1])
+        eps[..., t] = rho * eps[..., t - 1] + innov * innovation()
     return eps
+
+
+def spatial_root(spectrum, s: float) -> np.ndarray:
+    """[U, U] float32 R with R Rᵀ = H_s, the heat kernel exp(−sL) of ``spectrum`` scaled to unit diagonal:
+    D^{−1/2} Q e^{−sΛ/2} Qᵀ, D = diag(exp(−sL))."""
+    import torch
+
+    lam, Q = spectrum._eig
+    d = (Q * Q) @ torch.exp(-s * lam)
+    R = (Q * torch.exp(-s * lam / 2)) @ Q.T / torch.sqrt(torch.clamp(d, min=1e-300))[:, None]
+    return R.float().cpu().numpy()
+
+
+def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2, 4, 8, 16, 32, 64, 128, 256),
+                      min_expected: float = 0.0) -> Noise:
+    """The spatial part of the noise structure (`Noise`: ω, s*) on the place graph ``spectrum``, by the graph
+    periodogram of the residuals (the moments of a stationary process on a graph: Marques, Segarra, Leus & Ribeiro
+    2017; Perraudin & Vandergheynst 2017). Each place's standardised series x = (y − μ)/√V loses its level and
+    trend (e = xM); on the Laplacian's eigenvectors q_k, under the separable model,
+
+        E[Σ_t (q_kᵀ e_t)²] = tr(M) Σ_u q_uk² p_u + tr(M R(ρ) M) q_kᵀ A Σs A q_k,   A = diag(√f),
+
+    p and f the Poisson and frailty shares of each place's variance. Σs = (1 − ω)I + ωH_s: for each candidate s
+    (the footprints' scales) ω is the weighted least squares on the per-eigenvector powers, clipped to [0, 1], and s*
+    the best fit. Returns the field's noise with (ω, s*) added."""
+    import torch
+
+    lam, Q = spectrum._eig
+    U, T = s.y.shape
+    phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)
+    V = cell_variance(s.mu, phi, s.noise)
+    good = (s.mu > 0) & ((s.flags & (DENOMINATOR | NO_INFORMATION)) == 0)
+    x = np.where(good, (s.y - s.mu) / np.sqrt(np.where(good, V, 1.0)), 0.0)
+    M = _detrend_projection(T)
+    e = x @ M
+    p = np.where(good, s.mu / np.where(good, V, 1.0), 0.0).mean(1)
+    f = np.where(good, (V - s.mu) / np.where(good, V, 1.0), 0.0).mean(1)
+    if f.sum() <= 0:
+        return s.noise
+    dev, dt = Q.device, Q.dtype
+    Qt = Q
+    E = Qt.T @ torch.as_tensor(e, dtype=dt, device=dev)                           # [U eigen, T]
+    obs = (E * E).sum(1)
+    Q2 = Qt * Qt
+    a = Q2.T @ torch.as_tensor(p, dtype=dt, device=dev)                           # Σ_u q_uk² p_u
+    b = Q2.T @ torch.as_tensor(f, dtype=dt, device=dev)                           # Σ_u q_uk² f_u
+    R = s.noise.rho ** np.abs(np.arange(T)[:, None] - np.arange(T)[None, :])
+    cR, cM = float(np.trace(M @ R @ M)), float(np.trace(M))
+    target = obs - cM * a
+    sqf = torch.as_tensor(np.sqrt(f), dtype=dt, device=dev)
+    best = (np.inf, 0.0, 0.0)
+    for fp in footprints:
+        sc = spectrum.scales((fp,))[0]
+        dK = Q2 @ torch.exp(-sc * lam)                                             # diag(exp(−sL))
+        G = Qt.T @ ((sqf / torch.sqrt(torch.clamp(dK, min=1e-300)))[:, None] * Qt)   # Qᵀ A D^{-1/2} Q
+        h = (torch.exp(-sc * lam)[:, None] * G * G).sum(0)                          # q_kᵀ A H_s A q_k
+        base, slope = cR * b, cR * (h - b)
+        expected0 = cM * a + base
+        w = 1.0 / torch.clamp(expected0, min=1e-6) ** 2
+        om = float(((target - base) * slope * w).sum() / torch.clamp((slope * slope * w).sum(), min=1e-300))
+        om = min(max(om, 0.0), 1.0)
+        fit = cM * a + base + om * slope
+        sse = float((((obs - fit) ** 2) * w).sum())
+        if sse < best[0]:
+            best = (sse, om, sc)
+    return Noise(s.noise.kappa, s.noise.rho, round(best[1], 4), best[2])
+
+
+
 
 
 def gamma_frailty(eps: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
@@ -731,16 +816,18 @@ def gamma_frailty(eps: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
     return out
 
 
-def frailty(phi: np.ndarray, noise: Noise, rng: np.random.Generator) -> np.ndarray:
-    """A draw of the predictive's frailty [U, T] (`Noise`): gamma marginals joined by the AR(1) Gaussian copula."""
+def frailty(phi: np.ndarray, noise: Noise, rng: np.random.Generator, root: np.ndarray | None = None) -> np.ndarray:
+    """A draw of the predictive's frailty [U, T] (`Noise`): gamma marginals joined by the Gaussian copula, AR(1) over
+    periods and, with ω > 0, correlated over places (``root``: `spatial_root` at the noise's scale)."""
     phi_ = np.asarray(phi, dtype=float)
-    return gamma_frailty(copula_normals(phi_.shape, noise.rho, rng), phi_, noise)
+    return gamma_frailty(copula_normals(phi_.shape, noise.rho, rng, noise.omega, root), phi_, noise)
 
 
-def replicate_correlated(mu: np.ndarray, phi: np.ndarray, noise: Noise, rng: np.random.Generator) -> np.ndarray:
+def replicate_correlated(mu: np.ndarray, phi: np.ndarray, noise: Noise, rng: np.random.Generator,
+                         root: np.ndarray | None = None) -> np.ndarray:
     """Counts y* [U, T] from the predictive with its noise structure: Poisson(μ · `frailty`), NB(μ, φ/κ) marginally."""
     phi_ = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
-    return rng.poisson(mu * frailty(phi_, noise, rng)).astype(float)
+    return rng.poisson(mu * frailty(phi_, noise, rng, root)).astype(float)
 
 
 def with_noise(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, noise: Noise, seed: int
