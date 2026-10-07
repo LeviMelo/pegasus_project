@@ -476,3 +476,76 @@ def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, m
     ledger.complete(test, float(pv.min()) if pv.size else 1.0, None, {"cells": int(ok.sum()), "hits": len(out),
                                                                        "theta": th})
     return out
+
+
+# ---------------------------------------------------------------------- several fields at once (ARCHITECTURE §7.3)
+
+
+def _ltss_scores(Y: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The expectation-based Poisson subset scan over fields at every cell, by the linear-time subset scanning property
+    (Neill 2012): with the fields sorted by Y/M, the best subset is a prefix. ``Y``, ``M`` [F, n]. Returns the
+    maximal log-likelihood ratio [n] and the prefix length [n]. LLR(S) = Y_S log(Y_S/M_S) − (Y_S − M_S) where
+    Y_S > M_S, else 0."""
+    ratio = np.where(M > 0, Y / np.maximum(M, 1e-300), 0.0)
+    order = np.argsort(-ratio, axis=0)
+    Ys = np.cumsum(np.take_along_axis(Y, order, 0), 0)
+    Ms = np.cumsum(np.take_along_axis(M, order, 0), 0)
+    llr = np.where(Ys > Ms, Ys * np.log(np.maximum(Ys, 1e-300) / np.maximum(Ms, 1e-300)) - (Ys - Ms), 0.0)
+    k = np.argmax(llr, 0)
+    return llr[k, np.arange(llr.shape[1])], k + 1
+
+
+def joint_excess(surprises: list, ledger: control.Ledger, q: float = 0.05, replicates: int = 100, min_fields: int = 2
+                 ) -> list:
+    """Places and periods where a set of fields departs together (§7.3; ADR-0004's "an excess seen in all three
+    systems at once"): Neill's fast subset scan over the fields at each cell (`_ltss_scores`), each field read against
+    its own stage-B expectation. The null of a cell's maximal score comes from ``replicates`` fields drawn from each
+    field's predictive with its noise structure (N1; fields independent under the null), pooled over cells of similar
+    expectation (deciles of the cell's total expectation), its tail by a generalised Pareto (`multiscale.tail_p`). One
+    BH at q over the cells; a finding names the fields of the best subset (at least ``min_fields``), the places and
+    the period, and the subset's rate ratio."""
+    from . import multiscale
+    from .scans import lenses
+
+    names = [s.field.id for s in surprises]
+    places = np.asarray(surprises[0].places)
+    years = np.asarray(surprises[0].years)
+    for s in surprises[1:]:
+        if not (np.array_equal(np.asarray(s.places), places) and np.array_equal(np.asarray(s.years), years)):
+            raise ValueError("joint_excess reads fields on one lattice (the same places and periods)")
+    Y = np.stack([s.y.reshape(-1) for s in surprises]).astype(float)
+    M = np.stack([s.mu.reshape(-1) for s in surprises]).astype(float)
+    obs, k = _ltss_scores(Y, M)
+    rng = np.random.default_rng(config.seed("joint_excess", *names))
+    tot = M.sum(0)
+    edges = np.unique(np.quantile(tot, np.linspace(0, 1, 11)))
+    cls = np.clip(np.searchsorted(edges, tot, side="right") - 1, 0, len(edges) - 2)
+    null = [[] for _ in range(len(edges) - 1)]
+    for _ in range(replicates):
+        Yr = np.stack([surprise.replicate_correlated(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape),
+                                                      s.noise, rng).reshape(-1) for s in surprises])
+        sr, _ = _ltss_scores(Yr, M)
+        for c in range(len(null)):
+            null[c].append(sr[cls == c])
+    p = np.ones(obs.shape)
+    for c in range(len(null)):
+        sel = cls == c
+        h = np.sort(np.concatenate(null[c]))
+        if sel.any() and h.size:
+            p[sel] = multiscale.tail_p(h, obs[sel])
+    test = ledger.register(control.Hypothesis("joint|" + "+".join(names), "departure",
+                                              {"model": "fast subset scan over fields (Neill 2012)", "fields": names}))
+    keep = control.bh(p, q) & (k >= min_fields)
+    U, T = surprises[0].y.shape
+    order = np.argsort(-np.where(M > 0, Y / np.maximum(M, 1e-300), 0.0), axis=0)
+    out = []
+    for i in np.flatnonzero(keep):
+        sub = order[:k[i], i]
+        u, t = divmod(int(i), T)
+        out.append(lenses.Finding("joint_excess", "+".join(names[j] for j in sub), "B1",
+                                  {"places": [int(places[u])], "years": [int(years[t]), int(years[t])],
+                                   "fields": [names[j] for j in sub]},
+                                  float(Y[sub, i].sum() / max(M[sub, i].sum(), 1e-12)), float(p[i]),
+                                  {"llr": round(float(obs[i]), 3), "fields": int(k[i])}))
+    ledger.complete(test, float(p.min()) if p.size else 1.0, None, {"cells": int(p.size), "hits": len(out)})
+    return out

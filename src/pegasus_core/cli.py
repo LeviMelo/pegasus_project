@@ -228,6 +228,26 @@ def alarms(dataset: str, event: str, node: str, as_of: str, report: str = typer.
 
 
 @app.command()
+def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g. SIM.DO:death:A90-A99"),
+          years: str = Years, q: float = 0.05, limit: int = 30) -> None:
+    """Places and periods where several fields depart together (the fast subset scan over fields, §7.3)."""
+    from pegasus_data import geography
+
+    from . import tools
+
+    names = geography.municipalities()
+    found = tools.joint([tuple(f.split(":", 2)) for f in fields], _years(years), q=q)
+    t = Table("place", "year", "fields", "rate ratio", "p")
+    for f in sorted(found, key=lambda x: x.p)[:limit]:
+        m = names.get(str(f.locus["places"][0]))
+        t.add_row(f"{m['name']}/{m['uf_sigla']}" if m else str(f.locus["places"][0]), str(f.locus["years"][0]),
+                  ", ".join(x.split(":")[0] + ":" + x.split(":")[-1] for x in f.locus["fields"]), f"{f.effect:.2f}",
+                  f"{f.p:.1e}")
+    console.print(t)
+    console.print(f"{len(found)} joint departures")
+
+
+@app.command()
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod

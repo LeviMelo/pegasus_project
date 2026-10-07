@@ -1242,3 +1242,18 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
         f"{len(excluded)} miscalibrated fields")
     return admitted
 
+
+
+def joint(fields: list[tuple[str, str, str]], years: list[int], graph: str = "contiguity", q: float = 0.05,
+          replicates: int = 100) -> list:
+    """Places and periods where several fields, of one system or several, depart together (`departures.joint_excess`,
+    the fast subset scan over fields): ``fields`` as (dataset, event, node), each read at B1."""
+    from . import departures
+
+    sessions: dict = {}
+    surps = []
+    for ds, ev, node in fields:
+        s = sessions.setdefault((ds, ev), Session(ds, ev, years, graph))
+        surps.append(s.surprise(node, "B1"))
+    first = next(iter(sessions.values()))
+    return departures.joint_excess(surps, first.ledger, q=q, replicates=replicates)

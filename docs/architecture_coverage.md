@@ -259,7 +259,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 7.2 expectation-based score, marks Gaussian, LTSS | BM | `scans/subset.py`, `E:harness-gate` | |
 | 7.2 free dimensions, alternation | BM | `Scanner._alternate` | groups never enter a scan as a dimension (§13) |
 | 7.2 null by NB replicates with Gumbel tail; recursion | BM | `subset.null`, `subset.scan` | |
-| 7.3 subset scan across fields (field as a dimension) | NB | | not in §13 |
+| 7.3 subset scan across fields (field as a dimension) | BU (2026-10-07) | `departures.joint_excess` (Neill's fast subset scan over fields, null from each field's predictive), `tools.joint`, `pegasus-core joint`. One check: dengue in SIM, SIH and SINAN finds its 2021–23 spread into RS and SC first (notifications with admissions, and deaths in some towns) | not characterised on null worlds |
 | 7.4 interaction-factor patterns (ψ, ω, τ) | NB | no interaction | see 4.2 |
 | 7.4 non-negative tensor factorisation across blocks | P | `scans/patterns.py`; once in `E:utilization` (agrees with the two factors) | not in the survey; no `pattern` or `structural` lead in the register; stability built, not run |
 | 7.5 E_b between places | BM | `E:pairs-gate`, `E:eb-census-positives`, ADR-0005 | smooth-field power low |
