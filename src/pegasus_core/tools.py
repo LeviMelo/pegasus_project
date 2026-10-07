@@ -764,13 +764,25 @@ class Session:
             except LookupError as exc:
                 tested += [(x, {"tested": False, "reason": str(exc)}) for x in group]
                 continue
-            tested += [(x, replication.test_lead(sp, x, level) if replication.lasting(x) else
+            tested += [(x, self._ledgered("prospective", x, lambda x=x, sp=sp: replication.test_lead(sp, x, level),
+                                          last=last, level=level) if replication.lasting(x) else
                         {"tested": False, "reason": "a passing departure (spike or transient) does not recur: corroboration"})
                        for x in group]
             log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
         self._record(tested, "prospective", q)
         t.register.add(selected)
         return selected
+
+    def _ledgered(self, kind: str, x: leads.Lead, run, **spec) -> dict[str, Any]:
+        """One stage-E test of a lead, written to the ledger before it runs and completed with its p (§9.2): ``run``
+        returns the test's record (``tested``, ``p``, ``effect`` or a ``reason``)."""
+        tid = self.ledger.register(control.Hypothesis(f"{kind}|{self.dataset}", "scan", {
+            "lead": x.id, "fields": x.fields, "locus": x.locus, "estimand": x.estimand, **spec}))
+        r = run()
+        self.ledger.complete(tid, float(r.get("p", 1.0)) if r.get("tested") else 1.0,
+                             r.get("effect") if r.get("tested") else None,
+                             {"tested": bool(r.get("tested")), **({"reason": r["reason"]} if r.get("reason") else {})})
+        return r
 
     def strata(self, source: str = "popsvs") -> replication.Strata:
         """The session's events by municipality, year, sex, age band and 4-character code, with the person-years of
@@ -796,9 +808,15 @@ class Session:
         for i, x in enumerate(mine):
             last = x.train_last or max(self.years)
             span, direction = replication.span_direction(x)
-            rec = replication.audit(st, x.locus["places"], x.fields[0].split(":")[-1], x.locus["scale"],
-                                    x.provenance["stats"]["beta"], direction, [y for y in self.years if y <= last], tree,
-                                    seed_text=x.id, later_years=[y for y in self.years if y > last])
+            def run(x=x, last=last, direction=direction):
+                run.rec = replication.audit(st, x.locus["places"], x.fields[0].split(":")[-1], x.locus["scale"],
+                                            x.provenance["stats"]["beta"], direction, [y for y in self.years if y <= last],
+                                            tree, seed_text=x.id, later_years=[y for y in self.years if y > last])
+                j = run.rec["jurisdiction"]
+                return {"tested": "p" in j, "p": j.get("p", 1.0), "effect": j.get("effect"), "reason": j.get("reason")}
+
+            self._ledgered("spatial_unit", x, run, source=source)
+            rec = run.rec
             x.robustness = {**x.robustness, "artefact": rec}
             x.replications = {**x.replications, "national": rec["national"],
                               "spatial_unit": {"tested": True, **rec["jurisdiction"]}}
@@ -876,14 +894,19 @@ class Session:
             for src in fields_:
                 if not grid.holds(src, cats):
                     continue
-                c = corroborate.corroborate(grid, src, cats, rows, span, direction, f"corroborate|{x.id}|{src.label}",
-                                            replicates)
-                # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests
-                # needs the best to reach q / m: the promising ones are redrawn with many more replicates
-                if c.tested and c.p < refine_p:
-                    c = corroborate.corroborate(grid, src, cats, rows, span, direction,
-                                                f"corroborate-refine|{x.id}|{src.label}", refine_replicates)
-                tests.append((x, c))
+                def run(x=x, src=src, cats=cats, rows=rows, span=span, direction=direction):
+                    c = corroborate.corroborate(grid, src, cats, rows, span, direction, f"corroborate|{x.id}|{src.label}",
+                                                replicates)
+                    # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests
+                    # needs the best to reach q / m: the promising ones are redrawn with many more replicates
+                    if c.tested and c.p < refine_p:
+                        c = corroborate.corroborate(grid, src, cats, rows, span, direction,
+                                                    f"corroborate-refine|{x.id}|{src.label}", refine_replicates)
+                    run.result = c
+                    return {"tested": c.tested, "p": c.p, "effect": c.observed, "reason": (c.detail or {}).get("reason")}
+
+                self._ledgered("corroboration", x, run, source=src.label)
+                tests.append((x, run.result))
             if len(seen) % 200 == 0:
                 log(f"corroborated {len(seen)}")
         verdicts: dict[str, list[dict]] = {}
