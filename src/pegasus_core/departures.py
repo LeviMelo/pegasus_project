@@ -156,8 +156,8 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
     excess on the place graph (`multiscale.peaks`, STEM with the peak-height law from the predictive's replicates),
     one BH at q over every peak of every scale and temporal contrast, the minimum relevant effect as each peak's own
     one-sided test at q, and overlapping reported peaks merged into the most significant. ``shape`` is the departure's
-    course in time (`multiscale.contrasts`): ``spike`` (one period) or ``step`` (a level from a start to the end, the
-    change-point question at unknown spatial scale). A finding names its scale (the footprint's effective places) and
+    course in time (`multiscale.contrasts`): ``spike`` (one period), ``step`` (a level from a start to the end, the
+    change-point question at unknown spatial scale) or ``trend`` (a course bending upward from a start). A finding names its scale (the footprint's effective places) and
     the places holding half its kernel's mass. No zoning enters."""
     from . import multiscale
     from .scans import lenses

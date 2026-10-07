@@ -68,6 +68,12 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 4. **Am I fixing the cause, or a symptom?** A failed null is a model defect; lead volume is a ranking question; "is it real?" is stage E's.
 5. **Does it follow the roadmap's order** (STATUS, ARCHITECTURE §12)? Am I improving something the architecture has already demoted?
 6. **Is the computation structured and budgeted** (P13)? Does it scale to all fields at once?
+7. **Can it be made better?** (author, 2026-10-07; ask it at every design step and again before calling anything done.)
+   - Is there a more general, more principled, more robust formulation of this, more aligned with P1–P16?
+   - What did I fix by hand that the data or the model could choose: a partition, a scale grid, a shape list, a lag range, a graph? Each is a candidate to be learned or integrated over.
+   - What would the strongest critic of this method say first?
+   - Write the most general formulation down before simplifying, and name each simplification as a debt with its remedy.
+   - The fixed ladder of administrative supports (2026-10-06) was built under time pressure and accepted until the author challenged it. That question should have been asked first.
 
 If any answer is wrong, stop, re-plan, and write it down before coding.
 

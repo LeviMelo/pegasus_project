@@ -41,14 +41,17 @@ def _torch():
 
 @dataclass
 class GraphSpectrum:
-    """The normalised Laplacian's eigenpairs of a place graph (``edges`` over ``n`` places), on the device."""
+    """The normalised Laplacian's eigenpairs of a place graph (``edges`` over ``n`` places, with the graph's
+    ``weights``: border length for contiguity, `graphs.graph`), on the device."""
     edges: np.ndarray
     n: int
+    weights: np.ndarray | None = None
     _eig: tuple = field(default=None, repr=False)
 
     def __post_init__(self):
         torch, dev = _torch()
-        A = sp.coo_matrix((np.ones(len(self.edges)), (self.edges[:, 0], self.edges[:, 1])), shape=(self.n, self.n))
+        w = np.ones(len(self.edges)) if self.weights is None else np.asarray(self.weights, dtype=float)
+        A = sp.coo_matrix((w, (self.edges[:, 0], self.edges[:, 1])), shape=(self.n, self.n))
         A = A.maximum(A.T).tocsr()
         deg = np.asarray(A.sum(1)).ravel()
         dinv = np.where(deg > 0, 1.0 / np.sqrt(np.maximum(deg, 1e-300)), 0.0)
@@ -93,12 +96,17 @@ class GraphSpectrum:
 def contrasts(T: int, shape: str, min_past: int = 3, min_years: int = 2) -> tuple[np.ndarray, list[tuple[int, int]]]:
     """Temporal contrasts [T, m] of a departure shape and each one's window [t0, t1): ``spike``, one period each;
     ``step``, the sum from a start τ to the series' end, for τ leaving ``min_past`` periods before and ``min_years``
-    after (the change-point windows)."""
+    after (the change-point windows); ``trend``, a course bending upward from τ, the hinge (t − τ)₊ over the same
+    starts (a trend change; from τ = 0 it is the series' own slope against the reference)."""
     if shape == "spike":
         return np.eye(T), [(t, t + 1) for t in range(T)]
     if shape == "step":
         starts = range(min_past, T - min_years + 1)
         C = np.stack([(np.arange(T) >= tau).astype(float) for tau in starts], 1)
+        return C, [(tau, T) for tau in starts]
+    if shape == "trend":
+        starts = [0, *range(min_past, T - min_years + 1)]
+        C = np.stack([np.clip(np.arange(T) - tau + 1, 0, None).astype(float) for tau in starts], 1)
         return C, [(tau, T) for tau in starts]
     raise ValueError(f"unknown shape {shape!r}")
 

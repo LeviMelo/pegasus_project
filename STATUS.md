@@ -67,7 +67,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | O2 settle | B | done (ADR-0025); race (with O3) and SINAN wave 1 open |
 | O4 ICD | A–B | mostly done (ADR-0024); lists as effects, recording-quality fields open |
 | **N1 noise structure** | B | **built** (evaluation 2026-10-06, noise structure): NB(μ, φ/κ) with an AR(1) copula over periods; acceptance moves to the grid's null worlds (the time-shift negative is not a null for slow shapes); `MINIMUM_EFFECT_BY` still to remove |
-| N2 marginal uncertainty | B | after N1: nested Laplace or importance-corrected draws until SBC calibrates |
+| N2 marginal uncertainty | B | after the O6 acceptance and the regenerated lead register (production reads the mode, which the SBC defect does not touch; it touches the intervals of totals): integrated marginals of the place effects (nested Laplace), entry points `laplace.Posterior.sample`, `solver.StructuredNewton.draws`; accepted when SBC calibrates on VII and XIII |
 | **O6 departure models** | C | **in progress**: cell excess accepted for the retrospective cell question (the outbreak lens stays for prospective alarms until cell excess runs on BPA); step built, power low, over the ladder of supports next; trend, cluster, group open |
 | O5 bench | B–D checks | grid built, the gate retired (ADR-0028); seasonal and lagged plants, weights across fields open |
 | **O7 relations** | D | **in progress**: N1-whitened innovations, graph-frequency bands (no zoning), lagged stacking, EM factor analysis with ARD: clean null and planted worlds; real fields next |
