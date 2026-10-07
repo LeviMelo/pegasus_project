@@ -61,7 +61,7 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 - **P15** Race is an axis, read through its misclassification.
 - **P16** One stage, one computation: statistical validity in B–D, epidemiological only in E; a failed null is fixed in B, per field, never by per-system thresholds.
 
-**How work derailed on 2026-10-06, and the check that prevents it.** A day went into tuning v0 residual lenses with per-system thresholds, comparing variants by trial, and testing relations pairwise. Each step was locally reasonable and globally against P11, P12 and P16. Before any change, answer:
+**How work derailed (2026-10-06, 2026-10-07), and the check that prevents it.** On 2026-10-06 a day went into tuning v0 residual lenses with per-system thresholds, comparing variants by trial, and testing relations pairwise. On 2026-10-07 a dozen mechanisms landed while the canonical documents went stale, six-hour runs were launched without a look at the budgets, and untested work was called done. Each step was locally reasonable and globally against the principles. Before and after any change, answer:
 1. **Which stage is this?** Does it stay inside that stage?
 2. **Is it general?** Would it work, unchanged, on a system I have not looked at? If it needs a per-system constant, the cause is in another stage, usually B.
 3. **What is the established method** for this estimand? Am I building it, or patching a v0?
@@ -84,11 +84,19 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
    - Every method is also judged by reading its strongest real findings as epidemiology.
    - Of 2026-10-06/07's measurements most were synthetic; the meaningful ones were the real relation map, SIH's local family and stroke's spatial noise.
 
+9. **Locate it.** Name the ARCHITECTURE section the change touches. A new or changed mechanism, object, field kind, plan key, default or constant is written into that section (or §13.2 as a departure) **in the same commit**. Documentation that tracks the code is part of the change, not a later chore.
+10. **Read before asserting.** Describe a subsystem only after reading its code, its ADRs and its evaluations (race, on 2026-10-07, was summarised from memory and misstated).
+11. **Cost before running.** Estimate a run's work (fields × methods × years × replicates; fits, reads, links, downloads) against §5.8. Check on one field or one year first. Run at full scale only when a reading the author needs requires it, never to confirm what the code and an inspection settle. Heavy jobs go through `scripts/heavy.py` and `data/chain.py`, never another queue.
+12. **No hidden expensive default.** A national linkage, a refit of other blocks, a re-decode: nothing heavy starts implicitly. It is requested, and its cost is visible.
+13. **Constants are debts.** A constant that decides what is reported (a minimum effect, a list, a threshold) is recorded in §13.2 with how it will be measured (P7), never left as a silent gate.
+14. **Say what was checked.** "Built" means the code exists; "checked on X" names what ran; "done" means the acceptance criterion is met. Never commit unverified work described as working.
+15. **Ask before reshaping use.** A change to what the system computes by default, how it is used (§9.3) or a stage's boundary is discussed with the author first.
+
 If any answer is wrong, stop, re-plan, and write it down before coding.
 
 ## 1.1 The six stages (ARCHITECTURE §1.1, revision 3, ADR-0029)
 
-PegaSUS is a pipeline of six stages, **one computation each**. Every piece of work starts by naming the stage it belongs to.
+PegaSUS is **one model of the marked point process, read in six stages**, one computation each: readings of one persistent state (the fits, the ledger, the register), **not a pipeline and not a build order** (author, 2026-10-07). Every piece of work starts by naming the stage it belongs to.
 
 | stage | question | judged by |
 |---|---|---|
@@ -106,13 +114,15 @@ PegaSUS is a pipeline of six stages, **one computation each**. Every piece of wo
 
 The 2026-10-06 course correction that set this out is `docs/discussion/2026-10-06-course-correction.md`.
 
-## 1.2 Start of every session
+## 1.2 Start of every session, and after every context summary
 
 Read, in this order:
 1. `STATUS.md` (where each stage stands, and what is next);
-2. ARCHITECTURE §1.1 (the stages) and §12 (the roadmap and its order);
-3. the current package's section of `docs/plans/2026-10-06-overhaul.md`;
+2. ARCHITECTURE §1.1 (the stages), §12 (the roadmap S0–S7 and its order) and §5.7–5.8 (the machine, the job runner, the performance budgets);
+3. the plan of the package at hand (`docs/plans/`, the newest that covers it);
 4. `docs/architecture_coverage.md` for the item at hand.
+
+**A context summary is not the plan.** After one, re-read these before the next change: on 2026-10-07 work resumed from a summary, and the speed plan, the job runner and the budgets were never consulted.
 
 Steer by the roadmap's order and the coverage matrix, not by the latest result.
 
@@ -136,7 +146,7 @@ $PY scripts/check_docs.py
 - **Homes.**
   - PegaSUS writes only under `PEGASUS_HOME` (default `pegasus_home/`, gitignored).
   - It reads pegasus_data's home through pegasus_data, never directly.
-- **Long runs detach.** The Bash tool caps background work at ten minutes, so start longer fits with PowerShell `Start-Process`, logging beside them. Check that the process started, and watch it with a filter that catches failure as well as success.
+- **Long runs detach.** The Bash tool caps background work at ten minutes, so start longer jobs with PowerShell `Start-Process` running `scripts/heavy.py` (§4), logging beside them. Check that the process started, and watch it with a filter that catches failure as well as success.
 
 ---
 
@@ -157,12 +167,12 @@ $PY scripts/check_docs.py
 - **Never lose a question** (author, 2026-10-06). A method is retired only when its successor answers every question it answered (retrospective and prospective, every support, every shape), measured on the grid. Until then both run, and the docs say "takes over question X", never "replaces" or "drops". A method that answers wrongly is fixed or kept with its record; a question is never withdrawn because a method for it failed.
 - **Carry the whole request.** Each instruction is done, or reported as not done with the reason.
 - **Never idle on a wait; work fronts in parallel** (author, 2026-10-03, repeated 2026-10-06). While a fit, a scan or an agent runs, advance a task that does not depend on it: other code, documentation of finished work, analysis of results at hand. Launching a job and then waiting on it is the failure this rule names.
-  - **Parallel is my work, not the heavy jobs.** Heavy fits run one at a time through `scripts/heavy.py` (or one sequential queue script), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
+  - **Parallel is my work, not the heavy jobs.** Heavy fits run one at a time through `scripts/heavy.py` (a sequence through `data/chain.py` under one slot), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
   - Launch detached, check it started, set a watcher that catches completion and failure, then turn to the next front at once.
 - **Subagents** run on the cheaper model (Sonnet) for reading, searching and auditing. Spawn few, with precise briefs.
 - **Keep pegasus_data and pegasus_view working.**
-  - A change PegaSUS needs in pegasus_data is written as a handoff (`docs/handoffs/`). Change pegasus_data directly only when the author asks.
-  - pegasus_view's contract with pegasus_data is pegasus_data's to keep.
+  - pegasus_data is developed from this session too (branch `pegasus-core-fixes`), under its own CLAUDE.md: a declaration PegaSUS reads is made there, with its evidence, never guessed here.
+  - pegasus_view's contract with pegasus_data is pegasus_data's to keep; PegaSUS never touches pegasus_view.
 
 ---
 
@@ -261,7 +271,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | `studies/` | studies done with PegaSUS and pegasus_data |
 | `assets/brand/` | logo (`pegasus-logo.png`), wordmark, mark |
 | `docs/decisions/`, `docs/evaluation/` | ADRs and measurements, indexed by `DECISIONS.md` and `EVALUATION.md` |
-| `docs/plans/` | the order of work and each package's steps and acceptance (`2026-10-06-overhaul.md`), the solver's speed plan (`2026-10-06-optimization.md`) |
+| `docs/plans/` | each package's design and acceptance (the order of work is ARCHITECTURE §12), the speed plan and budgets (`2026-10-06-optimization.md`) |
 | `docs/architecture_coverage.md` | every ARCHITECTURE item against the code and the evidence, and the gaps ranked |
 | `docs/handoffs/` | requests to pegasus_data |
 | `docs/discussion/` | design reasoning, dated, frozen once superseded |
@@ -277,7 +287,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 |---|---|
 | where the work stands, stage by stage, and what is next | `STATUS.md` |
 | what PegaSUS is: the six stages (§1.1), principles P1–P16, mathematics, code, roadmap (§12), maturity and departures (§13) | `ARCHITECTURE.md` |
-| the order of work, each package's steps and acceptance | `docs/plans/2026-10-06-overhaul.md` (N1, N2, O1–O10) |
+| the order of work | ARCHITECTURE §12 (S0–S7); each package's plan in `docs/plans/` (the 2026-10-07 plans; `2026-10-06-overhaul.md` is the earlier packages' record) |
 | the solver's speed design and timings | `docs/plans/2026-10-06-optimization.md` |
 | the joint relation model's design (O7) | `docs/plans/2026-10-06-o7-joint-relations.md` |
 | how much of the architecture is built and measured, item by item; the gaps ranked | `docs/architecture_coverage.md` |

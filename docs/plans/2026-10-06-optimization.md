@@ -1,5 +1,7 @@
 # Speed: review and plan (2026-10-06)
 
+**Status:** live: the speed plan and its budgets (ARCHITECTURE §5.8); the solver's part implemented (v1), the pipeline's part (§5: tiers, PIT, scans, survey < 2 min a chapter) open.
+
 **Requirement (author, 2026-10-06):** blazing speed, and no resumption of development on unoptimised mathematics or code. This file is the design of work package O1 (ARCHITECTURE §5.3–5.8, §12) and of the speed work spread over the other packages. Every number below is measured unless it is marked as a target.
 
 ## 1. Where the time goes now

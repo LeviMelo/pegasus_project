@@ -1,6 +1,6 @@
 # Stage B robust to the departures it must expose
 
-**Status:** design, from the first real-data evaluation against documented events (2026-10-07, `data/real_events.py`).
+**Status:** implemented (`Monolith.robust`, the default; evaluation 2026-10-07, robust expectation); this file is the design record, from the first real-data evaluation against documented events (2026-10-07, `data/real_events.py`).
 
 ## What real data showed
 

@@ -1,6 +1,6 @@
 # O7 design: relations as one joint model (stage D)
 
-**Status:** design for the author's review before the build (ARCHITECTURE §7.5, ADR-0029). It replaces pairwise relation search with one joint model of all fields' departures.
+**Status:** implemented (`relations.py`, `pegasus-core relations`; ARCHITECTURE §7.5); this file is the design record. Was: design for the author's review before the build (ARCHITECTURE §7.5, ADR-0029). It replaces pairwise relation search with one joint model of all fields' departures.
 
 ## The question and why not pairs
 

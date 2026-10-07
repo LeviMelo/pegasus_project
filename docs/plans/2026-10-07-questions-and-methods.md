@@ -1,6 +1,6 @@
 # Questions and their methods
 
-**Status:** design (author's proposal, 2026-10-07). It formalises what the documented-events table does by hand: a question per row, several methods per column, each method with its record.
+**Status:** implemented (`questions.py`, `Session.ask`, `survey_questions`); this file is the design record (author's proposal, 2026-10-07). It formalises what the documented-events table does by hand: a question per row, several methods per column, each method with its record.
 
 ## Why
 

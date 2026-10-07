@@ -19,6 +19,7 @@ by the data and code versions and its inputs in the store. A plan:
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,10 +67,13 @@ class Plan:
         if isinstance(years, str):
             a, b = years.split("-")
             years = list(range(int(a), int(b) + 1))
-        systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
-                          s.get("compositions"), s.get("links"), s.get("disparities"), s.get("intervals"),
-                          s.get("classifiers"), s.get("mentions"), s.get("flows"))
-                   for s in raw.get("systems") or ()]
+        keys = {f.name for f in dataclasses.fields(System)} - {"dataset", "event", "blocks"}
+        for s in raw.get("systems") or ():
+            unknown = set(s) - keys - {"dataset", "event", "blocks"}
+            if unknown:
+                raise ValueError(f"plan system {s.get('dataset')}: unknown keys {sorted(unknown)}")
+        systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), **{k: s.get(k) for k in keys})
+                   for s in raw.get("systems") or ()]       # by name: a positional list put every key one place off
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),

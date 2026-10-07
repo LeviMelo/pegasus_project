@@ -1,6 +1,6 @@
 # Whole-system review and a new roadmap (2026-10-07)
 
-**Status:** a proposal for the author, written at their instruction after three days of development produced, in their words, "a mess of a system, poorly integrated, with fancy models".
+**Status:** adopted 2026-10-07 as ARCHITECTURE §12 (roadmap revision 4, S0–S7); its §8 decisions were answered by the author the same day: proceed as devised (1–3), and the agents and MCP layer stays at S7 (4). Originally a proposal for the author, written at their instruction after three days of development produced, in their words, "a mess of a system, poorly integrated, with fancy models".
 
 **How it was made.** Four independent audits, read-only, against the code rather than the existing status documents:
 - (A) pegasus_core's integration;
