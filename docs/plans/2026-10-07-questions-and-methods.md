@@ -48,3 +48,14 @@ The first questions:
 1. `questions.py`: the registry, with the records filled from `data/real_events.py` and the grid's null worlds.
 2. `Session.ask(question, node)` runs a question's methods and combines them. The survey asks questions, not lenses.
 3. Leads carry the question, the methods' agreement and the combined evidence.
+
+## Shapes (built 2026-10-07)
+
+**The problem.** A method's temporal contrast fires on departures of other shapes: a suffix sum is large when a one-year epidemic lies inside its window.
+
+**The fix.** Each finding of the multiscale and Bayesian-step methods carries its course in time, attributed by intervention analysis (`departures.attribute`, Chen & Liu 1993). A question declares the shapes that answer it:
+- excess: spike or transient;
+- step: step;
+- trend: trend.
+
+An answer none of whose findings takes one of these shapes is returned apart (`AnswerList.other_shape`), never dropped. Measured on the documented events: docs/evaluation/2026-10-07-real-events.md, v10.

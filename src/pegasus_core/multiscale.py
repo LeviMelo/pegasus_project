@@ -235,17 +235,33 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     S_all, Sr_all = torch.stack(S_all), torch.stack(Sr_all)
     # the empirical null per scale (Efron's central matching, by median and MAD): the field's own statistic re-centred
     # and re-scaled to the replicates' wherever the predictive misstates it; a real departure is too rare to move them
+    # per scale and absorption class: the replicates are drawn about the fit, the observed residuals are the fit's own,
+    # and the fit absorbs a share of a contrast's variance that grows with its projection on the place's level,
+    # a = (Σc)²/(T Σc²): 0.38 of the predictive's variance was left to a suffix from 2013 on stroke null worlds, none
+    # was absorbed of a two-year one. One matching pooled over all contrasts scaled the exact short suffixes up by the
+    # long ones' deficit (the multiscale step's findings in 8 of 10 null worlds, all on the last two or three years);
+    # one per contrast read a year-wide epidemic in a spike's own year as its null (COVID-19 2020 in the North lost,
+    # measles' p 10⁻⁴³ → 10⁻⁷). Contrasts of equal absorption share one null: every spike (a = 1/T) pools over the
+    # years, each suffix start has its own (2026-10-07)
     calibration = {}
+    absorb = np.round(C.sum(0) ** 2 / (T * (C ** 2).sum(0)), 6)
     for k in range(len(scales)):
-        o, r = S_all[k].flatten(), Sr_all[k].flatten()
-        mo, mr = o.median(), r.median()
-        so = (o - mo).abs().median()
-        sr = (r - mr).abs().median()
-        if float(so) < 1e-3 or float(sr) < 1e-3:   # mostly empty cells: no empirical null to read at this scale
-            calibration[places[k]] = {"shift": 0.0, "scale": 1.0, "degenerate": True}
-            continue
-        S_all[k] = (S_all[k] - mo) * (sr / so) + mr
-        calibration[places[k]] = {"shift": round(float(mo - mr), 4), "scale": round(float(so / sr), 4)}
+        shifts, ratios, flat = [], [], 0
+        for a in np.unique(absorb):
+            js = torch.as_tensor(np.flatnonzero(absorb == a), device=dev)
+            o, r = S_all[k][:, js], Sr_all[k][:, :, js]
+            mo, mr = o.median(), r.median()
+            so = (o - mo).abs().median()
+            sr = (r - mr).abs().median()
+            if float(so) < 1e-3 or float(sr) < 1e-3:   # mostly empty cells: no empirical null to read here
+                flat += 1
+                continue
+            S_all[k][:, js] = (o - mo) * (sr / so) + mr
+            shifts.append(float(mo - mr))
+            ratios.append(float(so / sr))
+        calibration[places[k]] = {"shift": [round(min(shifts), 4), round(max(shifts), 4)] if shifts else None,
+                                  "scale": [round(min(ratios), 4), round(max(ratios), 4)] if ratios else None,
+                                  "degenerate": flat}
     # pass 2: joint maxima in place x scale (scale-space: a peak beats its graph neighbours at its own scale and its
     # own place at the scales either side), so one departure is one test at the scale that fits it best
     def joint(X):                                   # X [k, U, ...] -> boolean of the same shape
@@ -278,6 +294,17 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     return found, null
 
 
+def kernel_row(spectrum: GraphSpectrum, centre: int, s: float) -> np.ndarray:
+    """K_s(centre, ·) [n] in double precision (the place alone at s = 0)."""
+    if s == 0:
+        out = np.zeros(spectrum.n)
+        out[centre] = 1.0
+        return out
+    torch, _ = _torch()
+    lam, Q = spectrum._eig
+    return ((Q[centre] * torch.exp(-s * lam)) @ Q.T).cpu().numpy()
+
+
 def footprint(spectrum: GraphSpectrum, centre: int, s: float, mass: float = 0.5,
               excess: np.ndarray | None = None) -> list[int]:
     """The smallest set of places holding ``mass`` of a peak: of the kernel-weighted ``excess`` [U] (each place's
@@ -286,9 +313,7 @@ def footprint(spectrum: GraphSpectrum, centre: int, s: float, mass: float = 0.5,
     the multiscale step's findings that touched no plant (false share 0.12 on stroke, grid v6, 2026-10-07)."""
     if s == 0:
         return [centre]
-    torch, _ = _torch()
-    lam, Q = spectrum._eig
-    row = ((Q[centre] * torch.exp(-s * lam)) @ Q.T).cpu().numpy()
+    row = kernel_row(spectrum, centre, s)
     if excess is not None and float((row * np.clip(excess, 0, None)).sum()) > 0:
         row = row * np.clip(excess, 0, None)
     order = np.argsort(row)[::-1]

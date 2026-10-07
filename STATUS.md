@@ -13,7 +13,12 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 **2026-10-07: real data first.** The author found the work stuck in a loop of synthetic benches built from the model's own law; methods are now judged first on documented events (ARCHITECTURE §10, CLAUDE.md design check 8).
 - **The real-data baseline** (`data/real_events.py`): of five documented events, measles 2018–19, chikungunya 2016–17 and COVID-19 in the North were missed by every stage-C method. The cause was in stage B: one dispersion per chapter, and categories' levels set with their epidemic years.
 - **Robust stage B** is the default (`Monolith.robust`: trimming by EM imputation, flags against a trimmed dispersion). With it, all five events are found by three methods (evaluation 2026-10-07, real events).
-- **In progress:** each category's own time course (`h_cat`), fitted by alternation with the mean. A structure round comes before trimming, and courses are fitted without the flagged cells. Plan `docs/plans/2026-10-07-robust-expectation.md` step 4.
+- **Category courses (`h_cat`) are built but not the default.** A flexible course absorbs its category's own national epidemic (measles 2018–19); a rigid one cannot follow COVID-19's arrival. The default (v9) is trimming only. Which reference a question takes belongs to the registry (evaluation 2026-10-07, robust expectation).
+- **N1 re-estimated:**
+  - κ by central matching of the PIT quartiles (measles κ 1000 → 20);
+  - ρ, δ from winsorised lag moments with their own frailty scale (ρ was at its bound on its own worlds).
+- **A finding's course in time is attributed** (`departures.attribute`, Chen & Liu 1993); the multiscale step's matches of spike events were spikes.
+- **The empirical null of the multiscale peaks is per scale and absorption class.** Pooled over every contrast, it put the multiscale step's false findings in 8 of 10 null worlds; per contrast it lost COVID-19 in the North. Now 1 of 10, and all five events found (evaluations 2026-10-06 departure models, 2026-10-07 real events).
 - **Built:** the question → methods registry (`questions`, `Session.ask`, `Session.survey_questions`).
 - **The space of stages C–D is the graph's own:**
   - multiscale peaks on heat kernels, scored as gamma tail probits;

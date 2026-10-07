@@ -32,3 +32,23 @@ A covariance that turns strongly negative at long lags is the signature of place
 - **High ρ.** Births per place wander nonlinearly beyond a linear trend. That wander is the departure models' to judge, against their empirical nulls (stage C), not B's noise.
 
 **The time-shift negative is not a null for slow-shape detectors.** Shifting a place's series circularly keeps its trend and turns it into a jump at the wrap. Its failures on change point and trend therefore measured the negative's construction, not the noise model's. N1's acceptance moves to the grid's null worlds, which now draw the field's counts with this noise (`harness.grid_world`), and to the space negative (MSR), which stays valid.
+
+## The estimator on its own worlds (2026-10-07)
+
+**Why.** The multiscale step's null worlds showed that the refit's N1 put ρ at its bound (0.95 against a generating 0.81). Rivals were declared and tested on the grid's stroke null worlds:
+- `data/noise_bias_diag.py`, `data/noise_recovery.py`, `data/noise_clip_bound.py`;
+- artifacts `data/probes/noise_{bias_diag,recovery,clip_bound}.json`.
+
+| estimator | ρ on null worlds (generating) | δ | measles B05 ρ |
+|---|---|---|---|
+| κ fixed at central matching, raw residuals clipped at 0.5 % | 0.95, 0.95, 0.95 (0.81) | 0.12–0.22 (0.58) | – |
+| lag scale fitted with ρ, δ; same clipping | 0.95, 0.95, 0.95 (0.75) | 0.55–0.65 (0.61) | – |
+| the same, unclipped | 0.82 (0.75); about the true mean and φ, 0.765 | – | – |
+| normal scores (randomised PIT) clipped at 0.5 % | 0.77, 0.83 (0.66) | 0.58–0.59 | 0.55 |
+| **normal scores clipped at the universal threshold** (Φ⁻¹(1 − 1/2N), 4.36 here) | **0.65, 0.69 (0.66)** | 0.59–0.61 | 0.54 (unclipped 0.30) |
+
+**Two biases, each with its own cause:**
+- **κ held fixed.** κ is the marginal of residuals about a fit that absorbs part of a persistent frailty. Held fixed, it left lag 1 to be met by ρ at its bound. The lag model now has its own frailty scale; δ recovered.
+- **Clipping at 0.5 %.** Clipping heavy-tailed scores at 0.5 % shrinks the lag-0 moment more than the cross-products. The universal threshold leaves null fields untouched and still bounds an epidemic's cells: measles, chikungunya and diarrhoea stay off the bound.
+
+**Adopted** (surprise cache 12). The real fields move to: stroke ρ 0.57, δ 0.64 (was 0.81, 0.58); SIH measles 0.54, 0.26; chikungunya 0.40, 0.46; diarrhoea 0.76, 0.80.

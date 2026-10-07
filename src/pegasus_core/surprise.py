@@ -362,7 +362,7 @@ class Expectations:
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 5}   # 5: N1 time noise untrimmed again, 2026-10-07
+        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 12}   # 12: N1 lags on normal scores, universal clip, 2026-10-07
         if cache:
             hit = store.get_table("surprise", key)
             if hit is not None:
@@ -692,6 +692,8 @@ def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np
 
 # ---------------------------------------------------------------------- N1: the predictive's noise structure
 
+
+
 def background(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, trim: float = 0.005) -> np.ndarray:
     """Cells inside the predictive's [``trim``, 1 − ``trim``] quantiles: the background every estimate of the noise
     is made on. A noise estimate that reads the departures takes them for noise: N1's spatial share went to its bound
@@ -713,7 +715,7 @@ def _detrend_projection(T: int) -> np.ndarray:
 
 def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 4) -> Noise:
     """ARCHITECTURE §6.1, N1 (ADR-0029): the predictive's noise structure over periods (`Noise`), by the bias-corrected
-    moments of regression residuals. Each place's standardised residual series z = (y − μ)/√V loses its own level and
+    moments of regression residuals. Each place's normal scores z (the randomised PIT under the marginal) lose its own level and
     linear trend (e = Mz, `_detrend_projection`); then E[Σ_t e_t e_{t+k}] = tr(L_k M Σ_u M), with
     Σ_u = p_u I + κ f_u R, p_u and f_u the place's Poisson and frailty shares of V, and R the latent correlation
     c_k = ρ δ^(k−1) (ARMA(1,1): lag 1 and the decay apart; an AR(1), δ = ρ, overstated the variance of multi-year sums
@@ -735,12 +737,11 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     keep = mu.mean(1) >= min_expected
     if keep.sum() < 10:
         return Noise()
-    # every cell, departures included: selecting the bulk (`background`, by cell or by whole place) shrank the lag-0
-    # variance more than the lag-k covariances and sent ρ to its bound (stroke deaths 0.93–0.95 against 0.62; the
-    # multiscale step then called 4 of 5 null worlds, 2026-10-07). Untrimmed, the moments recover planted (κ, ρ, δ)
-    m, r = mu[keep], (y - mu)[keep]
+    # κ by central matching of the PIT quartiles (`_central_kappa`, below), ρ and δ from winsorised lag moments
+    kap = _central_kappa(y, mu, phi)
+    m = mu[keep]
     ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
-    s2 = Noise().frailty_variance(ph)
+    s2 = Noise(kappa=kap).frailty_variance(ph)
     v = m + m ** 2 * s2
     p_u = (m / v).mean(1)
     f_u = (m ** 2 * s2 / v).mean(1)                       # the frailty's share of each cell's variance
@@ -748,7 +749,18 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     if F <= 0:
         return Noise()
     M = _detrend_projection(T)
-    e = (r / np.sqrt(v)) @ M
+    # Winsorised normal scores: the randomised PIT under the marginal (the copula's own scale), clipped at the universal
+    # threshold Φ⁻¹(1 − 1/2N) over the N cells (≈ √(2 log N); Donoho & Johnstone 1994), past which a null field holds
+    # less than one cell. An epidemic's cells enter at a bounded size; null cells are untouched.
+    # - Raw standardised residuals, unclipped, read an epidemic as persistence (ρ at its bound on SIH chapter I:
+    #   measles, chikungunya, diarrhoea); zeroed (`background`) they biased it the same way.
+    # - Clipped at the 0.5 % bound, on the raw scale or the normal one, the lag-0 moment of heavy-tailed scores shrank
+    #   more than the cross-products: ρ 0.77–0.83 on stroke null worlds drawn at 0.66, against 0.65–0.69 at the
+    #   universal threshold, as unclipped; measles ρ 0.54 at it, unclipped 0.30 (2026-10-07,
+    #   data/probes/noise_clip_bound.json)
+    _, zs = randomised_pit(y[keep], m, ph / kap, seed=0)
+    bound = float(stats.norm.isf(1.0 / (2 * zs.size)))
+    e = np.clip(np.nan_to_num(zs, nan=0.0), -bound, bound) @ M
     K = min(lags, T - 3)
     obs = np.array([float((e[:, :T - k] * e[:, k:]).sum()) for k in range(K + 1)])
     tk = np.arange(T)
@@ -762,11 +774,47 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
         MRM = M @ R @ M
         return P * trLM + kap * F * np.array([np.trace(MRM, offset=k) for k in range(K + 1)])
 
+    # κ by central matching (Efron 2004's empirical null, applied to the dispersion): the κ whose randomised PIT
+    # scores have the standard normal's interquartile range over the informative cells. Departures sit in the tails
+    # and cannot move the IQR, however many moderate cells an epidemic has. A moment estimate read them: measles
+    # admissions gave κ = 1000 (at the bound, with a standard error of 0.05 on the log scale: precise, and wrong),
+    # the predictive's dispersion fell to φ ≈ 0.02, and 614 admissions against 0.75 expected scored z = 5.7
+    # (2026-10-07).
+    # ρ and δ with the lag model's own frailty scale, fitted with them on lags 0..K. κ is the marginal of the residuals
+    # about the fit, which absorbs part of a persistent frailty (B1's place effect), while the detrended moments are
+    # corrected for that absorption (M): held at κ, the lag-1 moment could be met only by ρ at its bound (stroke null
+    # worlds drawn at ρ 0.81, δ 0.58 re-estimated at 0.95, 0.12–0.22, 2026-10-07). The correlation is what is kept
     scale = float(np.abs(obs).max()) or 1.0
     fit = optimize.least_squares(lambda par: (expected(par) - obs) / scale, x0=[1.0, 0.2, 0.2],
-                                 bounds=([0.0, -0.5, 0.0], [1e3, 0.95, 0.95]))
-    kap, rh, dc = (float(x) for x in fit.x)
+                                 bounds=([1e-3, -0.5, 0.0], [1e4, 0.95, 0.95]))
+    _, rh, dc = (float(x) for x in fit.x)
     return Noise(round(kap, 4), round(rh, 4), decay=round(dc, 4))
+
+
+def _central_kappa(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.5, seed: int = 0) -> float:
+    """The κ (the predictive's dispersion φ/κ) whose randomised PIT scores over the cells expecting at least
+    ``min_expected`` events have the standard normal's quartiles (−0.674, 0, 0.674): the least squared distance over
+    a grid of log κ, refined around its best point. The interquartile range alone is not monotone in κ (measles
+    admissions: 1.01 at κ = 1, 0.91 at 100, 1.19 at 1000, the zeros shifting the centre) and a root search on it
+    returned its bound (2026-10-07)."""
+    keep = mu >= min_expected
+    if keep.sum() < 50:
+        return 1.0
+    yy, mm = y[keep], mu[keep]
+    pp = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)[keep]
+    target = np.array([-0.6745, 0.0, 0.6745])
+
+    def gap(log_k: float) -> float:
+        _, z = randomised_pit(yy, mm, pp / np.exp(log_k), seed)
+        z = z[np.isfinite(z)]
+        return float(np.sum((np.quantile(z, [0.25, 0.5, 0.75]) - target) ** 2))
+
+    grid = np.linspace(np.log(0.05), np.log(1e3), 41)
+    vals = [gap(g) for g in grid]
+    i = int(np.argmin(vals))
+    lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
+    res = optimize.minimize_scalar(gap, bounds=(lo, hi), method="bounded", options={"xatol": 1e-3})
+    return float(np.exp(res.x if res.fun <= vals[i] else grid[i]))
 
 
 def lag_covariance(mu: np.ndarray, phi: np.ndarray, noise: Noise, k: int) -> np.ndarray:

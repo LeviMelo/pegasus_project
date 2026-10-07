@@ -187,17 +187,108 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
         if any(pk.centre in other or c in fp for c, other in overlapping):
             continue
         taken.append((pk.centre, fp, pk.window))
-        chosen.append((pk, sorted(fp)))
+        chosen.append((pk, sorted(fp), attribute(*series(s, multiscale.kernel_row(spectrum, pk.centre, pk.s)),
+                                                 window=pk.window, years=s.years)))
     out = [lenses.Finding("excess" if shape == "spike" else f"excess_{shape}", s.field.id, s.tier,
                           {"places": [int(s.places[u]) for u in fp],
                            "years": [int(s.years[pk.window[0]]), int(s.years[pk.window[1] - 1])]},
                           float(pk.rate_ratio), float(pk.p),
                           {"centre": int(s.places[pk.centre]), "scale_places": round(pk.places, 1), "s": pk.s,
-                           "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3)})
-           for pk, fp in chosen]
+                           "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3), "shape": shp})
+           for pk, fp, shp in chosen]
     ledger.complete(test, float(p.min()), None, {"peaks": len(found), "hits": len(out),
                                                  "null": {str(k): v for k, v in null.items()}})
     return out
+
+
+# ---------------------------------------------------------------------- the shape of a departure in time
+
+TC_DECAY = 0.7                  # Chen & Liu's temporary-change decay, their default
+
+
+def series(s: surprise.Surprise, weights: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The weighted sum over places of a field's counts and expectations [T], and its covariance over periods [T, T]
+    under the predictive with its noise structure (N1; places independent given the weights, as `multiscale.peaks`'s
+    variance takes them)."""
+    ok = (s.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0
+    w = np.where(ok.all(1), np.asarray(weights, dtype=float), 0.0)
+    nz = np.flatnonzero(np.abs(w) > 1e-12 * max(np.abs(w).max(), 1e-300))
+    w, y, mu = w[nz], s.y[nz], s.mu[nz]
+    phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[nz]
+    T = y.shape[1]
+    cov = np.diag((w ** 2) @ surprise.cell_variance(mu, phi, s.noise))
+    for lag in range(1, T):
+        if abs(s.noise.corr(lag)) < 1e-4:
+            break
+        c = (w ** 2) @ surprise.lag_covariance(mu, phi, s.noise, lag)
+        cov[np.arange(T - lag), np.arange(lag, T)] = c
+        cov[np.arange(lag, T), np.arange(T - lag)] = c
+    return w @ y, w @ mu, cov
+
+
+def attribute(y: np.ndarray, mu: np.ndarray, cov: np.ndarray, window: tuple | None = None, years=None,
+              critical: float | None = None) -> dict:
+    """Which course in time a departure takes: the iterative detection and joint estimation of intervention effects of
+    Chen & Liu (1993; the procedure of X-13ARIMA-SEATS and R's tsoutliers), with generalised least squares under the
+    predictive's covariance ``cov`` of the residual y − μ in place of their ARMA filter. Candidates at every start τ:
+    an additive outlier (one period, ``spike``), a temporary change (δ^(t−τ) from τ, δ = 0.7, ``transient``), a level
+    shift (from τ to the end, ``step``) and a ramp ((t − τ + 1)₊, ``trend``; X-13's ramp). Stage 1 adds the candidate
+    of largest |z| given the effects already chosen while it passes ``critical``; stage 2 re-estimates the chosen
+    jointly and drops the weakest below it, until all pass. ``critical`` defaults to tsoutliers' 3 + 0.0025(n − 50),
+    clipped to [3, 4]. The departure's shape is the chosen upward effect of largest z starting inside ``window``
+    [t0, t1) (None: anywhere); "none" when no effect passes there. A suffix-sum test fires on a spike inside its
+    window (yellow fever 2017–18 and measles 2018 read as steps 2013–23 by the multiscale step, 2026-10-07): the shape
+    tells a lasting change from a passing one. The residual is taken as Gaussian, an approximation for small counts."""
+    T = len(y)
+    if critical is None:
+        critical = float(np.clip(3 + 0.0025 * (T - 50), 3.0, 4.0))
+    r = y - mu
+    P = np.linalg.pinv(cov + 1e-9 * np.eye(T) * max(np.trace(cov) / T, 1e-12), hermitian=True)
+    t = np.arange(T)
+    cands = []
+    for tau in range(T):
+        cands.append(("spike", tau, (t == tau).astype(float)))
+        if tau < T - 1:
+            cands.append(("transient", tau, np.where(t >= tau, TC_DECAY ** np.clip(t - tau, 0, None), 0.0)))
+        if tau >= 1:
+            cands.append(("step", tau, (t >= tau).astype(float)))
+        cands.append(("trend", tau, np.clip(t - tau + 1, 0, None).astype(float)))
+    X = np.stack([c[2] for c in cands], 1)                                              # [T, n]
+
+    def joint(idx):
+        Xs = X[:, idx]
+        Ai = np.linalg.pinv(Xs.T @ P @ Xs, hermitian=True)
+        b = Ai @ (Xs.T @ P @ r)
+        return b, b / np.sqrt(np.clip(np.diag(Ai), 1e-300, None))
+
+    chosen: list[int] = []
+    for _ in range(2 * T):
+        e = r - X[:, chosen] @ joint(chosen)[0] if chosen else r
+        z = (X.T @ P @ e) / np.sqrt(np.clip(np.einsum("ti,ts,si->i", X, P, X), 1e-300, None))
+        z[chosen] = 0.0
+        j = int(np.argmax(np.abs(z)))
+        if abs(z[j]) < critical:
+            break
+        chosen.append(j)
+    while chosen:
+        b, z = joint(chosen)
+        k = int(np.argmin(np.abs(z)))
+        if abs(z[k]) >= critical:
+            break
+        chosen.pop(k)
+    yr = (lambda i: int(years[i])) if years is not None else int
+    effects = []
+    if chosen:
+        b, z = joint(chosen)
+        for j, bj, zj in zip(chosen, b, z, strict=True):
+            kind, tau, _ = cands[j]
+            base = float(mu[tau:].mean()) if kind in ("step", "trend") else float(mu[tau])
+            effects.append({"shape": kind, "start": yr(tau), "z": round(float(zj), 2),
+                            "excess": round(float(bj), 2), "relative": round(float(bj) / max(base, 1e-12), 3)})
+        effects.sort(key=lambda d: -d["z"])
+    lo, hi = window if window is not None else (0, T)
+    inside = [d for d in effects if d["z"] > 0 and yr(lo) <= d["start"] <= yr(hi - 1)]
+    return {"shape": inside[0]["shape"] if inside else "none", "effects": effects, "critical": round(critical, 2)}
 
 
 def _laplace_glm(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, X: np.ndarray, prec: np.ndarray, temper: np.ndarray,
@@ -263,6 +354,9 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
             if offset + i not in chosen:
                 continue
             t0 = int(f["starts"][f["k"][i]])
+            w = np.zeros(sk.y.shape[0])
+            w[int(f["rows"][i])] = 1.0
+            shp = attribute(*series(sk, w), window=(t0, sk.y.shape[1]), years=sk.years)
             out.append(lenses.Finding("step", s.field.id, s.tier,
                                       {"places": _members(s, sc, int(f["rows"][i])),
                                        "years": [int(sk.years[t0]), int(sk.years[-1])]},
@@ -270,7 +364,8 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
                                       {"support": "municipality" if sc is None else sc.name,
                                        "unit": str(sk.places[f["rows"][i]]), "p_step": float(1 - f["p_null"][i]),
                                        "delta": float(f["d"][i]), "delta_sd": float(f["sd"][i]),
-                                       "p_relevant": float(f["p_relevant"][i]), "start": int(sk.years[t0])}))
+                                       "p_relevant": float(f["p_relevant"][i]), "start": int(sk.years[t0]),
+                                       "shape": shp}))
         offset += len(f["rows"])
     ledger.complete(test, float(p_null.min()), None, {"units": len(p_null), "hits": len(out)})
     return out

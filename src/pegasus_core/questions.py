@@ -13,6 +13,10 @@ one question without multiplying its claims:
   periods) are one answer, which names every method that found it, with each method's effect, p-value and scale.
   A regional finding no cell method shows, or the reverse, is a statement about the departure's scale.
 - **Roles come from records**, never from a constant tuned to make an event appear.
+- **The course in time is attributed, not assumed.** A method's contrast can fire on a departure of another shape (a
+  suffix sum on a one-year epidemic). Each finding carries its shape by Chen & Liu's intervention analysis
+  (`departures.attribute`); an answer none of whose findings takes one of the question's ``shapes`` is not discarded
+  but returned apart (``AnswerList.other_shape``): it answers a sibling question.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ class Question:
     locus: str
     scale: str
     methods: tuple[Method, ...]
+    shapes: tuple[str, ...] = ()                # the courses in time that answer it (`departures.attribute`); () any
 
 
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
@@ -46,16 +51,16 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("cell_excess", "two-group model on the PIT scores; supports from the IBGE ladder"),
                  Method("excess", "multiscale graph peaks of a gamma tail score; places joined by N1's noise"),
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
-             )),
+             ), ("spike", "transient")),
     Question("step", "C", "a lasting rise in level from some period to the series' end", "B1",
              "area × window", "rate ratio", (
                  Method("excess_step", "multiscale graph peaks of suffix sums; N1's correlation over periods"),
                  Method("step", "Bayesian single change point per place, tempered by N1's correlation"),
                  Method("change_point", "trailing-window NB tails against the place's past course; the v0 lens"),
-             )),
+             ), ("step",)),
     Question("trend", "C", "a course bending upward from some period", "B1", "area × window", "rate ratio", (
         Method("excess_trend", "multiscale graph peaks of hinge contrasts"),
-    )),
+    ), ("trend",)),
 )}
 
 
@@ -75,6 +80,11 @@ class Answer:
     @property
     def p(self) -> float:
         return min(f.p for f in self.findings.values())
+
+    @property
+    def shapes(self) -> dict[str, str]:
+        """Each method's attributed course in time; "unattributed" where the method reports none."""
+        return {m: f.stats.get("shape", {}).get("shape", "unattributed") for m, f in self.findings.items()}
 
 
 def _years(f) -> tuple[int, int]:
@@ -111,13 +121,16 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
             if m.id not in home.findings or f.p < home.findings[m.id].p:
                 home.findings[m.id] = f
     answers.sort(key=lambda a: a.p)
-    out = AnswerList(answers)
+    fits = [not qn.shapes or any(v in qn.shapes or v == "unattributed" for v in a.shapes.values()) for a in answers]
+    out = AnswerList([a for a, ok in zip(answers, fits, strict=True) if ok])
+    out.other_shape = [a for a, ok in zip(answers, fits, strict=True) if not ok]
     out.failed = failed
     return out
 
 
 class AnswerList(list):
     failed: dict
+    other_shape: list
 
 
 def agreement(answers: list[Answer]) -> dict[str, int]:
@@ -132,5 +145,5 @@ def agreement(answers: list[Answer]) -> dict[str, int]:
 def summary(a: Answer) -> dict:
     states = np.unique(np.array(sorted(a.places)) // 10000).tolist() if a.places else []
     return {"question": a.question, "years": list(a.years), "places": len(a.places), "states": states,
-            "methods": a.methods, "p": float(f"{a.p:.3g}"),
+            "methods": a.methods, "p": float(f"{a.p:.3g}"), "shapes": a.shapes,
             "effects": {m: round(float(f.effect), 2) for m, f in a.findings.items()}}
