@@ -22,12 +22,10 @@ from __future__ import annotations
 import dataclasses
 import functools
 import hashlib
-import inspect
 import os
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
-from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -187,12 +185,9 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
 
 @functools.cache
 def _assembly_code() -> str:
-    """The hash of the code a BlockData is a function of: the assembly and the gateway's readers."""
-    h = hashlib.sha256(str(ASSEMBLY).encode())
-    for fn in (_assemble, _index_of, age_band, _chapter, _carrier, _admissible):
-        h.update(inspect.getsource(fn).encode())
-    h.update(Path(gateway.__file__).read_bytes())
-    return h.hexdigest()[:16]
+    """The version of the code a BlockData is a function of: the assembly and the gateway readers it reaches
+    (`config.code_key`), so an edit elsewhere in the gateway leaves every assembly current."""
+    return f"{ASSEMBLY}:{config.code_key(_assemble, _index_of, age_band, _chapter, _carrier, _admissible)}"
 
 
 def _blockdata_to(d: BlockData) -> tuple[dict[str, np.ndarray], dict]:

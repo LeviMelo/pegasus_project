@@ -32,7 +32,7 @@ The data cover deaths, admissions, births, notifications, procedures and more, b
 - **General.** Every method works for any field of any system, at any grain, with no logic or constant specific to one dataset, disease or place.
 - **Systematic.** It searches all fields, all places, all periods and all relations at once, with the multiplicity of the whole search designed in, never a hand-picked case.
 - **Principled.** It uses the field's established statistical method (P11), with each estimate's uncertainty calibrated and its claim's error rate controlled.
-- **Optimised.** It exploits the model's structure: sparse arrowhead solvers, GMRFs, factorised totals, low-rank joint structure. It runs on this machine in budgeted time. Speed is a feature, but never bought with validity.
+- **Optimised.** It exploits the model's structure: sparse arrowhead solvers, GMRFs, factorised totals, low-rank joint structure. It runs on this machine: the whole of DATASUS read together on one personal computer is the project's premise (ARCHITECTURE §1.2). Slowness is a defect of the code or its orchestration, never a reason to read less. Speed is never bought with validity.
 
 **The core concepts:**
 - the monolith's **expectation** (stage B), with its noise structure;
@@ -56,7 +56,7 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 - **P10** No dense object larger than the population tensor.
 - **P11** The established method comes first; a threshold or a check is never the answer to a modelling problem.
 - **P12** Departures and relations are model terms read through posteriors, not tails of residual statistics.
-- **P13** Exploit structure, and budget speed with a benchmark.
+- **P13** Exploit structure; speed targets measured by a benchmark.
 - **P14** Recording is measured: leads are re-scoped, never dissolved by untested explanations.
 - **P15** Race is an axis, read through its misclassification.
 - **P16** One stage, one computation: statistical validity in B–D, epidemiological only in E; a failed null is fixed in B, per field, never by per-system thresholds.
@@ -67,7 +67,7 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 3. **What is the established method** for this estimand? Am I building it, or patching a v0?
 4. **Am I fixing the cause, or a symptom?** A failed null is a model defect; lead volume is a ranking question; "is it real?" is stage E's.
 5. **Does it follow the roadmap's order** (STATUS, ARCHITECTURE §12)? Am I improving something the architecture has already demoted?
-6. **Is the computation structured and budgeted** (P13)? Does it scale to all fields at once?
+6. **Is the computation structured** (P13)? Does it scale to all fields at once? Is every object it needs computed once, keyed by content, and reused (work plan §2)?
 7. **Can it be made better?** (author, 2026-10-07; ask it at every design step and again before calling anything done.)
    - Is there a more general, more principled, more robust formulation of this, more aligned with P1–P16?
    - What did I fix by hand that the data or the model could choose: a partition, a scale grid, a shape list, a lag range, a graph? Each is a candidate to be learned or integrated over.
@@ -86,11 +86,11 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 
 9. **Locate it.** Name the ARCHITECTURE section the change touches. A new or changed mechanism, object, field kind, plan key, default or constant is written into that section (or §13.2 as a departure) **in the same commit**. Documentation that tracks the code is part of the change, not a later chore.
 10. **Read before asserting.** Describe a subsystem only after reading its code, its ADRs and its evaluations (race, on 2026-10-07, was summarised from memory and misstated).
-11. **Cost before running.** Estimate a run's work (fields × methods × years × replicates; fits, reads, links, downloads) against §5.8. Check on one field or one year first. Run at full scale only when a reading the author needs requires it, never to confirm what the code and an inspection settle. Heavy jobs go through `scripts/heavy.py` and `data/chain.py`, never another queue.
-12. **No hidden expensive default.** A national linkage, a refit of other blocks, a re-decode: nothing heavy starts implicitly. It is requested, and its cost is visible.
+11. **Check at the smallest scale that settles it.** One field, one year, one chapter. A national run is a reading, made when a unit's purpose is the reading, never to confirm what the code and an inspection settle. Heavy jobs go through the one job runner (today `scripts/heavy.py` and `data/chain.py`; the orchestrator after S0.3), never another queue.
+12. **Nothing computed inside a reader.** A national linkage, a refit of other blocks, a re-decode is an object of the state, computed by the orchestrator as a declared step, never silently inside a function that reads.
 13. **Constants are debts.** A constant that decides what is reported (a minimum effect, a list, a threshold) is recorded in §13.2 with how it will be measured (P7), never left as a silent gate.
 14. **Say what was checked.** "Built" means the code exists; "checked on X" names what ran; "done" means the acceptance criterion is met. Never commit unverified work described as working.
-15. **Ask before reshaping use.** A change to what the system computes by default, how it is used (§9.3) or a stage's boundary is discussed with the author first.
+15. **Work in units.** Every change belongs to a unit of `docs/plans/2026-10-07-work-plan.md`: its goal, its contract with the rest of the system, its definition of done. Work found on the way becomes a new unit, not a detour. One unit at a time; it closes in one commit with its documentation.
 
 If any answer is wrong, stop, re-plan, and write it down before coding.
 
@@ -118,11 +118,11 @@ The 2026-10-06 course correction that set this out is `docs/discussion/2026-10-0
 
 Read, in this order:
 1. `STATUS.md` (where each stage stands, and what is next);
-2. ARCHITECTURE §1.1 (the stages), §12 (the roadmap S0–S7 and its order) and §5.7–5.8 (the machine, the job runner, the performance budgets);
-3. the plan of the package at hand (`docs/plans/`, the newest that covers it);
+2. ARCHITECTURE §1.1 (the stages), §1.2 (the goals), §12 (the roadmap S0–S7) and §5.7–5.8 (the machine, the job runner, the speed targets);
+3. `docs/plans/2026-10-07-work-plan.md` (the unit in progress, its contract and its definition of done), then the design plan it cites;
 4. `docs/architecture_coverage.md` for the item at hand.
 
-**A context summary is not the plan.** After one, re-read these before the next change: on 2026-10-07 work resumed from a summary, and the speed plan, the job runner and the budgets were never consulted.
+**A context summary is not the plan.** After one, re-read these before the next change: on 2026-10-07 work resumed from a summary, and the speed plan, the job runner and the speed targets were never consulted.
 
 Steer by the roadmap's order and the coverage matrix, not by the latest result.
 
@@ -162,15 +162,7 @@ $PY scripts/check_docs.py
 
 # 4. Autonomy
 
-- **Decide what is the agent's; ask what is the author's.** Do not hand the author a menu of obvious choices, and do not present them as "decisions" (author, 2026-10-07).
-
-  | the agent decides, records and proceeds | the author decides (bring a recommendation) |
-  |---|---|
-  | methods, estimators, numerical choices, fixes, refactors, the documentation | goals, the reader, what a finished reading is |
-  | an ADR once a decision is final | use and cost: how a reading is chosen, bounded and shown (ARCHITECTURE §9.3) |
-  | the order of work inside a package | interfaces, serving, agents and MCP (S7; author, 2026-10-05 and 2026-10-07) |
-  | | scope, priorities, the roadmap's packages; a big stage's design before it is built |
-  | | anything outward: push, publish, contact |
+- **Decide everything in development** (author, 2026-10-07: "I won't be able to decide anything in development as I'll be away", nor architect goals). Goals, methods, use, scope, order, designs: the agent adjudicates, writes the decision where it is owned (§7) with its evidence, and proceeds. Never hand the author a menu, and never wait on a ruling. The author's word is needed only to act outward (below), and to start serving and agents (S7).
 - **Never act outward as the author.** Pushing, publishing, submitting and contacting anyone need explicit authorisation, each time.
 - **Replace, never build beside.** Before adding a mechanism, find the one that does the job (ARCHITECTURE §11.1). Two mechanisms for one job is a defect.
 - **Never lose a question** (author, 2026-10-06). A method is retired only when its successor answers every question it answered (retrospective and prospective, every support, every shape), measured on the grid. Until then both run, and the docs say "takes over question X", never "replaces" or "drops". A method that answers wrongly is fixed or kept with its record; a question is never withdrawn because a method for it failed.
@@ -196,7 +188,7 @@ $PY scripts/check_docs.py
 - **A synthetic that reproduces a symptom can validate the wrong mechanism.** Confirm every fix on the real object, and rerun the headline result after it.
 - **Locate a phenomenon in the model before fixing it.** A recurring patch means a missing abstraction.
 - **Check a fact before stating it:** a count, a date, what a document or a paper says.
-- **Profile before optimising.** Record budgets as measured, never as hoped.
+- **Profile before optimising.** Record speed as measured, never as hoped; a missed target is a defect to locate in the profile.
 
 ---
 
@@ -296,7 +288,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | `studies/` | studies done with PegaSUS and pegasus_data |
 | `assets/brand/` | logo (`pegasus-logo.png`), wordmark, mark |
 | `docs/decisions/`, `docs/evaluation/` | ADRs and measurements, indexed by `DECISIONS.md` and `EVALUATION.md` |
-| `docs/plans/` | each package's design and acceptance (the order of work is ARCHITECTURE §12), the speed plan and budgets (`2026-10-06-optimization.md`) |
+| `docs/plans/` | each package's design and acceptance (the order of work is ARCHITECTURE §12), the speed plan (`2026-10-06-optimization.md`); **the work plan (`2026-10-07-work-plan.md`): units, contracts, definitions of done** |
 | `docs/architecture_coverage.md` | every ARCHITECTURE item against the code and the evidence, and the gaps ranked |
 | `docs/handoffs/` | requests to pegasus_data |
 | `docs/discussion/` | design reasoning, dated, frozen once superseded |

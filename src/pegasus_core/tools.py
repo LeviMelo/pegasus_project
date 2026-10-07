@@ -501,13 +501,13 @@ class Session:
         verdict goes to ``lead.robustness["triage"]``, the tier to ``lead.replication``; leads read as
         artefacts are marked `explained`. With ``write`` the new states are appended to the register.
 
-        Each verdict carries the rules' version (`explain.RULES`). ``stale`` re-triages only the leads whose verdict
+        Each verdict carries the rules' version (`explain.rules()`). ``stale`` re-triages only the leads whose verdict
         was made by other rules (or none); a lead a superseded rule had explained is open again unless the new verdict
         explains it, and the old verdict is kept beside the new one."""
         mine = [x for x in (register if register is not None else self.register.current())
                 if x.fields and x.fields[0].startswith(f"{self.dataset}:")]
         if stale:
-            mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.RULES]
+            mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.rules()]
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
         for x in mine:
             by_node.setdefault((x.fields[0].split(":")[-1], x.train_last or 0, x.tier if x.train_last else ""), []).append(x)
@@ -551,13 +551,13 @@ class Session:
                     return {"tested": pv is not None, "p": 1.0 if pv is None else float(pv),
                             "reason": f"{v.cls} ({v.grade or 'ungraded'}): {v.reason}"}
 
-                self._ledgered("triage", x, run, rules=explain.RULES)
+                self._ledgered("triage", x, run, rules=explain.rules())
                 verdict = run.verdict
                 old = x.robustness.get("triage")
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
                                                            "grade": verdict.grade or None, "bound": verdict.bound,
-                                                           "rules": explain.RULES, **verdict.evidence,
-                                                           **({"superseded": old} if old and old.get("rules") != explain.RULES else {})}}
+                                                           "rules": explain.rules(), **verdict.evidence,
+                                                           **({"superseded": old} if old and old.get("rules") != explain.rules() else {})}}
                 if verdict.grade == explain.TESTED and verdict.cls in (explain.SUBSTITUTION, explain.SYSTEM):
                     x.status = "explained"      # only a tested explanation takes a lead out; bound and consistent stay attached
                 elif x.status == "explained":

@@ -138,8 +138,10 @@ def _declared(sys_: System, kind: str, wanted: list[str] | str | None) -> list[s
     return list(wanted)
 
 
-def _key(step: str, **inputs: Any) -> dict[str, Any]:
-    return {"step": step, "data": config.data_version(), "code": config.code_version(), **inputs}
+def _key(step: str, code: tuple, **inputs: Any) -> dict[str, Any]:
+    """A step's key: its inputs, the data version and the code the step runs (`config.code_key` of ``code``), never
+    the repository's commit, which re-keyed every step on every commit (survey 2026-10-07)."""
+    return {"step": step, "data": config.data_version(), "code": config.code_key(*code), **inputs}
 
 
 def _done(key: dict[str, Any]) -> bool:
@@ -158,7 +160,10 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     fits and register, `Session.train`), what they select tested once on the later years (`Session.temporal_confirm`),
     and each answer given the verdict of the selection that is the same finding (`Session.retier`)."""
     blocks = resolved.get(sys_.dataset, sys_.blocks)
-    key = _key("later_years", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
+    from . import tools
+
+    key = _key("later_years", (tools.Session.train, tools.Session.survey_questions, tools.Session.temporal_confirm,
+                               tools.Session.retier), dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
                questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers))
     if not force and _done(key):
         return "done on these versions"
@@ -189,7 +194,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         sessions[sys_.dataset] = s
         blocks = _chapters(sys_) if sys_.blocks == ["all"] else sys_.blocks
         for block in list(blocks):
-            key = _key("fit", dataset=sys_.dataset, event=sys_.event, block=block, years=plan.years, graph=plan.graph)
+            key = _key("fit", (fit_block,), dataset=sys_.dataset, event=sys_.event, block=block, years=plan.years, graph=plan.graph)
             try:
                 s.expectations.model(block)
                 out[f"fit {sys_.dataset} {block}"] = "fitted already"
@@ -205,8 +210,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     continue
                 _mark(key, {})
                 out[f"fit {sys_.dataset} {block}"] = "fitted"
-        key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
-                   questions=plan.questions, years=plan.years)
+        key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
+                   blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years)
         if force or not _done(key):
             leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                        levels=tuple(sys_.levels) if sys_.levels else None, log=log)
@@ -242,8 +247,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                         log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
                         out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
-            key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
-                       measure=column, questions=plan.questions, years=plan.years)
+            key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
+                       blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years)
             if force or not _done(key):
                 leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                             levels=tuple(sys_.levels) if sys_.levels else None, log=log)
@@ -253,7 +258,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"questions {sys_.dataset} {column}"] = "done on these versions"
     for sys_ in plan.systems:
         for node in sys_.disparities or []:
-            key = _key("disparity", dataset=sys_.dataset, event=sys_.event, node=node, years=plan.years)
+            key = _key("disparity", (tools.disparity,), dataset=sys_.dataset, event=sys_.event, node=node, years=plan.years)
             if force or not _done(key):
                 found = tools.disparity(sys_.dataset, sys_.event, node, plan.years, graph=plan.graph, log=log)
                 _mark(key, {"leads": len(found)})
@@ -262,7 +267,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"disparity {sys_.dataset} {node}"] = "done on these versions"
     if plan.relations and len(plan.systems) >= 1:
         spec = [(x.dataset, x.event, resolved.get(x.dataset, x.blocks)) for x in plan.systems]   # `all` resolved
-        key = _key("relations", plan=spec, years=plan.years)
+        key = _key("relations", (tools.relation_survey,), plan=spec, years=plan.years)
         if force or not _done(key):
             levels = tuple(sorted({lv for x in plan.systems for lv in (x.levels or ["group"])}))
             rel = tools.relation_survey(spec, plan.years, plan.graph, levels=levels, log=log)
@@ -275,12 +280,13 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             s = sessions[sys_.dataset]
             answers = [x for x in s.register.current() if x.kind == "answer"
                        and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")]
-            key = _key("triage", dataset=sys_.dataset, leads=sorted(x.id for x in answers))
+            served = [(x.dataset, x.event) for x in plan.systems] +                 [tuple(c) for c in plan.extra.get("corroborators") or ()]
+            key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
+                       leads=sorted(x.id for x in answers), served=sorted(served))
             if answers and (force or not _done(key)):
                 done = s.triage(register=answers, log=log)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
-                corr = s.corroborate(done, served=[(x.dataset, x.event) for x in plan.systems] +
-                                     [tuple(c) for c in plan.extra.get("corroborators") or ()], log=log)
+                corr = s.corroborate(done, served=served, log=log)
                 s.register.add(corr)
                 _mark(key, {"leads": len(answers), "corroborated": len(corr)})
                 out[f"triage {sys_.dataset}"] = len(answers)

@@ -13,7 +13,7 @@ Section map:
 
 | § | contents |
 |---|---|
-| 1 | purpose and principles; **§1.1 the six stages** |
+| 1 | purpose and principles; **§1.1 the six stages**; **§1.2 goals, the reader, done** |
 | 2 | the repositories and their boundary |
 | 3 | objects |
 | 4 | the monolith: model |
@@ -60,7 +60,7 @@ Leads are statistical objects, not conclusions.
 | P10 | **No dense object larger than the population tensor** is ever built (§5). |
 | P11 | **Established method first.** Before a statistic is designed, the field's standard for that estimand is named. It is then used, or beaten by measurement. A check, gate or threshold is not an answer to a modelling problem. |
 | P12 | **Departures and relations are model terms.** A lead is a posterior statement about a term of the model (its size, its certainty, its minimum relevant effect), not the tail of a residual statistic under a method-specific null. Scans search; models infer (§7). |
-| P13 | **Structure is exploited, and speed is budgeted.** Computation follows the model's sparsity: an arrowhead Hessian, GMRF precisions, factorised totals (§5.3). Every component has a time budget, and a benchmark is run on every change to the solver (§5.8). |
+| P13 | **Structure is exploited, and every object is computed once.** Computation follows the model's sparsity: an arrowhead Hessian, GMRF precisions, factorised totals (§5.3); each object of the state is computed once, keyed by content, and reused (§9.3). Every component has a speed target, and a benchmark is run on every change to the solver (§5.8). |
 | P14 | **Recording is measured, never used to dissolve.** Recording processes are model terms where the data identify them, and graded explanations where they do not. A lead is re-scoped to its conserved level, never removed by an untested explanation. A changed rule is re-applied to the stored state (§8.6). |
 | P15 | **Race is an axis, not an option.** Where the population carries race, the lattice does. Recorded race is read through its measured misclassification and missingness, never taken as the declared race, and never dropped because it is hard. |
 | P16 | **One stage, one computation** (revision 3, §1.1). Stages B–D (expectation, departures, relations) make statistical claims only; whether a departure is an event in the world is stage E's question, and nowhere earlier. A mis-stated null is a defect of the expectation's noise model and is fixed there, measured per field, never with a threshold per data system. A method is general: it carries no logic specific to one system or field. |
@@ -87,6 +87,17 @@ PegaSUS is one model of the marked point process, read in six stages. They are r
 - **D** never tests pairs as its search.
 - **A threshold** is never the answer to a modelling problem (P11), and relevance never patches a null.
 - **E** never removes a statistical lead except by a tested explanation (P14).
+
+### 1.2 Goals, the reader, done (revision 4)
+
+Written by the agent on 2026-10-07: the author does not set goals for the development and is often away; these are the working goals, revised when a reading shows they are wrong.
+
+- **The scale is the point.** Every record DATASUS publishes from 1996 (deaths, births, admissions, notifications, procedures), every declared field, every place, period and group, read together on one personal computer (§5.7). That this is doable is the project's premise: when something is slow, the code or its orchestration is wrong, and the remedy is structure (§5.1–5.5), computing each object once (§9.3) and incremental refresh, never reading less.
+- **The reader** is an epidemiologist or analyst at that computer: the author first. They read ranked leads, each a dossier (§9.1): the claim, the series against its expectation, the method's record, the rival explanations tested in stage E, the independent corroboration.
+- **A finished reading** is the register of every system's leads after stage E, ranked, with dossiers for the top of each system, refreshed when the data are.
+- **Speed targets** (§5.8) are properties the code must have: a chapter fitted and surveyed in minutes, every system's full survey within a night cold and within an hour when only new data arrived.
+- **Success:** documented events are found where, when and at the scale they happened; the false-lead rate is controlled at q and reported; the dossiers lead a reader to something worth a study.
+- **Not goals:** causal claims; identifying persons (identifiers pass through pegasus_data unmodified and flagged, never read here for their own sake); a reader of the ICD-9 era (SIM before 1996; a mapping to ICD-10 is welcome); a frontend (`../pegasus_view` is not PegaSUS's); serving and agents before S7.
 
 ## 2. Repositories and boundary
 
@@ -528,7 +539,7 @@ Over 2,000 draws on IX, the variance of random projections equals the exact aᵀ
 
 **Jobs** (`scripts/heavy.py`). A heavy job gets the machine's cores and states its share (`--threads`, set for its BLAS, OpenMP and numba); a GPU job takes the single GPU slot (`--gpu`). Few fat jobs are preferred to many thin ones: six fits of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone (2026-10-06). Surveys have their own pool. A chain of jobs runs through `data/chain.py`, never `bash`, which on this machine resolves to WSL's and cannot see the C: paths.
 
-### 5.8 Performance budgets and the benchmark
+### 5.8 Speed targets and the benchmark
 
 **Speed is a requirement (P13).** The benchmark (`bench`, to build in O1) fits a fixed set of blocks cold and warm and records seconds, outers, Newton steps, inner iterations, peak memory and the optimum reached. It runs on every change to the solver, and its result is an evaluation entry.
 
@@ -544,7 +555,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | all 19 SIM chapters; all 20 SIH chapters | hours | 10 min; 30 min |
 | survey of one chapter | 65 s (III, 21 fields) to hours | < 2 min |
 
-**Budgets are design targets.** The first v1 measurement either meets them or revises them, with the reason.
+**The targets are properties the code must have** (§1.2). A target missed is a defect of the code or its orchestration, found by profiling and fixed by structure or by computing an object once; it never bounds what a reading computes.
 
 **The optimum is the acceptance criterion.** v1 must reach the v0's optimum on the same data: objective within one log-likelihood unit, τ's within the convergence tolerance, the same calibration.
 
@@ -969,7 +980,7 @@ Lead
 
 ### 9.3 Use
 
-**PegaSUS runs as a survey.** Each data update triggers:
+**PegaSUS runs as a survey,** and the full survey of every system is the default reading (§1.2). Each data update triggers:
 1. a warm-started refit of affected blocks;
 2. surprises for the new periods;
 3. the scheduled scans;
@@ -988,7 +999,7 @@ Lead
 | `confirm(claim)` | one run on the reserved period (§8.3), ledgered, under LOND |
 | `train(t)`, `temporal_confirm(t)`, `spatial_confirm(leads)`, `corroborate(leads)`, `honest_sizes()`, `retier(leads, selected)` | the independent-unit tests, sizes after selection, the tier (§8.3) |
 
-**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method; nothing bounds or shows the cost of a reading (`docs/discussion/2026-10-07-survey.md` §2b). How a reading is chosen and bounded is the author's ruling (survey §4.4), pending.
+**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method. **The design (revision 4, `docs/plans/2026-10-07-work-plan.md` §2):** the state is a set of objects (assembled blocks, fits, noise, surprises, the spatial basis, answers, leads, verdicts, readings), each computed once, keyed by its inputs and the source of the code it runs, and stored; one orchestrator (`update`) computes the objects a plan needs in dependency order, resumes at the next missing object, and schedules them on the machine's CPU, GPU and memory. Steps are keyed by content since S0.1; `update` still recomputes shared objects per method and per reader (survey 3); S0.2–S0.3 build the rest of the design.
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 
@@ -1148,7 +1159,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `relations` (O7, stage D) | relation models (§7.5): the joint factor model of every field's departures (EM factor analysis with ARD; lagged copies for leads; graph-frequency bands for the spatial scale, no zoning) and its relation table with one FDR; each relation marked direct or carried by a shared driver (`direct_relations`: the graphical lasso of the residual after the factors, StARS, §7.6); the national and macro-regional courses with phase-surrogate nulls where the bands cannot be identified (`course_relations`); `relation_map` runs it all; the penalised distributed-lag term as the pairwise confirmation | numpy, scipy, torch, scikit-learn, multiscale |
 | `questions` (stages C–E) | the questions and the methods that answer them (docs/plans/2026-10-07-questions-and-methods.md): each method at q/k, the union merged by overlapping loci, agreement reported; `Session.ask` | tools |
 | `report` (stage F) | the register as a person reads it: answers per question and block with named municipalities, methods, shapes, triage and tier; relations with the scales left unanswered; the dossier of a lead (HTML) and the person's verdict written back; `pegasus-core report`, `dossier`, `verdict` | leads, pegasus_data geography |
-| `update` (§9.3) | the persistent state (fits, register, report) brought up to a declared plan (`Plan`, `plans/*.yml`); each step keyed by its inputs and, today, the repository's commit (§13.2); `pegasus-core update` | tools, report |
+| `update` (§9.3) | the persistent state (fits, register, report) brought up to a declared plan (`Plan`, `plans/*.yml`); each step keyed by its inputs and the code it runs (§11.3); `pegasus-core update` | tools, report |
 | `surveillance` (phase 4) | epidemiological weeks by one rule; reporting delays per place, shrunk to the nation's; the nowcast by binomial thinning; alarms at a declared recurrence interval per place against the alarm baseline (ADR-0004, ADR-0012); `Session.alarms`, `pegasus-core alarms` | gateway (delay_counts) |
 | `multiscale` (stages C–D) | space at every scale from the place graph: the normalised Laplacian's spectrum, heat kernels exp(−sL) with closed-form footprints, and multiscale peak testing (STEM with a simulated peak-height law) | numpy, scipy, torch, surprise |
 | `departures` (O6, stage C) | departure models (§7.0): cell excess (two-group model), excess at unknown spatial scale (multiscale peaks), step (Bayesian change point), each with its FDR and relevance test | surprise, control, multiscale |
@@ -1186,7 +1197,7 @@ pegasus_home/
   blockdata/<hash>/arrays.npz, manifest.json                        (an assembled BlockData; key = arguments, data version, population key and content hash, hash of the assembly and gateway source)
 ```
 
-**Every artefact's key** hashes (pegasus_data data versions, spec, code version). **A stale artefact is never served.**
+**Every artefact's key** hashes (pegasus_data data versions, spec, code version). **A stale artefact is never served.** The code version is `config.code_key` of the functions the artefact runs (S0.1, 2026-10-07): the syntax trees, without comments or docstrings, of everything in the package they reach by name, by `module.name`, by `self.name` within the class's family, and by `x.name` on any other object through every package method of that name. It may include more than runs, never less, except through `getattr` with a computed name. The repository's commit is recorded in manifests and the ledger, never keyed.
 
 ### 11.4 Invariants (enforced in code, checked by the harness)
 
@@ -1231,7 +1242,7 @@ A solver change is measured on the benchmark before it is adopted.
 | S7 | surveillance alarms as leads; serving and agents (phase 3–4) | — |
 | D | depth on demand: posterior departure models, N2, the top model, BYM2, 33 age classes, interaction patterns | each item has a reading that needed it |
 
-The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.md` and the evaluations.
+**The units of each package, their contracts and their definitions of done** are in `docs/plans/2026-10-07-work-plan.md`; no work starts outside it. The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.md` and the evaluations.
 
 ## 13. Departures and maturity
 
@@ -1263,7 +1274,7 @@ The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.m
 | corroboration, later years, other jurisdictions | 8.3 | v0 built and ledgered (S4): sources from declarations; open: shaped on documented events, any of an unbounded set of sources, a year without a stored link read as unlinked | S4 |
 | persons: cohorts, linked shares | 7.8 | v0 built (S2); links from stored runs only (2021–2022); not run | S2 |
 | the reader: dossier, verdicts | 9 | v0 built (S5), unused; an `artefact` verdict removes a lead (a defect, P14) | S5 |
-| use: plans, `update` | 9.3 | v0: every field, question and method, with no bound or estimate of cost; keyed by the commit | the author's ruling (§9.3) |
+| use: plans, `update` | 9.3 | v0: every field, question and method; steps keyed by content (S0.1); shared objects recomputed, no resume within a step, several job runners | S0.2–S0.3 |
 
 ### 13.2 Departures
 
@@ -1298,5 +1309,4 @@ The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.m
 | 3.1 | dates come from pegasus_data's roles | the alarm's entry date is the first of `gateway.ENTRY_PROPERTIES = ("entry_date", "registration_date", "processing_month")` a type declares | an ordered list of property names; to become a declared role |
 | 2 | every input comes through the gateway, which computes nothing expensive by surprise | links are computed only with `PEGASUS_COMPUTE_LINKS=1`; otherwise read from stored runs, and a year without one is reported (`LinkNotStored`) | a national linkage run is hours; corroboration and cohorts on unlinked years are open (survey §2) |
 | 10.0 | a method's record says where it was calibrated, with its power | `harness` marks a method calibrated when its null worlds hold findings no more often than max(q, 1/worlds): true by construction at one world | to be read from the grid's worlds, with tier, θ0, power and maturity (§9.1) |
-| 11.3 | a stale artefact is never served; keys hash what an artefact reads | the assembly key hashes gateway.py's bytes (any edit re-assembles every block); `update` keys each step by the repository's commit (any commit redoes every step) and omits the corroborators | survey 3; keys by the code an artefact reads are the fix |
 | 4.1 | κ and N^{(SUS)} are factors of μ; groups g = age × sex × race | κ and the SUS share are exposure modifiers of the source string (`popsvs+kappa`, `+sus`), opt-in; race groups are race-stratified blocks (own θ, f, g, h per race), not a race axis of G; infant deaths by recorded race use the exposure Σ_j C(k\|j) r_j N_j with r_j fitted on the recorded counts, valid when declared races share one shape; SUS before 2021 is the 2021-23 cell mean with a measured random-walk σ | η's age-sex profile is a random walk over G and is another front's ground; a race axis needs it; the SUS product holds 2021-23 only (ADR-0020) |
