@@ -135,7 +135,7 @@ class Expectations:
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
                  structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
                  center: str = "plugin", population: str | None = None,
-                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False, rank: int = 0):
+                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False, rank: int = 0, robust: bool = True):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
         "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
@@ -144,8 +144,11 @@ class Expectations:
         on the posterior mean (``"posterior"``). ``population`` names the exposure (``gateway.population``:
         popsvs, account-2; None: the configured default). When it carries intervals (the account) the
         predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
-        correlation ``exposure_rho`` between a place-year's cells (None: ignored)."""
+        correlation ``exposure_rho`` between a place-year's cells (None: ignored). ``robust`` (the default) reads each
+        count block through `monolith.Monolith.robust`: its level and dispersion from the background, never from the
+        departures stage C reports (evaluation 2026-10-07, real events)."""
         self.population, self.exposure_rho = population, exposure_rho
+        self.robust = robust
         self.rank = int(rank)       # the low-rank interaction's R of the stored fits (ADR-0021); 0: the base model
         self.supply = supply        # fit the facility-supply term onto each loaded count block (facility.attach_supply, ADR-0016)
         self.supplies: dict = {}
@@ -163,6 +166,8 @@ class Expectations:
             cls = monolith.model_class(self.source)
             self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
                                            device=self.device, **self._reader(), **({"rank": self.rank} if self.rank else {}))
+            if self.robust and cls is monolith.Monolith and not self.rank:
+                self._models[block] = self._models[block].robust_stored()
             if self.supply and cls is monolith.Monolith and self._models[block].data.grain == "year":
                 self.supplies[block] = facility.attach_supply(self._models[block], self.dataset, self.event)
         return self._models[block]
@@ -357,7 +362,7 @@ class Expectations:
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 2}
+        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 3}   # 3: N1 (κ, ARMA, space, background), 2026-10-07
         if cache:
             hit = store.get_table("surprise", key)
             if hit is not None:
@@ -687,6 +692,19 @@ def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np
 
 # ---------------------------------------------------------------------- N1: the predictive's noise structure
 
+def background(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, trim: float = 0.005) -> np.ndarray:
+    """Cells inside the predictive's [``trim``, 1 − ``trim``] quantiles: the background every estimate of the noise
+    is made on. A noise estimate that reads the departures takes them for noise: N1's spatial share went to its bound
+    (ω = 1 at 256 places) on yellow-fever deaths, whose 2017-18 outbreak then sat inside its own null (2026-10-07).
+    The cells outside are treated as missing (residual 0), the EM rule of `monolith.Monolith.robust`."""
+    phi_ = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
+    fin = np.isfinite(phi_)
+    ph = np.where(fin, phi_, 1e12)
+    p = ph / (ph + np.maximum(mu, 1e-12))
+    lo, hi = stats.nbinom.ppf(trim, ph, p), stats.nbinom.ppf(1 - trim, ph, p)
+    return (y >= lo) & (y <= hi)
+
+
 def _detrend_projection(T: int) -> np.ndarray:
     """M = I − X(XᵀX)⁻¹Xᵀ for X = [1, t]: the residual maker of a place's own level and linear trend."""
     X = np.column_stack([np.ones(T), np.arange(T) - (T - 1) / 2])
@@ -717,7 +735,8 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     keep = mu.mean(1) >= min_expected
     if keep.sum() < 10:
         return Noise()
-    m, r = mu[keep], (y - mu)[keep]
+    inside = background(y, mu, phi)
+    m, r = mu[keep], np.where(inside, y - mu, 0.0)[keep]
     ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
     s2 = Noise().frailty_variance(ph)
     v = m + m ** 2 * s2
@@ -815,7 +834,7 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
     U, T = s.y.shape
     phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)
     V = cell_variance(s.mu, phi, s.noise)
-    good = (s.mu > 0) & ((s.flags & (DENOMINATOR | NO_INFORMATION)) == 0)
+    good = (s.mu > 0) & ((s.flags & (DENOMINATOR | NO_INFORMATION)) == 0) & background(s.y, s.mu, s.phi)
     x = np.where(good, (s.y - s.mu) / np.sqrt(np.where(good, V, 1.0)), 0.0)
     M = _detrend_projection(T)
     e = x @ M
@@ -835,6 +854,7 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
     target = obs - cM * a
     sqf = torch.as_tensor(np.sqrt(f), dtype=dt, device=dev)
     best = (np.inf, 0.0, 0.0)
+    sse0 = None
     for fp in footprints:
         sc = spectrum.scales((fp,))[0]
         dK = Q2 @ torch.exp(-sc * lam)                                             # diag(exp(−sL))
@@ -847,8 +867,15 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
         om = min(max(om, 0.0), 1.0)
         fit = cM * a + base + om * slope
         sse = float((((obs - fit) ** 2) * w).sum())
+        if sse0 is None:
+            sse0 = float((((obs - expected0) ** 2) * w).sum())
         if sse < best[0]:
             best = (sse, om, sc)
+    # ω and s* are kept only when they improve the fit by more than their two parameters cost (the weighted squares
+    # are χ²-like: each coefficient's power has variance ∝ its expectation²): on a sparse field the frailty's share
+    # is negligible, ω is unidentified, and an unpenalised fit put it at its bound (ω = 1 on yellow-fever deaths)
+    if sse0 is None or (sse0 - best[0]) * T / 2.0 <= 2 * 2:
+        return dataclasses.replace(s.noise, omega=0.0, scale=0.0)
     return dataclasses.replace(s.noise, omega=round(best[1], 4), scale=best[2])
 
 

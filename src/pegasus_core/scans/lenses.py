@@ -33,12 +33,13 @@ TREND_PERIOD = {"municipality": 1.5, "region": 1.2, "state": 1.2}
 
 
 #: Where a system needs a larger θ0 than the default (ADR-0026): (lens, dataset prefix) → θ0. The first match wins.
+#: With N1's noise structure the SINAN and SINASC entries were removed: their lenses keep 0/10 null worlds at the
+#: defaults (data/probes/grid/n1_null_worlds.json, 2026-10-07; the time-shift negatives that set them keep each
+#: place's trend and are no null for slow shapes). SIH's spatial cluster still fires in 9/10 null worlds at 1.5: its
+#: reference B0 has no place effects, so SIH's hospital-use geography reads as clusters. A reference question, kept
+#: here as a recorded debt until the spatial question has its departure model (O6).
 MINIMUM_EFFECT_BY = (
-    ("spatial_cluster", "SIH-RD", 2.0),    # SIH's B0 holds its hospital-use geography (ADR-0018): 20/20 worlds at 1.5, 0/20 at 2.0
-    ("space_time", "SINAN", 1.5),          # SIFC's time negatives: 17/20 worlds at 1.1, 4/20 at 1.2, 0/20 at 1.5
-    ("trend_divergence", "SINAN", 2.0),    # SIFC's time negatives: 10/20 at 1.1, 3/20 at 1.5, 0/20 at 2.0
-    ("spatial_cluster", "SINAN", 2.0),     # SIFC's model worlds: 10/10 at 1.5, 0/10 at 2.0
-    ("trend_divergence", "SINASC", 1.5),   # births' time negatives: 13/20 at 1.1, 8/20 at 1.2, 0/20 at 1.5
+    ("spatial_cluster", "SIH-RD", 2.0),    # SIH's B0 holds its hospital-use geography (ADR-0018): 9/10 null worlds at 1.5
 )
 _DEFAULT_EFFECT = {"spatial_cluster": SPATIAL_RATE_RATIO, "trend_divergence": TREND_PERIOD}
 

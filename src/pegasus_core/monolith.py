@@ -549,6 +549,7 @@ class Monolith:
         # overdispersion as such and not as place variation (OPEN_QUESTIONS 8)
         self.likelihood = likelihood
         self.phi_fit = float("inf")
+        self.hc: torch.Tensor | None = None     # each category's own time course [E, T], `fit_category_courses`
         self.data = data
         self.prior = prior          # the tree levels' prior: iid Gaussian per level, or the horseshoe (`_update_horseshoe`)
         self.rank = int(rank)       # R, the components of the place × time interaction (0: none); `_enable_interaction` adds them
@@ -771,10 +772,29 @@ class Monolith:
         pt = self._place_time(x)                                          # [K, U, T]
         return self._leaf_place(x)[self.ixl][:, :, None] * torch.exp(self._I(x)) * pt[self.grp[self.ixl]]
 
+    def leaf_factor(self, x: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """The leaves whose place-time factor is their own, and its log [A, U, T]: the interaction's active leaves
+        (I) and, when the category courses are set (`fit_category_courses`), every leaf (its h_cat over periods).
+        None when neither is on. The solver's active-leaf path and Λ read this one factor."""
+        if not self.ix_on and self.hc is None:
+            return None
+        U, T = self.N.shape[:2]
+        if self.hc is None:
+            return self.ixl, self._I(x)
+        act = torch.arange(len(self.data.leaves), device=self.device)
+        logf = self.hc[:, None, :].expand(-1, U, T).clone()
+        if self.ix_on:
+            logf[self.ixl] = logf[self.ixl] + self._I(x)
+        return act, logf
+
     def _ix_correction(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Λ's change from the interaction: Σ over the active leaves' cells of μ₀ (e^I − 1)."""
+        """Λ's change from the leaf-specific factors (`leaf_factor`): Σ over their leaves' cells of μ₀ (e^F − 1)."""
+        lf = self.leaf_factor(x)
+        if lf is None:
+            return torch.zeros((), dtype=self.dtype, device=self.device)
+        act, logf = lf
         pt = self._place_time(x)
-        return (self._leaf_place(x)[self.ixl][:, :, None] * torch.expm1(self._I(x)) * pt[self.grp[self.ixl]]).sum()
+        return (self._leaf_place(x)[act][:, :, None] * torch.expm1(logf) * pt[self.grp[act]]).sum()
 
     def _init_interaction(self, ridge: float = 1.0, sweeps: int = 12) -> None:
         """Starting values of the interaction from the base fit's residual cube (a zero start is a saddle).
@@ -906,6 +926,8 @@ class Monolith:
             if self.ix_on:
                 psi = x["ix_psi"][:, self.ixp.clamp_min(0)] * (self.ixp >= 0)
                 eta = eta + (psi * self._om(x)[:, self.u] * x["ix_t"][:, self.tt]).sum(0)
+        if self.hc is not None:
+            eta = eta + self.hc[self.e, self.tt]
         return eta
 
     def total(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
@@ -914,7 +936,7 @@ class Monolith:
         per_group = torch.zeros((len(self.data.groups), self.N.shape[0]), dtype=self.dtype,
                                 device=self.device).index_add_(0, self.grp, leaf_place)  # [K, U]
         total = (per_group[:, :, None] * self._place_time(x, spatial)).sum()
-        return total + self._ix_correction(x) if self.ix_on and spatial else total
+        return total + self._ix_correction(x) if (self.ix_on or self.hc is not None) and spatial else total
 
     def penalty(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
@@ -1471,6 +1493,8 @@ class Monolith:
                 m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
                 if om is not None and int(self.ixpos[e]) >= 0:
                     m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
+                if self.hc is not None:
+                    m = m * torch.exp(self.hc[e])[None, :, None]
                 total += float((divisor * torch.log1p(m / divisor)).sum())
         return float(full.sum()) - (total - float((ph * np.log1p(mu / ph)).sum()))
 
@@ -1527,11 +1551,16 @@ class Monolith:
             if om is not None:          # an active leaf's slab carries exp(I) (a bound for the edges: |I| at most)
                 imax = float(self._I(x).abs().max())
                 lo, hi = lo - imax, hi + imax
+            if self.hc is not None:     # and each category's own course
+                hmax = float(self.hc.abs().max())
+                lo, hi = lo - hmax, hi + hmax
             for e in slabs:
                 k = int(self.grp[e])
                 m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
                 if om is not None and int(self.ixpos[e]) >= 0:
                     m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
+                if self.hc is not None:
+                    m = m * torch.exp(self.hc[e])[None, :, None]
                 m = m.reshape(-1)
                 # an unexposed cell (μ = 0) goes to an extra bin that is dropped: no compaction of the slab
                 idx = torch.where(m > 0, ((torch.log(m) - lo) / (hi - lo) * bins).clamp_(0, bins - 1),
@@ -1579,8 +1608,12 @@ class Monolith:
             sel = torch.as_tensor(leaves, device=self.device)
             K, U = len(self.data.groups), self.N.shape[0]
             ix = self.ix_on and spatial
-            if ix:      # the interaction makes each leaf's place-time factor its own: [K, U, T] sums over the leaves
-                E = torch.exp(self._I_of(x, sel))
+            E = torch.exp(self._I_of(x, sel)) if ix else None
+            if self.hc is not None:     # each category's own course over periods [n, 1, T]
+                H = torch.exp(self.hc[sel])[:, None, :]
+                E = H if E is None else E * H
+            ix = E is not None
+            if ix:      # a leaf-specific factor makes each leaf's place-time factor its own: [K, U, T] sums over the leaves
                 w = torch.zeros((K, *pt.shape[1:]), dtype=self.dtype, device=self.device).index_add_(
                     0, self.grp[sel], lp[sel][:, :, None] * E)
             else:
@@ -1613,9 +1646,13 @@ class Monolith:
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
             prof = self._prof(x)                                                        # [K, G]
-            if self.ix_on and spatial:
+            E = torch.exp(self._I_of(x, sel)) if self.ix_on and spatial else None
+            if self.hc is not None:
+                H = torch.exp(self.hc[sel])[:, None, :]
+                E = H if E is None else E * H
+            if E is not None:
                 w = torch.zeros((K, U, self.N.shape[1]), dtype=self.dtype, device=self.device).index_add_(
-                    0, self.grp[sel], lp[sel][:, :, None] * torch.exp(self._I_of(x, sel)))
+                    0, self.grp[sel], lp[sel][:, :, None] * E)
                 mu = torch.einsum("kut,kut,kg,utg->utg", w, torch.exp(lin), prof, self.N)
             else:
                 w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])
@@ -1648,7 +1685,7 @@ class Monolith:
         np.add.at(out, (self.data.u[m], self.data.t[m], self.data.g[m]), self.data.y[m])
         return out
 
-    def refit(self, data: BlockData) -> Monolith:
+    def refit(self, data: BlockData, hc: torch.Tensor | None = None) -> Monolith:
         """This model's mean refitted on other counts of the same lattice (a planted world, a held-out locus), from
         this fit's MAP at this fit's strengths and dispersion, to the production fit's closing tolerance. Re-learning
         the strengths changed what a refit absorbs by under 0.001 (evaluation 2026-10-06, absorption) at 3–5 times
@@ -1663,10 +1700,149 @@ class Monolith:
         with torch.no_grad():
             for n, v in self.params.items():
                 m2.params[n].copy_(v)
+        m2.hc = hc                  # the category courses as a fixed offset of this mean (`robust`'s alternation)
         solver.fit_mean(m2, iterations=30, loglik_tol=1.0)
         m2._solver_v1 = None        # the solver and the model refer to each other: a world's factor freed with it, not
         m2.phi = self.phi           # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)
         return m2
+
+    def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
+               max_sweeps: int = 12, sweep_tol: float = 0.05) -> Monolith:
+        """This fit made robust to the departures stage C must report (docs/plans/2026-10-07-robust-expectation.md):
+        each round flags the leaf × place × period cells beyond the predictive's upper ``trim`` quantile (their
+        observed totals against NB(μ, φ_x), φ_x the leaf-place-period dispersion by trimmed likelihood, so the flags
+        are not judged by a dispersion the outliers inflated), imputes their counts by the current expectation (EM for
+        missing cells: the fit converges to the one on the other cells) and refits from this MAP at these strengths.
+        The block's φ is re-estimated on the imputed counts, and the observed counts are restored for the surprises.
+
+        Why (evaluation 2026-10-07, real events): fitted on every cell, chapter I's φ was about 0.1 and its categories'
+        levels were set with their epidemic years; measles was expected at 200–300 admissions a year against 33–83
+        observed outside 2018–19, and every stage-C method missed it."""
+        import dataclasses
+
+        from scipy import stats as st
+
+        from .surprise import place_year_phi
+
+        d = self.data
+        E, (U, T) = len(d.leaves), d.N.shape[:2]
+        obs = np.zeros((E, U, T))
+        np.add.at(obs, (d.e, d.u, d.t), d.y)
+        m, info = self, []
+        for r in range(rounds):
+            mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)])            # [E, U, T]
+            live = (mu >= min_expected) | (obs > 0)
+            o, mm = obs[live][:, None], mu[live][:, None]
+            phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
+            k = float(phi_x) if np.isfinite(phi_x) else 1e12
+            p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
+            flag = (p < trim) & (obs > mu)
+            y_new = d.y.astype(float).copy()
+            f = flag[d.e, d.u, d.t]
+            scale = mu[d.e, d.u, d.t] / np.maximum(obs[d.e, d.u, d.t], 1e-12)
+            y_new[f] = d.y[f] * scale[f]                       # the cell's groups keep their shares of the expectation
+            info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()),
+                         "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
+            log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
+                f"({obs[flag].sum():.0f} events against {mu[flag].sum():.0f} expected)")
+            # the mean and the category courses by alternation, each given the other (block coordinate descent on a
+            # convex objective, so it reaches the joint optimum): a course fitted once after the mean cannot move the
+            # group's course, and a category that dominates its group (COVID-19 in B25–B34) left its siblings with an
+            # expectation near zero in ordinary years (2026-10-07)
+            dw = dataclasses.replace(d, y=y_new)
+            hc = m.hc
+            for sweep in range(max_sweeps):
+                m = self.refit(dw, hc=hc)
+                m.category_courses = m.fit_category_courses(y_new, log=lambda _x: None)
+                moved = float((m.hc - hc).abs().max()) if hc is not None else np.inf
+                hc = m.hc
+                log(f"  sweep {sweep}: course moved {moved:.3g}, τ {m.category_courses['tau']:.3g}")
+                if moved < sweep_tol:
+                    break
+        m.phi = m._dispersion()
+        m.data = d
+        m.robust_info = info
+        m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 2}   # its own cache key
+        log(f"robust: φ {self.phi:.3g} -> {m.phi:.3g}")
+        return m
+
+    def fit_category_courses(self, y: np.ndarray | None = None, taus: np.ndarray | None = None,
+                             ridge: float = 1e-2, log=print) -> dict:
+        """Each category's own time course h_cat[e, t] (docs/plans/2026-10-07-robust-expectation.md, step 4): given
+        every other effect, the category's yearly totals O[e, t] (of ``y``, the cells' counts; None: the data's) are
+        Poisson(M[e, t] e^{h[e, t]}), M the expectation without the course; h has an RW1 prior of precision τ shared
+        by the block (and a ``ridge`` on its level), τ chosen by the Laplace marginal likelihood summed over the
+        categories. A category whose epidemic dominates its ICD group's course (COVID-19 in B25–B34, dengue over
+        yellow fever in A90–A99) otherwise inherits that course in every ordinary year. Sets ``self.hc``."""
+        d = self.data
+        E, T = len(d.leaves), d.N.shape[1]
+        obs = np.zeros((E, T))
+        np.add.at(obs, (d.e, d.t), d.y if y is None else y)
+        saved, self.hc = self.hc, None
+        with torch.no_grad():
+            x = self.effects()
+            lp = self._leaf_place(x)                                              # [E, U]
+            pt = self._place_time(x)                                              # [K, U, T]
+            M = torch.einsum("eu,eut->et", lp, pt[self.grp]).cpu().numpy()       # [E, T]
+            if self.ix_on:
+                M = np.stack([self.expected(np.array([e]))[0].sum(0) for e in range(E)])
+        if self.supply is not None:
+            M = np.stack([self.expected(np.array([e]))[0].sum(0) for e in range(E)])
+        self.hc = saved
+        D = np.diff(np.eye(T), axis=0)
+        R = D.T @ D
+        M = np.maximum(M, 1e-12)
+
+        def fit(tau: float) -> tuple[np.ndarray, float]:
+            P = tau * R + ridge * np.eye(T)
+            h = np.zeros((E, T))
+            for _ in range(50):
+                lam = M * np.exp(h)
+                g = obs - lam - h @ P
+                H = lam[:, :, None] * np.eye(T)[None] + P[None]
+                step = np.linalg.solve(H, g[..., None])[..., 0]
+                h = h + np.clip(step, -5, 5)
+                if np.abs(step).max() < 1e-8:
+                    break
+            lam = M * np.exp(h)
+            H = lam[:, :, None] * np.eye(T)[None] + P[None]
+            ll = float(np.sum(obs * np.log(lam) - lam - special.gammaln(obs + 1)))
+            sign, logdet_p = np.linalg.slogdet(P)
+            lml = ll - 0.5 * float(np.einsum("et,ts,es->", h, P, h)) + 0.5 * E * logdet_p \
+                - 0.5 * float(np.linalg.slogdet(H)[1].sum())
+            return h, lml
+
+        grid = np.logspace(-2, 4, 25) if taus is None else np.asarray(taus, dtype=float)
+        best = max(((fit(tau), tau) for tau in grid), key=lambda r: r[0][1])
+        (h, lml), tau = best
+        self.hc = torch.as_tensor(h, dtype=self.dtype, device=self.device)
+        info = {"tau": float(tau), "lml": round(lml, 2), "max_abs": round(float(np.abs(h).max()), 3)}
+        log(f"category courses: τ {tau:.3g}, max |h| {info['max_abs']}")
+        return info
+
+    def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
+        """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
+        else made and stored."""
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 2}   # v2: with category courses
+        key = {**self.key(), "robust": tag}
+        arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
+        if arrays is not None and meta is not None:
+            with torch.no_grad():
+                for k, v in arrays.items():
+                    if k in self.params:
+                        self.params[k].copy_(torch.as_tensor(v))
+            self.phi = float(meta["phi"])
+            self.robust_info = meta.get("robust_info")
+            self.robust_tag = tag
+            if "h_cat" in arrays:
+                self.hc = torch.as_tensor(arrays["h_cat"], dtype=self.dtype, device=self.device)
+            return self
+        m = self.robust(rounds, trim, min_expected, log=log)
+        arrays = {k: v.detach().cpu().numpy() for k, v in m.params.items()}
+        if m.hc is not None:
+            arrays["h_cat"] = m.hc.detach().cpu().numpy()
+        store.put_arrays("monolith", m.key(), arrays, {**m.summary(), "robust_info": m.robust_info})
+        return m
 
     def without(self, cells: np.ndarray) -> Monolith:
         """The fit with the place-period ``cells`` ([U, T] boolean) held out: their exposure and counts removed for
@@ -1702,7 +1878,8 @@ class Monolith:
     def key(self) -> dict:
         return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {}),
                 **({"prior": self.prior} if self.prior != "gaussian" else {}),
-                **({"likelihood": self.likelihood} if self.likelihood != "poisson" else {})}
+                **({"likelihood": self.likelihood} if self.likelihood != "poisson" else {}),
+                **({"robust": self.robust_tag} if getattr(self, "robust_tag", None) else {})}
 
     def save(self) -> None:
         arrays = {k: v.detach().cpu().numpy() for k, v in self.params.items()}

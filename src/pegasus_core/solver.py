@@ -224,10 +224,11 @@ class StructuredNewton:
                 leaves = torch.nonzero(m.grp == k).ravel()
                 mubar[leaves] = torch.einsum("eu,ut,utg->etg", LP[leaves], EX[k], m.N) * Fk[k][None, None, :]
             dev = {}
-            if getattr(m, "ix_on", False):
-                act = m.ixl
+            lf = m.leaf_factor(x) if hasattr(m, "leaf_factor") else None
+            if lf is not None:                  # leaves with their own place-time factor: interaction, category courses
+                act, logf = lf
                 ka = m.grp[act]
-                Xa = EX[ka] * torch.exp(m._I(x))                                 # [A, U, T]
+                Xa = EX[ka] * torch.exp(logf)                                    # [A, U, T]
                 dPk = Xa * NF[ka] - Pk[ka]
                 dPu = dPk.sum(2)
                 dR = Fk[ka][:, None, :] * torch.einsum("aut,utg->aug", Xa, m.N) - R[ka]
@@ -1142,13 +1143,17 @@ class StructuredNewton:
             lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + m._grp_place(x)[:, :, None]
             EX = torch.exp(lin)
             Fk = m._prof(x)
-            J = torch.exp(m._I(x)) if getattr(m, "ix_on", False) else None
+            lf = m.leaf_factor(x) if hasattr(m, "leaf_factor") else None
+            J = torch.exp(lf[1]) if lf is not None else None
             E, U, T, G = self.E, self.U, self.T, self.G
             mm = torch.empty((E, U), dtype=LP.dtype)
             dPk = torch.empty((E, U, T), dtype=LP.dtype)
             dR = torch.empty((E, U, G), dtype=LP.dtype)
             mubar = torch.empty((E, T, G), dtype=LP.dtype)
-            pos = _np(m.ixpos) if J is not None else None
+            pos = None
+            if J is not None:                   # each leaf's row in the factor (-1: none)
+                pos = np.full(E, -1, dtype=np.int64)
+                pos[_np(lf[0]).astype(np.int64)] = np.arange(len(lf[0]))
             for e in range(E):
                 k = int(self.grp[e])
                 xt = EX[k] if J is None or pos[e] < 0 else EX[k] * J[int(pos[e])]

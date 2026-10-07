@@ -35,3 +35,21 @@ Yellow fever deaths 2017–18, measles admissions 2018–19 and chikungunya 2016
 - Measles and yellow-fever expectations in ordinary years approach their observed level.
 - Calibration of fields with no documented event does not degrade (stroke, SIH pneumonia): held-out likelihood, KS on the bulk.
 - Synthetic worlds only to confirm false-discovery calibration.
+
+## Step 4: each category's own time course (added 2026-10-07, from the robust run)
+
+**What the robust fit showed.** Trimming fixed the level of a category whose epidemic is its own: measles is now expected at 70–90 admissions a year against 33–83, and yellow fever at 4–7 deaths against 0–8. It cannot fix a category that has no time course of its own.
+- A category follows its ICD group's course (`h_grp`).
+- COVID-19's 2020–21 deaths dominate the B25–B34 group's course; in ordinary years B34 then sees 128–180 deaths against 35–66 expected.
+- Yellow fever rides dengue's course in A90–A99.
+
+**The term.** `h_cat[e, t]`, a random walk of order 1 over periods for each category, centred per category (its level stays `th_cat`), shrunk toward the group's course by a precision τ estimated like the others.
+
+**The fit** (agent map, 2026-10-07):
+- **As a new block of the solver.** It would be a global block of E·T coordinates, with the leaf-specific mean features of the interaction path and couplings like `th_cat`'s, in about a dozen solver functions.
+- **First, a backfitting sweep, as `ix_sweep` fits the interaction.** Given the other effects, each category's course is a T-dimensional penalised Poisson fit to its yearly totals against its expectation. τ comes by the Laplace marginal likelihood summed over categories. The sweep alternates with the main Newton and enters every mean as a factor exp(h_cat[e, t]): `eta_nnz`, `total`, `expected`, `expected_by_group`, `nb_loglik`, `_nb_loglik_binned`, the solver's `factors`.
+- **Inside the robust loop it reads the imputed counts**, so a category's course follows its background and its epidemics stay departures.
+
+**What B1's course then means.** With robust fitting, each category's course is its background course, and a nationwide epidemic (COVID-19) is a departure everywhere, not part of "the national course". That is the epidemiologically right reading. "Above Brazil's own course that year" is then a separate question in the registry (docs/plans/2026-10-07-questions-and-methods.md), with its own reference: the non-robust national course.
+
+**Accepted when** each category's ordinary-year expectation tracks its observed level (B34, A95, B05, A92), the five documented events are found, and held-out likelihood does not fall on SIM IX and XX.

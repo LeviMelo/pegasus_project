@@ -360,6 +360,12 @@ class Session:
             return getattr(lenses, lens)(s, self.ledger, **kw)
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
 
+    def ask(self, question: str, node: str, q: float = 0.05, **kw) -> list:
+        """A question of `questions.QUESTIONS` on one field: every method answering it at q/k, their findings merged
+        into answers by overlapping loci, each naming the methods that agree (docs/plans/2026-10-07-questions-and-methods.md)."""
+        from . import questions
+        return questions.ask(self, question, node, q, **kw)
+
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
                "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
                workers: int | None = None, prospective: int | None = None) -> list[leads.Lead]:

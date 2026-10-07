@@ -162,6 +162,22 @@ def tail_p(null: np.ndarray, h: np.ndarray, exceedances: int = 250) -> np.ndarra
     return np.maximum(out, 1e-300)
 
 
+def tail_z(obs, mean, var):
+    """The excess of a kernel-weighted count as a standard normal score: Φ⁻¹ of 1 − P(X ≥ obs), X a gamma with the
+    sum's mean and variance (skewed like a count, so a sparse place's single event is not a large score). A
+    standardised difference (obs − mean)/√var gave one death against 0.0001 expected a score of 100: the replicates'
+    peaks then reached the yellow-fever outbreak's and the outbreak went unreported (2026-10-07). The score of every
+    centre is approximately N(0, 1) under the null whatever its expectation, as the scan statistics' likelihood ratios
+    are (Kulldorff 1997; Neill 2012)."""
+    torch, _ = _torch()
+    m = torch.clamp(mean.double(), min=1e-12)
+    v = torch.clamp(var.double(), min=1e-12)
+    a = m * m / v
+    upper = torch.special.gammaincc(a, torch.clamp(obs.double(), min=0.0) * m / v)  # P(X ≥ obs)
+    z = -torch.special.ndtri(torch.clamp(upper, min=1e-300, max=1 - 1e-12))         # bounded: ±7 below, 37 above
+    return torch.where(mean > 1e-9, z, torch.zeros_like(z)).float()
+
+
 def torch_sqrt(x):
     torch, _ = _torch()
     return torch.sqrt(torch.clamp(x, min=1e-12))
@@ -205,13 +221,15 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     Dr = torch.as_tensor(np.concatenate(reps, 1), dtype=torch.float32, device=dev)          # [U, R·m]
     A = (spectrum.neighbours + sp.identity(U)).tocoo()       # a place counts among its own neighbourhood
     rows, cols = A.row, A.col
-    # pass 1: the standardised excess at every scale, observed [k, U, m] and replicated [k, U, R, m]
+    # pass 1: the excess at every scale as a tail probability's probit, observed [k, U, m] and replicated [k, U, R, m]
     S_all, Sr_all, places = [], [], []
     for sc in scales:
         K = torch.eye(U, device=dev) if sc == 0 else spectrum.kernel(sc)
         KW = (K * K) @ W
-        S_all.append((K @ D) / torch_sqrt(KW))
-        Sr_all.append(((K @ Dr) / torch_sqrt(KW.repeat(1, replicates))).reshape(U, replicates, m))
+        KM = K @ CM
+        S_all.append(tail_z(K @ D + KM, KM, KW))
+        Sr_all.append(tail_z(K @ Dr + KM.repeat(1, replicates), KM.repeat(1, replicates),
+                             KW.repeat(1, replicates)).reshape(U, replicates, m))
         places.append(spectrum.footprint(sc))                     # in double precision: far rows underflow in single
         del K, KW
     S_all, Sr_all = torch.stack(S_all), torch.stack(Sr_all)
@@ -221,8 +239,11 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     for k in range(len(scales)):
         o, r = S_all[k].flatten(), Sr_all[k].flatten()
         mo, mr = o.median(), r.median()
-        so = (o - mo).abs().median().clamp(min=1e-6)
-        sr = (r - mr).abs().median().clamp(min=1e-6)
+        so = (o - mo).abs().median()
+        sr = (r - mr).abs().median()
+        if float(so) < 1e-3 or float(sr) < 1e-3:   # mostly empty cells: no empirical null to read at this scale
+            calibration[places[k]] = {"shift": 0.0, "scale": 1.0, "degenerate": True}
+            continue
         S_all[k] = (S_all[k] - mo) * (sr / so) + mr
         calibration[places[k]] = {"shift": round(float(mo - mr), 4), "scale": round(float(so / sr), 4)}
     # pass 2: joint maxima in place x scale (scale-space: a peak beats its graph neighbours at its own scale and its
