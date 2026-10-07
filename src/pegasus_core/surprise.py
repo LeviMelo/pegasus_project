@@ -157,7 +157,7 @@ class Expectations:
         self.laplace, self.device, self.center = int(laplace), device, center
         self._posteriors: dict = {}
         classifier = self.source.get("column") or self.source.get("classifier")
-        self.registry = fields.Registry(dataset, event, structure, classifier=classifier)
+        self.registry = fields.Registry(dataset, event, self.source.get("structure", structure), classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
         self._macro: np.ndarray | None = None
 

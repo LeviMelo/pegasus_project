@@ -1,6 +1,6 @@
 # Fields from pegasus_data's roles
 
-**Status:** building (S1, 2026-10-07). Built: the registry (`fields.declared`), measures (`fields.measure_source`, readers with declared missing codes and domains; pegasus_data ADR-0154), compositions (`fields.share_sources`, `gateway.composition_counts`), institutions as the `institution` question, methods declaring the field kinds they read, measures and compositions in `update` plans. Pending: pegasus_data's missing-code declarations beyond SIH's measures (`scripts/propose_missing.py` there), intervals, code trees as second classifiers, the first end-to-end readings. It replaces the hand-named mark of today's code (`source="mark"`, `PESO`) and my earlier proposal to "add marks as questions" by naming variables, which the author rejected as a breach of the data-agnostic principle.
+**Status:** building (S1, 2026-10-07). Built: the registry (`fields.declared`), measures (`fields.measure_source`, readers with declared missing codes and domains; pegasus_data ADR-0154), compositions (`fields.share_sources`, `gateway.composition_counts`), institutions as the `institution` question, methods declaring the field kinds they read, measures and compositions in `update` plans. Since built: SIM's and SINASC's missing codes and measurement domains (pegasus_data ADR-0154 addenda); intervals, every declared date against the event's own (`fields.interval_source`, the sign read from the data). A measure whose declared domain admits zero is read by the count family (`monolith.CountModel`). Pending: code trees as second classifiers; a count place-year whose sum is zero has no log mean (the count family's observed scale); the first end-to-end readings. It replaces the hand-named mark of today's code (`source="mark"`, `PESO`) and my earlier proposal to "add marks as questions" by naming variables, which the author rejected as a breach of the data-agnostic principle.
 
 ## The problem
 
@@ -36,7 +36,7 @@ A field is an (event type, a declared column, a statistic) over the place × per
 | event type × classifier node (`code_tree`, primary) | counts (built) | the monolith | more or fewer events |
 | `model: mark`, `kind: number` | a measurement per event | §4.4 by its declared measurement scale, with case-mix from the classifier and the institution effect | the events themselves differ (longer, costlier, lighter) |
 | `model: mark`, `kind: category` | the events' composition over the column's codes | a share model per category (beta-binomial), or multinomial | what the events are made of changes |
-| `model: mark`, `kind: date` paired with the event's `when` | an interval (delay) | a positive measurement | the system's timing changes |
+| `kind: date` (a mark, or a `when` other than the event's own) | an interval: days from the event's own date (no pairing declared: every date is paired with the event's) | a positive measurement | the system's timing changes |
 | `model: dimension` | the events split by a declared non-stratum attribute | composition, as above | a dimension's share moves |
 | `model: institution` | the facility lattice (§4.5) | the institution effect inside the likelihood | one institution departs |
 | `model: stratum` race | an axis of G (O3) | the race-aware population account | disparities |
@@ -49,7 +49,6 @@ Every field kind is then asked the same questions (excess, step, trend, cluster)
 Asked through `docs/handoffs/`, never guessed here:
 - **A number's measurement scale:** a positive continuous quantity, a count, a bounded score, or an identifier-like number that is not a measurement. `kind: number` does not say which, and the model family depends on it.
 - **Order for categories that have one** (scores, schooling), so an ordinal model is chosen and not a multinomial.
-- **Which `when` dates pair into a meaningful interval** (admission to discharge, onset to notification). That is a declaration, not an inference from names.
 
 ## How it changes the existing objects
 

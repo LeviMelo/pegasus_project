@@ -105,20 +105,23 @@ NEWBORN_SHARE = 0.5
 GEO_POOL = 0.01     # a field is a newborn-exposure field when at least this share of its events are at age 0
 
 
-def _icd10_tree() -> tuple[dict, dict]:
-    tree = gateway.code_structure("ICD10")
+def _tree(structure: str = "ICD10") -> tuple[dict, dict]:
+    """A classifier tree's parents and levels, in the roles the model reads (`gateway.code_tree`)."""
+    tree = gateway.code_tree(structure)
     code, parent, level = (tree.column(c).to_pylist() for c in ("code", "parent", "level"))
     return dict(zip(code, parent, strict=True)), dict(zip(code, level, strict=True))
 
 
 @lru_cache(maxsize=64)
-def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str) -> float:
+def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, structure: str = "ICD10",
+                classifier: str | None = None) -> float:
     """The share of the block's events (years given) recorded at age 0, from the gateway's cached counts."""
-    parent_of, level_of = ({"*": None}, {"*": "category"}) if block == "*" else _icd10_tree()
+    parent_of, level_of = ({"*": None}, {"*": "category"}) if block == "*" else _tree(structure)
+    width = 3 if block == "*" else gateway.category_width(structure)
     at0 = total = 0.0
     for year in years:
-        tab = gateway.event_counts(dataset, event, int(year)).counts
-        enc = pc.dictionary_encode(pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, 3)
+        tab = gateway.event_counts(dataset, event, int(year), classifier=classifier).counts
+        enc = pc.dictionary_encode(pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width)
                                    if block != "*" else tab.column("code").combine_chunks())
         ok = np.array([block == "*" or (level_of.get(c) == "category" and _chapter(c, parent_of) == block)
                        for c in enc.dictionary.to_pylist()], dtype=bool)
@@ -138,7 +141,8 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
         return "account-3+confusion" if dataset == "SIM.DO" else "account-3"
     if source != "events":
         return "popsvs"
-    return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version()) >= NEWBORN_SHARE else "popsvs"
+    return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version(),
+                                   _.get("structure", "ICD10"), _.get("classifier")) >= NEWBORN_SHARE else "popsvs"
 
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
@@ -235,7 +239,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
               geo_pool: float = GEO_POOL, **source_args) -> BlockData:
     """One block's cells and populations, from the gateway.
 
-    ``block`` is an ICD-10 chapter, or ``*`` for an event type without a classifier tree.
+    ``block`` is a chapter of the classifier's tree (``structure=`` in the source, ICD-10 by default; any tree's
+    levels are read in the roles of `gateway.code_tree`), or ``*`` for an event type without a classifier tree.
     ``profile`` is the tree level that carries the levels and the age–sex profiles: ``group`` (the outermost ICD group
     under the chapter, pooling its categories: C00-C97, all malignant neoplasms), ``block`` (the innermost group,
     C51-C58: ICD-10 groups nest, pegasus_data's tree since 2026-10-06) or ``category`` (each category its own).
@@ -254,9 +259,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         share        a binary mark (``indicator=``, ``success=``, ``classifier=``): n, k; y is k/n, l2 is k
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
+    structure = source_args.pop("structure", "ICD10")
+    width = 3 if block == "*" else gateway.category_width(structure)
     years = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
-        dataset, event, block, years.tolist(), source, **source_args)
+        dataset, event, block, years.tolist(), source, structure=structure, **source_args)
     edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
@@ -281,7 +288,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         # an event type without a classifier tree: one leaf, every event in it
         parent_of, level_of = {"*": None}, {"*": "category"}
     else:
-        parent_of, level_of = _icd10_tree()
+        parent_of, level_of = _tree(structure)
     categories = (["*"] if block == "*" else
                   sorted(c for c, lv in level_of.items() if lv == "category" and _chapter(c, parent_of) == block))
     if profile not in ("group", "block", "category"):
@@ -292,12 +299,13 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     # (the group-profile fit of II expected 53 % of cervical-cancer deaths in men, 2026-10-06): a carrier whose
     # categories differ in admissibility is split by it, and each group's exposure is zero outside its cells
     # (`Monolith._prof`). For an underlying cause, the codes that cannot be one are not leaves at all
-    underlying = dataset == "SIM.DO" and source == "events"
+    underlying = dataset == "SIM.DO" and source == "events" and structure == "ICD10"
     # the restrictions are on the coded person's sex and age: they apply only where the population's strata are that
     # person's. SINASC's strata are the mother's (her sex implied by pegasus_data's roles) while CODANOMAL codes the
     # birth: applied there, male-only anomaly classes had no exposure and the fit's start was NaN (2026-10-06)
     own_strata = gateway.strata(dataset)["implied_sex"] is None
-    adm, never = ({}, set()) if block == "*" or not own_strata else _admissible(edges, underlying)
+    # the age and sex edits are ICD-10's (`code_attributes`): another tree has none declared
+    adm, never = ({}, set()) if block == "*" or not own_strata or structure != "ICD10" else _admissible(edges, underlying)
     never = never & set(categories)
     every = (np.ones(2 * nB, dtype=bool), "")
     cls = {c: adm.get(c, every) for c in categories}
@@ -347,7 +355,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         tab = ec.counts
         # the codes are few and the rows many: decide once per distinct code, then index
         enc = pc.dictionary_encode(tab.column("code").combine_chunks() if block == "*" else
-                                   pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, 3))
+                                   pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width))
         cats = enc.dictionary.to_pylist()
         row_code = enc.indices.to_numpy(zero_copy_only=False)
         in_block = np.array([c in eidx for c in cats], dtype=bool)[row_code]
@@ -357,10 +365,10 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             bad = np.array([c in never for c in cats], dtype=bool)[row_code]
             unallocated["not an underlying cause"] = unallocated.get("not an underlying cause", 0) + int(
                 tab.column(weight).to_numpy()[bad].sum())
-        unallocated["code not in ICD-10 tree"] = unallocated.get("code not in ICD-10 tree", 0) + int(
-            tab.column(weight).to_numpy()[other].sum())
+        absent = "code not in ICD-10 tree" if structure == "ICD10" else f"code not in the {structure} tree"
+        unallocated[absent] = unallocated.get(absent, 0) + int(tab.column(weight).to_numpy()[other].sum())
         for r in ec.unallocated.to_pylist():
-            if block == "*" or _chapter(str(r["code"] or "")[:3], parent_of) == block:
+            if block == "*" or _chapter(str(r["code"] or "")[:width], parent_of) == block:
                 unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
         if grain == "month":
             # the event's own (year, month), which may fall outside the publication year
@@ -393,7 +401,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
            "data": config.data_version(), **gateway.population_key(population),
            **({} if profile == "group" else {"profile": profile}),
-           **({} if source == "events" else {"source": source, **source_args}),
+           **({} if source == "events" and "classifier" not in source_args and structure == "ICD10" else
+              {"source": source, **source_args, **({} if structure == "ICD10" else {"structure": structure})}),
            **({} if grain == "year" else {"grain": grain}),
            **({"admissible": 2} if not group_cells.all() or never else {}),
            **({} if group_outer is None else {"geography": geography})}

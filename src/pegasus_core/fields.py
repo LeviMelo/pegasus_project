@@ -59,7 +59,7 @@ class Registry:
             # an event type without a classifier: one field, all its events
             self.parent, self.level, self.label = {"*": None}, {"*": "category"}, {"*": event}
         else:
-            tree = gateway.code_structure(structure)
+            tree = gateway.code_tree(structure)
             codes = tree.column("code").to_pylist()
             self.parent = dict(zip(codes, tree.column("parent").to_pylist(), strict=True))
             self.level = dict(zip(codes, tree.column("level").to_pylist(), strict=True))
@@ -282,12 +282,22 @@ class Declared:
 def declared(dataset: str) -> list[Declared]:
     """Every mark or dimension column of ``dataset`` as a field, or with the reason it is not one: a draft role, a
     number that is no measurement, a measurement whose missing codes are undeclared, a kind not yet read (a date, a
-    place, a code tree, a text). Nothing is named here: every field comes from the declarations (`gateway.roles`)."""
+    place, a code tree, a text). A date (a mark, or another `when` than the event's own) is an interval field
+    ``interval:<column>``: the days between the event's own date (`gateway._when`) and it. Nothing is named here:
+    every field comes from the declarations (`gateway.roles`)."""
     from . import gateway
 
+    try:
+        anchor = gateway._when(dataset)
+    except LookupError:
+        anchor = None
     out = []
     for r in gateway.roles(dataset):
-        if r.get("model") not in ("mark", "dimension"):
+        if r.get("model") not in ("mark", "dimension") and not (r.get("model") == "when" and r["kind"] == "date"):
+            continue
+        if r["kind"] == "date" and anchor is None:
+            out.append(Declared(dataset, f"interval:{r['column']}", r["role"], r.get("name") or "", "interval",
+                                reason="the event type declares no date of its own"))
             continue
         base = {"dataset": dataset, "column": r["column"], "role": r["role"], "name": r.get("name") or ""}
         if not r.get("reviewed", True):
@@ -306,14 +316,17 @@ def declared(dataset: str) -> list[Declared]:
                 out.append(Declared(**base, kind="composition", reason="missing codes not declared"))
             else:
                 out.append(Declared(**base, kind="composition", missing=tuple(r["missing"])))
+        elif r["kind"] == "date":
+            out.append(Declared(**{**base, "column": f"interval:{r['column']}"}, kind="interval",
+                                reason="the event's own date" if r["column"] == anchor else ""))
         else:
             out.append(Declared(**base, kind="", reason=f"kind {r['kind']} not yet read"))
     return out
 
 
 def measure_source(dataset: str, event: str, column: str) -> dict:
-    """The reader of a declared measure (`monolith.assemble`'s ``source``): positive values on the log scale, the
-    declared domain (else positive) and missing codes, the event type's primary classifier, and as case-mix its first
+    """The reader of a declared measure (`monolith.assemble`'s ``source``): positive values on the log scale, or the
+    count family when the declared domain admits zero; the declared domain (else positive) and missing codes, the event type's primary classifier, and as case-mix its first
     alternative classifier with a structure (SIH's procedures), all from the declarations."""
     from . import gateway
 
@@ -325,8 +338,53 @@ def measure_source(dataset: str, event: str, column: str) -> dict:
     primary = next((c["column"] for c in cls if c["role"] == "primary"), None)
     casemix = next((c["column"] for c in cls if c["role"] == "alternative" and c.get("structure")), None)
     lo, hi = d.domain if d.domain else (0.0, 1e300)
-    return {"source": "mark", "mark": column, "bounds": (max(lo, 1e-9), hi), "missing": list(d.missing),
+    # a domain that admits zero is a count's (previous pregnancies, Apgar): the count family, whose support holds 0;
+    # otherwise a positive quantity on the log scale (a weight, a length of stay)
+    family = "count" if d.domain and lo <= 0 else "mark"
+    return {"source": family, "mark": column, "bounds": (lo, hi) if family == "count" else (max(lo, 1e-9), hi),
+            "missing": list(d.missing),
             **({"classifier": primary} if primary else {}), **({"casemix": casemix} if casemix else {})}
+
+
+def interval_source(dataset: str, event: str, column: str, probe_year: int) -> dict:
+    """The reader of an interval field (`declared`, ``interval:<date column>``): the days from the event's own date to
+    the column's, plus one, as a positive measure (`gateway.mark_moments` with ``anchor``); its sign, which of the two
+    dates comes first, is read from the data of ``probe_year`` (the median), never assumed. No missing code: an
+    unparseable date is a missing mark."""
+    import duckdb
+
+    from . import gateway
+
+    d = next(x for x in declared(dataset) if x.column == column)
+    if d.kind != "interval" or d.reason:
+        raise ValueError(f"{dataset}.{column} is not a modelled interval: {d.reason or d.kind}")
+    col, anchor = column.split(":", 1)[1], gateway._when(dataset)
+    raw = gateway._records(dataset, event, probe_year, [anchor, col])
+    con = duckdb.connect()
+    con.register("r", raw)
+    med = con.execute(f"SELECT median(date_diff('day', {gateway._date_sql(anchor)}, {gateway._date_sql(col)})) "
+                      "FROM r").fetchone()[0]
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    return {"source": "mark", "mark": col, "anchor": anchor, "sign": -1 if med is not None and med < 0 else 1,
+            "bounds": (1.0, 1e300), "missing": [], **({"classifier": primary} if primary else {})}
+
+
+def classifier_sources(dataset: str, event: str) -> list[tuple[str, dict, list[str]]]:
+    """The event type's other declared classifiers with a code tree (SIH's procedures by SIGTAP, SIM's original
+    cause by ICD-10): each as (``classifier:<column>``, its reader, the chapters of its tree). Counts of the same
+    events, classified another way."""
+    from . import gateway
+
+    out = []
+    for c in gateway.event_type(dataset, event).get("classifiers") or []:
+        if c["role"] == "primary" or not c.get("structure"):
+            continue
+        tree = gateway.code_tree(c["structure"])
+        roots = sorted(x for x, lv in zip(tree.column("code").to_pylist(), tree.column("level").to_pylist(), strict=True)
+                       if lv == "chapter")
+        out.append((f"classifier:{c['column']}", {"classifier": c["column"], "structure": c["structure"]}, roots))
+    return out
 
 
 def share_sources(dataset: str, event: str, column: str, probe_year: int) -> list[tuple[str, dict]]:
@@ -351,15 +409,15 @@ def declared_links(dataset: str, event: str) -> list[Declared]:
     """The person-level fields of ``dataset`` (S2): for every declared link (pegasus_data `links.yml`) with a side
     on this dataset, the share of that side's events linked to the other side's (`gateway.linked_counts`): an outcome
     after the event on a cohort's side, a recording measure on the other. ``column`` names the field
-    ``link:<spec>:<side>``; a side filtered or grouped by its spec carries the reason it is not read yet."""
+    ``link:<spec>:<side>``; a grouped side carries the reason it is not read yet."""
     from . import gateway
 
     out = []
     for name, spec in gateway.link_specs().items():
         for side, sd, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
-            if sd.dataset != dataset:
+            if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
                 continue
-            reason = "a side filtered or grouped by its spec is not read yet" if (sd.where or sd.group or sd.explode_days) else ""
+            reason = "a grouped side pairs groups, not records; not read yet" if (sd.group or sd.explode_days) else ""
             out.append(Declared(dataset, f"link:{name}:{side}", f"linked.{other.dataset}",
                                 f"{dataset} events linked to {other.dataset} ({name})", "linked", reason=reason))
     return out

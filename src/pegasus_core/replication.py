@@ -258,6 +258,17 @@ def test_prospective(sp: surprise.Surprise, estimand: str, locus: dict[str, Any]
             "years": [int(s.years[0]), int(s.years[-1])], "train": sp.extras.get("train")}
 
 
+PASSING = ("spike", "transient")       # the courses of `departures.attribute` that do not persist
+
+
+def lasting(x: leads.Lead) -> bool:
+    """Whether a lead's departure can recur in later years: an answer is passing when every method's attributed
+    course is a spike or a transient; a lead with no attributed course is taken as lasting (tested)."""
+    shapes = [(v.get("stats") or {}).get("shape", {}).get("shape") for v in (x.provenance.get("by_method") or {}).values()]
+    shapes = [s for s in shapes if s and s not in ("unattributed", "none")]
+    return not shapes or not all(s in PASSING for s in shapes)
+
+
 def test_lead(sp: surprise.Surprise, x: leads.Lead, level: str = "state") -> dict[str, Any]:
     """A lead tested on the later years of ``sp``."""
     _, direction = span_direction(x)

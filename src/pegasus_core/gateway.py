@@ -12,6 +12,7 @@ POPSVS writes 7, whose last digit is the check digit and is removed).
 
 from __future__ import annotations
 
+import functools
 import warnings
 from dataclasses import dataclass
 
@@ -697,16 +698,19 @@ CASEMIX_CHARS = 2    # the procedure's group: the first two digits of a SIGTAP c
 
 def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], classifier: str | None,
                 places: pa.Array | None, casemix: str | None, facility_effects: str | None, facility: bool = False,
-                missing: tuple[str, ...] = ()) -> pa.Table:
+                missing: tuple[str, ...] = (), anchor: str | None = None, sign: int = 1) -> pa.Table:
     """Registers in ``con`` the table ``adj`` of a year's admissions with a valid mark: (u, sex, age, code, fac, m, lm), ``lm`` the
     log mark less the facility's effect (``facility_effects``: a stored table, `store_facility_effects`) and less the case-mix
     offset of its (diagnosis category, procedure group) stratum when ``casemix`` names the procedure column: the stratum's
-    mean log mark above its category's, shrunk by n/(n + MARK_SHRINK). Returns the unallocated (year, reason, code, y)."""
+    mean log mark above its category's, shrunk by n/(n + MARK_SHRINK). With ``anchor`` (the event's date column) the
+    mark is an interval: the days from the anchor to the ``mark`` date times ``sign``, plus one (the calendar days
+    spanned, so a same-day date is 1 and the log is defined). Returns the unallocated (year, reason, code, y)."""
     from .facility import facility_column  # the facility module reads this one: imported where used
 
     strata = _strata(dataset)
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
-    cols = [strata["residence"], strata["age"], mark] + ([strata["sex"]] if strata["sex"] else []) + \
+    cols = [strata["residence"], strata["age"], mark] + ([anchor] if anchor else []) + \
+        ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else []) + ([casemix] if casemix else []) + ([fcol] if fcol else [])
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
@@ -715,8 +719,10 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     pg = f"coalesce(left(trim(CAST(\"{casemix}\" AS VARCHAR)), {CASEMIX_CHARS}), '')" if casemix else "''"
     fac = f"coalesce(trim(CAST(\"{fcol}\" AS VARCHAR)), '')" if fcol else "''"
+    value = (f"CAST({int(sign)} * date_diff('day', {_date_sql(anchor)}, {_date_sql(mark)}) + 1 AS DOUBLE)" if anchor
+             else f'TRY_CAST(CAST("{mark}" AS VARCHAR) AS DOUBLE)')
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            trim(CAST("{mark}" AS VARCHAR)) AS mraw, TRY_CAST(CAST("{mark}" AS VARCHAR) AS DOUBLE) AS m, {pg} AS pg,
+            trim(CAST("{mark}" AS VARCHAR)) AS mraw, {value} AS m, {pg} AS pg,
             {fac} AS fac FROM r""")
     miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
     con.unregister("r")
@@ -733,10 +739,13 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
         if fx is None:
             raise LookupError(f"no stored facility effects {facility_effects}")
         con.register("fx", fx)
-        con.execute(f"""CREATE TEMP TABLE a AS SELECT u, sex, age, code, pg, fac, m, ln(m) - coalesce(fx.delta, 0) AS lm
+        con.execute(f"""CREATE TEMP TABLE a AS SELECT u, sex, age, code, pg, fac, m,
+                            CASE WHEN m > 0 THEN ln(m) END - coalesce(fx.delta, 0) AS lm
                         FROM e LEFT JOIN fx ON fx.facility = e.fac WHERE ({reason}) IS NULL""")
     else:
-        con.execute(f"CREATE TEMP TABLE a AS SELECT u, sex, age, code, pg, fac, m, ln(m) AS lm FROM e WHERE ({reason}) IS NULL")
+        # a count mark admits 0 (its log is undefined: lm NULL, the count family reads Σm and Σm² only)
+        con.execute(f"CREATE TEMP TABLE a AS SELECT u, sex, age, code, pg, fac, m, CASE WHEN m > 0 THEN ln(m) END AS lm "
+                    f"FROM e WHERE ({reason}) IS NULL")
     con.execute("DROP TABLE e")
     if casemix:
         con.execute(f"""CREATE TEMP TABLE cm AS SELECT left(a.code, 3) AS c3, a.pg,
@@ -753,7 +762,8 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
 
 def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float],
                  classifier: str | None = None, places: pa.Array | None = None, casemix: str | None = None,
-                 facility_effects: str | None = None, missing: tuple[str, ...] | list = ()) -> EventCounts:
+                 facility_effects: str | None = None, missing: tuple[str, ...] | list = (), anchor: str | None = None,
+                 sign: int = 1) -> EventCounts:
     """Accumulator states of a positive numeric mark per (u, year, sex, age, code): n, Σm, Σm², Σlog m, Σ(log m)²
     (ARCHITECTURE §4.4; handoff §4 asks pegasus_data to serve these). The log moments are of the *adjusted* log mark
     when ``casemix`` (the procedure column) or ``facility_effects`` are given (`_mark_frame`); Σm and Σm² are raw.
@@ -762,14 +772,15 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     key = {"what": "mark_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
            "bounds": list(bounds), "missing": list(missing), "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"casemix": casemix, "shrink": MARK_SHRINK, "chars": CASEMIX_CHARS} if casemix else {}),
-           **({"facility_effects": facility_effects} if facility_effects else {})}
+           **({"facility_effects": facility_effects} if facility_effects else {}),
+           **({"anchor": anchor, "sign": sign} if anchor else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
     con = duckdb.connect()
     unallocated = _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects,
-                              missing=tuple(missing))
+                              missing=tuple(missing), anchor=anchor, sign=sign)
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
             CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n, sum(m) AS s1,
             sum(m * m) AS s2, sum(lm) AS l1, sum(lm * lm) AS l2
@@ -844,7 +855,7 @@ def store_facility_effects(table: pa.Table) -> str:
 def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], nu: pa.Table,
                           edges: list[int], classifier: str | None = None, casemix: str | None = None,
                           facility_effects: str | None = None, places: pa.Array | None = None,
-                          missing: tuple[str, ...] | list = ()) -> pa.Table:
+                          missing: tuple[str, ...] | list = (), anchor: str | None = None, sign: int = 1) -> pa.Table:
     """A year's residuals of the admissions' adjusted log mark from a fitted location, summed by recording facility:
     (facility, year, n, sr, sr2) with r = lm − ν, ν looked up by (category, residence, sex, age band) in ``nu``
     (columns code3, u, sex, band, nu), the fitted model's cells. Admissions in a cell the fit has none of are left out."""
@@ -855,13 +866,13 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     key = {"what": "mark_facility_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "mark": mark, "bounds": list(bounds), "classifier": classifier, "casemix": casemix, "shrink": MARK_SHRINK,
            "facility_effects": facility_effects, "nu": digest, "edges": list(edges), "data": config.data_version(), "v": 1,
-           **_df_key(dataset, year)}
+           **_df_key(dataset, year), **({"anchor": anchor, "sign": sign} if anchor else {})}
     hit = store.get_table("gateway", key)
     if hit is not None:
         return hit
     con = duckdb.connect()
     _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects, facility=True,
-                missing=tuple(missing))
+                missing=tuple(missing), anchor=anchor, sign=sign)
     con.register("nu", nu)
     con.register("ab", pa.table({"age": pa.array(range(MAX_AGE + 1), pa.int16()),
                                  "band": pa.array([int(np.searchsorted(edges, a, side="right") - 1) for a in range(MAX_AGE + 1)],
@@ -934,6 +945,43 @@ def _strata(dataset: str) -> dict:
         raise LookupError(f"{dataset}: no sex stratum, and entity {entity!r} implies none")
     return {"residence": by_prop["residence"]["column"], "age": age["column"],
             "sex": by_prop["sex"]["column"] if "sex" in by_prop else None, "implied_sex": implied, "entity": entity}
+
+
+CANONICAL_LEVELS = ("chapter", "group", "category", "subcategory")
+
+
+@functools.cache
+def code_tree(name: str) -> pa.Table:
+    """A classifier tree with its levels in the roles the model reads (``level``: chapter, the roots; category, the
+    level above the leaves, the model's leaves; subcategory, the leaves; group, every level between) and the
+    structure's own name kept (``native_level``). The roles follow from the tree's depth, never from its names: ICD-10's
+    levels are already these; SIGTAP's group, subgroup, form and procedure become chapter, group, category and
+    subcategory. ``width`` is the category codes' length (3 for ICD-10, 6 for SIGTAP)."""
+    t = code_structure(name)
+    code, parent, level = (t.column(c).to_pylist() for c in ("code", "parent", "level"))
+    up = dict(zip(code, parent, strict=True))
+
+    def depth(c: str) -> int:
+        d = 0
+        while up.get(c) is not None:
+            c, d = up[c], d + 1
+        return d
+
+    by_level: dict[str, list[int]] = {}
+    for c, lv in zip(code, level, strict=True):
+        by_level.setdefault(lv, []).append(depth(c))
+    order = sorted(by_level, key=lambda lv: float(np.median(by_level[lv])))
+    role = {lv: ("chapter" if i == 0 else "subcategory" if i == len(order) - 1 and len(order) > 2
+                 else "category" if i == len(order) - 2 or len(order) == 2 else "group") for i, lv in enumerate(order)}
+    cats = [c for c, lv in zip(code, level, strict=True) if role[lv] == "category"]
+    width = int(np.median([len(c) for c in cats])) if cats else 3
+    return (t.set_column(t.column_names.index("level"), "level", pa.array([role[lv] for lv in level]))
+            .append_column("native_level", pa.array(level))
+            .replace_schema_metadata({"width": str(width)}))
+
+
+def category_width(name: str) -> int:
+    return int(code_tree(name).schema.metadata[b"width"])
 
 
 def code_structure(name: str) -> pa.Table:
@@ -1235,16 +1283,17 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     """The events of one side of a declared link per (u, year, sex, age, code): n, and k the expected number with a
     partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
     national run). The share k/n is an outcome after the event on a cohort's side (births followed by an infant
-    death) and a recording measure on the other (deaths that found their birth). A side filtered or grouped by its
-    spec is refused: its denominator is not the event type's."""
+    death) and a recording measure on the other (deaths that found their birth). A side filtered by its spec (`where`)
+    keeps the event type's denominator: its records outside the filter are unlinked by construction. A grouped side
+    is refused: its pairs name groups, not records."""
     import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
-    if sd.dataset != dataset:
+    if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
-    if sd.where or sd.group or sd.explode_days:
-        raise NotImplementedError(f"{link} {side}: a side filtered or grouped by its spec is not read yet")
+    if sd.group or sd.explode_days:
+        raise NotImplementedError(f"{link} {side}: a grouped side pairs groups, not records; not read yet")
     strata = _strata(dataset)
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(),
@@ -1289,16 +1338,16 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 def cohort_records(dataset: str, event: str, year: int, link: str, side: str, columns: list[str]
                    ) -> tuple[pa.Table, pa.Array, pa.Table]:
     """One side of a declared link as persons (`tools.cohort`): its records of ``year`` on the lattice (u, sex, age
-    class) with ``columns`` raw-coded and each record's identity, and the link's stored pairs. A side filtered or
-    grouped by its spec is refused, as in `linked_counts`."""
+    class) with ``columns`` raw-coded and each record's identity, and the link's stored pairs. A grouped side is
+    refused, as in `linked_counts`."""
     import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
-    if sd.dataset != dataset:
+    if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
-    if sd.where or sd.group or sd.explode_days:
-        raise NotImplementedError(f"{link} {side}: a side filtered or grouped by its spec is not read yet")
+    if sd.group or sd.explode_days:
+        raise NotImplementedError(f"{link} {side}: a grouped side pairs groups, not records; not read yet")
     strata = _strata(dataset)
     cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)

@@ -33,7 +33,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 
 | item (ARCHITECTURE) | built | dormant since | next concrete step |
 |---|---|---|---|
-| fields from pegasus_data's roles: marks, dimensions, institutions (§4.4, §4.5) | measures, compositions and links from declarations (`fields.declared`); SIH-RD's 38 measures declared | 2026-10-07 | SIM and SINASC missing codes; intervals; code trees as second classifiers |
+| fields from pegasus_data's roles: marks, dimensions, institutions (§4.4, §4.5) | measures (count family when the domain admits 0), compositions, intervals (every date against the event's), links and other classifiers' trees (SIGTAP), all from declarations; SIH, SIM and SINASC declared | 2026-10-07 | first end-to-end readings of each kind |
 | linkage and cohorts (§7.8, phase 2) | `cohort()`; linked-share fields from declared links | 2026-10-07 | sides filtered or grouped by their spec |
 | race and ages (O3, §4.1) | race-aware population accounts | 2026-10-05 | race as an axis of G on births and infant deaths |
 | institutions in the likelihood (§4.5) | facility triage, mark facility effects | 2026-10-05 | from the declared `institution` roles (same plan) |
@@ -42,7 +42,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | interaction patterns (§7.4) | interaction built, off | 2026-10-06 | read ψ, ω, τ of one block |
 | exact reference fit (OPEN_QUESTIONS 2) | not run | 2026-10-06 | one block by HMC against the Laplace draws |
 | the readable dossier and human verdicts (stage F) | `dossier` (HTML, series per answer), `verdict`; confirmed answers enter the event record (`harness.verdict_positives`) | 2026-10-07 | the author records verdicts on the first dossiers |
-| corroboration's sources (§8.3) | in the default stage E since 2026-10-07; `corroborate.RULES` hand-written | 2026-10-07 | derive the corroborating system from declarations (SINAN agravos' ICD codes, the ICD tree shared by SIM and SIH) |
+| corroboration's sources (§8.3) | derived from declarations (ICD-10-coded event types, declared links for overlap, the disasters field's ICD-10 correspondence) | 2026-10-07 | the linked overlap read on a full update |
 
 **Where each stage stands:**
 

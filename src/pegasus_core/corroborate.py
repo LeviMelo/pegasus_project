@@ -2,8 +2,12 @@
 
 A one-off event (a dam collapse, an epidemic year, a fire) cannot recur in the other temporal half, and a
 split of its own events says only that it is not a selection artefact. What confirms it is a second
-measurement of the same place and time that does not share the first one's records: deaths (SIM) against
-the disaster registry (S2iD), against notifications (SINAN) or against admissions (SIH).
+measurement of the same place and time that does not share the first one's records.
+
+**The sources are declared, never named here.** Every other served event type whose records carry an ICD-10 code
+(its primary classifier, or the code tree that defines its events, as SINAN's agravo) is a source for a lead whose
+codes it holds; a context field is a source where pegasus_data declares which ICD-10 codes record its events (the
+disasters field's `icd10`). `sources` lists them.
 
 **The null is the corroborating field's own.** The statistic is computed on the lead's places and years in
 that field; the null is the same statistic on random place sets of the same size, in the same states, matched
@@ -11,11 +15,10 @@ on population (a quintile of the nation's municipalities), over the same years. 
 as the lead in the other field by the field's own variation, in a year when the whole state was, does not
 corroborate. The p-value is (1 + #{null ≥ observed}) / (1 + B), so its floor is 1/(B + 1).
 
-**Overlap (§8.5).** SIM deaths and SIH admissions share the person who died in hospital, so the SIH count
-excludes admissions that ended in death (MORTE), and the share the exclusion removed is recorded as the
-measured upper bound of the overlap. S2iD and SINAN share no record with SIM.
-
-The rules (which field corroborates which codes) are data: `RULES`.
+**Overlap (§8.5).** Two systems that a declared link pairs share persons (a death in hospital is an admission that
+ended in death): the corroborating count is the source's events less the expected number linked to the lead's system
+(Σ p_match, `gateway.linked_counts`), and the linked share is recorded as the measured overlap. Systems no link pairs
+are taken as sharing no record.
 """
 
 from __future__ import annotations
@@ -30,24 +33,73 @@ import pyarrow as pa
 
 from . import config, gateway, store
 
-#: SIM code prefix → the independent field. ``s2id``: COBRADE typologies; ``sinan``: (dataset, event);
-#: ``sih``: admissions of the same ICD-10 category.
-MASS = ["Movimento de Massa", "Rompimento/Colapso de barragens", "Erosão"]
-WATER = ["Inundações", "Enxurradas", "Alagamentos", "Chuvas Intensas"]
-STORM = ["Vendavais e Ciclones", "Tornado", "Granizo", "Chuvas Intensas"]
-RULES: list[dict[str, Any]] = [
-    {"prefix": ("X36",), "source": "s2id", "typologies": MASS, "label": "S2iD, mass movement or dam collapse"},
-    {"prefix": ("X37",), "source": "s2id", "typologies": STORM, "label": "S2iD, storm"},
-    {"prefix": ("X38",), "source": "s2id", "typologies": WATER, "label": "S2iD, flood"},
-    {"prefix": ("X30",), "source": "s2id", "typologies": ["Onda de Calor e Baixa Umidade"], "label": "S2iD, heat wave"},
-    {"prefix": ("X31",), "source": "s2id", "typologies": ["Onda de Frio"], "label": "S2iD, cold wave"},
-    {"prefix": ("X00", "X01", "X02", "X03", "X04", "X05", "X06", "X07", "X08", "X09"), "source": "s2id",
-     "typologies": ["Incêndio Florestal"], "label": "S2iD, wildfire"},
-    {"prefix": ("A92",), "source": "sinan", "system": ("SINAN-CHIK", "notification"), "label": "SINAN chikungunya notifications"},
-    {"prefix": ("A90", "A91"), "source": "sinan", "system": ("SINAN-DENG", "probable_case"), "label": "SINAN dengue probable cases"},
-    {"prefix": ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"), "source": "sih",
-     "label": "SIH admissions (survivors) of the same category"},
-]
+
+def _system(dataset: str) -> str:
+    return dataset.upper().replace(".", "-")
+
+
+@dataclass(frozen=True)
+class Source:
+    """One independent field: an event type's ICD-10-coded events (``kind`` events), or a context field crossed by a
+    declared ICD-10 correspondence (``kind`` field)."""
+    kind: str
+    dataset: str
+    event: str = ""
+    column: str = ""                          # the ICD-10 column of its records
+    link: tuple[str, str] | None = None       # a declared link to the lead's system: (spec, this source's side)
+    codes: tuple[tuple[str, tuple[str, ...]], ...] = ()   # a field: (ICD-10 code or range, its typologies)
+    harm: tuple[str, ...] = ()                # a field: its columns counting people harmed (declared)
+
+    @property
+    def label(self) -> str:
+        if self.kind == "field":
+            return f"{self.dataset} (declared ICD-10 correspondence)"
+        return f"{self.dataset} {self.event}" + (f", less records linked by {self.link[0]}" if self.link else "")
+
+
+def icd_column(dataset: str, event: str) -> str | None:
+    """The column whose ICD-10 code classifies an event type's records: its primary classifier when that is ICD-10,
+    else the ICD-10 code tree that defines its events (`model: event_type`); None when it has neither."""
+    et = gateway.event_type(dataset, event)
+    primary = next((c for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    if primary is not None:
+        return primary["column"] if primary.get("structure") == "ICD10" else None
+    return next((r["column"] for r in gateway.roles(dataset)
+                 if r.get("model") == "event_type" and "ICD10" in (r.get("codelists") or [])), None)
+
+
+def sources(dataset: str, served: list[tuple[str, str]]) -> list[Source]:
+    """The independent fields of a lead of ``dataset``: every served event type of another system with ICD-10-coded
+    records (with the declared link to ``dataset`` whose linked records it shares, a side not grouped), and every
+    context field with a declared ICD-10 correspondence."""
+    specs = gateway.link_specs()
+    out: list[Source] = []
+    for ds, ev in dict.fromkeys(served):
+        if _system(ds) == _system(dataset) or (col := icd_column(ds, ev)) is None:
+            continue
+        link = next(((name, side) for name, s in specs.items()
+                     for side, sd, other in (("left", s.left, s.right), ("right", s.right, s.left))
+                     if _system(sd.dataset) == _system(ds) and _system(other.dataset) == _system(dataset)
+                     and not (sd.group or sd.explode_days)), None)
+        out.append(Source("events", ds, ev, col, link))
+    from pegasus_data.fields import declared_fields
+
+    for name, spec in declared_fields().items():
+        if spec.get("icd10"):
+            out.append(Source("field", name, codes=tuple((str(k), tuple(v)) for k, v in spec["icd10"].items()),
+                              harm=tuple(spec.get("harm") or ())))
+    return out
+
+
+def _covers(key: str, category: str) -> bool:
+    """An ICD-10 code or range (``X00-X09``) of a correspondence covers a 3-character category."""
+    lo, _, hi = key.partition("-")
+    return lo[:3] <= category <= (hi or lo)[:3]
+
+
+def typologies_for(source: Source, categories: list[str]) -> list[str]:
+    """The typologies a field's correspondence gives the lead's categories (empty: the field does not apply)."""
+    return sorted({t for key, ts in source.codes for c in categories if _covers(key, c) for t in ts})
 
 
 @dataclass
@@ -65,86 +117,46 @@ class Corroboration:
                 "null_median": self.null_median, "p": self.p, **(self.detail or {})}
 
 
-#: The rules for a lead of SIH-RD: the independent fields are SINAN (notified diseases) and SIM deaths **outside hospitals**
-#: (an in-hospital death is the same person as an admission that ended in death, ARCHITECTURE §8.5).
-SIH_RULES: list[dict[str, Any]] = [r for r in RULES if r["source"] == "sinan"] + [
-    {"prefix": ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q"), "source": "sim",
-     "label": "SIM deaths outside hospital of the same category"}]
-
-
-def rule_for(code: str, dataset: str = "SIM.DO") -> dict[str, Any] | None:
-    for r in (SIH_RULES if dataset.startswith("SIH") else RULES):
-        if any(code.startswith(p) for p in r["prefix"]):
-            return r
-    return None
-
-
 # ---------------------------------------------------------------------- readers (cached under the store)
 
 
-def s2id_events() -> pa.Table:
-    """Every S2iD event, 2010 on: u (6 digits), year, typology, group, deaths."""
-    key = {"what": "s2id", "data": config.data_version()}
+def field_events(name: str, harm: tuple[str, ...] = ()) -> pa.Table:
+    """A context field's events, 2010 on: u (6 digits), year, typology, and ``harmed`` the people its declared harm
+    columns count (pegasus_data's `load_field`)."""
+    key = {"what": "field_events", "field": name, "harm": list(harm), "data": config.data_version()}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
-    raw = gateway.raw_field("disasters", list(range(2010, 2025)))
+    raw = gateway.raw_field(name, list(range(2010, 2025)))
     con = duckdb.connect()
     con.register("r", raw)
-    t = con.execute("""SELECT CAST(municipality AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, typology,
-        "group" AS grp, cobrade, CAST(deaths AS INTEGER) AS deaths FROM r""").fetch_arrow_table()
-    store.put_table("corroborate", key, t, {"source": "pegasus_data.load_field(disasters)"})
+    harmed = " + ".join(f'coalesce(TRY_CAST("{c}" AS DOUBLE), 0)' for c in harm) or "0"
+    t = con.execute(f"""SELECT CAST(municipality AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, typology,
+        CAST({harmed} AS DOUBLE) AS harmed FROM r""").fetch_arrow_table()
+    store.put_table("corroborate", key, t, {"source": f"pegasus_data.load_field({name})"})
     return t
 
 
-def sih_year(year: int) -> pa.Table:
-    """SIH-RD admissions of a year by residence × ICD-10 category (3 characters) × in-hospital death."""
-    key = {"what": "sih", "year": year, "data": config.data_version(), "v": 1}
+def source_year(source: Source, year: int) -> pa.Table:
+    """A source's events of a year by residence × 3-character ICD-10 category: y, and k the expected number linked to
+    the lead's system (0 without a link)."""
+    key = {"what": "source_year", "dataset": source.dataset, "event": source.event, "column": source.column,
+           "link": list(source.link or ()), "year": year, "data": config.data_version()}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
-    raw = gateway.raw_event_counts("SIH-RD", "hospitalisation", year, ["MUNIC_RES", "DIAG_PRINC", "MORTE"])
+    if source.link:
+        t = gateway.linked_counts(source.dataset, source.event, year, source.link[0], source.link[1],
+                                  classifier=source.column).counts
+        y, k = "n", "k"
+    else:
+        t = gateway.event_counts(source.dataset, source.event, year, classifier=source.column).counts
+        y, k = "y", "0"
     con = duckdb.connect()
-    con.register("r", raw)
-    t = con.execute(f"""SELECT CAST({gateway._residence_sql('MUNIC_RES')} AS INTEGER) AS u,
-        left(upper(trim(CAST(DIAG_PRINC AS VARCHAR))), 3) AS code,
-        CAST(coalesce(TRY_CAST(MORTE AS INTEGER), 0) AS TINYINT) AS dead, CAST(sum(events) AS INTEGER) AS y
-        FROM r GROUP BY ALL""").fetch_arrow_table()
-    store.put_table("corroborate", key, t, {"source": "pegasus_data.count_events(SIH-RD)", "year": year})
-    return t
-
-
-def sim_year(year: int) -> pa.Table:
-    """SIM.DO deaths of a year by residence × ICD-10 category (3 characters) × death in a hospital (LOCOCOR = 1)."""
-    key = {"what": "sim", "year": year, "data": config.data_version(), "v": 1}
-    hit = store.get_table("corroborate", key)
-    if hit is not None:
-        return hit
-    raw = gateway.raw_event_counts("SIM.DO", "death", year, ["CODMUNRES", "CAUSABAS", "LOCOCOR"])
-    con = duckdb.connect()
-    con.register("r", raw)
-    t = con.execute("""SELECT TRY_CAST(left(CAST(CODMUNRES AS VARCHAR), 6) AS INTEGER) AS u,
-        left(upper(trim(CAST(CAUSABAS AS VARCHAR))), 3) AS code,
-        CAST(coalesce(TRY_CAST(CAST(LOCOCOR AS VARCHAR) AS INTEGER), 9) = 1 AS TINYINT) AS hospital, CAST(sum(events) AS INTEGER) AS y
-        FROM r GROUP BY ALL""").fetch_arrow_table()
-    store.put_table("corroborate", key, t, {"source": "pegasus_data.count_events(SIM.DO)", "year": year})
-    return t
-
-
-def sinan_matrix(dataset: str, event: str, places: np.ndarray, years: np.ndarray) -> np.ndarray:
-    """Notifications [place, year] of a SINAN system (all strata summed)."""
-    out = np.zeros((len(places), len(years)))
-    index = {int(u): i for i, u in enumerate(places)}
-    for j, year in enumerate(years):
-        try:
-            counts = gateway.event_counts(dataset, event, int(year), places=pa.array(places.astype(np.int64))).counts
-        except gateway.nothing_published():      # the system is not published for the year (chikungunya before 2015): no events
-            continue
-        u = counts.column("u").to_numpy()
-        y = counts.column("y").to_numpy()
-        rows = np.array([index.get(int(x), -1) for x in u])
-        ok = rows >= 0
-        np.add.at(out[:, j], rows[ok], y[ok])
+    con.register("t", t)
+    out = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, left(upper(code), 3) AS code,
+        CAST(sum({y}) AS DOUBLE) AS y, CAST(sum({k}) AS DOUBLE) AS k FROM t GROUP BY ALL""").fetch_arrow_table()
+    store.put_table("corroborate", key, out, {"source": source.label, "year": year})
     return out
 
 
@@ -162,10 +174,7 @@ class Fields:
         self.state = state_of
         self.quintile = np.digitize(population, np.quantile(population, [0.2, 0.4, 0.6, 0.8]))
         self._index = {int(u): i for i, u in enumerate(places)}
-        self._cache: dict[Any, np.ndarray] = {}
-        self._sih: pa.Table | None = None
-        self._sim: pa.Table | None = None
-        self._s2id: pa.Table | None = None
+        self._cache: dict[Any, Any] = {}
 
     def adjacent(self) -> list[np.ndarray]:
         """The neighbours of every place (the graph's adjacency lists), built once."""
@@ -177,84 +186,65 @@ class Fields:
             self._adjacent = [e[cut[i]:cut[i + 1], 1] for i in range(len(self.places))]
         return self._adjacent
 
-    # -- S2iD
-    def s2id(self, typologies: list[str] | None) -> np.ndarray:
-        key = ("s2id", tuple(typologies) if typologies else None)
+    def field(self, source: Source, typologies: list[str]) -> np.ndarray:
+        """People harmed [place, year] in a context field's events of the typologies (its declared harm columns; the
+        events themselves when it declares none)."""
+        key = ("field", source, tuple(typologies))
         if key not in self._cache:
-            t = s2id_events()
-            u, yr, ty = (t.column(c).to_numpy(zero_copy_only=False) for c in ("u", "year", "typology"))
-            ok = np.isin(yr, self.years) & (np.isin(ty, typologies) if typologies else True)
+            t = field_events(source.dataset, source.harm)
+            u, yr, ty, h = (t.column(c).to_numpy(zero_copy_only=False) for c in ("u", "year", "typology", "harmed"))
+            ok = np.isin(yr, self.years) & np.isin(ty, typologies)
             out = np.zeros((len(self.places), len(self.years)))
             ti = {int(y): j for j, y in enumerate(self.years)}
-            for a, b in zip(u[ok], yr[ok], strict=True):
+            for a, b, v in zip(u[ok], yr[ok], h[ok], strict=True):
                 i = self._index.get(int(a))
                 if i is not None:
-                    out[i, ti[int(b)]] += 1
+                    out[i, ti[int(b)]] += float(v) if source.harm else 1.0
             self._cache[key] = out
         return self._cache[key]
 
-    # -- SINAN
-    def sinan(self, system: tuple[str, str]) -> np.ndarray:
-        key = ("sinan", system)
-        if key not in self._cache:
-            self._cache[key] = sinan_matrix(system[0], system[1], self.places, self.years)
-        return self._cache[key]
-
-    # -- SIH
-    def _sih_all(self) -> pa.Table:
-        if self._sih is None:
+    def _table(self, source: Source) -> pa.Table | None:
+        if ("table", source) not in self._cache:
             parts = []
             for y in self.years:
-                t = sih_year(int(y))
+                try:
+                    t = source_year(source, int(y))
+                except gateway.nothing_published():      # not published for the year (chikungunya before 2015): no events
+                    continue
                 parts.append(t.append_column("year", pa.array(np.full(t.num_rows, int(y), dtype=np.int16))))
-            self._sih = pa.concat_tables(parts)
-        return self._sih
+            self._cache[("table", source)] = pa.concat_tables(parts) if parts else None
+        return self._cache[("table", source)]
 
-    def sih(self, categories: list[str]) -> tuple[np.ndarray, np.ndarray]:
-        """(survivors, died in hospital) [place, year] for the 3-character categories."""
-        key = ("sih", tuple(sorted(categories)))
+    def holds(self, source: Source, categories: list[str]) -> bool:
+        """Whether the source has any event of the categories (its own codes; a field by its correspondence)."""
+        if source.kind == "field":
+            return bool(typologies_for(source, categories))
+        key = ("codes", source)
         if key not in self._cache:
-            t = self._sih_all()
-            con = duckdb.connect()
-            con.register("s", t)
-            con.register("c", pa.table({"code": sorted(categories)}))
-            r = con.execute("""SELECT u, year, dead, sum(y) AS y FROM s WHERE code IN (SELECT code FROM c) GROUP BY ALL"""
-                            ).fetch_arrow_table()
-            alive = np.zeros((len(self.places), len(self.years)))
-            dead = np.zeros_like(alive)
-            ti = {int(y): j for j, y in enumerate(self.years)}
-            for a, b, d, v in zip(*(r.column(c).to_pylist() for c in ("u", "year", "dead", "y")), strict=True):
-                i = self._index.get(int(a))
-                if i is not None:
-                    (dead if d else alive)[i, ti[int(b)]] += float(v)
-            self._cache[key] = (alive, dead)
-        return self._cache[key]
+            t = self._table(source)
+            self._cache[key] = set() if t is None else set(t.column("code").to_pylist())
+        return bool(self._cache[key] & set(categories))
 
-
-    # -- SIM (the corroborating field of an SIH lead)
-    def sim(self, categories: list[str]) -> tuple[np.ndarray, np.ndarray]:
-        """(deaths outside hospital, deaths in hospital) [place, year] for the 3-character categories."""
-        key = ("sim", tuple(sorted(categories)))
+    def events(self, source: Source, categories: list[str]) -> tuple[np.ndarray, np.ndarray]:
+        """(events not linked to the lead's system, expected linked) [place, year] for the 3-character categories."""
+        key = ("events", source, tuple(sorted(categories)))
         if key not in self._cache:
-            if self._sim is None:
-                parts = []
-                for y in self.years:
-                    t = sim_year(int(y))
-                    parts.append(t.append_column("year", pa.array(np.full(t.num_rows, int(y), dtype=np.int16))))
-                self._sim = pa.concat_tables(parts)
-            con = duckdb.connect()
-            con.register("s", self._sim)
-            con.register("c", pa.table({"code": sorted(categories)}))
-            r = con.execute("""SELECT u, year, hospital, sum(y) AS y FROM s WHERE code IN (SELECT code FROM c) GROUP BY ALL"""
-                            ).fetch_arrow_table()
-            outside = np.zeros((len(self.places), len(self.years)))
-            inside = np.zeros_like(outside)
-            ti = {int(y): j for j, y in enumerate(self.years)}
-            for a, b, h, v in zip(*(r.column(c).to_pylist() for c in ("u", "year", "hospital", "y")), strict=True):
-                i = self._index.get(int(a)) if a is not None else None
-                if i is not None:
-                    (inside if h else outside)[i, ti[int(b)]] += float(v)
-            self._cache[key] = (outside, inside)
+            t = self._table(source)
+            free = np.zeros((len(self.places), len(self.years)))
+            linked = np.zeros_like(free)
+            if t is not None:
+                con = duckdb.connect()
+                con.register("s", t)
+                con.register("c", pa.table({"code": sorted(categories)}))
+                r = con.execute("SELECT u, year, sum(y) AS y, sum(k) AS k FROM s WHERE code IN (SELECT code FROM c) "
+                                "GROUP BY ALL").fetch_arrow_table()
+                ti = {int(y): j for j, y in enumerate(self.years)}
+                for a, b, v, k in zip(*(r.column(c).to_pylist() for c in ("u", "year", "y", "k")), strict=True):
+                    i = self._index.get(int(a)) if a is not None else None
+                    if i is not None:
+                        free[i, ti[int(b)]] += float(v) - float(k)
+                        linked[i, ti[int(b)]] += float(k)
+            self._cache[key] = (free, linked)
         return self._cache[key]
 
 
@@ -334,35 +324,30 @@ def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, repli
     return out
 
 
-def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarray, years: list[int], direction: int,
-                seed_text: str, replicates: int = 4999, connected: bool = True, dataset: str = "SIM.DO") -> Corroboration:
+def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.ndarray, years: list[int],
+                direction: int, seed_text: str, replicates: int = 4999, connected: bool = True) -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
-    rule = rule_for(code, dataset)
-    if rule is None:
-        return Corroboration(False, detail={"reason": "no independent field for this code"})
+    sid = f"{source.kind}:{source.dataset}:{source.event}"
     if direction <= 0:
-        return Corroboration(False, rule["source"], rule["label"], detail={"reason": "a deficit is not corroborated by a field"})
+        return Corroboration(False, sid, source.label, detail={"reason": "a deficit is not corroborated by a field"})
     cols = (fields.years >= years[0]) & (fields.years <= years[-1])
     other = ~cols
     rng = np.random.default_rng(config.seed(seed_text))
     detail: dict[str, Any] = {}
 
-    if rule["source"] == "s2id":
-        m = fields.s2id(rule.get("typologies"))
-        obs = float((m[rows][:, cols].sum(1) > 0).sum())      # places with a registered disaster in the window
+    if source.kind == "field":
+        m = fields.field(source, typologies_for(source, categories))
+        obs = float(m[rows][:, cols].sum())        # people the registry reports harmed at the places in the window
 
         def null_of(sets: np.ndarray) -> np.ndarray:
-            return (m[sets][:, :, cols].sum(2) > 0).sum(1).astype(float)
+            return m[sets][:, :, cols].sum((1, 2)).astype(float)
 
-        detail["unit"] = "places with a registered disaster in the window"
+        detail["unit"] = ("people the registry reports harmed" if source.harm else "registered events") +             " at the places in the window"
     else:
-        if rule["source"] == "sinan":
-            y = fields.sinan(rule["system"])
-        else:
-            alive, dead = fields.sim(categories) if rule["source"] == "sim" else fields.sih(categories)
-            y = alive
-            tot = float(alive[rows][:, cols].sum() + dead[rows][:, cols].sum())
-            detail["overlap_upper_bound"] = float(dead[rows][:, cols].sum() / tot) if tot > 0 else 0.0
+        y, linked = fields.events(source, categories)
+        tot = float(y[rows][:, cols].sum() + linked[rows][:, cols].sum())
+        if source.link:
+            detail["overlap"] = float(linked[rows][:, cols].sum() / tot) if tot > 0 else 0.0
         base = np.median(y[:, other], axis=1) if other.any() else np.zeros(len(y))
 
         def ratio(r: np.ndarray) -> np.ndarray:
@@ -378,10 +363,10 @@ def corroborate(fields: Fields, code: str, categories: list[str], rows: np.ndarr
     null = np.concatenate([null_of(_null_sets(fields, rows, rng, min(chunk, replicates - i), connected))
                            for i in range(0, replicates, chunk)])
     p = float((1 + np.sum(null >= obs)) / (1 + len(null)))
-    if rule["source"] == "s2id" and obs == 0:
+    if source.kind == "field" and obs == 0:
         p = 1.0
     detail["replicates"] = replicates
-    return Corroboration(True, rule["source"], rule["label"], obs, float(np.median(null)), p, detail)
+    return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
 
 
 def categories_of(registry, node: str) -> list[str]:

@@ -17,6 +17,7 @@ ledger. The event sides survive for sizes only: `honest_sizes`.
 from __future__ import annotations
 
 import contextlib
+import gc
 import json
 import threading
 from dataclasses import dataclass, field
@@ -269,7 +270,10 @@ class Session:
         return self._spectrum
 
     def _blocks(self) -> list[str]:
-        return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)})
+        """The blocks fitted for this session's reader (the counts, or its measure, share or classifier)."""
+        mine = json.loads(json.dumps({f: self.source.get(f) for f in READER_FIELDS}))     # tuples as the key's lists
+        return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)
+                       if all(k["key"].get(f) == mine[f] for f in READER_FIELDS)})
 
     # ---- scanning ----------------------------------------------------------------
 
@@ -404,7 +408,7 @@ class Session:
         names = questions or tuple(qs.QUESTIONS)
         found: dict[str, list] = {}
         src = self.source
-        measure = (f"|{src['mark']}" if src.get("mark") else
+        measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
                    f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
                    f"|link:{src['link']}:{src['side']}" if src.get("link") else "")   # its own family
         for block in blocks or self._blocks():
@@ -577,15 +581,30 @@ class Session:
         self._total, self._ill, self._pop = total, ill, pop
 
     def _expected_total(self) -> np.ndarray:
-        """[U, T] the expected events of every fitted block (stage B1), on the evidence grid: a share's denominator."""
+        """[U, T] the expected events of every fitted block (stage B1), on the evidence grid: a share's denominator.
+        Kept in the store under the blocks' fit keys; a block read only for this total is released at once (holding
+        every chapter's model at the same time took 13 GB on SIH-RD, 2026-10-07)."""
         if getattr(self, "_mu_total", None) is None:
             self._prepare_grid()
+            key = {"what": "expected_total", "dataset": self.dataset, "event": self.event, "years": list(self.years),
+                   "graph": self.graph, "robust": self.expectations.robust, "data": config.data_version(),
+                   "fits": sorted(k["model"] for k in fitted(self.dataset, self.event, self.graph, self.years))}
+            hit = store.get_arrays("tools", key)
+            if hit is not None:
+                self._mu_total = hit["mu"]
+                return self._mu_total
             tot = None
             for b in self._blocks():
+                held = b in self.expectations._models
                 m = self.expectations.model(b)
                 mu = m.expected(np.arange(len(m.data.leaves)))[0]
                 tot = mu if tot is None else tot + mu
+                if not held:
+                    del m
+                    self.expectations._models.pop(b, None)
+                    gc.collect()
             self._mu_total = tot
+            store.put_arrays("tools", key, {"mu": np.asarray(tot)})
         return self._mu_total
 
     def _data(self, block: str) -> monolith.BlockData:
@@ -713,17 +732,26 @@ class Session:
         """This session over the years up to ``last``, with its own register and ledger: the survey that selects
         what the later years then test (`temporal_confirm`). Nothing after ``last`` is read."""
         home = self.split_home or config.home()
-        return Session(self.dataset, self.event, [y for y in self.years if y <= last], self.graph,
-                       ledger=control.Ledger(home / f"ledger_T{last}"), register=leads.Register(home / f"leads_T{last}"))
+        tag = "".join(f"_{v}" for k, v in sorted(self.source.items()) if k in ("mark", "indicator", "link", "side"))
+        return Session(self.dataset, self.event, [y for y in self.years if y <= last], self.graph, self.supply,
+                       self.rank, dict(self.source), ledger=control.Ledger(home / f"ledger_T{last}{tag}"),
+                       register=leads.Register(home / f"leads_T{last}{tag}"))
 
     def temporal_confirm(self, last: int, q: float = 0.05, level: str = "state", log=print) -> list[leads.Lead]:
         """The leads the survey selected on the years up to ``last`` (`train`), each tested once at its fixed places on the
         later years of this session, against a fit that ends at ``last`` (BP, the place's course not carried
         forward), re-levelled to the state's course of each year (`replication.relevel`); Benjamini-Hochberg over
         everything tested. The verdict is in ``lead.replications["prospective"]``. A one-off event does not
-        recur: it stays untested here by nature, and needs corroboration."""
+        recur: an answer whose every attributed course is a spike or a transient (`departures.attribute`) stays
+        untested here by nature, and needs corroboration."""
         t = self.train(last)
         selected = t.register.current()
+        if self.source.get("mark"):
+            tested = [(x, {"tested": False, "reason": "a measure's later years are cell means: the count tail does not "
+                                                      "apply; not built"}) for x in selected]
+            self._record(tested, "prospective", q)
+            t.register.add(selected)
+            return selected
         by_node: dict[str, list[leads.Lead]] = {}
         for x in selected:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)
@@ -734,7 +762,9 @@ class Session:
             except LookupError as exc:
                 tested += [(x, {"tested": False, "reason": str(exc)}) for x in group]
                 continue
-            tested += [(x, replication.test_lead(sp, x, level)) for x in group]
+            tested += [(x, replication.test_lead(sp, x, level) if replication.lasting(x) else
+                        {"tested": False, "reason": "a passing departure (spike or transient) does not recur: corroboration"})
+                       for x in group]
             log(f"{i + 1}/{len(by_node)} {node}: {len(group)} leads")
         self._record(tested, "prospective", q)
         t.register.add(selected)
@@ -810,19 +840,25 @@ class Session:
         a.register.add(selected)
         return selected
 
-    def corroborate(self, register: list[leads.Lead], only_signals: bool = True, replicates: int = 4999,
-                    q: float = 0.05, log=print, refine_p: float = 0.01, refine_replicates: int = 99999) -> list[leads.Lead]:
-        """Ask an independent field (S2iD, SINAN, SIH: `corroborate.RULES`) whether each lead's places and years are
-        unusual there, against that field's own null (random same-size place sets of the same state and
-        population quintile; a cluster of touching places is replaced by connected sets grown on the graph, `corroborate._null_sets`). Leads with p < ``refine_p`` are redrawn at ``refine_replicates`` so that Benjamini-Hochberg over many tests can reject. Benjamini-Hochberg within each source.
-        Written to ``lead.replications["corroboration"]``."""
+    def corroborate(self, register: list[leads.Lead], served: list[tuple[str, str]] | None = None,
+                    only_signals: bool = True, replicates: int = 4999, q: float = 0.05, log=print,
+                    refine_p: float = 0.01, refine_replicates: int = 99999) -> list[leads.Lead]:
+        """Ask every independent field (`corroborate.sources` over the ``served`` event types, and the context fields
+        with a declared ICD-10 correspondence) that holds a lead's codes whether its places and years are unusual
+        there, against that field's own null (random same-size place sets of the same state and population quintile;
+        a cluster of touching places is replaced by connected sets grown on the graph, `corroborate._null_sets`).
+        Leads with p < ``refine_p`` are redrawn at ``refine_replicates`` so that Benjamini-Hochberg over many tests can
+        reject. Benjamini-Hochberg within each source. Written to ``lead.replications["corroboration"]``: the best
+        source's test, ``ok`` when any source rejects, and every source's test under ``sources``."""
         self._prepare_grid()
         pop = self._pop.sum(1)
         state = (self._grid_places // 10000).astype(int)
         grid = corroborate.Fields(self._grid_places, self._grid_years, state, pop, self.edges())
         index = {int(p): j for j, p in enumerate(self._grid_places)}
         reg = self.expectations.registry
-        done: list[tuple[leads.Lead, corroborate.Corroboration]] = []
+        fields_ = corroborate.sources(self.dataset, served or [])
+        tests: list[tuple[leads.Lead, corroborate.Corroboration]] = []
+        seen: list[leads.Lead] = []
         for x in register:
             tri = x.robustness.get("triage", {})
             if not x.fields or not x.fields[0].startswith(f"{self.dataset}:") or (
@@ -833,31 +869,37 @@ class Session:
             rows = np.array([index[int(u)] for u in x.locus.get("places", []) if int(u) in index], dtype=int)
             if rows.size == 0 or not span:
                 continue
-            c = corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
-                                        f"corroborate|{x.id}", replicates, dataset=self.dataset)
-            done.append((x, c))
-            if len(done) % 200 == 0:
-                log(f"corroborated {len(done)}")
-        # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests needs the best
-        # to reach q / m: the promising ones are redrawn with many more replicates, so the tier is reachable
-        for i, (x, c) in enumerate(done):
-            if c.tested and c.p < refine_p and c.source:
-                node = x.fields[0].split(":")[-1]
-                span, direction = replication.span_direction(x)
-                rows = np.array([index[int(u)] for u in x.locus["places"] if int(u) in index], dtype=int)
-                done[i] = (x, corroborate.corroborate(grid, node, corroborate.categories_of(reg, node), rows, span, direction,
-                                                      f"corroborate-refine|{x.id}", refine_replicates, dataset=self.dataset))
-        for source in {c.source for _, c in done if c.tested}:
-            group = [(x, c) for x, c in done if c.tested and c.source == source]
+            seen.append(x)
+            cats = corroborate.categories_of(reg, node)
+            for src in fields_:
+                if not grid.holds(src, cats):
+                    continue
+                c = corroborate.corroborate(grid, src, cats, rows, span, direction, f"corroborate|{x.id}|{src.label}",
+                                            replicates)
+                # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests
+                # needs the best to reach q / m: the promising ones are redrawn with many more replicates
+                if c.tested and c.p < refine_p:
+                    c = corroborate.corroborate(grid, src, cats, rows, span, direction,
+                                                f"corroborate-refine|{x.id}|{src.label}", refine_replicates)
+                tests.append((x, c))
+            if len(seen) % 200 == 0:
+                log(f"corroborated {len(seen)}")
+        verdicts: dict[str, list[dict]] = {}
+        for source in {c.source for _, c in tests if c.tested}:
+            group = [(x, c) for x, c in tests if c.tested and c.source == source]
             ps = np.array([c.p for _, c in group])
             mask, qv = control.bh(ps, q), control.adjusted(ps)
             for (x, c), hit, qq in zip(group, mask, qv, strict=True):
-                x.replications = {**x.replications, "corroboration": {**c.asdict(), "q": float(qq), "ok": bool(hit)}}
-        for x, c in done:
+                verdicts.setdefault(x.id, []).append({**c.asdict(), "q": float(qq), "ok": bool(hit)})
+        for x, c in tests:
             if not c.tested:
-                x.replications = {**x.replications, "corroboration": {**c.asdict(), "ok": False}}
+                verdicts.setdefault(x.id, []).append({**c.asdict(), "ok": False})
+        for x in seen:
+            got = verdicts.get(x.id) or [{"tested": False, "reason": "no independent field holds its codes", "ok": False}]
+            best = min(got, key=lambda v: (not v["ok"], v.get("q", v.get("p", 1.0))))
+            x.replications = {**x.replications, "corroboration": {**best, "sources": got}}
             x.replication = control.replication_tier(kinds_of(x))
-        return [x for x, _ in done]
+        return seen
 
     def retier(self, register: list[leads.Lead], selected: list[leads.Lead]) -> list[leads.Lead]:
         """Give each lead of the all-data register the verdicts of the selecting session's lead that is the same finding
@@ -936,6 +978,10 @@ def kinds_of(x: leads.Lead) -> set[str]:
 # ---- reading the stores, for the tools over MCP (`mcp_server`) -------------------------------------------
 
 
+#: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
+READER_FIELDS = ("source", "classifier", "structure", "mark", "indicator", "success", "link", "side", "anchor", "column")
+
+
 def fitted(dataset: str | None = None, event: str | None = None, graph: str | None = None,
            years: list[int] | None = None) -> list[dict[str, Any]]:
     """The fitted monolith blocks in the store (their manifests' keys), optionally narrowed."""
@@ -946,7 +992,7 @@ def fitted(dataset: str | None = None, event: str | None = None, graph: str | No
                                          (("dataset", dataset), ("event", event), ("graph", graph), ("years", years))):
             continue
         out.append({"dataset": k["dataset"], "event": k["event"], "graph": k.get("graph"), "years": k.get("years"),
-                    "block": k["block"], "model": d.parent.name})
+                    "block": k["block"], "model": d.parent.name, "key": k})
     return out
 
 

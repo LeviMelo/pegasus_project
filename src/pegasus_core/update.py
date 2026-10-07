@@ -8,7 +8,10 @@ by the data and code versions and its inputs in the store. A plan:
 
     years: 2010-2023
     systems:
-      - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group]}
+      - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group],
+         measures: all, compositions: all, intervals: all, links: all, classifiers: all}   # fields from declarations
+    corroborators: [[SINAN-DENG, probable_case]]    # served systems read as independent fields, not modelled
+    confirm_last: 2019        # stage E's later years: select on the years up to it, test on the years after
     relations: true
     triage: true
     report: reports/leads.md
@@ -35,6 +38,8 @@ class System:
     measures: list[str] | str | None = None     # "all", or columns of `fields.declared`: the measurement fields read
     compositions: list[str] | str | None = None  # "all", or category columns of `fields.declared`: their share fields
     links: list[str] | str | None = None         # "all", or `fields.declared_links` columns: person-level fields
+    intervals: list[str] | str | None = None     # "all", or `fields.declared` interval:<date> fields: days from the event
+    classifiers: list[str] | str | None = None   # "all", or alternative classifier columns: counts by their own tree
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
@@ -60,7 +65,9 @@ class Plan:
             a, b = years.split("-")
             years = list(range(int(a), int(b) + 1))
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
-                          s.get("compositions"), s.get("links"), s.get("disparities")) for s in raw.get("systems") or ()]
+                          s.get("compositions"), s.get("links"), s.get("disparities"), s.get("intervals"),
+                          s.get("classifiers"))
+                   for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
@@ -126,6 +133,29 @@ def _mark(key: dict[str, Any], result: dict[str, Any]) -> None:
     store.put_table("update", key, pa.table({"done": [time.strftime("%Y-%m-%dT%H:%M:%S")]}), {**key, **result})
 
 
+def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: bool, log) -> Any:
+    """§8.3's later years for a system's answers: the questions asked again on the years up to ``last`` (its own
+    fits and register, `Session.train`), what they select tested once on the later years (`Session.temporal_confirm`),
+    and each answer given the verdict of the selection that is the same finding (`Session.retier`)."""
+    key = _key("later_years", dataset=sys_.dataset, event=sys_.event, blocks=sys_.blocks, levels=sys_.levels,
+               questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers))
+    if not force and _done(key):
+        return "done on these versions"
+    t = s.train(last)
+    for block in sys_.blocks:
+        try:
+            t.expectations.model(block)
+        except LookupError:
+            fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, log=log)
+    t.survey_questions(sys_.blocks, tuple(plan.questions) if plan.questions else None,
+                       levels=tuple(sys_.levels) if sys_.levels else None, log=log)
+    selected = s.temporal_confirm(last, log=log)
+    s.register.add(s.retier(answers, selected))
+    stood = sum((x.replications.get("prospective") or {}).get("ok") is True for x in answers)
+    _mark(key, {"selected": len(selected), "stood": stood})
+    return {"selected": len(selected), "answers standing on the later years": stood}
+
+
 def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     """Every stage of ``plan`` (module docstring); returns what each step did or why it was skipped."""
     from . import report, tools
@@ -157,17 +187,28 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions)
                     for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
         readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
-        for column, source in readers:
+        readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
+                    for column in _declared(sys_, "interval", sys_.intervals)]
+        readers = [(column, source, sys_.blocks) for column, source in readers]
+        # another classifier's counts: the same events by its own tree, every chapter of it
+        readers += [(name, source, roots) for name, source, roots in fields.classifier_sources(sys_.dataset, sys_.event)
+                    if sys_.classifiers == "all" or name.split(":", 1)[1] in (sys_.classifiers or [])]
+        for column, source, blocks in readers:
             ms = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=source)
-            for block in sys_.blocks:
+            for block in blocks:
                 try:
                     ms.expectations.model(block)
                 except LookupError:
-                    fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source=source, log=log)
-            key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=sys_.blocks, levels=sys_.levels,
+                    try:
+                        fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source=source, log=log)
+                    except (ValueError, LookupError) as exc:     # a chapter of another tree the events never use
+                        log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
+                        out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {exc}"
+            blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
+            key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
                        measure=column, questions=plan.questions, years=plan.years)
             if force or not _done(key):
-                leads = ms.survey_questions(sys_.blocks, tuple(plan.questions) if plan.questions else None,
+                leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                             levels=tuple(sys_.levels) if sys_.levels else None, log=log)
                 _mark(key, {"answers": len(leads)})
                 out[f"questions {sys_.dataset} {column}"] = len(leads)
@@ -201,7 +242,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             if answers and (force or not _done(key)):
                 done = s.triage(register=answers, log=log)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
-                corr = s.corroborate(done, log=log)
+                corr = s.corroborate(done, served=[(x.dataset, x.event) for x in plan.systems] +
+                                     [tuple(c) for c in plan.extra.get("corroborators") or ()], log=log)
                 s.register.add(corr)
                 _mark(key, {"leads": len(answers), "corroborated": len(corr)})
                 out[f"triage {sys_.dataset}"] = len(answers)
@@ -209,6 +251,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                                                           for x in corr)
             else:
                 out[f"triage {sys_.dataset}"] = "nothing new" if answers else "no answers"
+            last = plan.extra.get("confirm_last")
+            if last and answers:
+                out[f"later years {sys_.dataset}"] = _later_years(plan, sys_, s, answers, int(last), force, log)
     if plan.report:
         out["report"] = str(report.write(plan.report))
     return out

@@ -5,6 +5,8 @@ systems:
   - {dataset: SIH-RD, event: hospitalisation, blocks: [I, X], levels: [group]}
   - {dataset: SINASC-DN, event: birth, blocks: ['*']}
   - {dataset: SINAN-SIFC, event: notification, blocks: ['*']}
+# other served systems read as independent fields (corroboration, stage E) without being modelled here
+corroborators: [[SINAN-DENG, probable_case], [SINAN-CHIK, notification]]
 relations: true
 triage: true
 report: reports/leads.md
