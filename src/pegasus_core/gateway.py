@@ -1284,3 +1284,30 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
 
+
+
+def cohort_records(dataset: str, event: str, year: int, link: str, side: str, columns: list[str]
+                   ) -> tuple[pa.Table, pa.Array, pa.Table]:
+    """One side of a declared link as persons (`tools.cohort`): its records of ``year`` on the lattice (u, sex, age
+    class) with ``columns`` raw-coded and each record's identity, and the link's stored pairs. A side filtered or
+    grouped by its spec is refused, as in `linked_counts`."""
+    import pegasus_data as pg
+
+    spec = link_specs()[link]
+    sd = spec.left if side == "left" else spec.right
+    if sd.dataset != dataset:
+        raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
+    if sd.where or sd.group or sd.explode_days:
+        raise NotImplementedError(f"{link} {side}: a side filtered or grouped by its spec is not read yet")
+    strata = _strata(dataset)
+    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
+    con = duckdb.connect()
+    con.register("r", raw)
+    keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
+    t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep},
+            CAST("_blob_sha256" AS VARCHAR) || ':' || CAST("_row" AS VARCHAR) AS rid FROM r""").fetch_arrow_table()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pairs = pg.link(link, period=year, geography="BR", method="probabilistic").pairs
+    return t, t.column("rid"), pairs

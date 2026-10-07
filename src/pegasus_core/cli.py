@@ -255,6 +255,19 @@ def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = ty
 
 
 @app.command()
+def cohort(dataset: str, event: str, link: str, side: str, year: int, draws: int = 20, q: float = 0.05) -> None:
+    """The cohort scan on one side of a declared link: every declared attribute against having a partner (§7.8)."""
+    from . import tools
+
+    found = tools.cohort(dataset, event, link, side, year, draws=draws, q=q, log=console.print)
+    t = Table("attribute", "level", "reference", "RR", "95 %", "q")
+    for x in sorted(found, key=lambda x: x.q)[:40]:
+        t.add_row(x.locus["attribute"], x.locus["level"], x.locus["reference"], f"{x.effect:.2f}",
+                  f"{x.interval[0]:.2f}–{x.interval[1]:.2f}", f"{x.q:.1e}")
+    console.print(t)
+
+
+@app.command()
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod

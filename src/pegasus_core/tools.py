@@ -1212,3 +1212,56 @@ def records(dataset: str, event: str, year: int, columns: list[str], places: lis
         code = pc.utf8_slice_codeunits(pc.cast(t[res], pa.string()), 0, 6)
         t = t.filter(pc.is_in(code, value_set=pa.array([str(p) for p in places])))
     return t
+
+
+def cohort(dataset: str, event: str, link: str, side: str, year: int, draws: int = 20, q: float = 0.05,
+           log=print) -> list[leads.Lead]:
+    """The cohort scan (ARCHITECTURE §7.8) on one side of a declared link: every event of ``dataset`` in ``year`` is a
+    person; the outcome is having a partner on the link's other side (a birth followed by an infant death); every
+    modelled composition of ``dataset`` (`fields.declared`, a declared category with its missing codes, which form
+    their own "not recorded" level) is an attribute, tested level by level against its most common one, adjusted for
+    the side's age class, sex and year with a shrunk place effect (`scans.cohort.scan`). Linkage uncertainty enters
+    by ``draws`` plausible link sets (each pair kept with its p_match), combined by Rubin's rules. Nothing is named:
+    the persons, the attributes and the outcome come from pegasus_data's declarations. Results enter the register as
+    leads of kind "cohort"."""
+    from . import fields
+    from .scans import cohort as cohort_mod
+
+    attrs = [d for d in fields.declared(dataset) if d.kind == "composition" and not d.reason]
+    if not attrs:
+        raise ValueError(f"{dataset}: no modelled composition to read as an attribute (`fields.declared` says why)")
+    t, ids, pairs = gateway.cohort_records(dataset, event, year, link, side, [d.column for d in attrs])
+    rng = np.random.default_rng(config.seed("cohort", dataset, link, side, year))
+    p = pairs.column("p_match").to_numpy(zero_copy_only=False) if "p_match" in pairs.column_names else np.ones(pairs.num_rows)
+    mine = pairs.column("r" if side == "right" else "l").to_numpy(zero_copy_only=False)
+    base = {"place": pa.array([str(u) for u in t["u"].to_pylist()]),
+            "age_band": pa.array([str(a) for a in t["age"].to_pylist()]),
+            "sex": pa.array([str(s) for s in t["sex"].to_pylist()]),
+            "year": pa.array([str(year)] * t.num_rows), "person_time": pa.array(np.ones(t.num_rows))}
+    for d in attrs:
+        raw = [str(x) if x not in (None, "") else "blank" for x in t[d.column].to_pylist()]
+        base[d.column] = pa.array(["not recorded" if x in d.missing else x for x in raw])
+    tables = []
+    id_list = ids.to_numpy(zero_copy_only=False)
+    for _ in range(draws):
+        kept = set(mine[rng.random(len(p)) < p])
+        out = np.fromiter((x in kept for x in id_list), dtype=float, count=len(id_list))
+        tables.append(pa.table({**base, "outcome": pa.array(out)}))
+    family = f"cohort|{link}:{side}|{dataset}|{year}"
+    res = cohort_mod.scan(tables[0], [d.column for d in attrs], ["outcome"], control.Ledger(), family, draws=tables)
+    log(f"{family}: {len(res)} contrasts over {len(attrs)} attributes, {t.num_rows} persons")
+    if not res:
+        return []
+    qv = control.adjusted(np.array([r.p for r in res]))
+    admitted = [leads.Lead(kind="cohort", estimand="rate_ratio_vs_reference", tier="cohort",
+                           fields=[f"{dataset}:{event}", f"link:{link}:{side}"],
+                           locus={"attribute": r.attribute, "level": r.level, "reference": r.reference,
+                                  "years": [year, year]},
+                           effect=float(np.exp(r.log_rr)), scale="rate_ratio",
+                           interval=(float(np.exp(r.log_rr - 1.96 * r.sd)), float(np.exp(r.log_rr + 1.96 * r.sd))),
+                           p=float(r.p), q=float(qq), family=family,
+                           null=f"|log RR| ≤ log {cohort_mod.DELTA_RR} (minimum effect), Rubin over {draws} link draws",
+                           calibrated=False, provenance={"events": r.events, "persons": r.person_time})
+                for r, qq in zip(res, qv, strict=True) if qq <= q]
+    leads.Register().add(admitted)
+    return admitted
