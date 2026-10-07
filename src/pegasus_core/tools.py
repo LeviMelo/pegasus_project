@@ -812,8 +812,9 @@ class Session:
                 run.rec = replication.audit(st, x.locus["places"], x.fields[0].split(":")[-1], x.locus["scale"],
                                             x.provenance["stats"]["beta"], direction, [y for y in self.years if y <= last],
                                             tree, seed_text=x.id, later_years=[y for y in self.years if y > last])
-                j = run.rec["jurisdiction"]
-                return {"tested": "p" in j, "p": j.get("p", 1.0), "effect": j.get("effect"), "reason": j.get("reason")}
+                j = run.rec["jurisdiction"]       # its p is named by the unit's test (`replication.jurisdiction`)
+                pv = next((j[k] for k in ("p_binomial", "p_test", "p_state_rest") if j.get(k) is not None), None)
+                return {"tested": pv is not None, "p": 1.0 if pv is None else float(pv), "reason": j.get("reason")}
 
             self._ledgered("spatial_unit", x, run, source=source)
             rec = run.rec
