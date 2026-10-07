@@ -42,6 +42,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | interaction patterns (§7.4) | interaction built, off; `scans/patterns.py` (CP-APR) with no input since the map's SIH tensor went (2026-10-07) | 2026-10-06 | read ψ, ω, τ of one block |
 | exact reference fit (OPEN_QUESTIONS 2) | not run | 2026-10-06 | one block by HMC against the Laplace draws |
 | the readable dossier and human verdicts (stage F) | `dossier` (HTML, series per answer), `verdict`; confirmed answers enter the event record (`harness.verdict_positives`) | 2026-10-07 | the author records verdicts on the first dossiers |
+| names left in pegasus_core (S0) | columns come from roles everywhere in code; the coded age is decoded to days in `gateway._infant_age_mix` | 2026-10-07 | an `age_days` derived role in pegasus_data, as `IDADE_anos` |
 | corroboration's sources (§8.3) | derived from declarations (ICD-10-coded event types, declared links for overlap, the disasters field's ICD-10 correspondence) | 2026-10-07 | the linked overlap read on a full update |
 
 **Where each stage stands:**

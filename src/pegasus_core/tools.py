@@ -338,7 +338,7 @@ class Session:
                confidence: float = 0.5) -> list[dict]:
         """Phase 4 (`surveillance`; ADR-0004): the alarms of the last ``weeks`` epidemiological weeks before the date
         ``as_of`` (ISO) for every place of a field. The events known by then are the current year's records whose
-        ``report`` date (SINAN's DT_DIGITA) precedes it (`gateway.delay_counts`); each place's reporting delay comes
+        ``report`` date (`gateway.entry_date`) precedes it (`gateway.delay_counts`); each place's reporting delay comes
         from the last closed year; the baseline is the alarm tier (BPA, ADR-0012) fitted on the years before, at its
         own grain and allocated to weeks in proportion to their days (stated: a weekly alarm fit replaces it).
         Returns one row per place-week that alarms, strongest first."""

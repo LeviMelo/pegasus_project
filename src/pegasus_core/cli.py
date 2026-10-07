@@ -210,12 +210,15 @@ def events(years: str = Years) -> None:
 
 
 @app.command()
-def alarms(dataset: str, event: str, node: str, as_of: str, report: str = typer.Option("DT_DIGITA", help="the date an event becomes known"),
+def alarms(dataset: str, event: str, node: str, as_of: str,
+           report: str = typer.Option(None, help="the date an event becomes known (default: the declared entry date)"),
            years: str = Years, recurrence: float = 260.0, weeks: int = 8) -> None:
     """Phase 4: the place-weeks before AS_OF whose nowcast exceeds the alarm baseline at the declared recurrence."""
     s = _session(dataset, event, years, "contiguity")
     t = Table("place", "week", "known", "nowcast", "threshold", "P(exceed)")
-    for r in s.alarms(node, as_of, report, recurrence, weeks)[:40]:
+    from . import gateway
+
+    for r in s.alarms(node, as_of, report or gateway.entry_date(dataset), recurrence, weeks)[:40]:
         t.add_row(str(r["place"]), str(r["week"]), str(r["known"]), f"{r['nowcast']:.1f}", f"{r['threshold']:.0f}",
                   f"{r['p_exceed']:.2f}")
     console.print(t)

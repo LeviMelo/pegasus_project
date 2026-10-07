@@ -335,22 +335,26 @@ def _confusion() -> pd.DataFrame:
 
 def _infant_age_mix() -> np.ndarray:
     """The share of the perinatal deaths (SIM chapter P, ages under 1) in the matrix's three age bands (0-6 d, 7-27 d,
-    28-364 d) over the years the matrix was measured on, from the certificate's IDADE (unit digit then value)."""
+    28-364 d) over the years the matrix was measured on, from the certificate's coded age (the role ``age_coded``:
+    DATASUS's unit digit then value; its decoding to days belongs in pegasus_data, as ``IDADE_anos`` is) under the
+    primary classifier's chapter P."""
     key = {"what": "infant_age_mix", "years": list(CONFUSION_YEARS), "data": config.data_version()}
     cached = store.get_table("gateway", key)
     if cached is None:
         import pegasus_data as pg
 
         tot = np.zeros(3)
+        coded = next(r["column"] for r in roles("SIM.DO") if r["property"] == "age_coded")
+        cause = next(c["column"] for c in event_type("SIM.DO", "death")["classifiers"] if c["role"] == "primary")
         for y in CONFUSION_YEARS:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                raw = pg.count_events("SIM.DO", "death", period=y, geography="BR", by=["CAUSABAS", "IDADE"],
+                raw = pg.count_events("SIM.DO", "death", period=y, geography="BR", by=[cause, coded],
                                       root=config.data_root(), allow_partial=False, max_download=8 * 1024**3)
             con = duckdb.connect()
             con.register("r", raw)
-            for band, n in con.execute("""
-                WITH x AS (SELECT lpad(CAST("IDADE" AS VARCHAR), 3, '0') AS a, events FROM r WHERE upper("CAUSABAS") LIKE 'P%')
+            for band, n in con.execute(f"""
+                WITH x AS (SELECT lpad(CAST("{coded}" AS VARCHAR), 3, '0') AS a, events FROM r WHERE upper("{cause}") LIKE 'P%')
                 SELECT CASE WHEN left(a, 1) IN ('0', '1') THEN 0 WHEN left(a, 1) = '2' THEN
                        (CASE WHEN TRY_CAST(substr(a, 2) AS INTEGER) <= 6 THEN 0 WHEN TRY_CAST(substr(a, 2) AS INTEGER) <= 27 THEN 1 ELSE 2 END)
                        WHEN left(a, 1) = '3' THEN 2 END AS band, sum(events) FROM x GROUP BY 1""").fetchall():
@@ -569,6 +573,20 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
         table = table.filter(pc.invert(pc.fill_null(pc.is_in(col, value_set=pa.array(
             [str(v) for v in status["excluded"]])), False)))
     return table
+
+
+#: the properties of the date a record enters its system (SINAN's data entry, SIM's and SINASC's registration, SIH's
+#: processing month): when an event becomes known, what a nowcast's delay runs to
+ENTRY_PROPERTIES = ("entry_date", "registration_date", "processing_month")
+
+
+def entry_date(dataset: str) -> str:
+    """The column of the date a record enters its system, from pegasus_data's roles (`ENTRY_PROPERTIES`)."""
+    by = {r["property"]: r["column"] for r in roles(dataset) if r.get("kind") == "date"}
+    hit = next((by[p] for p in ENTRY_PROPERTIES if p in by), None)
+    if hit is None:
+        raise LookupError(f"{dataset}: no entry date among its roles ({ENTRY_PROPERTIES})")
+    return hit
 
 
 def _when(dataset: str) -> str:
