@@ -34,6 +34,7 @@ class System:
     levels: list[str] | None = None
     measures: list[str] | str | None = None     # "all", or columns of `fields.declared`: the measurement fields read
     compositions: list[str] | str | None = None  # "all", or category columns of `fields.declared`: their share fields
+    links: list[str] | str | None = None         # "all", or `fields.declared_links` columns: person-level fields
 
 
 @dataclass
@@ -58,7 +59,7 @@ class Plan:
             a, b = years.split("-")
             years = list(range(int(a), int(b) + 1))
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
-                          s.get("compositions")) for s in raw.get("systems") or ()]
+                          s.get("compositions"), s.get("links")) for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
@@ -80,6 +81,18 @@ def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str
     model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
     model.save()
     return model
+
+
+def _links(sys_: System) -> list[str]:
+    if not sys_.links:
+        return []
+    modelled = [d.column for d in fields.declared_links(sys_.dataset, sys_.event) if not d.reason]
+    if sys_.links == "all":
+        return modelled
+    unknown = [c for c in sys_.links if c not in modelled]
+    if unknown:
+        raise ValueError(f"{sys_.dataset}: not modelled person-level fields {unknown} (`fields.declared_links` says why)")
+    return list(sys_.links)
 
 
 def _measures(sys_: System) -> list[str]:
@@ -142,6 +155,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_)]
         readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions)
                     for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
+        readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
         for column, source in readers:
             ms = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=source)
             for block in sys_.blocks:

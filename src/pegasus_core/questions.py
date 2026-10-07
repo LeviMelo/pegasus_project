@@ -136,6 +136,19 @@ def _shape(session, node: str, f, tier: str) -> dict:
 def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer]:
     """Every method of ``question`` on the field ``node`` at q/k, the union merged into answers by overlapping loci,
     strongest first. A method that fails is reported in the answer list's ``failed`` attribute and the rest go on."""
+    # one surprise per (node, tier) while the question is asked: every method and every finding's shape reads it
+    # (recomputed per finding, a field's hundreds of cell findings each re-ran N1's estimation, 2026-10-07)
+    owner = getattr(session._local, "memo", None) is None
+    if owner:
+        session._local.memo = {}
+    try:
+        return _ask(session, question, node, q, **kw)
+    finally:
+        if owner:
+            session._local.memo = None
+
+
+def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer]:
     qn = QUESTIONS[question]
     kind = session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count")
     methods = [m for m in qn.methods if kind in m.kinds]

@@ -96,8 +96,8 @@ class BlockData:
 
 
 # the readers of marks: each cell's accumulator states, the one whose mean is y, and (last) the second moment kept in l2
-CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k")}
-CELL_MEAN = {"mark": "l1", "count": "s1", "share": "k"}
+CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k"), "linked": ("n", "k")}
+CELL_MEAN = {"mark": "l1", "count": "s1", "share": "k", "linked": "k"}
 ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
 NEWBORN_SHARE = 0.5
 # geography carriers holding less than this share of a block's events are pooled into one (`assemble(geo_pool=)`):
@@ -328,7 +328,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     values = CELL_VALUES.get(source, ("y",))
     weight = "n" if source in CELL_VALUES else "y"
     readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments,
-               "count": gateway.mark_moments, "share": gateway.share_moments}
+               "count": gateway.mark_moments, "share": gateway.share_moments, "linked": gateway.linked_counts}
     if grain == "month":
         if source not in ("events", "code_list"):
             raise NotImplementedError("the monthly grain reads event counts and code-list counts")
@@ -2340,7 +2340,7 @@ class CountModel(_CellMark):
 def model_class(source: dict | None) -> type[Monolith]:
     """The model of a reader's source: counts by the Poisson-NB monolith, a mark by its family's (``mark``: log-normal)."""
     kind = (source or {}).get("source", "events")
-    return {"mark": MarkModel, "count": CountModel, "share": ShareModel}.get(kind, Monolith)
+    return {"mark": MarkModel, "count": CountModel, "share": ShareModel, "linked": ShareModel}.get(kind, Monolith)
 
 
 # ---------------------------------------------------------------------- model choice

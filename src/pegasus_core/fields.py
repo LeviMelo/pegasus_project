@@ -346,3 +346,35 @@ def share_sources(dataset: str, event: str, column: str, probe_year: int) -> lis
     return [(v, {"source": "share", "indicator": column, "success": (v,), "missing": list(d.missing),
                  **({"classifier": primary} if primary else {})}) for v in order[1:]]
 
+
+def declared_links(dataset: str, event: str) -> list[Declared]:
+    """The person-level fields of ``dataset`` (S2): for every declared link (pegasus_data `links.yml`) with a side
+    on this dataset, the share of that side's events linked to the other side's (`gateway.linked_counts`): an outcome
+    after the event on a cohort's side, a recording measure on the other. ``column`` names the field
+    ``link:<spec>:<side>``; a side filtered or grouped by its spec carries the reason it is not read yet."""
+    from . import gateway
+
+    out = []
+    for name, spec in gateway.link_specs().items():
+        for side, sd, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
+            if sd.dataset != dataset:
+                continue
+            reason = "a side filtered or grouped by its spec is not read yet" if (sd.where or sd.group or sd.explode_days) else ""
+            out.append(Declared(dataset, f"link:{name}:{side}", f"linked.{other.dataset}",
+                                f"{dataset} events linked to {other.dataset} ({name})", "linked", reason=reason))
+    return out
+
+
+def link_source(dataset: str, event: str, column: str) -> dict:
+    """The reader of a person-level field (`declared_links`): the linked share of one side of a declared link, on the
+    event type's primary classifier."""
+    from . import gateway
+
+    d = next(x for x in declared_links(dataset, event) if x.column == column)
+    if d.reason:
+        raise ValueError(f"{dataset}.{column}: {d.reason}")
+    _, name, side = column.split(":")
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    return {"source": "linked", "link": name, "side": side, **({"classifier": primary} if primary else {})}
+

@@ -405,11 +405,13 @@ class Session:
         found: dict[str, list] = {}
         src = self.source
         measure = (f"|{src['mark']}" if src.get("mark") else
-                   f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else "")   # its own family
+                   f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
+                   f"|link:{src['link']}:{src['side']}" if src.get("link") else "")   # its own family
         for block in blocks or self._blocks():
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
                     continue
+                self._local.memo = {}           # a field's surprises computed once for all its questions
                 for qn in names:
                     try:
                         answers = self.ask(qn, f.node, q=q)
@@ -421,6 +423,7 @@ class Session:
                         found.setdefault(f"{qn}|{block}{measure}", []).append((f.id, a, min(1.0, a.p * k)))
                     log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
                         f"{len(getattr(answers, 'other_shape', []))} of another shape")
+        self._local.memo = None
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)
         from . import harness

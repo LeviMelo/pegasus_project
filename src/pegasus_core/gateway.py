@@ -548,8 +548,9 @@ def _df_key(dataset: str, year: int) -> dict:
     return {"df_residence": 1} if dataset.startswith("SIH") and year < 2018 else {}
 
 
-def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Table:
-    """Raw-coded records of one event type for one year (the event type's status applied)."""
+def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False) -> pa.Table:
+    """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` keeps each
+    record's identity (`_blob_sha256`, `_row`: what pegasus_data's links pair)."""
     import pegasus_data as pg
     import pyarrow.compute as pc
 
@@ -559,7 +560,7 @@ def _records(dataset: str, event: str, year: int, columns: list[str]) -> pa.Tabl
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes",
-                         root=config.data_root(), max_download=8 * 1024**3)
+                         root=config.data_root(), max_download=8 * 1024**3, **({"provenance": "all"} if identity else {}))
     if status.get("column") and status.get("values"):
         table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
                                       value_set=pa.array([str(v) for v in status["values"]])))
@@ -1220,3 +1221,66 @@ def epi_week(dates: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     first = jan4 - ((jan4.astype(np.int64) + 4) % 7).astype("timedelta64[D]")
     week = ((start - first).astype(np.int64) // 7 + 1).astype(np.int64)
     return year.astype(np.int64), week
+
+
+def link_specs() -> dict:
+    """pegasus_data's declared links (`curation/links.yml`): each spec's left and right sides."""
+    from pegasus_data.linkage.engine import load_links
+
+    return load_links()
+
+
+def linked_counts(dataset: str, event: str, year: int, link: str, side: str, classifier: str | None = None,
+                  places: pa.Array | None = None) -> EventCounts:
+    """The events of one side of a declared link per (u, year, sex, age, code): n, and k the expected number with a
+    partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
+    national run). The share k/n is an outcome after the event on a cohort's side (births followed by an infant
+    death) and a recording measure on the other (deaths that found their birth). A side filtered or grouped by its
+    spec is refused: its denominator is not the event type's."""
+    import pegasus_data as pg
+
+    spec = link_specs()[link]
+    sd = spec.left if side == "left" else spec.right
+    if sd.dataset != dataset:
+        raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
+    if sd.where or sd.group or sd.explode_days:
+        raise NotImplementedError(f"{link} {side}: a side filtered or grouped by its spec is not read yet")
+    strata = _strata(dataset)
+    key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+           "link": link, "side": side, "classifier": classifier, "data": config.data_version(),
+           **_df_key(dataset, year)}
+    cached = store.get_table("gateway", key)
+    cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
+    if cached is not None and cached_un is not None:
+        return EventCounts(cached, cached_un, key)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pairs = pg.link(link, period=year, geography="BR", method="probabilistic").pairs
+    ids = pairs.column("l" if side == "left" else "r")
+    p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
+    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + \
+        ([classifier] if classifier else [])
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
+    con = duckdb.connect()
+    con.register("r", raw)
+    con.register("pm", pa.table({"rid": ids, "p": p}))
+    valid = places if places is not None else population([year]).column("u").unique()
+    con.register("v", pa.table({"u": valid}))
+    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
+            CAST("_blob_sha256" AS VARCHAR) || ':' || CAST("_row" AS VARCHAR) AS rid FROM r""")
+    reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
+                     WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
+                     WHEN code IS NULL OR code = '' THEN 'code' END"""
+    counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
+            CAST(sum(coalesce(m.p, 0)) AS DOUBLE) AS k
+        FROM e LEFT JOIN (SELECT rid, max(p) AS p FROM pm GROUP BY rid) m USING (rid)
+        WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
+    unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
+            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.link({link}): {side} side of {dataset}",
+                                            "pairs": pairs.num_rows})
+    store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
+    return EventCounts(counts, unallocated, key)
+
