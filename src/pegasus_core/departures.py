@@ -419,3 +419,60 @@ class _Municipal:
 
     def __init__(self, n: int):
         self.n = n
+
+
+# ---------------------------------------------------------------------- a field's share of all events (ARCHITECTURE §7.1)
+
+
+def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, mu_total: np.ndarray,
+                 places: np.ndarray, years: np.ndarray, field_id: str, ledger: control.Ledger, q: float = 0.05,
+                 min_total: float = 20.0, ratio: float = 1.25) -> list:
+    """A field's share of all events departing from its expectation in a place and period: recording practice (the
+    ill-defined chapter's share rising or falling) or composition (§7.1, the observation lens). Conditional on the
+    place-period's observed total n, y_part ~ BetaBinomial(n, p, θ) with p = μ_part/μ_total, both stage B's (each
+    with its own place level and national course), and θ the share's overdispersion by central matching of the
+    randomised PIT's quartiles (as N1's κ: the bulk sets the null, the departures sit in the tails). Two-sided: a
+    share can fall as practice improves. One BH at q over the cells with n ≥ ``min_total``; relevance (P5) asks the
+    observed share to differ from the expected by at least ``ratio`` either way."""
+    from scipy import optimize
+
+    from .scans import lenses
+
+    ok = (n_total >= min_total) & (mu_total > 0) & (mu_part > 0)
+    p = np.clip(np.where(ok, mu_part / np.where(mu_total > 0, mu_total, 1.0), 0.5), 1e-6, 1 - 1e-6)
+    y, n, pp = y_part[ok], n_total[ok].round(), p[ok]
+    rng = np.random.default_rng(config.seed("share_excess", field_id))
+    v = rng.random(y.shape)
+
+    def pit(log_theta: float) -> np.ndarray:
+        th = np.exp(log_theta)                       # θ = a + b, the beta's total concentration
+        d = stats.betabinom(n, pp * th, (1 - pp) * th)
+        return np.clip(d.cdf(y - 1) + v * d.pmf(y), 1e-12, 1 - 1e-12)
+
+    def gap(log_theta: float) -> float:
+        z = special.ndtri(pit(log_theta))
+        return float(np.sum((np.quantile(z, [0.25, 0.5, 0.75]) - np.array([-0.6745, 0.0, 0.6745])) ** 2))
+
+    grid = np.linspace(np.log(1.0), np.log(1e6), 31)
+    best = grid[int(np.argmin([gap(g) for g in grid]))]
+    log_theta = optimize.minimize_scalar(gap, bounds=(best - 0.5, best + 0.5), method="bounded").x
+    th = float(np.exp(log_theta))
+    d = stats.betabinom(n, pp * th, (1 - pp) * th)
+    upper, lower = d.sf(y - 1), d.cdf(y)
+    pv = np.clip(2 * np.minimum(upper, lower), 0, 1)
+    share, expect = y / np.maximum(n, 1), pp
+    relevant = (share >= ratio * expect) | (share <= expect / ratio)
+    test = ledger.register(control.Hypothesis(f"share|{field_id}", "departure",
+                                              {"model": "beta-binomial share, central-matching θ", "field": field_id}))
+    keep = control.bh(pv, q) & relevant
+    ui, ti = np.nonzero(ok)
+    out = [lenses.Finding("share_excess", field_id, "B1",
+                          {"places": [int(places[ui[i]])], "years": [int(years[ti[i]]), int(years[ti[i]])]},
+                          float(share[i] / max(expect[i], 1e-12)), float(pv[i]),
+                          {"observed_share": round(float(share[i]), 4), "expected_share": round(float(expect[i]), 4),
+                           "total": int(n[i]), "theta": round(th, 1),
+                           "direction": "up" if share[i] > expect[i] else "down"})
+           for i in np.flatnonzero(keep)]
+    ledger.complete(test, float(pv.min()) if pv.size else 1.0, None, {"cells": int(ok.sum()), "hits": len(out),
+                                                                       "theta": th})
+    return out

@@ -46,13 +46,13 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
 PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
-SCALE = {"cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
+SCALE = {"share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
          "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
@@ -345,6 +345,20 @@ class Session:
             phi = float(self.expectations.model(self.expectations.field(node).block).phi)
             return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
                                           **{"phi": phi, **kw})
+        if lens == "share_excess":                   # the field's share of all events (§7.1, the observation lens)
+            from . import departures
+            s = self.surprise(node, "B1")
+            self._prepare_grid()
+            if self._total is None:
+                raise ValueError(f"{self.dataset}: no all-event count to take a share of (one block, no tree)")
+            index = {int(p_): i for i, p_ in enumerate(self._grid_places)}
+            rows = np.array([index.get(int(p_), -1) for p_ in s.places])
+            have = rows >= 0
+            total = np.zeros(s.y.shape)
+            total[have] = self._total[rows[have]]
+            mu_total = np.zeros(s.y.shape)
+            mu_total[have] = self._expected_total()[rows[have]]
+            return departures.share_excess(s.y, total, s.mu, mu_total, s.places, s.years, s.field.id, self.ledger, **kw)
         s = self.surprise(node, tier, train_last)
         if lens in ("cell_excess", "step") and "scales" not in kw:
             kw["scales"] = self.scales()              # the departure models run over the ladder of supports
@@ -664,6 +678,18 @@ class Session:
         if blocks == ["*"]:
             total = ill = None      # an event type without a classifier tree has no all-cause count: the death-rate reads need one
         self._total, self._ill, self._pop = total, ill, pop
+
+    def _expected_total(self) -> np.ndarray:
+        """[U, T] the expected events of every fitted block (stage B1), on the evidence grid: a share's denominator."""
+        if getattr(self, "_mu_total", None) is None:
+            self._prepare_grid()
+            tot = None
+            for b in self._blocks():
+                m = self.expectations.model(b)
+                mu = m.expected(np.arange(len(m.data.leaves)))[0]
+                tot = mu if tot is None else tot + mu
+            self._mu_total = tot
+        return self._mu_total
 
     def _data(self, block: str) -> monolith.BlockData:
         """A block's cells (`monolith.assemble`, which keeps them in the store)."""

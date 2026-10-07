@@ -70,6 +70,11 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                                         "effects), STEM; a cluster at its own scale, no zoning"),
                  Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
              )),
+    Question("share", "C", "a field's share of all events departing from its expectation in a place and period: "
+             "recording practice (the ill-defined share) or composition", "B1", "area × period", "share ratio", (
+                 Method("share_excess", "beta-binomial on the observed total, the share expected from stage B, "
+                                        "θ by central matching; two-sided"),
+             )),
     Question("group", "C", "a place whose excess differs across sex × age groups from the national pattern", "B0",
              "area × group", "rate ratio", (
                  Method("group_disparity", "likelihood-ratio heterogeneity of the groups' SIRs; the v0 lens"),

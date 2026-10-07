@@ -65,4 +65,8 @@ An answer none of whose findings takes one of these shapes is returned apart (`A
 - **The documented events are one registry.** `harness.POSITIVES` holds 25 declarations made before their runs, plus the 5 events of 2026-10-07. Each is read through the question its lens asked (`Positive.question`). `harness.event_record` (`pegasus-core events`) scores every method of the question against each positive.
 - **Nothing is dropped.** A positive whose question is not built, whose locus a script derives, or whose dataset is not served, is listed with that status.
 - **`cluster` and `group` are questions,** answered for now by their v0 lenses alone (`spatial_cluster`, `group_disparity`). They stay while their departure models (O6) are built.
+- **`share` (2026-10-07).** A field's share of all events in a place and period, against the share stage B expects (`departures.share_excess`).
+  - The observation lens of ARCHITECTURE §7.1: recording practice (the ill-defined chapter) and composition.
+  - It is also the evidence stage E reads for a recording explanation.
+- **`cluster` has a second method,** `excess_level`: the multiscale peaks of the whole period's excess against B0.
 

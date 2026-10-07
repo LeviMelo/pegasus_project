@@ -253,7 +253,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 7.1 group disparity | P | `E:lens-positives`: weighted recall 0.048 and 0.003, spatial negatives reject sd < 1.0; grid: blind to a one-year group spike (it tests a unit over the whole period) | runs, marked uncalibrated (ADR-0028) |
 | 7.1 trend divergence: national course at region and state | BM | `E:lens-positives` (recall 0.66, Jaccard 0.77) | |
 | 7.1 trend divergence: neighbours; national at municipality | BM | `E:lens-positives` (not recovered); ADR-0026: θ0 1.1 SIM, 1.5 SINASC, 2.0 SINAN; SIH's time negatives fail at every θ0 | runs; the neighbours estimand and SIH trends marked uncalibrated (ADR-0028) |
-| 7.1 observation lens on recording-practice fields | NB | `scans/lenses.py` docstring only | 0 `observation` leads; no ill-defined-share or coding-practice field has been scanned |
+| 7.1 observation lens on recording-practice fields | BU (2026-10-07) | the `share` question: `departures.share_excess`, a field's share of all events against stage B's expected share, beta-binomial on the observed total, θ by central matching, two-sided (the ill-defined share rising or falling) | not run; no declared recording positive yet |
 | 7.1 scales and per-scale BH at q/(number of scales) | BM | `scans/scales.py`, `E:lens-positives` | |
 | 7.1 SURVEY_PLAN | BM | `tools.SURVEY_PLAN`, ADR-0028 | every combination runs; `--ungated` retired |
 | 7.2 expectation-based score, marks Gaussian, LTSS | BM | `scans/subset.py`, `E:harness-gate` | |
