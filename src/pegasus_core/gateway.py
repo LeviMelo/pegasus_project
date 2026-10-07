@@ -335,16 +335,16 @@ def _confusion() -> pd.DataFrame:
 
 def _infant_age_mix() -> np.ndarray:
     """The share of the perinatal deaths (SIM chapter P, ages under 1) in the matrix's three age bands (0-6 d, 7-27 d,
-    28-364 d) over the years the matrix was measured on, from the certificate's coded age (the role ``age_coded``:
-    DATASUS's unit digit then value; its decoding to days belongs in pegasus_data, as ``IDADE_anos`` is) under the
-    primary classifier's chapter P."""
-    key = {"what": "infant_age_mix", "years": list(CONFUSION_YEARS), "data": config.data_version()}
+    28-364 d) over the years the matrix was measured on: the deaths under the primary classifier's chapter P by the
+    subject's age stratum (pegasus_data's decoded fractional years, ``IDADE_anos``) in whole days (its six decimals
+    put day 7 at 6.99996: 513 deaths of 2019 crossed the band edge unrounded)."""
+    key = {"what": "infant_age_mix", "years": list(CONFUSION_YEARS), "data": config.data_version(), "v": 2}
     cached = store.get_table("gateway", key)
     if cached is None:
         import pegasus_data as pg
 
         tot = np.zeros(3)
-        coded = next(r["column"] for r in roles("SIM.DO") if r["property"] == "age_coded")
+        coded = _strata("SIM.DO")["age"]
         cause = next(c["column"] for c in event_type("SIM.DO", "death")["classifiers"] if c["role"] == "primary")
         for y in CONFUSION_YEARS:
             with warnings.catch_warnings():
@@ -354,10 +354,10 @@ def _infant_age_mix() -> np.ndarray:
             con = duckdb.connect()
             con.register("r", raw)
             for band, n in con.execute(f"""
-                WITH x AS (SELECT lpad(CAST("{coded}" AS VARCHAR), 3, '0') AS a, events FROM r WHERE upper("{cause}") LIKE 'P%')
-                SELECT CASE WHEN left(a, 1) IN ('0', '1') THEN 0 WHEN left(a, 1) = '2' THEN
-                       (CASE WHEN TRY_CAST(substr(a, 2) AS INTEGER) <= 6 THEN 0 WHEN TRY_CAST(substr(a, 2) AS INTEGER) <= 27 THEN 1 ELSE 2 END)
-                       WHEN left(a, 1) = '3' THEN 2 END AS band, sum(events) FROM x GROUP BY 1""").fetchall():
+                WITH x AS (SELECT round(TRY_CAST("{coded}" AS DOUBLE) * 365.25) AS d, events FROM r
+                           WHERE upper("{cause}") LIKE 'P%')
+                SELECT CASE WHEN d < 7 THEN 0 WHEN d < 28 THEN 1 WHEN d < 365.25 THEN 2 END AS band, sum(events)
+                FROM x GROUP BY 1""").fetchall():
                 if band is not None:
                     tot[band] += n
         cached = pa.table({"band": [0, 1, 2], "share": list(tot / tot.sum())})
