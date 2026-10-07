@@ -80,12 +80,51 @@ def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, gra
 @app.command()
 def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            blocks: list[str] = typer.Option(None, help="default: every fitted block"),
+           levels: list[str] = typer.Option(None, help="tree levels to read (e.g. group); default: every level"),
+           lenses: bool = typer.Option(False, help="the v0 lens pass instead (the prospective alarm's)"),
            replicates: int = 100
            ) -> None:
-    """The scheduled pass: every field with events, every lens combination, error control, leads with their method record."""
+    """The scheduled pass over every field with events: each stage-C question asked through all its methods
+    (`questions`), error control per question and block, the answers to the register."""
     s = _session(dataset, event, years, graph)
-    admitted = s.survey(blocks or None, replicates=replicates, log=console.print)
+    if lenses:
+        admitted = s.survey(blocks or None, replicates=replicates, log=console.print)
+    else:
+        admitted = s.survey_questions(blocks or None, levels=tuple(levels) if levels else None, log=console.print)
     console.print(f"{len(admitted)} leads admitted")
+
+
+@app.command()
+def ask(dataset: str, event: str, question: str, node: str, years: str = Years, graph: str = "contiguity",
+        q: float = 0.05, limit: int = 20) -> None:
+    """One stage-C question (excess, step, trend) of one field, through every method that answers it."""
+    from . import questions
+
+    s = _session(dataset, event, years, graph)
+    answers = s.ask(question, node, q=q)
+    t = Table("years", "places", "states", "methods", "shapes", "effects", "p")
+    for a in answers[:limit]:
+        sm = questions.summary(a)
+        t.add_row(f"{sm['years'][0]}–{sm['years'][1]}", str(sm["places"]), ",".join(map(str, sm["states"][:6])),
+                  "+".join(sm["methods"]), ", ".join(f"{k}:{v}" for k, v in sm["shapes"].items()),
+                  ", ".join(f"{k} {v}" for k, v in sm["effects"].items()), f"{sm['p']:.2g}")
+    console.print(t)
+    console.print(f"{len(answers)} answers; {len(getattr(answers, 'other_shape', []))} of another shape; "
+                  f"agreement {questions.agreement(answers)}; failed {getattr(answers, 'failed', {})}")
+
+
+@app.command()
+def relations(plan: list[str] = typer.Argument(..., help="DATASET:EVENT:BLOCK[,BLOCK…], e.g. SIM.DO:death:I,IX"),
+              years: str = Years, graph: str = "contiguity", min_events: int = 2000, q: float = 0.05) -> None:
+    """Stage D across systems: which fields' departures move together, at which spatial scale and lag."""
+    from . import tools
+
+    parsed = [(p.split(":")[0], p.split(":")[1], p.split(":")[2].split(",")) for p in plan]
+    admitted = tools.relation_survey(parsed, _years(years), graph, min_events=min_events, q=q, log=console.print)
+    t = Table("band", "field", "leader", "lag", "rho", "q")
+    for x in sorted(admitted, key=lambda x: x.q)[:40]:
+        t.add_row(x.locus["band"], x.fields[0], x.fields[1], str(x.locus["lag"]), f"{x.effect:+.3f}", f"{x.q:.2g}")
+    console.print(t)
 
 
 @app.command()

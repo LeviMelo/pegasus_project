@@ -524,3 +524,29 @@ def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) 
     for r, pi, k in zip(rows, p, keep, strict=True):
         r["p"], r["reported"] = float(pi), bool(k)
     return rows
+
+
+def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, log=None) -> dict:
+    """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
+    frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
+    stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
+    (`factor_model`), and every pair, lag and band under one BH at q (`relation_table`). Returns ``rows`` (every
+    pair, ``reported`` marking the relations), ``unanswered`` (the bands not fitted) and ``fields``."""
+    d = innovations(surprises)
+    T = len(d.periods)
+    min_cells = int(np.ceil((lags + 1) * len(d.fields) * T / max(T - lags, 1)))   # lagged cells ≥ lagged fields
+    unanswered: list[str] = []
+
+    def note(msg: str) -> None:
+        unanswered.append(msg)
+        if log:
+            log(msg)
+
+    fits = {}
+    for label, db in bands(d, spectrum, min_cells=min_cells, log=note).items():
+        fits[label] = factor_model(lagged(db, lags), K=K)
+        if log:
+            log(f"band {label}: {db.r.shape[1]} coefficients, "
+                f"{int((fits[label].gamma > 1e-3 * fits[label].gamma.max()).sum())} factors kept")
+    return {"rows": relation_table(fits, q=q), "unanswered": unanswered, "fields": d.fields}
+

@@ -19,7 +19,6 @@ cell is ever formed. φ is estimated afterwards by moments (§5.2).
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import functools
 import hashlib
@@ -551,7 +550,6 @@ class Monolith:
         self.likelihood = likelihood
         self.phi_fit = float("inf")
         self.hc: torch.Tensor | None = None     # each category's own time course [E, T], `fit_category_courses`
-        self.off: torch.Tensor | None = None    # N2: each leaf-place-period's log offset v/2 [E, U, T], `laplace.marginal`
         self.data = data
         self.prior = prior          # the tree levels' prior: iid Gaussian per level, or the horseshoe (`_update_horseshoe`)
         self.rank = int(rank)       # R, the components of the place × time interaction (0: none); `_enable_interaction` adds them
@@ -774,41 +772,17 @@ class Monolith:
         pt = self._place_time(x)                                          # [K, U, T]
         return self._leaf_place(x)[self.ixl][:, :, None] * torch.exp(self._I(x)) * pt[self.grp[self.ixl]]
 
-    def _offset(self, sel=None) -> torch.Tensor | None:
-        """[n, U, T] the log factor the leaves ``sel`` (None: all; an int: one leaf, [U, T]) carry beyond the effects:
-        the category courses (`fit_category_courses`, over periods) and N2's variance correction (`laplace.marginal`,
-        per leaf-place-period). None when neither is set."""
-        if self.hc is None and self.off is None:
-            return None
-        U, T = self.N.shape[:2]
-        pick = (lambda a: a) if sel is None else (lambda a: a[sel])
-        out = pick(self.off) if self.off is not None else None
-        if self.hc is not None:
-            h = pick(self.hc)
-            h = h[None, :] if h.dim() == 1 else h[:, None, :]
-            out = h.expand(*((U, T) if h.dim() == 2 else (h.shape[0], U, T))) if out is None else out + h
-        return out
-
-    @contextlib.contextmanager
-    def without_offset(self):
-        """The model with N2's offset removed, for evaluating a posterior draw of the effects: a draw η carries its
-        own uncertainty, and its mean is e^η, not e^(η + v/2)."""
-        saved, self.off = self.off, None
-        try:
-            yield self
-        finally:
-            self.off = saved
-
     def leaf_factor(self, x: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor] | None:
         """The leaves whose place-time factor is their own, and its log [A, U, T]: the interaction's active leaves
         (I) and, when the category courses are set (`fit_category_courses`), every leaf (its h_cat over periods).
         None when neither is on. The solver's active-leaf path and Λ read this one factor."""
-        if not self.ix_on and self.hc is None and self.off is None:
+        if not self.ix_on and self.hc is None:
             return None
-        if self.hc is None and self.off is None:
+        U, T = self.N.shape[:2]
+        if self.hc is None:
             return self.ixl, self._I(x)
         act = torch.arange(len(self.data.leaves), device=self.device)
-        logf = self._offset().clone()
+        logf = self.hc[:, None, :].expand(-1, U, T).clone()
         if self.ix_on:
             logf[self.ixl] = logf[self.ixl] + self._I(x)
         return act, logf
@@ -954,8 +928,6 @@ class Monolith:
                 eta = eta + (psi * self._om(x)[:, self.u] * x["ix_t"][:, self.tt]).sum(0)
         if self.hc is not None:
             eta = eta + self.hc[self.e, self.tt]
-        if self.off is not None and spatial:
-            eta = eta + self.off[self.e, self.u, self.tt]
         return eta
 
     def total(self, x: dict[str, torch.Tensor], spatial: bool = True) -> torch.Tensor:
@@ -964,8 +936,7 @@ class Monolith:
         per_group = torch.zeros((len(self.data.groups), self.N.shape[0]), dtype=self.dtype,
                                 device=self.device).index_add_(0, self.grp, leaf_place)  # [K, U]
         total = (per_group[:, :, None] * self._place_time(x, spatial)).sum()
-        leafwise = self.ix_on or self.hc is not None or self.off is not None
-        return total + self._ix_correction(x) if leafwise and spatial else total
+        return total + self._ix_correction(x) if (self.ix_on or self.hc is not None) and spatial else total
 
     def penalty(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
         out = torch.zeros((), dtype=self.dtype, device=self.device)
@@ -1522,9 +1493,8 @@ class Monolith:
                 m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
                 if om is not None and int(self.ixpos[e]) >= 0:
                     m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
-                oe = self._offset(e)
-                if oe is not None:
-                    m = m * torch.exp(oe[sel])[:, :, None]
+                if self.hc is not None:
+                    m = m * torch.exp(self.hc[e])[None, :, None]
                 total += float((divisor * torch.log1p(m / divisor)).sum())
         return float(full.sum()) - (total - float((ph * np.log1p(mu / ph)).sum()))
 
@@ -1581,17 +1551,16 @@ class Monolith:
             if om is not None:          # an active leaf's slab carries exp(I) (a bound for the edges: |I| at most)
                 imax = float(self._I(x).abs().max())
                 lo, hi = lo - imax, hi + imax
-            if self.hc is not None or self.off is not None:     # and the leaf-place-period offsets
-                hmax = float(self._offset().abs().max())
+            if self.hc is not None:     # and each category's own course
+                hmax = float(self.hc.abs().max())
                 lo, hi = lo - hmax, hi + hmax
             for e in slabs:
                 k = int(self.grp[e])
                 m = lp[e][sel][:, None, None] * base[k][sel][:, :, None] * self.N[sel] * prof[k][None, None, :]
                 if om is not None and int(self.ixpos[e]) >= 0:
                     m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
-                oe = self._offset(e)
-                if oe is not None:
-                    m = m * torch.exp(oe[sel])[:, :, None]
+                if self.hc is not None:
+                    m = m * torch.exp(self.hc[e])[None, :, None]
                 m = m.reshape(-1)
                 # an unexposed cell (μ = 0) goes to an extra bin that is dropped: no compaction of the slab
                 idx = torch.where(m > 0, ((torch.log(m) - lo) / (hi - lo) * bins).clamp_(0, bins - 1),
@@ -1640,9 +1609,8 @@ class Monolith:
             K, U = len(self.data.groups), self.N.shape[0]
             ix = self.ix_on and spatial
             E = torch.exp(self._I_of(x, sel)) if ix else None
-            off = self._offset(sel) if spatial else (None if self.hc is None else self.hc[sel][:, None, :])
-            if off is not None:         # the category courses and N2's offset [n, U, T]
-                H = torch.exp(off)
+            if self.hc is not None:     # each category's own course over periods [n, 1, T]
+                H = torch.exp(self.hc[sel])[:, None, :]
                 E = H if E is None else E * H
             ix = E is not None
             if ix:      # a leaf-specific factor makes each leaf's place-time factor its own: [K, U, T] sums over the leaves
@@ -1679,9 +1647,8 @@ class Monolith:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
             prof = self._prof(x)                                                        # [K, G]
             E = torch.exp(self._I_of(x, sel)) if self.ix_on and spatial else None
-            off = self._offset(sel) if spatial else (None if self.hc is None else self.hc[sel][:, None, :])
-            if off is not None:
-                H = torch.exp(off)
+            if self.hc is not None:
+                H = torch.exp(self.hc[sel])[:, None, :]
                 E = H if E is None else E * H
             if E is not None:
                 w = torch.zeros((K, U, self.N.shape[1]), dtype=self.dtype, device=self.device).index_add_(
@@ -1718,8 +1685,7 @@ class Monolith:
         np.add.at(out, (self.data.u[m], self.data.t[m], self.data.g[m]), self.data.y[m])
         return out
 
-    def refit(self, data: BlockData, hc: torch.Tensor | None | type(...) = ..., tau_scale: dict | None = None,
-              off: torch.Tensor | None | type(...) = ...) -> Monolith:
+    def refit(self, data: BlockData, hc: torch.Tensor | None | type(...) = ..., tau_scale: dict | None = None) -> Monolith:
         """This model's mean refitted on other counts of the same lattice (a planted world, a held-out locus), from
         this fit's MAP at this fit's strengths and dispersion, to the production fit's closing tolerance. Re-learning
         the strengths changed what a refit absorbs by under 0.001 (evaluation 2026-10-06, absorption) at 3–5 times
@@ -1738,7 +1704,6 @@ class Monolith:
         # fit and refitted without them read every category's course as a departure: 25–39 findings per null world,
         # 2026-10-07); `robust`'s alternation passes its own
         m2.hc = self.hc if hc is ... else hc
-        m2.off = self.off if off is ... else off  # N2's offset likewise (`laplace.marginal` passes its own)
         solver.fit_mean(m2, iterations=30, loglik_tol=1.0)
         m2._solver_v1 = None        # the solver and the model refer to each other: a world's factor freed with it, not
         m2.phi = self.phi           # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)

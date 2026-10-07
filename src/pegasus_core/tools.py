@@ -566,7 +566,14 @@ class Session:
                     ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
                 if fac is not None and rows.size:
                     ev.facility = fac.tally(self.expectations.registry.chapter(node), block_codes, lead_codes, rows)
-                verdict = explain.triage(x.estimand, rows, span, direction, ev, st.get("observed"), st.get("expected"))
+                obs, exp_ = st.get("observed"), st.get("expected")
+                if obs is None and s is not None and span:
+                    # a question's answer (`survey_questions`) carries its methods' stats, not the locus's totals:
+                    # read them from the field's expectation over the answer's places and window
+                    sel = np.isin(s.places, np.asarray(x.locus.get("places", []), dtype=s.places.dtype))
+                    w = (s.years >= span[0]) & (s.years <= span[-1])
+                    obs, exp_ = float(s.y[sel][:, w].sum()), float(s.mu[sel][:, w].sum())
+                verdict = explain.triage(x.estimand, rows, span, direction, ev, obs, exp_)
                 old = x.robustness.get("triage")
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
                                                            "grade": verdict.grade or None, "bound": verdict.bound,
@@ -1112,3 +1119,47 @@ def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only:
         harness.record("depmap", {"years": years, "worlds": worlds, "health_only": health_only}, out["negatives"])
     store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
     return {"summary": out, "edges": dm.edges, "inputs": inp}
+
+
+def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], graph: str = "contiguity",
+                    min_events: int = 2000, levels: tuple[str, ...] = ("group",), q: float = 0.05, log=print
+                    ) -> list[leads.Lead]:
+    """Stage D across systems (`relations.relation_map`): every field of the ``levels`` of each (dataset, event,
+    blocks) in ``plan`` with at least ``min_events`` events, read at B1; the reported relations enter the register as
+    leads of kind "relation" (fields: the follower and the leader; locus: the band and the lag; effect: the implied
+    correlation). Each system's fits are released before the next is loaded. Statistical relations only (P16)."""
+    import gc
+
+    from . import multiscale, relations
+
+    surps, edges, n_places = [], None, None
+    for ds, ev, blocks in plan:
+        s = Session(ds, ev, years, graph)
+        for b in blocks:
+            m = s.expectations.model(b)
+            for f in s.fields(b):
+                if f.level not in levels and not (b == "*" and f.node == "*"):
+                    continue
+                x = s.surprise(f.node, "B1")
+                if x.y.sum() >= min_events:
+                    surps.append(x)
+            if edges is None:
+                edges, n_places = s.edges(), len(m.data.places)
+            s.expectations._models = {}
+            gc.collect()
+        log(f"{ds}: {len(surps)} fields so far")
+    out = relations.relation_map(surps, multiscale.GraphSpectrum(edges, n_places), q=q, log=log)
+    rep = [r for r in out["rows"] if r["reported"]]
+    qv = control.adjusted(np.array([r["p"] for r in out["rows"]]))
+    qmap = {id(r): float(v) for r, v in zip(out["rows"], qv, strict=True)}
+    family = "relations|" + "+".join(f"{ds}:{','.join(b)}" for ds, _, b in plan)
+    admitted = [leads.Lead(kind="relation", estimand="co-movement", tier="B1", fields=[r["field"], r["leader"]],
+                           locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
+                           interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
+                           null="independent fields' innovations (factor model per band)", calibrated=True,
+                           provenance={"z": float(r["z"]), "unanswered": out["unanswered"]})
+                for r in rep]
+    leads.Register().add(admitted)
+    log(f"{len(rep)} relations reported of {len(out['rows'])} pairs; unanswered: {len(out['unanswered'])} bands")
+    return admitted
+

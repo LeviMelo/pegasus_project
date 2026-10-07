@@ -92,6 +92,22 @@ def _years(f) -> tuple[int, int]:
     return int(y[0]), int(y[-1])
 
 
+def _shape(session, node: str, f, tier: str) -> dict:
+    """A finding's course in time when its method does not report one: `departures.attribute` on the field's series
+    summed over the finding's places, its window the finding's years. Every method's answer then carries a shape."""
+    from . import departures
+
+    s = session.surprise(node, tier)
+    w = np.isin(np.asarray(s.places).astype(int), [int(p) for p in f.locus.get("places", [])]).astype(float)
+    if not w.any():
+        return {"shape": "unattributed"}
+    y0, y1 = _years(f)
+    yrs = np.asarray(s.years)
+    inside = np.flatnonzero((yrs >= y0) & (yrs <= y1))
+    window = (int(inside[0]), int(inside[-1]) + 1) if inside.size else None
+    return departures.attribute(*departures.series(s, w), window=window, years=s.years)
+
+
 def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer]:
     """Every method of ``question`` on the field ``node`` at q/k, the union merged into answers by overlapping loci,
     strongest first. A method that fails is reported in the answer list's ``failed`` attribute and the rest go on."""
@@ -106,6 +122,8 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
             failed[m.id] = f"{type(exc).__name__}: {exc}"
             continue
         for f in found:
+            if "shape" not in f.stats:
+                f.stats["shape"] = _shape(session, node, f, kw.get("tier", "B1"))
             pl, (y0, y1) = {int(p) for p in f.locus.get("places", [])}, _years(f)
             home = None
             for a in answers:

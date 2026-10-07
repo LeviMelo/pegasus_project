@@ -21,20 +21,20 @@ P16 gives each object one stage. Revision 3's items:
 | § | item | status |
 |---|---|---|
 | 1.1, P16 | one stage, one computation; statistical validity B–D, epidemiological only E | **P**: written; the code still fuses stages in the tiers, the lenses, θ0 and the harness (`docs/discussion/2026-10-06-course-correction.md` §2) |
-| 6.1, 12 (N1) | the expectation's noise structure: serial correlation of a place's deviations, learned per field | **NB**. Measured: lag-1 residual autocorrelation 0.03–0.39 by field (`data/probes/residual_autocorr.json`) |
-| 5.5, 12 (N2) | marginal uncertainty of the levels | **NB**. SBC shows the defect (E:2026-10-06-sbc) |
-| 7.0 (O6) | departure models as the stage-C inference | **NB**. The lenses are screens; their interim settings (ADR-0026/0027) are to be superseded |
-| 7.5 (O7) | relations as one joint model of all fields' departures | **NB**. `relations.distributed_lag` built as the confirmation tool |
+| 6.1, 12 (N1) | the expectation's noise structure: serial correlation of a place's deviations, learned per field | **BM** (2026-10-07). `surprise.Noise`: gamma frailty, Gaussian copula with ARMA(1,1) correlation over periods, a spatial share on the heat kernel. κ by central matching of the PIT quartiles; ρ and δ with their own scale on normal scores clipped at the universal threshold. Recovers its own generating ρ on null worlds (0.65–0.69 against 0.66; E:2026-10-06-noise-structure) |
+| 5.5, 12 (N2) | marginal uncertainty of the levels | **P**. `laplace.marginal` (the Gaussian variational fixed point) is built opt-in and not accepted: on VII the draws' median total matches the data, their mean is still tail-driven (plan 2026-10-06-overhaul, N2). SBC shows the defect (E:2026-10-06-sbc) |
+| 7.0 (O6) | departure models as the stage-C inference | **P**, mostly **BM**. Cell excess (two-group) BM. Multiscale peaks for spike, step and trend (STEM, null per scale and absorption class) BM: every documented event found, step null worlds 1/10. Shape attribution (Chen & Liu) BM on the events. The Bayesian step not accepted (power). The questions registry (`questions`, `survey_questions`) BU: the first survey was running on 2026-10-07 (E:2026-10-07-real-events, E:2026-10-06-departure-models) |
+| 7.5 (O7) | relations as one joint model of all fields' departures | **P**. The band factor model with innovations, lags and BH (`relations`) is BM: the cross-system positive controls are found, and SIH's place permutation leaves 2.0 % false above the national scale. The national and macro-regional bands are unanswered (OPEN_QUESTIONS 9). The spectral factor model is BU (E:2026-10-07-relations-real) |
 | 10 | validation split: statistical bench (B–D) and epidemiological checks (E) | **P**: written; the harness module still holds both |
 
+*(Re-ranked 2026-10-07; N1 is done.)*
 **The gaps, re-ranked by revision 3:**
-1. N1, the noise structure.
-2. N2, marginal uncertainty.
-3. O6, departure models.
-4. O7, the joint relation model.
-5. O8, interpretation.
-6. O3 and O9, race and breadth.
-7. O10, use.
+1. N2, marginal uncertainty: the variational fixed point is built, and the skew of sparse levels is next.
+2. O6's remainder: the trend question's methods, the Bayesian step's power, and reading the questions survey.
+3. O7's remainder: national-scale relations (OPEN_QUESTIONS 9) and SIH's local family (OPEN_QUESTIONS 8).
+4. O8, interpretation.
+5. O3 and O9, race and breadth.
+6. O10, use.
 
 ## Revision 2 (2026-10-06, ADR-0023)
 
