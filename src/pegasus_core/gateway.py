@@ -1123,45 +1123,63 @@ def context_sum(name: str, year: int, where: dict[str, str] | None = None) -> pa
     return table
 
 
-def indicator_counts(dataset: str, event: str, year: int, indicators: dict[str, str], places: pa.Array
-                     ) -> tuple[pa.Table, dict[tuple[str, str], int]]:
-    """Events of a year that satisfy each named SQL predicate over the raw columns (SINASC: weight < 2500 g, a
-    caesarean), per residence: a table (u, name, y) with the name '*' for all events, and the records satisfying
-    both predicates of every pair (the measured overlap, §8.5). Predicates are written over the columns as
-    TRY_CAST numbers (``PESO``, ``SEMAGESTAC``) or text; an event with a null predicate is not counted for it."""
-    import re
+def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, str]:
+    """A context on ``places`` over the window ``years`` (`map_inputs`): a declared field's value over its declared
+    denominator (pegasus_data `fields.yml` ``over``: another field, or ``population``, the residents), the mean of its
+    years in the window, or of the declared year nearest the window's end when it has none there (a census). ``entry``
+    is a field's name, numerators of one denominator summed (``a+b``), or {field, where} for a field whose rows are
+    strata (`context_sum`). Returns the values (NaN where a place has none) and a label."""
+    from pegasus_data.fields import _years, declared_fields
 
-    strata = _strata(dataset)
-    cols = sorted({c for sql in indicators.values() for c in re.findall(r"[A-Z][A-Z0-9_]{2,}", sql)} | {strata["residence"]})
-    key = {"what": "indicator_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
-           "indicators": indicators, "data": config.data_version()}
-    cached = store.get_table("gateway", key)
-    if cached is not None:
-        meta = store.manifest("gateway", key) or {}
-        return cached, {tuple(k.split("|")): v for k, v in meta.get("overlap", {}).items()}
-    raw = _records(dataset, event, year, cols)
-    con = duckdb.connect()
-    con.register("r", raw)
-    con.register("v", pa.table({"u": places}))
-    num = {c: f'TRY_CAST(CAST("{c}" AS VARCHAR) AS DOUBLE)' for c in cols}
-    exprs = {n: re.sub(r"[A-Z][A-Z0-9_]{2,}", lambda m: num[m.group(0)], sql) for n, sql in indicators.items()}
-    sel = ", ".join(f"coalesce(({e}), false) AS \"i_{n}\"" for n, e in exprs.items())
-    con.execute(f"CREATE TEMP TABLE e AS SELECT {_residence_sql(strata['residence'])} AS u, {sel} FROM r")
-    parts = ["SELECT u, '*' AS name, count(*) AS y FROM e GROUP BY u"] + [
-        f"SELECT u, '{n}' AS name, count(*) AS y FROM e WHERE \"i_{n}\" GROUP BY u" for n in indicators]
-    table = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, name, CAST(sum(y) AS INTEGER) AS y
-                            FROM ({' UNION ALL '.join(parts)}) WHERE u IN (SELECT u FROM v) GROUP BY ALL
-                            ORDER BY name, u""").fetch_arrow_table()
-    names = list(indicators)
-    overlap = {}
-    for i, a in enumerate(names):
-        for b in names[i + 1:]:
-            overlap[(a, b)] = int(con.execute(f'SELECT count(*) FROM e WHERE "i_{a}" AND "i_{b}"').fetchone()[0])
-    store.put_table("gateway", key, table, {"overlap": {"|".join(k): v for k, v in overlap.items()}})
-    return table, overlap
+    spec_of = declared_fields()
+    names = entry["field"].split("+") if isinstance(entry, dict) else entry.split("+")
+    where = entry.get("where") if isinstance(entry, dict) else None
+    over = {spec_of[n].get("over") for n in names}
+    if len(over) != 1:
+        raise ValueError(f"{entry}: the summed fields declare different denominators {sorted(map(str, over))}")
+    over = over.pop()
+    declared = sorted(set(_years(str(spec_of[names[0]]["years"]))))
+    inside = [y for y in declared if years[0] <= y <= years[-1]]
+    chosen = inside or [min(declared, key=lambda y: (abs(y - years[-1]), -y))]
+    index = {int(u): i for i, u in enumerate(places)}
 
+    def values(name: str, year: int, rows_where=None) -> np.ndarray:
+        out = np.full(len(places), np.nan)
+        if rows_where is not None:
+            t = context_sum(name, year, rows_where)
+            pairs_ = zip(t.column("u").to_pylist(), t.column("value").to_pylist(), strict=True)
+        else:
+            t = context_field(name, years=[year])
+            ok = [s in ("value", "zero", "ok") for s in t.column("status").to_pylist()]
+            pairs_ = ((u, v) for u, v, o in zip(t.column("u").to_pylist(), t.column("value").to_pylist(), ok,
+                                                 strict=True) if o)
+        for u, v in pairs_:
+            i = index.get(int(u))
+            if i is not None and v is not None:
+                out[i] = float(v)
+        return out
 
-# ---------------------------------------------------------------------- pass-throughs (the door for modules that need pegasus_data itself)
+    per_year = []
+    for year in chosen:
+        num = sum(values(n, year, where) for n in names)
+        if over == "population":
+            tot = population([year]).group_by("u").aggregate([("n", "sum")])     # once: group order is not stable
+            den = np.full(len(places), np.nan)
+            for u, n in zip(tot.column("u").to_pylist(), tot.column("n_sum").to_pylist(), strict=True):
+                if int(u) in index:
+                    den[index[int(u)]] = n
+        elif over:
+            den = values(over, year)
+        else:
+            den = np.ones(len(places))
+        with np.errstate(all="ignore"):
+            per_year.append(np.where(den > 0, num / den, np.nan))
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        value = np.nanmean(np.stack(per_year), axis=0)
+    label = "+".join(names) + (f" [{where}]" if where else "") + (f" over {over}" if over else "") + \
+        f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
+    return value, label
 
 
 def package_version() -> str:

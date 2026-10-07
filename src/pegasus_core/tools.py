@@ -1108,11 +1108,14 @@ def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only:
     from .scans import map_inputs, maps, pairs
 
     years = years or map_inputs.YEARS
-    systems = [(x.dataset, x.event, x.blocks) for x in update.Plan.load(plan).systems]
-    key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "v": 3}   # v3: declared fields
+    loaded = update.Plan.load(plan)
+    systems = [(x.dataset, x.event, x.blocks) for x in loaded.systems]
+    contexts = loaded.extra.get("contexts") or []
+    key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "contexts": contexts,
+           "v": 3}   # v3: declared fields and contexts
     inp = maps.MapInputs.load(key)
     if inp is None:
-        inp = map_inputs.build(systems, years)
+        inp = map_inputs.build(systems, years, contexts=contexts)
         inp.save(key)
     # §11.4: a chapter whose count expectation failed calibration at B1 (the first tier with geography, whose field
     # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones

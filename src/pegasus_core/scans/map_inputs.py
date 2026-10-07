@@ -7,8 +7,8 @@ a measure's or a share's is its precision-weighted mean residual, shrunk (`gauss
 only where a declared link records the same event in both (`same_event`: a death in hospital is an admission and a
 certificate); there a field's overlap with the other system is its measured linked share, and past `maps.MAX_OVERLAP`
 the field's "not linked to" twin (its events less the expected linked ones) enters instead, sharing nothing (§8.5).
-A context is a complete count or a rate over a registered denominator, z-scored, with the constant sd 0.05 the gate
-used (it cannot change ρ). Every field with events enters (ADR-0028: no field is left out for power).
+A context is a declared field over its declared denominator (``over``), as rank-based normal scores, with the
+constant sd 0.05 the gate used (it cannot change ρ); the plan names which (``contexts``). Every field with events enters (ADR-0028: no field is left out for power).
 """
 
 from __future__ import annotations
@@ -22,103 +22,21 @@ CONTEXT_SD = 0.05
 YEARS = list(range(2015, 2020))
 
 
-def _population(places: np.ndarray, years: list[int]) -> np.ndarray:
-    """[U, T, 2, 17]: persons by place, year, sex, five-year band (POPSVS)."""
-    ix = {int(u): i for i, u in enumerate(places)}
-    out = np.zeros((len(places), len(years), 2, 17))
-    t = gateway.population(years)
-    for u, yr, s, a, n in zip(*(t.column(c).to_numpy() for c in ("u", "year", "sex", "age", "n")), strict=True):
-        if int(u) in ix and int(s) in (1, 2):
-            out[ix[int(u)], years.index(int(yr)), int(s) - 1, min(int(a) // 5, 16)] += n
-    return out
-
-
 def place_effect(y: np.ndarray, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
     """The shrunk Poisson place intercept over the expectation (B0 for E_b) and its posterior sd."""
     _, b, sd, tau = surprise.refit_place(y[:, None], mu[:, None], np.full((len(y), 1), np.inf), np.ones((1, 1)))
     return b[:, 0], sd[:, 0], float(tau[0])
 
 
-def _field(places: np.ndarray, rows) -> np.ndarray:
-    out = np.full(len(places), np.nan)
-    ix = {int(u): i for i, u in enumerate(places)}
-    for u, v in rows:
-        if int(u) in ix:
-            out[ix[int(u)]] = v
-    return out
+def normal_scores(v: np.ndarray) -> np.ndarray:
+    """A context on a common scale whatever its unit and skew: the rank-based normal scores Φ⁻¹(r / (n + 1)) of its
+    finite values (van der Waerden), NaN kept. One transform for every context replaces a scaling chosen per field."""
+    from scipy import special, stats
 
-
-def _census(name: str, year: int, places: np.ndarray) -> np.ndarray:
-    t = gateway.context_field(name, years=[year])
-    ok = [s in ("value", "zero", "ok") for s in t.column("status").to_pylist()]
-    u, v = t.column("u").to_numpy(), t.column("value").to_numpy()
-    return _field(places, [(a, b) for a, b, o in zip(u, v, ok, strict=True) if o])
-
-
-def _stock_rate(name: str, years: list[int], places: np.ndarray, pop: np.ndarray, per: float = 1000.0) -> np.ndarray:
-    """Mean over the years of a CNES December stock per ``per`` persons (POPSVS of the year)."""
-    t = gateway.context_field(name, years=years)
-    ix = {int(u): i for i, u in enumerate(places)}
-    stock = np.full((len(places), len(years)), np.nan)
-    for u, yr, v, st in zip(t.column("u").to_numpy(), t.column("year").to_numpy(), t.column("value").to_numpy(),
-                            t.column("status").to_pylist(), strict=True):
-        if int(u) in ix and st == "ok":
-            stock[ix[int(u)], years.index(int(yr))] = v
-    with np.errstate(all="ignore"):
-        return np.nanmean(np.where(pop > 0, stock / pop * per, np.nan), axis=1)
-
-
-def contexts(places: np.ndarray, years: list[int]) -> dict[str, tuple[np.ndarray, str]]:
-    """The context fields as (values, label), transformed to near-symmetric scales, before z-scoring."""
-    pop = _population(places, years).sum((2, 3))                    # [U, T]
-    c = lambda n, y=2022: _census(n, y, places)                     # noqa: E731
-    ratio = lambda a, b: np.where(b > 0, a / np.where(b > 0, b, np.nan), np.nan)    # noqa: E731
-    hh, resident = c("households"), c("population_resident_census")
-    gdp = c("gdp", 2021)
-    pop21 = _population(places, [2021]).sum((1, 2, 3))
-    pop22 = _population(places, [2022]).sum((1, 2, 3))
-    race_u = c("population_race_universe")
-    inc_u = c("persons_income_universe")
-    ans = np.full(len(places), np.nan)
-    ix = {int(u): i for i, u in enumerate(places)}
-    for u, v in zip(*(gateway.context_sum("ans_beneficiaries", 2022, {"coverage": "Médico-hospitalar"}).column(k).to_numpy()
-                      for k in ("u", "value")), strict=True):
-        if int(u) in ix:
-            ans[ix[int(u)]] = v
-    enrol = np.full(len(places), np.nan)
-    for u, v in zip(*(gateway.context_sum("inep_enrolments", 2022, {"margin": "total", "category": "all"}).column(k).to_numpy()
-                      for k in ("u", "value")), strict=True):
-        if int(u) in ix:
-            enrol[ix[int(u)]] = v
-    with np.errstate(all="ignore"):
-        out = {
-            "sewer_network": (ratio(c("households_sewer_network"), hh), "households on the sewer network, 2022"),
-            "water_network": (ratio(c("households_water_network"), hh), "households on the water network, 2022"),
-            "no_bathroom": (ratio(c("households_without_bathroom"), hh), "households without a bathroom, 2022"),
-            "waste_collected": (ratio(c("households_waste_collected"), hh), "households with waste collection, 2022"),
-            "literacy_15plus": (ratio(c("persons_15_plus_literate"), c("persons_15_plus")), "literate share of 15+, 2022"),
-            "urban_share": (ratio(c("population_urban"), resident), "urban share of the census population, 2022"),
-            "income_over_2sm": (ratio(c("persons_income_over_2_sm"), inc_u), "persons with income over 2 minimum wages, 2022"),
-            "black_brown_share": (ratio(c("population_black") + c("population_brown"), race_u), "black or brown share, 2022"),
-            "indigenous_share": (np.arcsinh(100 * ratio(c("population_indigenous"), race_u)), "asinh of 100 x indigenous share, 2022"),
-            "log_gdp_pc": (np.log(ratio(gdp * 1000, pop21)), "log GDP per capita, 2021"),
-            "gva_agriculture_share": (np.arcsinh(10 * ratio(c("gross_value_added_agriculture", 2021), gdp)),
-                                      "asinh of 10 x agriculture share of GDP, 2021"),
-            "gva_public_admin_share": (ratio(c("gross_value_added_public_administration", 2021), gdp),
-                                       "public administration share of GDP, 2021"),
-            "school_enrolments_pc": (np.arcsinh(10 * ratio(enrol, pop22)), "asinh of 10 x basic-education enrolments per person, 2022"),
-            "ans_plan_coverage": (np.arcsinh(10 * ratio(ans, pop22)), "asinh of 10 x private health-plan links per person, Dec 2022"),
-            "beds_sus_per1000": (np.arcsinh(_stock_rate("cnes_beds_sus", years, places, pop)), "asinh SUS beds per 1,000, 2015-19"),
-            "beds_icu_sus_per1000": (np.arcsinh(10 * _stock_rate("cnes_beds_icu_sus", years, places, pop)),
-                                     "asinh of 10 x SUS ICU beds per 1,000, 2015-19"),
-            "physicians_per1000": (np.arcsinh(_stock_rate("cnes_physicians_professionals", years, places, pop)),
-                                   "asinh physicians (distinct CNS) per 1,000, 2015-19"),
-            "nurses_per1000": (np.arcsinh(_stock_rate("cnes_nurses_professionals", years, places, pop)),
-                               "asinh nurses per 1,000, 2015-19"),
-            "esf_teams_per10k": (np.arcsinh(_stock_rate("cnes_teams_esf", years, places, pop, 1e4)), "asinh ESF teams per 10,000, 2015-19"),
-            "mammography_sus_per100k": (np.arcsinh(_stock_rate("cnes_equipment_mammography_sus", years, places, pop, 1e5)),
-                                        "asinh SUS mammographs per 100,000, 2015-19"),
-        }
+    out = np.full(len(v), np.nan)
+    ok = np.isfinite(v)
+    if ok.sum() > 1:
+        out[ok] = special.ndtri(stats.rankdata(v[ok]) / (ok.sum() + 1))
     return out
 
 
@@ -194,11 +112,12 @@ def _linked(dataset: str, event: str, link: str, side: str, years: list[int], pl
 
 
 def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = None,
-          places: np.ndarray | None = None) -> MapInputs:
+          places: np.ndarray | None = None, contexts: list | None = None) -> MapInputs:
     """The map's fields (module docstring), from declarations and the production fits: for every (dataset, event,
     blocks) in ``systems``, each chapter field of its count fits and every fitted measure, share or linked field, its
     place effect over ``years`` against tier B0 (`Session.surprise`: the national rates by age, sex and period, no
-    place effects); the context fields; and, where a declared link records the same events in two systems
+    place effects); the ``contexts`` (declared fields over their declared denominators, `gateway.context_value`, as
+    normal scores); and, where a declared link records the same events in two systems
     (`same_event`), each field's measured overlap with the other system, with its "not linked to" field where that
     overlap passes `maps.MAX_OVERLAP` (its events less the expected linked ones: no event shared with the other)."""
     from .. import tools
@@ -269,9 +188,11 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                 b, sd, _ = place_effect(y2, mu2)
                 add(f"{names[i]}|not linked to {in_map[theirs][0]}", ds,
                     labels[i] + f" (not linked to {in_map[theirs][0]})", b, sd, cats[i] | {f"unlinked:{in_map[theirs][0]}"})
-    for k, (v, label) in contexts(places, years).items():
-        z = (v - np.nanmean(v)) / np.nanstd(v)
-        add(f"ctx:{k}", "context", label, z, np.where(np.isfinite(z), CONTEXT_SD, np.nan), set())
+    for entry in contexts or ():
+        v, label = gateway.context_value(entry, years, places)
+        z = normal_scores(v)
+        name = entry["field"] if isinstance(entry, dict) else entry
+        add(f"ctx:{name}", "context", label, z, np.where(np.isfinite(z), CONTEXT_SD, np.nan), set())
     F = len(names)
     overlap = np.zeros((F, F))
     for a in range(F):

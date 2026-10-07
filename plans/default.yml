@@ -10,3 +10,26 @@ corroborators: [[SINAN-DENG, probable_case], [SINAN-CHIK, notification]]
 relations: true
 triage: true
 report: reports/leads.md
+# the dependency map's context fields (`tools.dependency_map`): pegasus_data's declared fields over their declared
+# denominators, as normal scores; "a+b" sums numerators of one denominator; {field, where} picks strata
+contexts:
+  - households_sewer_network
+  - households_water_network
+  - households_without_bathroom
+  - households_waste_collected
+  - persons_15_plus_literate
+  - population_urban
+  - persons_income_over_2_sm
+  - population_black+population_brown
+  - population_indigenous
+  - gdp
+  - gross_value_added_agriculture
+  - gross_value_added_public_administration
+  - {field: inep_enrolments, where: {margin: total, category: all}}
+  - {field: ans_beneficiaries, where: {coverage: Médico-hospitalar}}
+  - cnes_beds_sus
+  - cnes_beds_icu_sus
+  - cnes_physicians_professionals
+  - cnes_nurses_professionals
+  - cnes_teams_esf
+  - cnes_equipment_mammography_sus
