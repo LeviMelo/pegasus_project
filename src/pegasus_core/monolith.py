@@ -1707,7 +1707,7 @@ class Monolith:
         return m2
 
     def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
-               max_sweeps: int = 12, sweep_tol: float = 0.05) -> Monolith:
+               max_sweeps: int = 5, sweep_tol: float = 0.05, footprints: tuple[float, ...] = ()) -> Monolith:
         """This fit made robust to the departures stage C must report (docs/plans/2026-10-07-robust-expectation.md):
         each round flags the leaf × place × period cells beyond the predictive's upper ``trim`` quantile (their
         observed totals against NB(μ, φ_x), φ_x the leaf-place-period dispersion by trimmed likelihood, so the flags
@@ -1729,61 +1729,106 @@ class Monolith:
         obs = np.zeros((E, U, T))
         np.add.at(obs, (d.e, d.u, d.t), d.y)
         m, info = self, []
-        for r in range(rounds):
-            mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)])            # [E, U, T]
-            live = (mu >= min_expected) | (obs > 0)
-            o, mm = obs[live][:, None], mu[live][:, None]
-            phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
-            k = float(phi_x) if np.isfinite(phi_x) else 1e12
-            p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
-            flag = (p < trim) & (obs > mu)
-            y_new = d.y.astype(float).copy()
-            f = flag[d.e, d.u, d.t]
-            scale = mu[d.e, d.u, d.t] / np.maximum(obs[d.e, d.u, d.t], 1e-12)
-            y_new[f] = d.y[f] * scale[f]                       # the cell's groups keep their shares of the expectation
-            info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()),
-                         "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
-            log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
-                f"({obs[flag].sum():.0f} events against {mu[flag].sum():.0f} expected)")
+        # round 0 fits the structure (the category courses) on the observed counts and flags nothing: trimming judges
+        # cells against an expectation, and before the courses exist a category in a group another dominates is
+        # mis-expected everywhere; its ordinary counts were flagged as excesses, imputed away, and the courses then fit
+        # the imputed zeros (B25–B33 expected near zero in ordinary years, 2026-10-07). Structure first, trimming second
+        for r in range(rounds + 1):
+            if r == 0:
+                y_new = d.y.astype(float)
+                info.append({"round": 0, "structure": True})
+                log("robust round 0: structure (category courses) on the observed counts")
+            else:
+                y_new = None
+            mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)]) if r else None   # [E, U, T]
+            flag = None
+            if r:
+                live = (mu >= min_expected) | (obs > 0)
+                o, mm = obs[live][:, None], mu[live][:, None]
+                phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
+                k = float(phi_x) if np.isfinite(phi_x) else 1e12
+                p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
+                flag = (p < trim) & (obs > mu)
+                cells = int(flag.sum())
+                flag |= self._regional_flags(obs, mu, k, trim, footprints)
+                dw = m._impute(d, flag)
+                info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()), "by_cell": cells,
+                             "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
+                log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
+                    f"({obs[flag].sum():.0f} events against {mu[flag].sum():.0f} expected)")
             # the mean and the category courses by alternation, each given the other (block coordinate descent on a
             # convex objective, so it reaches the joint optimum): a course fitted once after the mean cannot move the
             # group's course, and a category that dominates its group (COVID-19 in B25–B34) left its siblings with an
             # expectation near zero in ordinary years (2026-10-07)
-            dw = dataclasses.replace(d, y=y_new)
-            hc = m.hc
+            if r == 0:
+                dw = dataclasses.replace(d, y=y_new)
+
+            def course_map(model, h, dw=dw, flag=flag):
+                """One sweep: the mean refitted with the courses ``h`` as an offset (warm, from ``model``'s MAP), then
+                the courses given it."""
+                nxt = model.refit(dw, hc=h)
+                nxt.category_courses = nxt.fit_category_courses(d.y, missing=flag, data=d, log=lambda _x: None)
+                return nxt, nxt.hc
+
+            # the fixed point of the sweep map, accelerated by SQUAREM (Varadhan & Roland 2008): two sweeps, an
+            # extrapolation along their drift, one stabilising sweep. The plain sweeps converged linearly at a rate
+            # near 0.9 per sweep on SIM I (0.63, 0.36, 0.23, 0.15, 0.10, 0.079, 0.073, 0.068, … 2026-10-07)
+            m, h0 = course_map(m, m.hc)
+            prev = np.log(np.maximum(m.course_totals, 1e-9))
             for sweep in range(max_sweeps):
-                m = self.refit(dw, hc=hc)
-                m.category_courses = m.fit_category_courses(y_new, log=lambda _x: None)
-                moved = float((m.hc - hc).abs().max()) if hc is not None else np.inf
-                hc = m.hc
-                log(f"  sweep {sweep}: course moved {moved:.3g}, τ {m.category_courses['tau']:.3g}")
+                m1, h1 = course_map(m, h0)
+                m2, h2 = course_map(m1, h1)
+                rr, vv = h1 - h0, h2 - 2 * h1 + h0
+                nv = float(vv.norm())
+                alpha = -float(rr.norm()) / nv if nv > 0 else -1.0
+                alpha = min(max(alpha, -4.0), -1.0)           # α = −1 is the plain double sweep; −4 bounds the step
+                h_ext = h0 - 2 * alpha * rr + alpha ** 2 * vv
+                m, h0 = course_map(m2, h_ext)
+                tot = np.log(np.maximum(m.course_totals, 1e-9))
+                # the predictions, not the split, and only where they hold an event: a category expected at 0.001
+                # moving to 0.004 is 1.4 on the log scale and no change to anything read
+                held = (np.exp(tot) >= 1.0) | (np.exp(prev) >= 1.0)
+                moved = float(np.abs(tot - prev)[held].max()) if held.any() else 0.0
+                prev = tot
+                log(f"  squarem {sweep}: course moved {moved:.3g}, α {alpha:.2f}, τ {m.category_courses['tau']:.3g}")
                 if moved < sweep_tol:
                     break
         m.phi = m._dispersion()
         m.data = d
         m.robust_info = info
-        m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 2}   # its own cache key
+        m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 7}   # its own cache key
         log(f"robust: φ {self.phi:.3g} -> {m.phi:.3g}")
         return m
 
     def fit_category_courses(self, y: np.ndarray | None = None, taus: np.ndarray | None = None,
-                             ridge: float = 1e-2, log=print) -> dict:
+                             centre: float = 1e4, missing: np.ndarray | None = None, data: BlockData | None = None,
+                             log=print) -> dict:
         """Each category's own time course h_cat[e, t] (docs/plans/2026-10-07-robust-expectation.md, step 4): given
         every other effect, the category's yearly totals O[e, t] (of ``y``, the cells' counts; None: the data's) are
         Poisson(M[e, t] e^{h[e, t]}), M the expectation without the course; h has an RW1 prior of precision τ shared
-        by the block (and a ``ridge`` on its level), τ chosen by the Laplace marginal likelihood summed over the
-        categories. A category whose epidemic dominates its ICD group's course (COVID-19 in B25–B34, dengue over
-        yellow fever in A90–A99) otherwise inherits that course in every ordinary year. Sets ``self.hc``."""
-        d = self.data
+        by the block and is centred over periods (a penalty ``centre`` on its mean: the course is a shape, the level
+        stays the category's θ_cat; a free level drifted between the two from sweep to sweep and the alternation of
+        `robust` never settled, 2026-10-07), τ chosen by the Laplace marginal likelihood summed over the categories.
+        ``missing`` [E, U, T] marks cells left out of both totals (`robust`'s flagged departures): the exact likelihood
+        of the courses without them, where imputing them by the expectation (an EM step) converged slowly and let a
+        course follow half of yellow fever's 2017–18 outbreak. A category whose epidemic dominates its ICD group's
+        course (COVID-19 in B25–B34, dengue over yellow fever in A90–A99) otherwise inherits that course in every
+        ordinary year. Sets ``self.hc``."""
+        d = self.data if data is None else data         # the observed cells (`robust` refits on imputed ones)
         E, T = len(d.leaves), d.N.shape[1]
         obs = np.zeros((E, T))
-        np.add.at(obs, (d.e, d.t), d.y if y is None else y)
+        yy = d.y if y is None else y
+        keep = np.ones(len(yy), bool) if missing is None else ~missing[d.e, d.u, d.t]
+        np.add.at(obs, (d.e[keep], d.t[keep]), yy[keep])
         saved, self.hc = self.hc, None
         with torch.no_grad():
             x = self.effects()
             lp = self._leaf_place(x)                                              # [E, U]
             pt = self._place_time(x)                                              # [K, U, T]
             M = torch.einsum("eu,eut->et", lp, pt[self.grp]).cpu().numpy()       # [E, T]
+            if missing is not None:
+                miss = torch.as_tensor(missing, dtype=lp.dtype, device=lp.device)
+                M = M - torch.einsum("eut,eu,eut->et", miss, lp, pt[self.grp]).cpu().numpy()
             if self.ix_on:
                 M = np.stack([self.expected(np.array([e]))[0].sum(0) for e in range(E)])
         if self.supply is not None:
@@ -1794,7 +1839,7 @@ class Monolith:
         M = np.maximum(M, 1e-12)
 
         def fit(tau: float) -> tuple[np.ndarray, float]:
-            P = tau * R + ridge * np.eye(T)
+            P = tau * R + centre * np.ones((T, T)) / T ** 2 + 1e-8 * np.eye(T)
             h = np.zeros((E, T))
             for _ in range(50):
                 lam = M * np.exp(h)
@@ -1816,14 +1861,80 @@ class Monolith:
         best = max(((fit(tau), tau) for tau in grid), key=lambda r: r[0][1])
         (h, lml), tau = best
         self.hc = torch.as_tensor(h, dtype=self.dtype, device=self.device)
+        self.course_totals = M * np.exp(h)          # each category's predicted total per period [E, T]
         info = {"tau": float(tau), "lml": round(lml, 2), "max_abs": round(float(np.abs(h).max()), 3)}
         log(f"category courses: τ {tau:.3g}, max |h| {info['max_abs']}")
         return info
 
+    def _impute(self, d: BlockData, flag: np.ndarray) -> BlockData:
+        """The block's counts with every flagged leaf × place × period replaced by its expectation over its sex-age
+        groups (EM for missing cells), zero counts included: scaling only the non-empty entries left a flagged
+        region's empty cells at zero, below their expectation, and pulled the background down."""
+        import dataclasses
+
+        f = flag[d.e, d.u, d.t]
+        keep = ~f
+        parts_e, parts_u, parts_t, parts_g, parts_y = [d.e[keep]], [d.u[keep]], [d.t[keep]], [d.g[keep]], [d.y[keep].astype(float)]
+        for e in np.unique(np.nonzero(flag)[0]):
+            uu, tt = np.nonzero(flag[e])
+            mg = self.expected_by_group(np.array([e]))[uu, tt]                     # [n, G]
+            ii, gg = np.nonzero(mg > 0)
+            parts_e.append(np.full(len(ii), e, dtype=d.e.dtype))
+            parts_u.append(uu[ii].astype(d.u.dtype))
+            parts_t.append(tt[ii].astype(d.t.dtype))
+            parts_g.append(gg.astype(d.g.dtype))
+            parts_y.append(mg[ii, gg])
+        return dataclasses.replace(d, e=np.concatenate(parts_e), u=np.concatenate(parts_u), t=np.concatenate(parts_t),
+                                   g=np.concatenate(parts_g), y=np.concatenate(parts_y))
+
+    def _regional_flags(self, obs: np.ndarray, mu: np.ndarray, k: float, trim: float,
+                        footprints: tuple[float, ...]) -> np.ndarray:
+        """[E, U, T] cells inside a regional excess: a cell is flagged when, at some heat-kernel scale on the place
+        graph (`multiscale`), the kernel-weighted count around it is a discovery of BH at q = 0.05 over every centre
+        and period of that scale (its gamma upper-tail probability); the region-period is then missing whole.
+        Tested at the cells' own level (0.005) instead, chance alone marked hundreds of regions over ~50,000 tests
+        per scale and trimmed 33,677 cells of SIM I against 8,358 by cells alone (2026-10-07).
+
+        **Off by default** (``footprints=()`` in `robust`): with BH and whole regions missing the flags still grew
+        round after round (SIM I: 48,195 then 161,661 cells), because this null takes cells as independent while
+        N1's spatial share makes neighbourhood aggregates more variable; trimming the regions it over-calls lowers
+        the background and calls more. A calibrated regional null (the replicates with N1's spatial noise of
+        `multiscale.peaks`) is the debt; until then diffuse outbreaks are partly absorbed (yellow fever 2017–18:
+        expected 44 and 76 deaths against 195 and 257 observed, still a 3–4× departure). Diffuse outbreaks of one or two events per place pass a
+        cell-by-cell trim (yellow fever 2017–18: p ≈ 0.01 per cell) and lifted the category's course."""
+        import torch as th
+
+        from . import multiscale
+
+        if not footprints:
+            return np.zeros(obs.shape, bool)
+        E, U, T = obs.shape
+        sp = getattr(self, "_spectrum", None)
+        if sp is None:
+            sp = self._spectrum = multiscale.GraphSpectrum(self.graph[0], U, self.graph[1])
+        Ob = th.as_tensor(obs.transpose(1, 0, 2).reshape(U, E * T), dtype=th.float32)
+        M = th.as_tensor(mu.transpose(1, 0, 2).reshape(U, E * T), dtype=th.float32)
+        V = M + M * M / max(k, 1e-9)
+        from . import control
+
+        out = np.zeros((U, E * T), dtype=bool)
+        for s in sp.scales(footprints):
+            K = sp.kernel(s).cpu()
+            z = multiscale.tail_z(K @ Ob, K @ M, (K * K) @ V)
+            p = th.special.ndtr(-z.double()).numpy()
+            live = (M.numpy() > 0)
+            sel = np.zeros(p.shape, dtype=bool)
+            sel[live] = control.bh(p[live], 0.05)
+            out |= sel
+        # the region-period is missing whole, its cells below their expectation too: keeping only the cells above it
+        # selected the upper half of the region's noise, pulled the background down and let the flags grow round after
+        # round (SIM I: 15,636 then 27,011 cells, 2026-10-07)
+        return out.reshape(U, E, T).transpose(1, 0, 2)
+
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
         else made and stored."""
-        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 2}   # v2: with category courses
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 7}   # v7: cell trimming, structure first, SQUAREM
         key = {**self.key(), "robust": tag}
         arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
         if arrays is not None and meta is not None:

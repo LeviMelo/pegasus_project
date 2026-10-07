@@ -29,7 +29,7 @@ import pyarrow.parquet as pq
 
 from . import config
 
-KINDS = ("residual", "subset", "pattern", "relation", "cohort", "observation", "structural")
+KINDS = ("residual", "subset", "pattern", "relation", "cohort", "observation", "structural", "answer")   # answer: a question's merged methods (`questions`)
 PROSPECTIVE_PURPOSE = {"BP": "expectation", "BPA": "alarm"}      # the tier of each object (`surprise.PURPOSE_TIER`)
 SCALES = ("rate_ratio", "rho", "log_rr", "share_absorbed", "sd")
 

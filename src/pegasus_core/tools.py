@@ -366,6 +366,49 @@ class Session:
         from . import questions
         return questions.ask(self, question, node, q, **kw)
 
+    def survey_questions(self, blocks: list[str] | None = None, questions: tuple[str, ...] | None = None,
+                         q: float = 0.05, log=print) -> list[leads.Lead]:
+        """The pass over every field with events, asking questions instead of running lenses (`questions`): per field
+        and question, the methods' answers (each method at q/k inside the field, merged by overlapping loci); an
+        answer's p is its smallest method p times k (Bonferroni over the methods, valid under any dependence);
+        across fields, Benjamini–Bogomolov per (question, block) family. Each lead names the question, the methods
+        that agree, each one's effect and scale. Retrospective, in the fields' order."""
+        from . import questions as qs
+
+        names = questions or tuple(qs.QUESTIONS)
+        found: dict[str, list] = {}
+        for block in blocks or self._blocks():
+            for f in self.fields(block):
+                for qn in names:
+                    k = len(qs.QUESTIONS[qn].methods)
+                    try:
+                        answers = self.ask(qn, f.node, q=q)
+                    except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
+                        log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
+                        continue
+                    for a in answers:
+                        found.setdefault(f"{qn}|{block}", []).append((f.id, a, min(1.0, a.p * k)))
+                    log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}")
+        families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
+        rejected = control.bogomolov(families, q)
+        admitted = []
+        for fam, mask in rejected.items():
+            qv = control.adjusted(families[fam])
+            for (fid, a, p), keep, qq in zip(found[fam], mask, qv, strict=True):
+                if not keep:
+                    continue
+                best = min(a.findings.values(), key=lambda x: x.p)
+                admitted.append(leads.Lead(
+                    kind="answer", estimand=fam.split("|")[0], tier="B1", fields=[fid],
+                    locus={"places": sorted(a.places), "years": list(a.years)}, effect=float(best.effect),
+                    scale="rate_ratio", interval=None, p=float(p), q=float(qq), family=fam,
+                    null="each method's own (questions.QUESTIONS)", calibrated=True,
+                    provenance={"graph": self.graph, "methods": a.methods,
+                                "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
+                                              for m, x in a.findings.items()}}))
+        self.register.add(admitted)
+        return admitted
+
     def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
                "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
                workers: int | None = None, prospective: int | None = None) -> list[leads.Lead]:
