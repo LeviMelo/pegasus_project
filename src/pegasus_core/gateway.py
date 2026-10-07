@@ -1141,13 +1141,21 @@ def context_sum(name: str, year: int, where: dict[str, str] | None = None) -> pa
     return table
 
 
+def declared_fields() -> dict:
+    """pegasus_data's declared context fields (`curation/fields.yml`): each one's source, unit, years and declarations
+    (``over``, ``icd10``, ``harm``)."""
+    from pegasus_data.fields import declared_fields as declared
+
+    return declared()
+
+
 def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, str]:
     """A context on ``places`` over the window ``years`` (`map_inputs`): a declared field's value over its declared
     denominator (pegasus_data `fields.yml` ``over``: another field, or ``population``, the residents), the mean of its
     years in the window, or of the declared year nearest the window's end when it has none there (a census). ``entry``
     is a field's name, numerators of one denominator summed (``a+b``), or {field, where} for a field whose rows are
     strata (`context_sum`). Returns the values (NaN where a place has none) and a label."""
-    from pegasus_data.fields import _years, declared_fields
+    from pegasus_data.fields import _years
 
     spec_of = declared_fields()
     names = entry["field"].split("+") if isinstance(entry, dict) else entry.split("+")

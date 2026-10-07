@@ -82,9 +82,7 @@ def sources(dataset: str, served: list[tuple[str, str]]) -> list[Source]:
                      if _system(sd.dataset) == _system(ds) and _system(other.dataset) == _system(dataset)
                      and not (sd.group and (sd.where or getattr(sd, "latest", None)))), None)
         out.append(Source("events", ds, ev, col, link))
-    from pegasus_data.fields import declared_fields
-
-    for name, spec in declared_fields().items():
+    for name, spec in gateway.declared_fields().items():
         if spec.get("icd10"):
             out.append(Source("field", name, codes=tuple((str(k), tuple(v)) for k, v in spec["icd10"].items()),
                               harm=tuple(spec.get("harm") or ())))
