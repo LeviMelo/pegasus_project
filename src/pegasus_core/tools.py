@@ -1265,3 +1265,67 @@ def cohort(dataset: str, event: str, link: str, side: str, year: int, draws: int
                 for r, qq in zip(res, qv, strict=True) if qq <= q]
     leads.Register().add(admitted)
     return admitted
+
+
+def disparity(dataset: str, event: str, node: str, years: list[int], races: tuple[str, ...] | None = None,
+              reference: str = "1", graph: str = "contiguity", q: float = 0.05, log=print) -> list[leads.Lead]:
+    """Race disparities of a field (ARCHITECTURE §3.4, §4.2; P15) by indirect standardisation: each race's expectation
+    without place effects (tier B0 of the race's own fit: its national rates by age, sex and period on its slice of
+    the population account, and for recorded race the exposure through the measured confusion, `gateway.population`),
+    so a place's standardised ratio O_j/E_j is the race's rate there against the race's national rate. A place's
+    disparity is its race-j ratio over the ``reference`` race's; given the two races' events there, race j's count is
+    binomial with probability E_j·θ/(E_j·θ + E_ref), θ the national disparity, so the test (two-sided) reports places
+    whose disparity departs from Brazil's, pooled over ``years``. One BH at q over races and places; the leads carry
+    the place's disparity against the national one. Each race's block is fitted where it is not (`update.fit_block`)."""
+    from scipy import stats as st
+
+    from . import update
+
+    races = races or tuple(k for k in gateway.RACE if k != reference)
+    out_rows = []
+    sess = {}
+    for k in (reference, *races):
+        s = Session(dataset, event, years, graph, source={"race": k})
+        block = s.expectations.field(node).block
+        try:
+            s.expectations.model(block)
+        except LookupError:
+            update.fit_block(dataset, event, block, years, graph, source={"race": k}, log=log)
+            s = Session(dataset, event, years, graph, source={"race": k})
+        sess[k] = s.surprise(node, "B0")
+    ref = sess[reference]
+    o_ref, e_ref = ref.y.sum(1), ref.mu.sum(1)
+    test = control.Ledger().register(control.Hypothesis(f"disparity|{dataset}|{node}", "scan", {
+        "model": "indirect standardisation by race, conditional binomial", "reference": reference, "races": races,
+        "years": [years[0], years[-1]]}))
+    for k in races:
+        s = sess[k]
+        if not np.array_equal(np.asarray(s.places), np.asarray(ref.places)):
+            raise ValueError("the race fits read different places")
+        o, e = s.y.sum(1), s.mu.sum(1)
+        theta = (o.sum() / max(e.sum(), 1e-12)) / max(o_ref.sum() / max(e_ref.sum(), 1e-12), 1e-12)
+        n = o + o_ref
+        use = (n > 0) & (e > 0) & (e_ref > 0)
+        p0 = e * theta / (e * theta + e_ref)
+        lower = st.binom.cdf(o, n, np.clip(p0, 1e-12, 1 - 1e-12))
+        upper = st.binom.sf(o - 1, n, np.clip(p0, 1e-12, 1 - 1e-12))
+        pv = np.where(use, np.minimum(1.0, 2 * np.minimum(lower, upper)), 1.0)
+        for i in np.flatnonzero(use):
+            rr = (o[i] / e[i]) / max(o_ref[i] / e_ref[i], 1e-12) if o_ref[i] > 0 else np.inf
+            out_rows.append((k, int(s.places[i]), float(rr), float(theta), float(pv[i]), float(o[i]), float(o_ref[i])))
+    if not out_rows:
+        return []
+    pv = np.array([r[4] for r in out_rows])
+    keep = control.bh(pv, q)
+    qv = control.adjusted(pv)
+    control.Ledger().complete(test, float(pv.min()), None, {"places": len(out_rows), "reported": int(keep.sum())})
+    field_id = ref.field.id
+    admitted = [leads.Lead(kind="residual", estimand="race_disparity", tier="B0", fields=[field_id],
+                           locus={"places": [u], "years": [years[0], years[-1]], "race": k, "reference": reference},
+                           effect=rr if np.isfinite(rr) else 1e6, scale="rate_ratio", interval=None, p=p, q=float(qq),
+                           family=f"disparity|{field_id}", null="the national disparity (conditional binomial)",
+                           calibrated=False, provenance={"national_disparity": theta, "events": o_k, "events_reference": o_r})
+                for (k, u, rr, theta, p, o_k, o_r), kp, qq in zip(out_rows, keep, qv, strict=True) if kp]
+    leads.Register().add(admitted)
+    log(f"disparity {field_id}: {len(admitted)} places depart from the national disparity, of {len(out_rows)}")
+    return admitted

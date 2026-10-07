@@ -268,6 +268,21 @@ def cohort(dataset: str, event: str, link: str, side: str, year: int, draws: int
 
 
 @app.command()
+def disparity(dataset: str, event: str, node: str, years: str = Years, reference: str = "1", q: float = 0.05) -> None:
+    """Race disparities of a field: places whose disparity departs from the national one (indirect standardisation)."""
+    from . import gateway, tools
+
+    names = gateway.municipality_names()
+    found = tools.disparity(dataset, event, node, _years(years), reference=reference, q=q, log=console.print)
+    t = Table("race", "place", "disparity", "national", "q")
+    for x in sorted(found, key=lambda x: x.q)[:40]:
+        m = names.get(str(x.locus["places"][0]))
+        t.add_row(gateway.RACE.get(x.locus["race"], x.locus["race"]), f"{m['name']}/{m['uf_sigla']}" if m else
+                  str(x.locus["places"][0]), f"{x.effect:.2f}", f"{x.provenance['national_disparity']:.2f}", f"{x.q:.1e}")
+    console.print(t)
+
+
+@app.command()
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod

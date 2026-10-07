@@ -35,6 +35,7 @@ class System:
     measures: list[str] | str | None = None     # "all", or columns of `fields.declared`: the measurement fields read
     compositions: list[str] | str | None = None  # "all", or category columns of `fields.declared`: their share fields
     links: list[str] | str | None = None         # "all", or `fields.declared_links` columns: person-level fields
+    disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
 @dataclass
@@ -59,7 +60,7 @@ class Plan:
             a, b = years.split("-")
             years = list(range(int(a), int(b) + 1))
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
-                          s.get("compositions"), s.get("links")) for s in raw.get("systems") or ()]
+                          s.get("compositions"), s.get("links"), s.get("disparities")) for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
@@ -172,6 +173,15 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"questions {sys_.dataset} {column}"] = len(leads)
             else:
                 out[f"questions {sys_.dataset} {column}"] = "done on these versions"
+    for sys_ in plan.systems:
+        for node in sys_.disparities or []:
+            key = _key("disparity", dataset=sys_.dataset, event=sys_.event, node=node, years=plan.years)
+            if force or not _done(key):
+                found = tools.disparity(sys_.dataset, sys_.event, node, plan.years, graph=plan.graph, log=log)
+                _mark(key, {"leads": len(found)})
+                out[f"disparity {sys_.dataset} {node}"] = len(found)
+            else:
+                out[f"disparity {sys_.dataset} {node}"] = "done on these versions"
     if plan.relations and len(plan.systems) >= 1:
         spec = [(x.dataset, x.event, x.blocks) for x in plan.systems]
         key = _key("relations", plan=spec, years=plan.years)
