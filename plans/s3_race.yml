@@ -1,0 +1,8 @@
+# S3: race disparities of SIM deaths (tools.disparity: each race's B0 expectation on its slice of the population
+# account, recorded race through the measured confusion), kept current by update
+years: 2010-2023
+systems:
+  - {dataset: SIM.DO, event: death, blocks: [XV, XVI, XX], levels: [group], disparities: [O00-O99, P00-P96, X85-Y09]}
+relations: false
+triage: false
+report: reports/s3_race.md
