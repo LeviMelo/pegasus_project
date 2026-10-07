@@ -1,6 +1,6 @@
 # ARCHITECTURE.md: PegaSUS
 
-**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). **Revision 2, 2026-10-06 (ADR-0023),** on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It replaces how the model is solved (§5), how departures and relations are read (§7), how methods are validated (§8.4, §10), and the roadmap (§12). The model itself (§4) and the boundary with pegasus_data (§2) stand. The design drafts are in `docs/discussion/2026-10-04-design-v0.2.md`. When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
+**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). **Revision 2, 2026-10-06 (ADR-0023),** on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It replaces how the model is solved (§5), how departures and relations are read (§7), how methods are validated (§8.4, §10), and the roadmap (§12). The model itself (§4) and the boundary with pegasus_data (§2) stand. **Revision 3, 2026-10-06 (ADR-0029),** after the author's critique of that day's work (`docs/discussion/2026-10-06-course-correction.md`): PegaSUS is **six stages, one computation each** (§1.1); the noise structure belongs to the expectation (§6), detection is departure models (§7.0), relations are one joint model (§7.5), validity is statistical in stages B–D and epidemiological only in stage E (§10), and the roadmap is re-cut to the stages (§12). The design drafts are in `docs/discussion/2026-10-04-design-v0.2.md`. When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
 
 **Maturity.** Each component is at one of three levels, stated where it is described and summarised in §13:
 - **v0**, a first version that runs;
@@ -13,7 +13,7 @@ Section map:
 
 | § | contents |
 |---|---|
-| 1 | purpose and principles |
+| 1 | purpose and principles; **§1.1 the six stages** |
 | 2 | the repositories and their boundary |
 | 3 | objects |
 | 4 | the monolith: model |
@@ -63,8 +63,30 @@ Leads are statistical objects, not conclusions.
 | P13 | **Structure is exploited, and speed is budgeted.** Computation follows the model's sparsity: an arrowhead Hessian, GMRF precisions, factorised totals (§5.3). Every component has a time budget, and a benchmark is run on every change to the solver (§5.8). |
 | P14 | **Recording is measured, never used to dissolve.** Recording processes are model terms where the data identify them, and graded explanations where they do not. A lead is re-scoped to its conserved level, never removed by an untested explanation. A changed rule is re-applied to the stored state (§8.6). |
 | P15 | **Race is an axis, not an option.** Where the population carries race, the lattice does. Recorded race is read through its measured misclassification and missingness, never taken as the declared race, and never dropped because it is hard. |
+| P16 | **One stage, one computation** (revision 3, §1.1). Stages B–D (expectation, departures, relations) make statistical claims only; whether a departure is an event in the world is stage E's question, and nowhere earlier. A mis-stated null is a defect of the expectation's noise model and is fixed there, measured per field, never with a threshold per data system. A method is general: it carries no logic specific to one system or field. |
 
 ---
+
+
+### 1.1 The six stages (revision 3)
+
+PegaSUS is a pipeline of six stages. Each answers one question with one kind of computation and is judged by one kind of validity. Every object in the code belongs to one stage. An object that fuses two is a defect (P16).
+
+| stage | question | computation | judged by | output | sections |
+|---|---|---|---|---|---|
+| **A. Data and meaning** (pegasus_data) | what was recorded, for whom, under which code? | reading, decoding, populations | correct meaning | counts by place × period × age–sex × code; populations | §2, §3 |
+| **B. Expectation** (the monolith) | what is expected if nothing unusual happens, and how does its noise behave? | a model of every count: its mean, its dispersion, **and the dependence of its noise over periods, places and causes**, measured per field | statistical: calibration of the predictive (PIT, held-out likelihood, SBC) | each field's joint predictive | §4, §5, §6 |
+| **C. Departures** | is there a departure of a declared shape (cell excess, step, trend, cluster, group interaction), measured against a declared reference, and how large? | **departure terms in the model**, read through their posterior; reported where P(effect > the minimum relevant effect) is high, the expected false-discovery proportion held at q | statistical: on worlds from B with and without planted departures (the grid), false discoveries at q and power measured | statistical leads: shape, support, reference, effect with interval | §7.0–§7.4, §8.1–§8.2, §8.4 |
+| **D. Relations** | which fields move together, and which leads which? | **one joint model of all fields' departures**: shared latent space–time factors and sparse lagged dependence among them; a pairwise lag test only confirms a link the joint model proposes or that was declared | statistical: recovery of planted relations; null worlds | relation leads: fields, shared factors, lags, intervals | §7.5, §7.6 |
+| **E. Interpretation** | is a statistical lead an event in the world, an artefact of recording, or already known? | recording terms and graded explanations (P14), replication on independent units, corroboration by independent systems, documented events | **epidemiological**, not statistical | a lead's class, replication tier, corroboration | §8.3, §8.6, §10.1 |
+| **F. Use** | what does a person read first? | ranking by effect, certainty and relevance; the register, reports, serving, surveillance | usefulness | the reading list | §9 |
+
+**What each stage may not do:**
+- **B** never contains a departure term or a reference built to look for one. B2's per-place trend is a reference of stage C, not part of the expectation.
+- **C** never builds its own null. It reads B's predictive, so a stage-C false lead is a B defect or a C defect, never "the data system's".
+- **D** never tests pairs as its search.
+- **A threshold** is never the answer to a modelling problem (P11), and relevance never patches a null.
+- **E** never removes a statistical lead except by a tested explanation (P14).
 
 ## 2. Repositories and boundary
 
@@ -517,6 +539,8 @@ The measurements, the design of every fast path and the order of work are in `do
 
 ### 6.1 Tiers
 
+**Revision 3 (ADR-0029).** The expectation of stage B is one object: the fit's joint predictive, with its noise structure (N1, §12): dispersion and the dependence of a place's deviations across periods, learned per field. The tiers below are **references** of stage C: each departure estimand declares the reference it is measured against (Brazil, the region, the place's own past), and no reference is part of the expectation. Measured on 2026-10-06, B2 as a detection reference took in what it was testing: a place step ×3 was found 0.11 of the time against B2 and 0.95 against B1. The residuals' lag-1 autocorrelation within places, which the predictive below ignores, is 0.03 on stroke deaths, 0.23 on ill-defined causes, 0.27 on births and 0.39 on SIH pneumonia admissions (`data/probes/residual_autocorr.json`).
+
 **A tier is the monolith with a declared subset of terms.**
 
 | tier | terms | what remains surprising |
@@ -589,6 +613,8 @@ flags_c                          denominator tension | unreliable recording (peg
 Every scan is a **ledger entry** (§9.2) with a declared estimand, tier, family and null.
 
 ### 7.0 Two layers: departure models infer, scans search (revision 2)
+
+**Revision 3 (ADR-0029): this section is stage C, and its departure models are the next work (O6, after N1).** The v0 lenses of §7.1 are screens: they propose supports and make no claims. Their 2026-10-06 refinements (ADR-0026's per-system θ0, ADR-0027's past-course baselines) answered a stage-B defect inside stage C, and are superseded by the noise term (N1) and the departure models as each lands. The past course of ADR-0027 survives as the step model's declared reference.
 
 **Detection has two layers (P12):**
 - **Departure models (§7.0, v1, to build) are the inference.** A lead is a posterior statement about a model term.
@@ -688,6 +714,8 @@ minimise Σ_c [ μ_c m_c − y_c log(μ_c m_c) ]  over  m_c = Σ_r λ_r a_r(u) b
 **Each component is a multiplicative departure shared by places, times and fields.** A coding substitution appears as a component positive on one code and a matching one negative on another, in the same places and times.
 
 ### 7.5 Pairs (screens) and relation models
+
+**Revision 3 (ADR-0029): relations are stage D, one joint model.** All fields' departures from their expectations are modelled together: a low-rank set of latent space–time factors shared across fields (the cross-block generalisation of the place × time interaction ψωτ, and the top model of §5.6), and sparse lagged dependence among the factors. Its cost grows with the number of factors, not with the square of the number of fields. The pairwise screens below and `relations.distributed_lag` (the confirmation of one link, declared or proposed by the joint model) are not the search. A design note precedes the build (O7).
 
 **Fields X and Y are compared at their common support** (the finest support both lift to by their laws).
 
@@ -829,6 +857,8 @@ A lead is selected on data and confirmed only by **units that took no part in th
 
 ### 8.4 Weighting by power, and minimum effects (revision 2)
 
+**Revision 3 (ADR-0029).** The minimum relevant effect is a statement of relevance and nothing else: in a departure model it is the region of practical equivalence of P(effect > minimum). A per-system threshold that compensates a mis-stated null (ADR-0026's table in `lenses.MINIMUM_EFFECT_BY`) is withdrawn when N1 lands, and the volume of leads is a ranking question of stage F.
+
 **No field is excluded for low power (P9).**
 - **v0 (ADR-0022):** a field entered a lens only where the lens's power at a reference effect reached 0.5.
 - **The objection:** FDR already controls the false discoveries of weak hypotheses. Their only cost is a dilution of the others' power, and weighting answers that.
@@ -943,6 +973,10 @@ Lead
 ---
 
 ## 10. Validation: characterisation, not permission (revision 2)
+
+**Revision 3 (ADR-0029): two kinds of validation, never mixed.**
+- **Statistical characterisation** (stages B–D): the predictive's calibration and SBC (§10.6), the grid of planted signals in refitted worlds (§10.3), and null worlds and negatives (§10.2, §10.4). It measures whether a method's stated certainty holds and how much it sees.
+- **Epidemiological checks** (stage E): documented events (§10.1), replication and corroboration. They test interpretation, never tune a statistical constant.
 
 ### 10.0 What validation is for (P9)
 
@@ -1141,29 +1175,27 @@ A solver change is measured on the benchmark before it is adopted.
 
 ---
 
-## 12. Roadmap: the overhaul (revision 2)
+## 12. Roadmap: the overhaul, re-cut to the stages (revision 3)
 
-**Phases 0–3 of 2026-10-04** (harness, monolith, lenses, pairs, replication, maps, institutions' first stage) were built as v0 by 2026-10-05. Phase 4, prospective surveillance (ADR-0004), stands as the goal (O10).
+**Phases 0–3 of 2026-10-04** were built as v0 by 2026-10-05. **Revision 2** (ADR-0023) ordered the overhaul O0–O10; **revision 3** (ADR-0029) re-cuts it to the six stages of §1.1 and changes the order. Details, acceptance and the running state are in `docs/plans/2026-10-06-overhaul.md`.
 
-**The overhaul's work packages** run in this order: speed first, because every later measurement waits on it. Each package ends with its measurement, its evaluation entry and its decision. Details, acceptance and the running state are in `docs/plans/2026-10-06-overhaul.md`.
+| package | stage | builds | accepted when | state (2026-10-06) |
+|---|---|---|---|---|
+| **O0** | — | revisions 2 and 3 | written | done (ADR-0023, ADR-0029) |
+| **O1, solver** | B | the arrowhead Hessian, sparse Cholesky, LAML, the benchmark | v0 optimum reached; budgets met or revised | done |
+| **O2, settle** | B | the interaction's rank, the tree prior, κ and SUS | each with its held-out measurement | done (ADR-0025); race with O3, SINAN wave 1 open |
+| **O4, ICD** | A–B | the tree, admissibility, carriers, list and conserved fields | one chapter refitted, held out | mostly done (ADR-0024) |
+| **N1, noise** | B | a residual place × period term whose correlation over periods is learned per field (marginal likelihood), so the predictive states each field's own serial dependence | the negatives that failed by serial correlation pass with **no per-system constant**, and held-out likelihood does not fall | **next** |
+| **N2, uncertainty** | B | marginal estimates of the levels (nested Laplace, or importance-corrected draws), so posteriors of totals and of the intercept calibrate (SBC) | SBC's intercept and totals uniform on a sparse and a dense block | after N1 |
+| **O6, departures** | C | departure models per estimand (§7.0): cell excess (two-group model), step (Bayesian change point on the past-course reference), trend (BaySTDetect), cluster (BYM2 exceedance), group interaction; the Bayesian FDR of §8.2; relevance as P(effect > minimum) | each matches or beats its v0 lens on the grid at equal FDR | after N1; the lenses are its screens |
+| **O5, characterise** | B–D checks | the grid, null worlds and negatives, SBC: the statistical bench for N1, O6 and O7 | every stage-B–D method has its power surface and null record | grid built; gate retired (ADR-0028); weights across fields, seasonal and lagged plants open |
+| **O7, relations** | D | the joint model of all fields' departures (shared latent space–time factors, sparse lagged dependence; absorbs the top model of §5.6); the pairwise lag test as confirmation | planted relations recovered at controlled false discoveries; the declared arbovirus → microcephaly link confirmed | **design note first**; `relations.distributed_lag` built as the confirmation tool |
+| **O8, interpretation** | E | recording terms and coding regimes, graded re-triage, rule versions, replication, corroboration, documented events as held-out checks | no lead removed by an untested explanation; every lead read at its conserved level | rule versions built; the rest open |
+| **O3, race and ages** | A–B | race as an axis of G, the recording model, single child ages | births, infant deaths and one adult chapter fitted with race | open, in parallel |
+| **O9, breadth** | A–B | more systems (SINAN families, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link), each fitted with N1's noise term and no per-system tuning | each calibrated and characterised | open, in parallel |
+| **O10, use and surveillance** | F | ranking, reports, the register, phase 4's prospective alarms | timeliness and false alarms against the benchmark | last |
 
-| package | builds | accepted when |
-|---|---|---|
-| **O0** | this revision: review, principles P9 and P11–P15, the ICD ontology (§3.3) and race (§3.4), §5, §7.0, §7.5 relation models, §8.4, §8.6, §10, this roadmap (ADR-0023) | written (2026-10-06) |
-| **O1, solver** | `solver`: the assembled arrowhead Hessian (checked against autodiff), elimination, sparse Cholesky, Schur complement, constraints; BYM2; LAML in log τ; selected inversion; the benchmark (`bench`, O1) | the v0 optimum is reached on the four benchmark blocks, and the §5.8 budgets are met or revised with the reason |
-| **O2, settle** | refit the fitted blocks on the new solver; decide what waited on slow fits: the interaction's rank (ADR-0021), the tree prior (horseshoe), the SUS exposure and race groups (ADR-0020), the SINAN wave-1 families | each decision has its held-out measurement |
-| **O3, race and ages** | pegasus_data: the 2000 undeclared imputed from the census microdata with household context (totals untouched), the within-band prior from 2010's cohorts, the sample-to-full-count correction measured on 2010, the 1991 race, single ages 0–19 validated; PegaSUS: G = 33 ages × 2 sexes × 5 races, the recording model of §4.1, the race terms of §4.2, the race-disparity departure | births, infant deaths and one adult chapter fitted with race and single child ages; recorded against expected by race calibrated at B1; disparities with intervals checked against published rates (held out) |
-| **O4, ICD ontology** | pegasus_data: the ontology product of §3.3 (attributes from the DATASUS release, age plausibility, ICD-9 and its bridge, the lists to add, external-cause axes, the relation graph); PegaSUS: list effects θ_L, structural zeros, intent and mechanism fields, conserved levels and corroboration rules read from the relations | the ontology served through `gateway`; one chapter refitted with lists and zeros, held-out deviance against the fit without them |
-| **O5, characterise** | the designed grid of planted signals (§10.3) and null worlds over real fields of every system; v0 constants re-made on the grid; IHW weights (§8.4); the gate retired in code, the method record on every lead | every v0 lens has its power surface and null-world FDR; no documented event tunes anything |
-| **O6, departures** | departure models (§7.0): unusual trend (BaySTDetect), cell excess (local fdr / shrinkage), step, cluster exceedance, group interaction; Bayesian FDR | each beats or matches its v0 lens on the grid at equal FDR, else the lens stays the inference and the reason is recorded |
-| **O7, relations** | the distributed-lag term in the monolith; the shared-component model; the endemic–epidemic term for infectious families; negative controls | the arbovirus → microcephaly lag recovered (declared before the run), cold → respiratory admissions estimated with its interval, null worlds held |
-| **O8, recording** | conserved-level fields as standard; the graded re-triage of the stored register (running, 2026-10-06); rule versions on verdicts; the coding-regime term | no lead removed by an untested explanation; every lead read at its conserved level |
-| **O9, breadth** | on the fast stack: SINAN families beyond wave 1, SIH marks (§4.4), SIA/APAC, CIHA, the SIH↔SIM link's products | each new system calibrated at B1 and surveyed |
-| **O10, top model and surveillance** | the top model and the model-choice loop (§5.6); phase 4 (ADR-0004), with alarm baselines benchmarked against Farrington/Noufaily and published alerts (InfoDengue) | timeliness, false alarms and hits against the benchmark |
-
-**What pegasus_data must supply** for each package is requested in `docs/handoffs/`, as before (§2, rule 2).
-
----
+**Order:** N1 → N2 → O6 (cell excess, step, trend, cluster, group) → O7 (design, then build) → O8, with O3 and O9 alongside → O10. The lead register is regenerated after O6, from departure models, not from the v0 lenses (the 2026-10-06 v1 survey of 41,700 leads is kept only as the lenses' baseline).
 
 ## 13. Departures and maturity
 

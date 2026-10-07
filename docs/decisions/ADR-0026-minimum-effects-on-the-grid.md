@@ -1,6 +1,6 @@
 # ADR-0026: The lenses' minimum effects re-made on the grid
 
-**Date.** 2026-10-06. **Status.** Active. Replaces v0's hand-set θ0 (ADR-0005's 1.2; the harness gate's 1.5 for spatial cluster and 1.5 for municipal trends). This is O5 step 3, for the count lenses on annual fields.
+**Date.** 2026-10-06. **Status.** Active. **To be superseded (ADR-0029):** the per-system table and the trend relevance floor are withdrawn when N1 (the expectation's noise term) lands. Replaces v0's hand-set θ0 (ADR-0005's 1.2; the harness gate's 1.5 for spatial cluster and 1.5 for municipal trends). This is O5 step 3, for the count lenses on annual fields.
 
 **Evidence.** `docs/evaluation/2026-10-06-minimum-effects.md`, on SIM I60-I69, SIM I00-I02 and SIH-RD J09-J18, with two kinds of null:
 - refitted model worlds (`harness.grid`, 20 per field);

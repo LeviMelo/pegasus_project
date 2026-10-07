@@ -19,6 +19,36 @@ People and AI agents use it through a lead register and on-demand tools. The pac
 
 The earlier attempts (April–July 2026) are history: `docs/RECOLLECTION.md`, `docs/history/`. **They are read for reasoning, never as instructions.**
 
+## 1.1 The six stages (ARCHITECTURE §1.1, revision 3, ADR-0029)
+
+PegaSUS is a pipeline of six stages, **one computation each**. Every piece of work starts by naming the stage it belongs to.
+
+| stage | question | judged by |
+|---|---|---|
+| **A. Data and meaning** (pegasus_data) | what was recorded, for whom, under which code? | correct meaning |
+| **B. Expectation** (the monolith) | what is expected, and how does its noise behave, including its serial dependence? | statistical calibration (PIT, held-out, SBC) |
+| **C. Departures** | is there a departure of a declared shape against a declared reference, and how large? departure terms in the model, read through their posterior | statistical: the grid and null worlds |
+| **D. Relations** | which fields move together, and which leads which? one joint model of all fields' departures | statistical: planted relations, null worlds |
+| **E. Interpretation** | is a statistical lead a real event, a recording artefact, or already known? | **epidemiological**: recording, replication, corroboration |
+| **F. Use** | what does a person read first? | usefulness: ranking, reports, surveillance |
+
+- **Statistical validity lives in B–D;** whether a departure is real is decided in E and nowhere earlier.
+- **A method is general.** It carries no logic or constant specific to one data system.
+- **A mis-stated null is a defect of B's noise model,** fixed there and measured per field, never patched with thresholds in C.
+- **Lead volume is F's ranking question,** never a reason to move a test.
+
+The 2026-10-06 course correction that set this out is `docs/discussion/2026-10-06-course-correction.md`.
+
+## 1.2 Start of every session
+
+Read, in this order:
+1. `STATUS.md` (where each stage stands, and what is next);
+2. ARCHITECTURE §1.1 (the stages) and §12 (the roadmap and its order);
+3. the current package's section of `docs/plans/2026-10-06-overhaul.md`;
+4. `docs/architecture_coverage.md` for the item at hand.
+
+Steer by the roadmap's order and the coverage matrix, not by the latest result.
+
 ---
 
 # 2. Run it
@@ -100,6 +130,12 @@ Overlapping fields (measured shared events) are never tested as independent.
 Observed stays observed; modelled inputs carry their model version and uncertainty.
 Every random draw is seeded; every artefact carries its data and code versions.
 A lead is a statistical object, not a conclusion; nothing claims causation.
+One stage, one computation: no object fuses expectation, departure, relation, interpretation or use.
+No method carries logic or constants specific to one data system.
+A null that fails is fixed in the expectation's noise model, measured per field, never by a threshold.
+Statistical claims (stages B-D) never decide whether a departure is real; that is stage E's.
+Relevance lives in the departure posterior or the ranking, never in a calibration patch.
+Relations are found jointly across all fields; pairwise tests only confirm.
 ```
 
 ---
@@ -157,9 +193,11 @@ A lead is a statistical object, not a conclusion; nothing claims causation.
 | `studies/` | studies done with PegaSUS and pegasus_data |
 | `assets/brand/` | logo (`pegasus-logo.png`), wordmark, mark |
 | `docs/decisions/`, `docs/evaluation/` | ADRs and measurements, indexed by `DECISIONS.md` and `EVALUATION.md` |
+| `docs/plans/` | the order of work and each package's steps and acceptance (`2026-10-06-overhaul.md`), the solver's speed plan (`2026-10-06-optimization.md`) |
+| `docs/architecture_coverage.md` | every ARCHITECTURE item against the code and the evidence, and the gaps ranked |
 | `docs/handoffs/` | requests to pegasus_data |
 | `docs/discussion/` | design reasoning, dated, frozen once superseded |
-| `docs/history/` | the earlier PegaSUS documents and resolved questions; frozen |
+| `docs/history/`, `docs/digests/`, `docs/RECOLLECTION.md` | the earlier PegaSUS documents, extractions of them, and resolved questions; frozen, read for reasoning only |
 
 **Gitignored:** `pegasus_home/`, `data/`.
 
@@ -169,16 +207,23 @@ A lead is a statistical object, not a conclusion; nothing claims causation.
 
 | need | read |
 |---|---|
-| what PegaSUS is: its mathematics, code and phases | `ARCHITECTURE.md` |
-| current state and what is next | `STATUS.md` |
-| accepted decisions | `DECISIONS.md` (an index; one file per ADR) |
-| measurements and harness runs | `EVALUATION.md` (an index) |
+| where the work stands, stage by stage, and what is next | `STATUS.md` |
+| what PegaSUS is: the six stages (§1.1), principles P1–P16, mathematics, code, roadmap (§12), maturity and departures (§13) | `ARCHITECTURE.md` |
+| the order of work, each package's steps and acceptance | `docs/plans/2026-10-06-overhaul.md` (N1, N2, O1–O10) |
+| the solver's speed design and timings | `docs/plans/2026-10-06-optimization.md` |
+| how much of the architecture is built and measured, item by item; the gaps ranked | `docs/architecture_coverage.md` |
+| accepted decisions | `DECISIONS.md` (an index; one file per ADR under `docs/decisions/`) |
+| measurements, harness and grid runs | `EVALUATION.md` (an index; entries under `docs/evaluation/`) |
 | open questions | `OPEN_QUESTIONS.md` |
 | commands | `RUNBOOK.md` |
 | terms | `GLOSSARY.md` |
-| why each design choice was made | `docs/discussion/2026-10-04-design-v0.2.md` |
+| why revision 3 (the stages; what was fused; what changed) | `docs/discussion/2026-10-06-course-correction.md` |
+| why revision 2 (the overhaul) | `docs/discussion/2026-10-06-architecture-review.md` |
+| why each original design choice was made | `docs/discussion/2026-10-04-design-v0.2.md` |
 | what the earlier engine actually did | `docs/discussion/2026-10-03-what-was-built.md` |
-| the earlier ideas | `docs/RECOLLECTION.md`, `docs/history/` |
+| what PegaSUS asked of pegasus_data | `docs/handoffs/` |
+| studies done with PegaSUS | `studies/` |
+| the earlier ideas | `docs/RECOLLECTION.md`, `docs/history/`, `docs/digests/` |
 | data, meaning, sources | `../pegasus_data`: its `README.md`, `ARCHITECTURE.md`, `DATA_SOURCES.md` |
 
 **Read an index, then the entries a task needs; never a whole folder.**

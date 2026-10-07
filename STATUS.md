@@ -1,39 +1,31 @@
 # Status
 
-**2026-10-06. Development is paused for ARCHITECTURE revision 2** (ADR-0023), on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It resumes with work package O1 (the structured solver) of `docs/plans/2026-10-06-overhaul.md`. What follows describes the v0 engine that the revision builds on.
+**2026-10-06, evening: ARCHITECTURE revision 3** (ADR-0029). PegaSUS is six stages, one computation each (ARCHITECTURE §1.1):
+- A data and meaning;
+- B expectation, with its noise structure;
+- C departures;
+- D relations;
+- E interpretation;
+- F use.
 
-**2026-10-04.** Every module of ARCHITECTURE §11.1 existed. The first block (ICD chapter IX, SIM 2010–2023) was fitted and read end to end: surprises at B0, B1 and B2, lenses, pairs (evaluation 2026-10-04).
+Stages B–D make statistical claims only; E alone is epidemiological. The next work is **N1**, the expectation's noise structure, then N2 → O6 → O7 → O8 (ARCHITECTURE §12; `docs/plans/2026-10-06-overhaul.md`). The review behind it is `docs/discussion/2026-10-06-course-correction.md`.
 
-**Coverage of the architecture** (2026-10-05): [docs/architecture_coverage.md](docs/architecture_coverage.md) maps every ARCHITECTURE item to built / measured / partial / not built / superseded, with the data and scan coverage and the ten gaps that matter most. It reads the code and the evaluations, not this file; re-run it when a status changes.
+**Where each stage stands:**
 
-**Built:**
-- **The data path:**
-  - `gateway`: population, event counts, structures, graphs, regions, overlap; it reconciles exactly with the official SIM totals;
-  - `store`, `config`.
-- **The model:**
-  - `structures`, `graphs`;
-  - `monolith`: the factorised likelihood, Fellner–Schall, φ by exact ML;
-  - `fields`: registry, admission, overlap, lifting.
-- **Reading the model:**
-  - `surprise`: tiers B0, B1 and B2, randomised PIT, calibration, place-year φ;
-  - `scans`: the lenses, subset scanning with a Gumbel null, pairs (E_b, E_b|Z with MSR on the normalised graph, E_w with AR(1) n_eff), CP-APR patterns, explaining away, Shapley decomposition, cohort scans.
-- **Inference and use:**
-  - `control`: the ledger, BH/BY/Simes, Benjamini–Bogomolov, TreeBH, LOND, splits, replication tiers;
-  - `leads`;
-  - `harness`: positives, planted signals and power curves, NB surrogates, MSR and shift negatives, the gate;
-  - `tools` (Session, survey, confirm);
-  - `cli` (`pegasus-core`).
-- **Known departures** are listed in ARCHITECTURE §13.
+| stage | state | what is next |
+|---|---|---|
+| **A. Data** (pegasus_data) | SIM, SIH, SINASC, SINAN served. ICD structure, admissibility, the ICD-9 bridge and code lists are in pegasus_data | breadth (O9) |
+| **B. Expectation** | the solver is v1 for every model (exact Newton, LAML; IX 32 s, XX 107 s); ICD carriers and admissibility (ADR-0024); O2 settled (ADR-0025); monthly grain, including code lists | **N1:** the predictive ignores serial correlation (lag-1 within places: 0.03 stroke, 0.23 ill-defined, 0.27 births, 0.39 SIH pneumonia). **N2:** Laplace draws miscalibrate the intercept and count sums (SBC) |
+| **C. Departures** | v0 lenses only, now screens. Their 2026-10-06 settings (ADR-0026 θ0, ADR-0027 baselines, weighted outbreak) are interim. Held-out sizing (`Session.held_out`) and the absorption finding stand | **O6:** departure models, after N1 |
+| **D. Relations** | `relations.distributed_lag` (confirmation of one link; planted curves recovered, null windows 1/100); `pegasus-core relation`; the arbovirus → microcephaly protocol declared | **O7:** the joint model's design note |
+| **E. Interpretation** | triage with rule versions; replication tiers; the facility layer for SIH | O8 |
+| **F. Use** | the register with method records (ADR-0028); the v0 register (33,228 leads, pre-refit) and the first v1 survey (41,700 leads, the lenses' baseline) are not reading lists | regenerated after O6 |
 
-**Fitted (contiguity, v0 solver):**
-- **SIM:** 19 chapters (I–XVIII, XX), XVII refitted under the `hybrid` exposure on 2026-10-06.
-- **SIH-RD:** 20 chapters, annual. The fits on ≤ 2019 for replication are running.
-- **SINASC:** births; anomalies (XVII, from CODANOMAL); birth weight (mark model).
-- **SINAN:** DENG and LEPT; wave 1 (eleven families) being fitted.
+**The bench** (O5, statistical characterisation of stages B–D): the grid of planted signals in refitted worlds (`harness.grid`, `pegasus-core grid`), run on SIM dense and sparse, SIH, SINASC, SINAN and monthly dengue; null worlds and negatives; SBC (`scripts/sbc.py`).
 
-**The first lead examined:** São Borja (RS), acute MI ×2 in 2018 against flat neighbours (evaluation 2026-10-04, SINASC entry).
+**Coverage of the architecture:** [docs/architecture_coverage.md](docs/architecture_coverage.md), item by item.
 
-**pegasus_data is developed from this session too** (since 2026-10-04): branch `pegasus-core-fixes` (ICD-10 COVID categories, border lengths, `logmoments`, pegasus_data's ADR on GBD).
+**pegasus_data is developed from this session too:** branch `pegasus-core-fixes`.
 
 **Architecture learned from results** (each row: what a measurement showed, and where it now lives).
 
@@ -66,21 +58,23 @@
 | SBC on SIM VII (sparse) and XIII (dense): the intercept, the large places and the count-scale sums miscalibrate in both: the joint mode puts data-poor place effects at zero and their mass in the intercept, and Laplace draws centred there inherit it | the Laplace draws are not used for count-scale functionals until levels are estimated marginally (nested Laplace or importance correction); production surprises stay mode-centred | OPEN_QUESTIONS 2; SBC evaluation |
 | on SIH, trend divergence finds trends in every time-shifted negative world at any θ0; the rank-1 interaction halves both the real trend leads (1,426 → 636, J09-J18) and the negatives' findings, but not to zero | a SIH trend lead is read net of the interaction, and its remaining place-specific course goes to the facility layer; no threshold calibrates SIH trends | minimum-effects evaluation; ADR-0026 |
 
-**The overhaul (2026-10-06).** The order of work is ARCHITECTURE §12. The detail, acceptance and running jobs are in `docs/plans/2026-10-06-overhaul.md`:
+**The roadmap (revision 3, ARCHITECTURE §12).** The order is N1 → N2 → O6 → O7 → O8, with O3 and O9 alongside, then O10.
 
-| package | what | state |
+| package | stage | state |
 |---|---|---|
-| O0 | the revision: review, principles (P11–P15), the ICD ontology and race (§3.3–3.4), §5, §7.0, §7.5, §8.4, §8.6, §10, §12, §13 (ADR-0021, ADR-0023) | done |
-| O1 | the solver: assembled arrowhead Hessian, sparse Cholesky, Schur, BYM2, LAML, selected inversion, the benchmark (`bench`, O1) | **in progress** (2026-10-06): `solver.py` built and verified on IX (exact Newton, quadratic convergence, 24 units below v0's optimum); strengths by Newton on log τ, safeguarded by the LAML itself (mgcv) and shrunk by their probe noise; **the age–sex profile now centred over both sexes** (a model defect: no component carried the sex level; held-out deviance 2.21828 → 2.21703); a start from IPF (leaf + group × year + group × age–sex), backfitted place deviations and moment-estimated strengths; φ from a binned likelihood; cold IX 59 s, 6 outers (v0 501 s calm), XV 50 s, SIH-RD X monthly 2010–14 119 s; v1 is the default for count blocks; monthly grain verified; `scripts/bench.py`, `heavy.py` threads and GPU slot. the interaction (leaf-specific features, alternating Newton for ψ, τ, ω) and the mark and share models on v1; supernodal factor and solves; every SIM and SIH block refitted under ADR-0024 (pass 3, started 2026-10-06 13:09: SIM 2010–2023, SIH 2010–2023, SIM 2010–2019; `data/refit3_chain.py`), then O2's rank and prior runs on the same defaults (`data/o2b_chain.py`). Open: the rank choice on v1 (IX rank 1 held out −1.6284 against v0's −1.6297; rank 3 running), the 20 s budget (IX 37 s under ADR-0024; small geography carriers pooled, the strengths stop at one LAML unit), the BYM ridge's outers (BYM2 coordinates measured, not adopted), the rank choice across blocks (O2). The NB mean fit is not adopted (OPEN_QUESTIONS 8 resolved). v0 retired; exact Laplace draws; the horseshoe on exact variances. **The lead registers predate the refits** and are regenerated when O5–O6 redesign the lenses (evaluation 2026-10-06, solver v1) |
-| O2 | settle on the fast stack: the interaction's rank, the horseshoe, the SUS exposure and race groups, SINAN wave 1 | **mostly settled** (ADR-0025, 2026-10-06): the interaction is off by default, with its rank chosen per block (IX rank 4 +0.015 per death); the tree prior stays Gaussian; κ and the SUS share stay opt-in. Open: race groups (with O3), SINAN wave 1 on v1 |
-| O3 | race and ages: pegasus_data's tensor fixes (2000 undeclared imputed from microdata, bands, sample vs full count, 1991, single ages 0–19 validated), G = 33 ages × sex × race, the recording model, disparities | |
-| O4 | the ICD ontology: pegasus_data's `icd_ontology` (attributes, age rules, ICD-9 bridge, lists, external-cause axes, relations); subcategory leaves, lists, structural zeros, conserved levels from the relations | **in progress** (2026-10-06, ADR-0024): the nested tree; attributes and external-cause axes in pegasus_data; **admissibility built** (sex by RESTRSEXO and NCHS Table G, Table G's absolute age limits, SIM underlying-cause eligibility; excluded records counted by reason); profiles by block with history and geography by group; chapter XX's intent and mechanism fields. The courses' annual forecast is the damped trend (OPEN_QUESTIONS 9, resolved). pegasus_data serves the ICD-9 → ICD-10 bridge (NCHS 1996; 99.45 % of SIM RS 1995's causes covered). Pre-1996 SIM is of limited importance (author, 2026-10-06): the bridge stays as a mapping, and no ICD-9-era reader is planned. Open: recording-quality fields from the conditional edits and CBPOUCOUTEIS, lists as effects, the relation graph; the refits under ADR-0024 |
-| O5 | characterise: the planted grid, null worlds, constants re-made, IHW weights, the gate retired | **in progress** (2026-10-06): a refit absorbs 9–63 % of a planted departure, so worlds are refitted; `harness.grid` / `pegasus-core grid` built (the v0 gate and its CLI retired); θ0 re-made on three fields (ADR-0026: 1.1 for the cell lenses and trends, spatial cluster 1.5 SIM / 2.0 SIH); weighted BH and Roeder–Wasserman weights in `control`; leads sized against the fit with their locus held out (`Session.held_out`); **the gate retired** (ADR-0028: every field scanned, every lead with its method's record). Open: grids on SINASC and SINAN (running), monthly fields; the weights applied |
-| O6 | departure models | **started** (2026-10-06): the change point reads each place against its own NB level-and-slope course from the years before the window (ADR-0027; place step ×3 found 0.47 against 0.11); the outbreak lens reads B1 as it is (place ×3 0.92 against 0.81 on stroke, 0.73 against 0.55 on SIH); a course level freed to the place-effect prior fails the time negatives (serially correlated residuals). Found: SIH trend and sparse-SIM time negatives fail at every θ0 (misspecification, partly the place × time interaction's) |
-| O7 | relation models: distributed lag, shared component, endemic–epidemic | **started** (2026-10-06): `relations.distributed_lag` (two-stage on the outcome's B1, NB, RW2 by Laplace, a simultaneous band: planted lag curves recovered, null worlds 1/100), `Session.exposure` / `Session.relation`, `pegasus-core relation`. The arbovirus → microcephaly positive is declared (protocol committed before any run) and waits on the monthly code-list reader |
-| O8 | recording: graded re-triage of the stored register (running), rule versions, conserved-level fields, coding regimes | started |
-| O9 | breadth: SINAN, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link | |
-| O10 | top model, model choice, prospective surveillance | |
+| O0 | — | revisions 2 and 3 written (ADR-0023, ADR-0029) |
+| O1 solver | B | done |
+| O2 settle | B | done (ADR-0025); race (with O3) and SINAN wave 1 open |
+| O4 ICD | A–B | mostly done (ADR-0024); lists as effects, recording-quality fields open |
+| **N1 noise structure** | B | **next**: an AR(1) place × period term learned per field; accepted when the failed negatives pass with no per-system constant |
+| N2 marginal uncertainty | B | after N1: nested Laplace or importance-corrected draws until SBC calibrates |
+| O6 departure models | C | after N1: cell excess, step, trend, cluster, group, each against its lens on the grid |
+| O5 bench | B–D checks | grid built, the gate retired (ADR-0028); seasonal and lagged plants, weights across fields open |
+| O7 relations | D | design note first; the distributed-lag confirmation built |
+| O8 interpretation | E | rule versions built; recording terms, replication, corroboration, documented events open |
+| O3 race and ages | A–B | open |
+| O9 breadth | A–B | open |
+| O10 use and surveillance | F | last |
 
 **Carried into the overhaul from the v0 backlog** (the rest is done; its history is in git):
 

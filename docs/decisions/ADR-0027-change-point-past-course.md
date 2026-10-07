@@ -1,6 +1,6 @@
 # ADR-0027: The change point reads each place against its own past course; the outbreak lens reads B1
 
-**Date.** 2026-10-06. **Status.** Active. O6's first departure baselines: the change point and the outbreak estimands.
+**Date.** 2026-10-06. **Status.** Active. **To be superseded (ADR-0029):** the lens settings go with O6's departure models; the past course survives as the step model's reference. O6's first departure baselines: the change point and the outbreak estimands.
 
 **Evidence.** `docs/evaluation/2026-10-06-minimum-effects.md` (tiers and baselines); `data/lens_course.py` → `data/probes/grid/change_point_past_*.json`. The checks, on SIM I60-I69, SIM I00-I02 and SIH-RD J09-J18:
 - model null worlds, 10 per field;

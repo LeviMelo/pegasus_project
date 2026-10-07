@@ -6,6 +6,36 @@
 
 **Found while auditing:** `ARCHITECTURE.md` lost §8.4 (admission, minimum effects, calibrated δ and θ0) and §8.5 (mechanical overlap) in commit 4c0397a (ADR-0015 rewrote §8.3). Thirty-two citations in `ARCHITECTURE.md`, eleven modules and one script, plus three ADRs and four evaluation entries, still point to them (`git show 4c0397a^:ARCHITECTURE.md`, lines 521-558, has the text). `check_docs.py` does not check section references.
 
+## Revision 3 (2026-10-06, ADR-0029): the six stages
+
+ARCHITECTURE §1.1 now lays PegaSUS out as six stages:
+- A data;
+- B expectation;
+- C departures;
+- D relations;
+- E interpretation;
+- F use.
+
+P16 gives each object one stage. Revision 3's items:
+
+| § | item | status |
+|---|---|---|
+| 1.1, P16 | one stage, one computation; statistical validity B–D, epidemiological only E | **P**: written; the code still fuses stages in the tiers, the lenses, θ0 and the harness (`docs/discussion/2026-10-06-course-correction.md` §2) |
+| 6.1, 12 (N1) | the expectation's noise structure: serial correlation of a place's deviations, learned per field | **NB**. Measured: lag-1 residual autocorrelation 0.03–0.39 by field (`data/probes/residual_autocorr.json`) |
+| 5.5, 12 (N2) | marginal uncertainty of the levels | **NB**. SBC shows the defect (E:2026-10-06-sbc) |
+| 7.0 (O6) | departure models as the stage-C inference | **NB**. The lenses are screens; their interim settings (ADR-0026/0027) are to be superseded |
+| 7.5 (O7) | relations as one joint model of all fields' departures | **NB**. `relations.distributed_lag` built as the confirmation tool |
+| 10 | validation split: statistical bench (B–D) and epidemiological checks (E) | **P**: written; the harness module still holds both |
+
+**The gaps, re-ranked by revision 3:**
+1. N1, the noise structure.
+2. N2, marginal uncertainty.
+3. O6, departure models.
+4. O7, the joint relation model.
+5. O8, interpretation.
+6. O3 and O9, race and breadth.
+7. O10, use.
+
 ## Revision 2 (2026-10-06, ADR-0023)
 
 The rows below audit the v1 text; their section numbers still hold, because revision 2 inserted sections instead of renumbering. What the revision changes:
