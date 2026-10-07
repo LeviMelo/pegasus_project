@@ -377,7 +377,9 @@ class Strata:
         pop = con.execute(f"""select u, year, sex, (select max(e) from unnest({edges.tolist()}) t(e)
             where e <= greatest(age, 0))::smallint band, sum(n) n from p group by all""").fetchdf()
         log(f"strata {dataset}.{event} {years[0]}-{years[-1]}: {sum(len(r) for r in rows)} event rows")
-        return cls(pd.concat(rows), pop, edges)
+        out = cls(pd.concat(rows), pop, edges)
+        out.dataset = dataset          # the system whose minimum effects a unit claim is read against (`_delta`)
+        return out
 
     # ---- direct standardisation
     def _mask(self, c3set) -> np.ndarray:
@@ -463,8 +465,10 @@ class Strata:
         return obs, exp
 
 
-def _delta(scale: str, years) -> float:
-    return lenses._trend_delta(types.SimpleNamespace(years=np.asarray(years)), scale)
+def _delta(scale: str, years, dataset: str = "") -> float:
+    """The trend lens's minimum divergence per standardised year for the system ``dataset`` (its calibrated floor)."""
+    field = types.SimpleNamespace(id=f"{dataset}:")
+    return lenses._trend_delta(types.SimpleNamespace(years=np.asarray(years), field=field), scale)
 
 
 def jurisdiction(st: Strata, places, scale: str, c3set, direction: int, years, seed_text: str = "jurisdiction-v1",
@@ -500,7 +504,7 @@ def jurisdiction(st: Strata, places, scale: str, c3set, direction: int, years, s
     if scale == "state":
         group = np.searchsorted(states, state_of)
         Obs, b, se = beta_of(group)
-        d = _delta("state", yrs)
+        d = _delta("state", yrs, getattr(st, "dataset", ""))
         p = explain.slope_p(b, se, direction, d, dof)
         others = np.array([s not in own for s in states]) & (Obs.sum(1) >= 30) & np.isfinite(p)
         hit = others & (p < alpha) & (np.sign(b) == direction)
@@ -516,7 +520,7 @@ def jurisdiction(st: Strata, places, scale: str, c3set, direction: int, years, s
         rng = np.random.default_rng(config.seed(seed_text, *map(int, mine)))
         order = rng.permutation(len(mine))
         a, c = mine[order[: len(mine) // 2]], mine[order[len(mine) // 2:]]
-        d = _delta("region", yrs)
+        d = _delta("region", yrs, getattr(st, "dataset", ""))
         res = {}
         for name, half in (("select", a), ("test", c)):
             group = np.where(np.isin(state_of, half) & np.isin(st.places, places), 0, -1)
@@ -539,7 +543,7 @@ def jurisdiction(st: Strata, places, scale: str, c3set, direction: int, years, s
     group = np.where(np.isin(state_of, st_of) & ~np.isin(st.places, places), 0, -1)
     _, b, se = beta_of(group, 1)
     _, bm, _ = beta_of(np.where(np.isin(st.places, places), 0, -1), 1)
-    p = float(explain.slope_p(b, se, direction, _delta("municipality", yrs), dof)[0])
+    p = float(explain.slope_p(b, se, direction, _delta("municipality", yrs, getattr(st, "dataset", "")), dof)[0])
     carried = bool(p < alpha and direction * b[0] >= 0.5 * direction * bm[0])
     return {"unit": "municipality", "scope": "state" if carried else "municipality", "ok": not carried, "p_state_rest": p,
             "state_rest_beta": float(b[0]), "beta": float(bm[0])}
@@ -558,7 +562,7 @@ def conserved_level(st: Strata, places, scale: str, node_set, codes, name: str, 
     Obs, E = (a[ok_years] for a in st.series(places, union))
     b, se = explain.loglinear(Obs, E, yrs)
     d = int(np.sign(b[0])) or 1
-    p = float(explain.slope_p(b, se, d, _delta(scale, yrs), len(yrs) - 2)[0])
+    p = float(explain.slope_p(b, se, d, _delta(scale, yrs, getattr(st, "dataset", "")), len(yrs) - 2)[0])
     span = (yrs.max() - yrs.min()) / yrs.std()
     node_o = st.series(places, list(node_set))[0][ok_years].sum()
     out = {"level": name, "categories": len(union), "node_share_of_deaths": float(node_o / max(Obs.sum(), 1.0)), "beta": float(b[0]), "se": float(se[0]), "direction": d, "p": p,
@@ -624,7 +628,7 @@ def audit(st: Strata, places, node: str, scale: str, beta_claim: float, directio
     out: dict[str, Any] = {"node": node, "scale": scale, "years": [int(yrs[0]), int(yrs[-1])]}
     ok_years = np.isin(st.years, yrs)
     Obs, E = (a[ok_years] for a in st.series(places, node_set))
-    delta = _delta(scale, yrs)
+    delta = _delta(scale, yrs, getattr(st, "dataset", ""))
     b, se = explain.loglinear(Obs, E, yrs)
     p = float(explain.slope_p(b, se, direction, delta, len(yrs) - 2)[0])
     out["national"] = {"beta": float(b[0]), "se": float(se[0]), "p": p, "claim_beta": float(beta_claim),
