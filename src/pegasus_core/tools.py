@@ -46,13 +46,13 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"cell_excess": "B1", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
 PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
-SCALE = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
+SCALE = {"cell_excess": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
 
@@ -335,6 +335,12 @@ class Session:
             return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
                                           **{"phi": phi, **kw})
         s = self.surprise(node, tier, train_last)
+        if lens == "cell_excess":                     # a departure model (stage C, O6)
+            from . import departures
+            return departures.cell_excess(s, self.ledger, **kw)
+        if lens == "step":                     # the step departure model (stage C, O6)
+            from . import departures
+            return departures.step(s, self.ledger, **kw)
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)

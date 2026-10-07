@@ -214,7 +214,7 @@ def recovery(found: set, documented: set, weight: dict | None = None) -> dict[st
 def surrogate(s: surprise.Surprise, seed_parts: tuple) -> surprise.Surprise:
     """The same field with y ~ NB(μ, φ): a world where the model is true."""
     rng = np.random.default_rng(config.seed(*seed_parts))
-    return with_counts(s, subset.replicate(s.mu, s.phi, rng), seed_parts)
+    return with_counts(s, surprise.replicate_correlated(s.mu, s.phi, s.noise, rng), seed_parts)
 
 
 def with_counts(s: surprise.Surprise, y: np.ndarray, seed_parts: tuple) -> surprise.Surprise:
@@ -234,7 +234,7 @@ def with_counts(s: surprise.Surprise, y: np.ndarray, seed_parts: tuple) -> surpr
         extras = {**s.extras, "alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1],
                   "tau": tau, "offset": s.mu}     # the trends are departures from the generating mean
     return surprise.Surprise(s.field, s.tier, s.places, s.years, y, s.mu, s.phi, u, z, s.w, s.flags,
-                             s.calibration, extras)
+                             s.calibration, extras, noise=s.noise)
 
 
 DELTA_GRID = (0.0, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1)
@@ -464,7 +464,7 @@ GRID_SHAPES = ("spike", "step", "trend", "group")
 GRID_THETAS = (1.1, 1.2, 1.5, 2.0, 3.0)
 GRID_LOAD = 0.05     # a world's planted excess in any period, at most this share of the field's expected events then (beyond its first plant)
 GRID_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence", "group_disparity")
-MINIMUM_EFFECT_ARG = {"outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
+MINIMUM_EFFECT_ARG = {"cell_excess": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
                       "spatial_cluster": "rate_ratio", "trend_divergence": "ratio", "group_disparity": "sd"}
 
 
@@ -571,10 +571,14 @@ def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarra
     return plants
 
 
-def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.Generator) -> Any:
+def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.Generator,
+               noise: surprise.Noise | None = None, phi_field: np.ndarray | None = None) -> Any:
     """The block's counts drawn from its fit, y ~ NB(μ', φ) cell by cell (leaf × place × period × age–sex), where μ'
     is the fit's mean with the plants' multipliers on the field's ``leaves``. The background is the model's own
-    world, so what a lens finds outside the plants is a false lead."""
+    world, so what a lens finds outside the plants is a false lead. With the field's ``noise`` structure (N1) and its
+    place × period dispersion ``phi_field``, the field's own leaves are drawn as Poisson under one lognormal frailty per
+    (place, period), log-variance κ·log(1 + 1/φ) and AR(1) over periods (`surprise.replicate_correlated`'s law), so the
+    field's totals carry the predictive's marginal and its serial dependence."""
     import dataclasses
 
     import torch
@@ -590,12 +594,16 @@ def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.G
         else:
             mult[rows, :, p.group] *= course
     inside = {int(e) for e in leaves}
+    frail = None
+    if noise is not None and not noise.null and phi_field is not None:
+        frail = surprise.frailty(phi_field, noise, rng)
+        mult = mult * frail[:, :, None]
 
     def leaf(args):
         e, r = args
         with torch.no_grad():
             mu = m.expected_by_group(np.array([e]))
-        y = subset.replicate(mu * mult if e in inside else mu, m.phi, r)
+        y = subset.replicate(mu * mult if e in inside else mu, np.inf if (frail is not None and e in inside) else m.phi, r)
         u, t, g = np.nonzero(y)
         return np.full(len(u), e), u, t, g, y[u, t, g]
 
@@ -669,6 +677,8 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     U, T = mu_ut.shape
     sess = tools.Session(session.dataset, session.event, session.years, session.graph, source=session.source,
                          ledger=control.Ledger(config.home() / "harness" / "grid_ledger"))
+    s_orig = session.surprise(node, "B1")                                 # the field's noise structure (N1)
+    phi_field = np.broadcast_to(np.asarray(s_orig.phi, dtype=float), (U, T))
     rows, false_rows = [], []
     plans = [(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
     done = 0
@@ -678,7 +688,7 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
             rng = np.random.default_rng(config.seed("grid", f.id, kind, shape, w))
             plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas, offset=w)
             t0 = time.time()
-            sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng))}   # never the unseeing fit
+            sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng, s_orig.noise, phi_field))}
             sess._local.memo = {}                                           # each tier once per world
             s1 = sess.surprise(node, "B1")
             periods = np.asarray(s1.years)

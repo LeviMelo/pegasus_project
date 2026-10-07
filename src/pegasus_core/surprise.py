@@ -47,6 +47,29 @@ DISPERSION_LEVELS: tuple[str, ...] = ("macro", "state")
 MIN_DISPERSION_CELLS = 200
 
 
+@dataclass(frozen=True)
+class Noise:
+    """The predictive's noise structure over the periods of a place (stage B, N1; ADR-0029). Each cell is
+    NB(μ, φ/κ): a gamma frailty of variance κ/φ times a Poisson, so κ corrects the block's dispersion for this field.
+    The frailties of a place's periods are joined by a Gaussian copula whose latent correlation at lag k is ρ^k (an
+    AR(1)), so the marginal stays the NB exactly. A place's own slow structure (its level and trend beyond the
+    reference tier) is not noise: it is what the trend and step departure models test (`noise_structure`).
+
+    The Surprise's φ already carries κ (`with_noise`); its ``noise`` then keeps κ = 1 and records the estimate in the
+    calibration."""
+    kappa: float = 1.0
+    rho: float = 0.0
+
+    @property
+    def null(self) -> bool:
+        return self.kappa == 1.0 and self.rho == 0.0
+
+    def frailty_variance(self, phi: np.ndarray) -> np.ndarray:
+        """κ/φ per cell (0 where φ is infinite)."""
+        phi = np.asarray(phi, dtype=float)
+        return self.kappa * np.divide(1.0, phi, out=np.zeros(phi.shape), where=np.isfinite(phi) & (phi > 0))
+
+
 @dataclass
 class Surprise:
     field: fields.Field
@@ -62,6 +85,11 @@ class Surprise:
     flags: np.ndarray        # [U, T] int8
     calibration: dict = field(default_factory=dict)
     extras: dict = field(default_factory=dict)   # B2: alpha, beta and their posterior sd per place
+    noise: Noise = None      # N1: the predictive's noise structure over periods (`noise_structure`)
+
+    def __post_init__(self):
+        if self.noise is None:
+            self.noise = Noise()
 
     def table(self) -> pa.Table:
         U, T = self.y.shape
@@ -209,7 +237,14 @@ class Expectations:
         for ev in unseen.values():
             flags[ev > 0] |= NEW_CATEGORY
         w_info = np.where(np.isinf(phi), mean, mean / (1 + mean / phi))
-        out = Surprise(f, PURPOSE_TIER[purpose], tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal)
+        # the noise structure is the training fit's (N1): estimated on the years before t0, never on the watched ones
+        mu_tr, mu2_tr = model.expected(li, spatial=True)
+        phi_tr = 1.0 / (1.0 / laplace.predictive_phi(mu_tr, np.zeros_like(mu_tr), mu2_tr, model.phi)
+                        + 1.0 / np.broadcast_to(np.asarray(extra, dtype=float), np.shape(extra)))
+        noise = noise_structure(model.observed(li), mu_tr, np.broadcast_to(phi_tr, mu_tr.shape))
+        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho}
+        out = Surprise(f, PURPOSE_TIER[purpose], tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal,
+                       noise=noise)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
         if unseen:
             # a category the fit never saw has no expectation: it is out of the node (it would break the chapter's
@@ -342,6 +377,18 @@ class Expectations:
             ev = ev * np.divide(mu, mu_first, out=np.ones_like(mu), where=mu_first > 0) ** 2
             var = ev if var is None else var + ev
         out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places), var=var)
+        if tier != "B1":
+            # the noise structure is stage B's, the B1 predictive's (ADR-0029): a reference (B0 without the place
+            # effects, B2 with a refitted course per place) is measured against, never re-estimated on. B2's own
+            # residuals hide the persistence a trend must be judged against (SIH trends: 25 findings per shifted world
+            # with B2's ρ)
+            mu_b1 = m.expected(leaves, spatial=True)[0]
+            # the tier's φ came out of _assemble divided by the tier's own κ: undone here, then B1's applied
+            phi_b1 = np.broadcast_to(np.asarray(out.phi, dtype=float), mu_b1.shape) * out.calibration["noise"]["kappa"]
+            nz = noise_structure(y, mu_b1, phi_b1)
+            out.calibration["noise"] = {"kappa": nz.kappa, "rho": nz.rho}
+            out.phi, out.u, out.z, out.w, out.noise = with_noise(y, out.mu, phi_b1, nz,
+                                                                 config.seed(f.id, tier, "pit", m.key()))
         out.extras = extras
         if cache:
             store.put_table("surprise", key, out.table(), {"calibration": out.calibration,
@@ -414,8 +461,10 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
         # from the very departures the tier is meant to show
         phi_agg = cells
         u, z = randomised_pit(y, mu, phi_agg, seed)
-    w = np.where(np.isinf(phi_agg), mu, mu / (1 + mu / phi_agg))
-    return Surprise(f, tier, m.data.places, m.data.periods(), y, mu, phi_agg, u, z, w, flags, cal)
+    noise = noise_structure(y, mu, phi_agg)
+    cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho}
+    phi_agg, u, z, w, noise = with_noise(y, mu, phi_agg, noise, seed)
+    return Surprise(f, tier, m.data.places, m.data.periods(), y, mu, phi_agg, u, z, w, flags, cal, noise=noise)
 
 
 def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np.ndarray,
@@ -515,7 +564,7 @@ def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Sur
     units = np.asarray(scale.units)
     units = units.astype(np.int64) if all(str(k).isdigit() for k in units) else units   # IBGE codes stay integers
     return Surprise(s.field, s.tier, units, s.years, y, mu, phi, u, z, w,
-                    np.zeros(y.shape, dtype=np.int8), {}, {"scale": scale.name})
+                    np.zeros(y.shape, dtype=np.int8), {}, {"scale": scale.name}, noise=s.noise)
 
 
 def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray) -> float | np.ndarray:
@@ -576,6 +625,139 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
                 new[rows] = cur[rows][0] + dg * tau2 / (tau2 + vg)
         cur = new
     return to_phi(cur)
+
+
+# ---------------------------------------------------------------------- N1: the predictive's noise structure
+
+def _detrend_projection(T: int) -> np.ndarray:
+    """M = I − X(XᵀX)⁻¹Xᵀ for X = [1, t]: the residual maker of a place's own level and linear trend."""
+    X = np.column_stack([np.ones(T), np.arange(T) - (T - 1) / 2])
+    return np.eye(T) - X @ np.linalg.solve(X.T @ X, X.T)
+
+
+def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 2) -> Noise:
+    """ARCHITECTURE §6.1, N1 (ADR-0029): the predictive's noise structure over periods (`Noise`), by the bias-corrected
+    moments of regression residuals. Each place's standardised residual series z = (y − μ)/√V loses its own level and
+    linear trend (e = Mz, `_detrend_projection`); then E[Σ_t e_t e_{t+k}] = tr(L_k M Σ_u M), with
+    Σ_u = p_u I + κ f_u R(ρ), p_u and f_u the place's Poisson and frailty shares of V, and R(ρ) the AR(1) correlation
+    (the copula's latent correlation stands for the frailties' own: exact as κ/φ → 0, and the frailty shares of the
+    fields measured are a few per cent).
+    (κ, ρ) match the pooled lag 0..``lags`` sums by least squares. The places with at least ``min_expected`` events a
+    period enter.
+
+    Why the detrending (measured 2026-10-06, `data/probes/noise_structure.json`): B1's residual covariances fall from
+    +0.8σ² at lag 1 to −2.8σ² at lag 9 on stroke deaths, the signature of place-specific trends B1 does not hold.
+    Those are departures from the reference, what the trend lens exists to find; fitted as noise they read as a
+    persistent component or ρ → 1, and would hide the signal they are. Lags 0..2 only: a place's slower nonlinear
+    wander survives the linear detrending (ρ → 0.95 on SINASC with lags to 4), and is the departure models' to judge
+    against their empirical nulls (stage C), not B's noise."""
+    U, T = y.shape
+    if T < 5:
+        return Noise()
+    keep = mu.mean(1) >= min_expected
+    if keep.sum() < 10:
+        return Noise()
+    m, r = mu[keep], (y - mu)[keep]
+    ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
+    s2 = Noise().frailty_variance(ph)
+    v = m + m ** 2 * s2
+    p_u = (m / v).mean(1)
+    f_u = (m ** 2 * s2 / v).mean(1)                       # the frailty's share of each cell's variance
+    P, F = float(p_u.sum()), float(f_u.sum())
+    if F <= 0:
+        return Noise()
+    M = _detrend_projection(T)
+    e = (r / np.sqrt(v)) @ M
+    K = min(lags, T - 3)
+    obs = np.array([float((e[:, :T - k] * e[:, k:]).sum()) for k in range(K + 1)])
+    tk = np.arange(T)
+    trLM = np.array([np.trace(M, offset=k) for k in range(K + 1)])  # tr(L_k M): L_k picks the entries (t, t + k)
+
+    def expected(par: np.ndarray) -> np.ndarray:
+        kap, rh = par
+        MRM = M @ (rh ** np.abs(tk[:, None] - tk[None, :])) @ M
+        return P * trLM + kap * F * np.array([np.trace(MRM, offset=k) for k in range(K + 1)])
+
+    scale = float(np.abs(obs).max()) or 1.0
+    fit = optimize.least_squares(lambda par: (expected(par) - obs) / scale, x0=[1.0, 0.2],
+                                 bounds=([0.0, -0.5], [1e3, 0.95]))
+    kap, rh = (float(x) for x in fit.x)
+    return Noise(round(kap, 4), round(rh, 4))
+
+
+def lag_covariance(mu: np.ndarray, phi: np.ndarray, noise: Noise, k: int) -> np.ndarray:
+    """[U, T − k] Cov(y_t, y_{t+k}) of a place's cells under the predictive's noise structure (`Noise`; the copula's
+    correlation taken as the frailties')."""
+    s2 = noise.frailty_variance(np.broadcast_to(np.asarray(phi, dtype=float), mu.shape))
+    return mu[:, :-k] * mu[:, k:] * noise.rho ** k * np.sqrt(s2[:, :-k] * s2[:, k:])
+
+
+def cell_variance(mu: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
+    """Var(y) of each cell under the predictive with its noise structure: μ + μ²κ/φ."""
+    return mu + mu ** 2 * noise.frailty_variance(np.broadcast_to(np.asarray(phi, dtype=float), mu.shape))
+
+
+def suffix_variance(mu: np.ndarray, phi: np.ndarray, noise: Noise, scale: float = 1.0, tol: float = 1e-4) -> np.ndarray:
+    """[U, T] Var(Σ_{s ≥ t} y_s) per place under the predictive, the means scaled by ``scale`` (a null boundary θ0·μ):
+    the cells' variances plus twice their covariances over periods, lags truncated where ρ^k < ``tol``."""
+    m = scale * mu
+    phi_ = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
+    row = np.zeros(mu.shape)                                      # Σ_k Cov(y_t, y_{t+k}): cell t's forward covariances
+    k = 1
+    while noise.rho > 0 and k < mu.shape[1] and noise.rho ** k >= tol:
+        row[:, :-k] += lag_covariance(m, phi_, noise, k)
+        k += 1
+    return np.cumsum((cell_variance(m, phi_, noise) + 2 * row)[:, ::-1], 1)[:, ::-1]
+
+
+def copula_normals(shape: tuple, rho: float, rng: np.random.Generator) -> np.ndarray:
+    """Standard normals [..., T] with an AR(1) correlation ρ over the last axis: the copula's latent field."""
+    eps = np.empty(shape)
+    eps[..., 0] = rng.standard_normal(shape[:-1])
+    innov = np.sqrt(max(1.0 - rho ** 2, 0.0))
+    for t in range(1, shape[-1]):
+        eps[..., t] = rho * eps[..., t - 1] + innov * rng.standard_normal(shape[:-1])
+    return eps
+
+
+def gamma_frailty(eps: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
+    """The gamma frailty (mean 1, variance κ/φ) at the copula's normals ``eps``: G⁻¹(Φ(ε)) (1 where φ is infinite)."""
+    s2 = noise.frailty_variance(np.broadcast_to(np.asarray(phi, dtype=float), eps.shape[-2:]))
+    s2 = np.broadcast_to(s2, eps.shape)
+    out = np.ones(eps.shape)
+    pos = s2 > 0
+    shape = 1.0 / s2[pos]
+    out[pos] = stats.gamma.ppf(special.ndtr(eps[pos]), shape, scale=1.0 / shape)
+    return out
+
+
+def frailty(phi: np.ndarray, noise: Noise, rng: np.random.Generator) -> np.ndarray:
+    """A draw of the predictive's frailty [U, T] (`Noise`): gamma marginals joined by the AR(1) Gaussian copula."""
+    phi_ = np.asarray(phi, dtype=float)
+    return gamma_frailty(copula_normals(phi_.shape, noise.rho, rng), phi_, noise)
+
+
+def replicate_correlated(mu: np.ndarray, phi: np.ndarray, noise: Noise, rng: np.random.Generator) -> np.ndarray:
+    """Counts y* [U, T] from the predictive with its noise structure: Poisson(μ · `frailty`), NB(μ, φ/κ) marginally."""
+    phi_ = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
+    return rng.poisson(mu * frailty(phi_, noise, rng)).astype(float)
+
+
+def with_noise(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, noise: Noise, seed: int
+               ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Noise]:
+    """The predictive with its estimated noise structure folded in: φ/κ, the PIT u and z under it, the cells' weights,
+    and the noise left to carry (κ = 1, ρ)."""
+    phi_eff = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape) / max(noise.kappa, 1e-12)
+    u, z = randomised_pit(y, mu, phi_eff, seed)
+    w = np.where(np.isinf(phi_eff), mu, mu / (1 + mu / phi_eff))
+    return phi_eff, u, z, w, Noise(1.0, noise.rho)
+
+
+def trend_inflation(rho_count: np.ndarray | float) -> np.ndarray | float:
+    """The factor on a slope's variance when its series' errors are AR(1) with lag-1 correlation ``rho_count``
+    ((1 + ρ)/(1 − ρ), the large-sample inflation of a least-squares trend; Bence 1995)."""
+    r = np.clip(rho_count, 0.0, 0.95)
+    return (1 + r) / (1 - r)
 
 
 def randomised_pit(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -704,4 +886,5 @@ def _from_table(f: fields.Field, tier: str, t: pa.Table, meta: dict | None) -> S
     meta = meta or {}
     extras = {k: np.asarray(meta[k]) for k in ("alpha", "beta", "alpha_sd", "beta_sd", "tau") if k in meta}
     return Surprise(f, tier, places, years, col("y"), col("mu"), col("phi"), col("pit"), col("z"), col("w"),
-                    col("flags"), meta.get("calibration", {}), extras)
+                    col("flags"), meta.get("calibration", {}), extras,
+                    noise=Noise(**meta.get("calibration", {}).get("noise", {})))

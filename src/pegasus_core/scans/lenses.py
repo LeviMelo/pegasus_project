@@ -138,9 +138,10 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
         # the null depends on (μ, φ, neighbourhoods, windows, direction) only: one per field and
         # direction, shared by every scan of it, surrogates included
         null_key = (lens, name, s.field.id, s.tier, k, max_window, full_period, replicates, mark,
-                    s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)))
+                    s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)), s.noise)
         found, nul = subset.scan(data, mm, s.phi, sc, alpha=alpha, replicates=replicates,
-                                 seed_parts=(lens, name, s.field.id, s.tier), nul=_NULLS.get(null_key))
+                                 seed_parts=(lens, name, s.field.id, s.tier), nul=_NULLS.get(null_key),
+                                 noise=None if mark else s.noise)
         if nul is not None:
             _NULLS[null_key] = nul
         out += [Finding(lens, s.field.id, s.tier,
@@ -229,12 +230,15 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
         return []
     Yall = np.cumsum(s.y[:, ::-1], 1)[:, ::-1]
     Mall = np.cumsum(s.mu[:, ::-1], 1)[:, ::-1]
-    cells = np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0)
-    Eall = np.cumsum(cells[:, ::-1], 1)[:, ::-1]
-    Y, M, E = Yall[:, starts], rr * Mall[:, starts], rr ** 2 * Eall[:, starts]
+    # the window total's variance under the predictive (stage B, N1): the cells' NB variance and their covariance over
+    # periods (`surprise.suffix_variance`, the field's own ρ); the Poisson part scales with the course's multiplier,
+    # the rest with its square
+    Vall = surprise.suffix_variance(s.mu, s.phi, s.noise, scale=rr)
+    Y, M = Yall[:, starts], rr * Mall[:, starts]
+    E = Vall[:, starts] - M
     mult, var_log = _past_course(s, starts)                 # [U, starts]: the window's multiplier and its log variance
     M, E = M * mult, E * mult ** 2
-    V = M + E + M ** 2 * np.expm1(var_log)                  # the cells' NB variance + the extrapolated course's
+    V = M + E + M ** 2 * np.expm1(var_log)                  # + the extrapolated course's own uncertainty
     p_win = np.ones(Y.shape)
     up = (Y > M) & (M > 0)
     pois = up & (V <= M * (1 + 1e-12))
@@ -501,8 +505,9 @@ def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarr
     course; 1 at the municipality, whose β is B2's shrunk estimate). A coarser unit is one NB
     cell series (Σy against Σμ, Var = Σ(μ + μ²/φ)), refitted by the same Newton as B2 with a vague prior."""
     b, sd = s.extras["beta"], s.extras["beta_sd"]
+    infl = np.sqrt(surprise.trend_inflation(_lag1_correlation(s, scale)))      # N1: AR(1) errors widen a trend
     if scale.name == "municipality":
-        return b, sd, np.ones(len(b))
+        return b, sd * infl, np.ones(len(b))
     off = _offset(s)
     y, o = scale.sum(s.y), scale.sum(off)
     inv = scale.sum(np.where(np.isfinite(s.phi) & (s.phi > 0), off ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
@@ -516,7 +521,21 @@ def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarr
     var = m + np.where(np.isfinite(phi), m ** 2 / np.where(np.isfinite(phi), phi, 1.0), 0.0)
     chi = np.divide((y - m) ** 2, var, out=np.zeros_like(m), where=var > 0).sum(1) / max(len(st) - 4, 1)
     kappa = np.maximum(chi, 1.0)
-    return bb[:, 1], sdd[:, 1] * np.sqrt(kappa), kappa
+    return bb[:, 1], sdd[:, 1] * np.sqrt(kappa) * infl, kappa
+
+
+def _lag1_correlation(s: surprise.Surprise, scale: scales_mod.Scale) -> np.ndarray:
+    """Each unit's lag-1 correlation of its series under the predictive's noise structure (stage B, N1): within-place
+    covariances summed over the unit's places, over the geometric mean of consecutive variances."""
+    if s.noise.rho <= 0 or s.y.shape[1] < 2:
+        return np.zeros(scale.n)
+    phi = s.phi if np.ndim(s.phi) else np.full(s.mu.shape, s.phi)
+    var = surprise.cell_variance(s.mu, phi, s.noise)
+    cov = surprise.lag_covariance(s.mu, phi, s.noise, 1)
+    if scale.name != "municipality":
+        var, cov = scale.sum(var), scale.sum(cov)
+    den = np.sqrt(var[:, :-1] * var[:, 1:]).sum(1)
+    return np.divide(cov.sum(1), den, out=np.zeros(len(den)), where=den > 0)
 
 
 def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05,

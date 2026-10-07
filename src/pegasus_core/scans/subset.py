@@ -306,19 +306,20 @@ MAX_REPLICATES = 2000  # replicates drawn, at most, to reach them
 
 
 def null(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int = 200,
-         seed_parts: tuple = ("subset-null",)) -> Null:
+         seed_parts: tuple = ("subset-null",), noise=None) -> Null:
     """The maximum score over replicates drawn under the model. A places × time scan (no free
     dimensions) runs every replicate at once on the GPU (`_maxima_batched`), drawing more (up to
     MAX_REPLICATES) until MIN_POSITIVE maxima are positive; a scan with free dimensions runs
-    replicate by replicate."""
+    replicate by replicate. ``noise`` is the predictive's noise structure over periods (`surprise.Noise`, stage B,
+    N1): replicates carry it."""
     if m.ndim == 2:
-        maxima = _maxima_batched(scanner, m, phi, replicates, config.seed(*seed_parts))
+        maxima = _maxima_batched(scanner, m, phi, replicates, config.seed(*seed_parts), noise=noise)
         extra = 0
         while (maxima > 0).sum() < MIN_POSITIVE and len(maxima) < MAX_REPLICATES:
             extra += 1
             more = min(len(maxima), MAX_REPLICATES - len(maxima))
             maxima = np.concatenate([maxima, _maxima_batched(scanner, m, phi, more,
-                                                             config.seed(*seed_parts, "more", extra))])
+                                                             config.seed(*seed_parts, "more", extra), noise=noise)])
     else:
         rng = np.random.default_rng(config.seed(*seed_parts))
         maxima = np.array([scanner.best(replicate(m, phi, rng, scanner.kind), m).score for _ in range(replicates)])
@@ -397,9 +398,10 @@ def _alternate(scanner: Scanner, Y, M):
 
 
 def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int, seed: int,
-                    chunk: int = 8) -> np.ndarray:
+                    chunk: int = 8, noise=None) -> np.ndarray:
     """The null's maxima: replicates drawn on the device (gamma–Poisson for counts, Gaussian for
-    marks) and searched in batches by `_alternate`, float32."""
+    marks; with a ``noise`` structure the Poisson–lognormal frailty of `surprise.replicate_correlated`) and
+    searched in batches by `_alternate`, float32."""
     import torch
 
     dev = _device()
@@ -413,6 +415,13 @@ def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, re
         R = min(chunk, replicates - start)
         if scanner.kind == "gaussian":
             Y = torch.randn((R, U, T), generator=gen, device=dev) * M.clamp(min=0).sqrt()
+        elif noise is not None and not noise.null:
+            # the predictive's frailty (gamma marginals, AR(1) Gaussian copula: surprise.frailty), drawn on the CPU
+            from .. import surprise
+            nrng = np.random.default_rng([seed % (2 ** 63), start])
+            phi_c = np.broadcast_to(np.asarray(phi, dtype=float), m.shape)
+            fr = surprise.gamma_frailty(surprise.copula_normals((R, U, T), noise.rho, nrng), phi_c, noise)
+            Y = torch.poisson(M * torch.as_tensor(fr, dtype=torch.float32, device=dev), generator=gen)
         else:
             finite = torch.isfinite(phi_t) & (M > 0)
             shape = torch.where(finite, phi_t, torch.ones_like(M))
@@ -426,7 +435,7 @@ def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, re
 
 def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner, alpha: float = 0.05,
          max_subsets: int = 20, replicates: int = 200, seed_parts: tuple = ("subset",),
-         nul: Null | None = None) -> tuple[list[Subset], Null]:
+         nul: Null | None = None, noise=None) -> tuple[list[Subset], Null]:
     """The recursive scan: report the best subset, condition it out (μ ← y on its cells; for the
     Gaussian score, its residuals ← 0), repeat until the next p exceeds α. Returns the subsets
     with Gumbel and empirical p. The null is drawn only when the observed best score is positive
@@ -438,7 +447,7 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
         s = scanner.best(y, m)
         if s.score <= 0:
             break
-        nul = nul or null(scanner, m0, phi, replicates, seed_parts)
+        nul = nul or null(scanner, m0, phi, replicates, seed_parts, noise=noise)
         s.p, s.p_empirical = nul.p(s.score), nul.p_empirical(s.score)
         if s.p > alpha:
             break
