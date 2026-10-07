@@ -59,9 +59,10 @@ def report(leads: list[register_mod.Lead] | None = None, limit: int = 25, title:
         out.append("")
     rel = sorted((x for x in leads if x.kind == "relation" and x.status != "retired"), key=lambda x: x.q)
     if rel:
-        out += [f"## Relations: {len(rel)}", "", "| band | field | leader | lag | ρ | q |", "|---|---|---|---|---|---|"]
+        out += [f"## Relations: {len(rel)}", "", "| band | field | leader | lag | ρ | direct | q |", "|---|---|---|---|---|---|---|"]
         out += [f"| {x.locus.get('band')} | {x.fields[0]} | {x.fields[1]} | {x.locus.get('lag')} | {x.effect:+.3f} | "
-                f"{x.q:.1e} |" for x in rel[:limit]]
+                f"{ {True: 'direct', False: 'shared driver'}.get(x.provenance.get('direct'), '') } | {x.q:.1e} |"
+                for x in rel[:limit]]
         unanswered = sorted({u for x in rel for u in x.provenance.get("unanswered", [])})
         if unanswered:
             out += ["", "**Scales left unanswered:**", *[f"- {u}" for u in unanswered]]

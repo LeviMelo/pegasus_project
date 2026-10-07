@@ -528,7 +528,7 @@ def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) 
 
 
 def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, courses: bool = True,
-                 log=None) -> dict:
+                 direct: bool = True, log=None) -> dict:
     """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
     frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
     stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
@@ -546,13 +546,25 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
         if log:
             log(msg)
 
-    fits = {}
+    fits, graphs_ = {}, {}
     for label, db in bands(d, spectrum, min_cells=min_cells, log=note).items():
-        fits[label] = factor_model(lagged(db, lags), K=K)
+        dl = lagged(db, lags)
+        fits[label] = factor_model(dl, K=K)
+        if direct:
+            graphs_[label] = direct_relations(dl, fits[label])
         if log:
             log(f"band {label}: {db.r.shape[1]} coefficients, "
                 f"{int((fits[label].gamma > 1e-3 * fits[label].gamma.max()).sum())} factors kept")
     rows = relation_table(fits, q=q)
+    for r in rows:              # direct given the factors (§7.6), or carried by a shared driver
+        g = graphs_.get(r["support"])
+        if g is not None:
+            names = g["fields"]
+            i, j = names.index(f"{r['field']}@0"), names.index(f"{r['leader']}@{r['lag']}")
+            r["partial"] = float(g["partial"][i, j])
+            # direct given the factors when the residual keeps the relation's sign; a partial of the other sign is the
+            # factors over-explaining a shared movement (dengue deaths and admissions: ρ +0.44, partial −0.38, 2026-10-07)
+            r["direct"] = abs(r["partial"]) > 1e-8 and np.sign(r["partial"]) == np.sign(r["rho"])
     if courses:
         rows += course_relations(surprises, lags=lags, q=q)
         if log:
@@ -630,3 +642,55 @@ def course_relations(surprises: list, lags: int = 2, q: float = 0.05, replicates
         for r, k in zip(rows, keep, strict=True):
             r["reported"] = bool(k)
     return rows
+
+
+# ---------------------------------------------------------------------- direct relations: sparse + low rank (§7.6)
+
+
+def direct_relations(d: Departures, fit: Factors, lambdas: tuple[float, ...] = (0.5, 0.35, 0.25, 0.18, 0.12, 0.08, 0.05),
+                     subsamples: int = 20, beta: float = 0.05, seed: int = 0) -> dict:
+    """Which of a band's relations are direct (ARCHITECTURE §7.6): the latent-variable graphical model of
+    Chandrasekaran, Parrilo & Willsky (2012), the precision of the fields' departures as sparse minus low rank. The low
+    rank is the factor model's (``fit``, on the same departures ``d``); the sparse part is the graphical lasso of
+    the residual r − ΛF, its penalty chosen by StARS (Liu, Roeder & Wasserman 2010): the least penalty whose edges
+    are stable across ``subsamples`` subsamples of 10√n cells (instability ≤ ``beta``). A relation the factors carry
+    and the sparse graph does not is a shared driver; one in the graph is direct given the factors. Returns the
+    partial correlations [F, F], the chosen penalty and the instability path."""
+    import warnings
+
+    from sklearn.covariance import graphical_lasso
+
+    warnings.filterwarnings("ignore", module="sklearn")    # its convergence notices, once per subsample
+    F = len(d.fields)
+    R = d.r.reshape(F, -1)
+    ok = np.isfinite(d.v.reshape(F, -1)).all(0) & np.isfinite(R).all(0)
+    low = np.einsum("fk,kn->fn", fit.loadings, fit.factors.reshape(fit.factors.shape[0], -1))
+    X = (R - low)[:, ok]
+    X = (X - X.mean(1, keepdims=True)) / np.maximum(X.std(1, keepdims=True), 1e-12)
+    n = X.shape[1]
+    rng = np.random.default_rng(seed)
+    b = int(min(n, max(10 * np.sqrt(n), 5 * F)))
+    path = []
+    chosen = lambdas[0]
+    for lam in sorted(lambdas, reverse=True):
+        freq = np.zeros((F, F))
+        for _ in range(subsamples):
+            idx = rng.choice(n, b, replace=False)
+            S = np.corrcoef(X[:, idx])
+            try:
+                _, P = graphical_lasso(S, alpha=lam, max_iter=200)
+            except FloatingPointError:
+                continue
+            freq += np.abs(P) > 1e-8
+        theta = freq / subsamples
+        off = ~np.eye(F, dtype=bool)
+        instab = float(np.mean(2 * theta[off] * (1 - theta[off])))
+        path.append({"lambda": lam, "instability": round(instab, 4)})
+        if instab > beta:
+            break                                       # StARS: the least penalty before the edges turn unstable
+        chosen = lam
+    _, P = graphical_lasso(np.corrcoef(X), alpha=chosen, max_iter=500)
+    dg = np.sqrt(np.diag(P))
+    partial = -P / np.outer(dg, dg)
+    np.fill_diagonal(partial, 1.0)
+    return {"partial": partial, "lambda": chosen, "path": path, "fields": d.fields}

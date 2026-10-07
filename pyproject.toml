@@ -21,6 +21,7 @@ dependencies = [
   "torch>=2.5",
   "numba>=0.60",
   "threadpoolctl>=3",
+  "scikit-learn>=1.4",    # the graphical lasso of the direct relations (relations.direct_relations, §7.6)
   "scikit-sparse>=0.5",   # CHOLMOD for the v1 solver (ARCHITECTURE §5.3); on Windows from conda-forge, installed --no-deps
   "statsmodels>=0.14",
   "pydantic>=2",

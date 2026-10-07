@@ -1234,7 +1234,8 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
                            locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
                            interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
                            null="independent fields' innovations (factor model per band)", calibrated=True,
-                           provenance={"z": float(r["z"]), "unanswered": out["unanswered"] + excluded})
+                           provenance={"z": float(r["z"]), "unanswered": out["unanswered"] + excluded,
+                                       **({"partial": r["partial"], "direct": bool(r["direct"])} if "direct" in r else {})})
                 for r in rep]
     leads.Register().add(admitted)
     log(f"{len(rep)} relations reported of {len(out['rows'])} pairs; unanswered: {len(out['unanswered'])} bands, "

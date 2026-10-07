@@ -273,7 +273,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 7.5 HSIC with CKA floor | NB | | not in §13 |
 | 7.6 pair-test dependency map, two layers, TreeBH | BM | `E:dependency-map`, ADR-0013 | one map, 65 fields, SIM/SIH/SINASC 2015-19 + contexts; no SIA or APAC field |
 | 7.6 utilization factors in Z | BM | `E:utilization`, ADR-0018 | model-side fix is gap 3 |
-| 7.6 sparse + low-rank graphical model, StARS | NB | ADR-0013 | §13 row 7.6 |
+| 7.6 sparse + low-rank graphical model, StARS | BU (2026-10-07) | `relations.direct_relations`: the graphical lasso of the residual after the band factor model (Chandrasekaran, Parrilo & Willsky 2012), penalty by StARS; each relation marked direct or shared driver. Checked on four fields: dengue deaths ↔ admissions is a shared driver (ρ +0.44, partial −0.38) | not run on the full map |
 | 7.7 explaining away, absorbed share | BM | `E:cnes-supply-pairs` (15 leads, 108 tests) | used once |
 | 7.7 decomposition (Shapley, four components) | BU | `Session.decompose`, `explain.decompose` | no evaluation entry, no run on a lead |
 | 7.7 triage classes | BM | `E:lead-triage` (4,045 system / 2,015 signal / 746 / 690) | "signal" is unexplained, not confirmed |
