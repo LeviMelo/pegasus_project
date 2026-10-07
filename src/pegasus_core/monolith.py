@@ -321,9 +321,12 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments,
                "count": gateway.mark_moments, "share": gateway.share_moments}
     if grain == "month":
-        if source != "events":
-            raise NotImplementedError("the monthly grain reads event counts")
+        if source not in ("events", "code_list"):
+            raise NotImplementedError("the monthly grain reads event counts and code-list counts")
         readers["events"] = gateway.monthly_counts
+        # a code-list column (SINASC's CODANOMAL) by month: each event once under each category it carries
+        readers["code_list"] = lambda ds, ev, year, places=None, column=None: gateway.monthly_counts(
+            ds, ev, year, classifier=column, places=places, code_list=True)
         # person-months: each month carries a twelfth of the year's person-years
         N = np.repeat(N, 12, axis=1) / 12.0
         S = None if S is None else np.repeat(S, 12, axis=1)
