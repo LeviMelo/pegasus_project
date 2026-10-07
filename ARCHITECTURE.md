@@ -993,6 +993,17 @@ Lead
   - The v0 history (θ0, the alarm history rule chosen on dengue 2019–23, the trend reference chosen because the positives were state-level) is recorded where it happened.
   - Those choices are re-made on the grid in work package O5 (§12).
 
+**Real data first (author, 2026-10-07).**
+- **What a synthetic world cannot do.**
+  - A world drawn from the model's own law, scanned by a method that assumes that law, measures internal consistency: a synthetic problem has a synthetic solution by construction.
+  - It cannot reveal that the model itself is wrong.
+  - Two days of grids passed while a chapter-wide dispersion (φ ≈ 0.1 in chapter I) hid every epidemic of the chapter. Measles 2018–19, chikungunya 2016–17 and COVID-19 in the North were missed by every method; only real data showed it (evaluation 2026-10-07, real events).
+- **The order of judgement.**
+  - Discovery is judged first on real fields: documented events (§10.1, `data/real_events.py`), positive controls (one disease in two systems), and real-data negative controls (time reversal, place permutation).
+  - Each method's strongest real findings are then read as epidemiology.
+  - The planted grid calibrates false discoveries and maps power; it ranks nothing on its own.
+- **A miss on a documented event is a defect report.** It is diagnosed to its stage and fixed by a principled change there, never by a constant tuned to make the event appear. The event stays held out from tuning.
+
 ### 10.1 Documented events (held out)
 
 Each event is declared before it is scored, with its estimand, tier, locus and criterion (locus overlap ≥ 0.5 Jaccard; effect sign). A failure is a finding about the method, recorded with its reasons; it does not take the method out of the survey.

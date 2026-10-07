@@ -349,13 +349,150 @@ def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.0
     return out
 
 
-def relation_table(fits: dict[str, Factors], q: float = 0.05) -> list[dict]:
+@dataclass
+class SpectralFactors:
+    """The joint model with each factor's own spatial spectrum (`spectral_factor_model`): loadings Λ [F, K] (each
+    column of unit norm), the factors' score variances per graph-frequency band G [K, B], each field's extra variance
+    σ² [F], the bands' coefficient counts n [B], labels and the effective places of their heat-kernel scale."""
+    fields: list[str]
+    loadings: np.ndarray
+    G: np.ndarray
+    sigma2: np.ndarray
+    n: np.ndarray
+    labels: list[str]
+    places: np.ndarray
+    trace: list = field(default_factory=list)
+
+    def band(self, b) -> _BandView:
+        """The fit read over band ``b`` (an index, or a list of fine bands pooled)."""
+        return _BandView(self, np.atleast_1d(b))
+
+    def report_bands(self, octaves: float = 1.5) -> dict[str, list[int]]:
+        """The fine bands pooled into reporting groups ``octaves`` wide in footprint (effective places): the fine grid
+        is the model's resolution; a relation is asked over scales wide enough to hold its coefficients."""
+        lp = np.log2(self.places)
+        edges = np.arange(lp.min(), lp.max() + octaves, octaves)
+        groups: dict[str, list[int]] = {}
+        for b, v in enumerate(lp):
+            g = int(np.searchsorted(edges, v, side="right") - 1)
+            lo, hi = 2 ** edges[g], 2 ** min(edges[g] + octaves, lp.max())
+            groups.setdefault(f"~{lo:.0f}-{hi:.0f} places", []).append(b)
+        return groups
+
+    def factor_scales(self) -> list[float]:
+        """Each factor's spatial scale: the effective places of the band where its spectrum peaks."""
+        return [float(self.places[int(np.argmax(g))]) for g in self.G]
+
+
+@dataclass
+class _BandView:
+    """One band of a `SpectralFactors`, read as `relation_table` reads a `Factors`."""
+    fit: SpectralFactors
+    b: np.ndarray
+
+    @property
+    def fields(self) -> list[str]:
+        return self.fit.fields
+
+    def relations(self) -> tuple[np.ndarray, np.ndarray]:
+        L, n = self.fit.loadings, self.fit.n[self.b]
+        g = (self.fit.G[:, self.b] * n).sum(1) / n.sum()                 # the factors' mean variance over the bands
+        C = (L * g) @ L.T
+        tot = np.diag(C) + 1.0 + self.fit.sigma2
+        rho = C / np.sqrt(np.outer(tot, tot))
+        np.fill_diagonal(rho, 1.0)
+        return rho, rho * np.sqrt(n.sum())
+
+
+def spectral_factor_model(d: Departures, spectrum, K: int = 12, n_bands: int = 24, iterations: int = 300,
+                          tol: float = 1e-7, log=None) -> SpectralFactors:
+    """One joint model of the (whitened, `innovations`, possibly `lagged`) departures over every spatial scale: on the
+    graph Fourier coefficients x_f(k, t) of the place graph ``spectrum``,
+
+        x(k, t) = Λ s(k, t) + ε,   s_j(k, t) ~ N(0, g_j(λ_k)),   ε_f ~ N(0, 1 + σ_f²),
+
+    each factor j with its own spatial spectral density g_j, piecewise constant over ``n_bands`` log-spaced bands of
+    the Laplacian's eigenvalues and smoothed across neighbouring bands (EM with smoothing, Silverman et al. 1990): a
+    stationary process on the graph per factor (Marques et al. 2017). A factor no field needs has g → 0 everywhere.
+    The bands are a fine grid on a continuum, not a choice: one fit reads every scale, a factor spanning several is
+    one factor, and each reports its own scale (`SpectralFactors.factor_scales`). Under the model the posterior of
+    s(k, t) depends on its band only, so the E-step costs B small K × K inversions."""
+    import torch
+
+    lam, Q = spectrum._eig
+    dev = Q.device
+    ok = np.isfinite(d.v) & (d.v > 0)
+    x = np.where(ok, d.r / np.sqrt(np.where(ok, d.v, 1.0)), 0.0)          # [F, U, T]
+    F, U, T = x.shape
+    Xin = torch.as_tensor(np.transpose(x, (1, 0, 2)).reshape(U, F * T), dtype=Q.dtype, device=dev)
+    X = (Q.T @ Xin).reshape(U, F, T).permute(1, 0, 2).reshape(F, U * T).float()          # [F, k·T]
+    lam_ = lam.cpu().numpy()
+    pos = lam_[lam_ > 1e-9]
+    edges = np.concatenate([[-1.0], np.geomspace(pos.min(), 2.0 + 1e-6, n_bands)])
+    band_k = np.clip(np.searchsorted(edges, lam_, side="right") - 1, 0, n_bands - 1)
+    band = torch.as_tensor(np.repeat(band_k, T), device=dev)                              # [k·T]
+    used = np.unique(band_k)
+    B = len(used)
+    remap = np.full(n_bands, -1)
+    remap[used] = np.arange(B)
+    band = torch.as_tensor(remap[np.repeat(band_k, T)], device=dev)
+    nb = torch.bincount(band, minlength=B).float()
+    mids = [float(np.sqrt(max(edges[b], pos.min()) * edges[b + 1])) for b in used]
+    places = np.array([spectrum.footprint(1.0 / m) for m in mids])
+    labels = [f"λ {max(edges[b], 0):.3g}-{edges[b + 1]:.3g} (~{p:.0f} places)" for b, p in zip(used, places, strict=True)]
+    # initialisation: the leading components of the coefficients
+    ev, vec = torch.linalg.eigh(X @ X.T / X.shape[1])
+    top = torch.argsort(ev, descending=True)[:K]
+    Lam = vec[:, top].float()
+    G = torch.clamp(ev[top] - 1.0, min=1e-3)[:, None].repeat(1, B).float()
+    sigma2 = torch.zeros(F, device=dev)
+    eye = torch.eye(K, device=dev)
+    onehot = torch.nn.functional.one_hot(band, B).float()                                 # [k·T, B]
+    trace, prev = [], None
+    for it in range(iterations):
+        w = 1.0 / (1.0 + sigma2)                                                           # [F]
+        LtW = Lam.T * w                                                                    # [K, F]
+        P = torch.diag_embed(1.0 / G.T) + (LtW @ Lam)[None]                                # [B, K, K]
+        S = torch.linalg.inv(P)                                                            # Σ_b
+        Y = LtW @ X                                                                        # [K, k·T]
+        m = torch.einsum("nkj,jn->kn", S[band], Y)                                         # [K, k·T]
+        # sufficient statistics
+        Smm = torch.einsum("kn,jn,nb->bkj", m, m, onehot)                                  # Σ_{n∈b} m mᵀ
+        Ess = (S * nb[:, None, None] + Smm)                                                # [B, K, K]
+        A = Ess.sum(0)
+        bx = X @ m.T                                                                       # [F, K]
+        Lam = bx @ torch.linalg.inv(A + 1e-6 * eye)
+        # the factors' spectra, EM then smoothed in log over neighbouring bands
+        Gnew = torch.diagonal(Ess, dim1=1, dim2=2).T / nb[None]                            # [K, B]
+        lg = torch.log(torch.clamp(Gnew, min=1e-8))
+        pad = torch.cat([lg[:, :1], lg, lg[:, -1:]], 1)
+        G = torch.exp(0.25 * pad[:, :-2] + 0.5 * pad[:, 1:-1] + 0.25 * pad[:, 2:])
+        # each loading column to unit norm, its scale moved into the spectrum
+        norm = torch.clamp(Lam.norm(dim=0), min=1e-8)
+        Lam, G = Lam / norm, G * (norm ** 2)[:, None]
+        resid = X - Lam @ m
+        sigma2 = torch.clamp((resid ** 2).mean(1) + torch.einsum("fk,bkj,fj,b->f", Lam, S, Lam, nb) / X.shape[1] - 1.0,
+                             min=0.0)
+        ll = float(-(resid ** 2).sum())
+        trace.append(round(ll, 2))
+        if log and it % 20 == 0:
+            log(f"iteration {it}: {ll:.6g}; factor peaks {np.round(G.max(1).values.cpu().numpy(), 4).tolist()}")
+        if prev is not None and abs(ll - prev) < tol * abs(ll):
+            break
+        prev = ll
+    c = lambda a: a.detach().cpu().numpy()  # noqa: E731
+    return SpectralFactors(d.fields, c(Lam), c(G), c(sigma2), c(nb), labels, places, trace)
+
+
+def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) -> list[dict]:
     """Stage D's report over fits at several supports (``fits``: support → `Factors`, on `lagged` departures or not):
     every pair of distinct fields, at relative lag ℓ ≥ 0 (one of the two at lag 0), its implied correlation and z,
     a two-sided p, and one BH at q over every pair, lag and support. A relation is statistical (P16): whether it is a
     cause, a shared driver or a shared recording artefact is stage E's question."""
     from . import control
 
+    if isinstance(fits, SpectralFactors):
+        fits = {label: fits.band(bs) for label, bs in fits.report_bands().items()}
     rows = []
     for support, fit in fits.items():
         rho, z = fit.relations()

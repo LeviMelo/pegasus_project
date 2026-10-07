@@ -74,6 +74,15 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
    - What would the strongest critic of this method say first?
    - Write the most general formulation down before simplifying, and name each simplification as a debt with its remedy.
    - The fixed ladder of administrative supports (2026-10-06) was built under time pressure and accepted until the author challenged it. That question should have been asked first.
+8. **Is it judged on real data with known answers?** (author, 2026-10-07.)
+   - A synthetic world built from the model's own law, scanned by a method that assumes that law, measures internal consistency only: a synthetic problem has a synthetic solution by construction.
+   - Synthetic worlds serve calibration (false discoveries need known truth) and nothing more.
+   - Discovery is judged on real fields:
+     - documented events, found where, when and at what scale they happened (`data/real_events.py`);
+     - positive controls (one disease in two systems);
+     - real-data negative controls (time reversal, place permutation).
+   - Every method is also judged by reading its strongest real findings as epidemiology.
+   - Of 2026-10-06/07's measurements most were synthetic; the meaningful ones were the real relation map, SIH's local family and stroke's spatial noise.
 
 If any answer is wrong, stop, re-plan, and write it down before coding.
 
