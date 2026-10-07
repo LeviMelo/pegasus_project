@@ -537,7 +537,15 @@ class Session:
                     sel = np.isin(s.places, np.asarray(x.locus.get("places", []), dtype=s.places.dtype))
                     w = (s.years >= span[0]) & (s.years <= span[-1])
                     obs, exp_ = float(s.y[sel][:, w].sum()), float(s.mu[sel][:, w].sum())
-                verdict = explain.triage(x.estimand, rows, span, direction, ev, obs, exp_)
+                def run(x=x, rows=rows, span=span, direction=direction, obs=obs, exp_=exp_, ev=ev):
+                    run.verdict = explain.triage(x.estimand, rows, span, direction, ev, obs, exp_)
+                    v = run.verdict
+                    pv = v.evidence.get("p")
+                    return {"tested": pv is not None, "p": 1.0 if pv is None else float(pv),
+                            "reason": f"{v.cls} ({v.grade or 'ungraded'}): {v.reason}"}
+
+                self._ledgered("triage", x, run, rules=explain.RULES)
+                verdict = run.verdict
                 old = x.robustness.get("triage")
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
                                                            "grade": verdict.grade or None, "bound": verdict.bound,
