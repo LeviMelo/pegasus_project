@@ -40,6 +40,7 @@ class System:
     links: list[str] | str | None = None         # "all", or `fields.declared_links` columns: person-level fields
     intervals: list[str] | str | None = None     # "all", or `fields.declared` interval:<date> fields: days from the event
     classifiers: list[str] | str | None = None   # "all", or alternative classifier columns: counts by their own tree
+    mentions: list[str] | str | None = None      # "all", or `fields.declared_mentions` fields: every code a record carries
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
@@ -66,7 +67,7 @@ class Plan:
             years = list(range(int(a), int(b) + 1))
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
                           s.get("compositions"), s.get("links"), s.get("disparities"), s.get("intervals"),
-                          s.get("classifiers"))
+                          s.get("classifiers"), s.get("mentions"))
                    for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
@@ -214,6 +215,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
         readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
                     for column in _declared(sys_, "interval", sys_.intervals)]
+        wanted = [d.column for d in fields.declared_mentions(sys_.dataset)]
+        readers += [(c, fields.mentions_source(sys_.dataset, c)) for c in wanted
+                    if sys_.mentions == "all" or c in (sys_.mentions or [])]
         resolved[sys_.dataset] = list(blocks)
         readers = [(column, source, list(blocks)) for column, source in readers]
         # another classifier's counts: the same events by its own tree, every chapter of it

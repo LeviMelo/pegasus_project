@@ -156,7 +156,7 @@ class Expectations:
         self.source = dict(source or {})
         self.laplace, self.device, self.center = int(laplace), device, center
         self._posteriors: dict = {}
-        classifier = self.source.get("column") or self.source.get("classifier")
+        classifier = self.source.get("classifier") or self.source.get("column")
         self.registry = fields.Registry(dataset, event, self.source.get("structure", structure), classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
         self._macro: np.ndarray | None = None

@@ -346,6 +346,25 @@ def measure_source(dataset: str, event: str, column: str) -> dict:
             **({"classifier": primary} if primary else {}), **({"casemix": casemix} if casemix else {})}
 
 
+def declared_mentions(dataset: str) -> list[Declared]:
+    """The multiple-code fields of ``dataset``: every group of columns pegasus_data declares to be read together as one
+    set of codes (`gateway.code_groups`: an admission's diagnoses, the causes a certificate mentions) is a field
+    ``mentions:<role>`` whose events count once under each category any of its columns carries."""
+    from . import gateway
+
+    return [Declared(dataset, f"mentions:{role}", role, f"every code of {role} ({', '.join(cols)})", "mentions")
+            for role, cols in gateway.code_groups(dataset).items()]
+
+
+def mentions_source(dataset: str, column: str) -> dict:
+    """The reader of a multiple-code field (`declared_mentions`): the code list of its columns, on ICD-10's tree."""
+    from . import gateway
+
+    role = column.split(":", 1)[1]
+    cols = gateway.code_groups(dataset)[role]
+    return {"source": "code_list", "column": cols, "classifier": column}
+
+
 def interval_source(dataset: str, event: str, column: str, probe_year: int) -> dict:
     """The reader of an interval field (`declared`, ``interval:<date column>``): the days from the event's own date to
     the column's, plus one, as a positive measure (`gateway.mark_moments` with ``anchor``); its sign, which of the two

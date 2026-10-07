@@ -412,7 +412,8 @@ class Session:
         src = self.source
         measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
                    f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
-                   f"|link:{src['link']}:{src['side']}" if src.get("link") else "")   # its own family
+                   f"|link:{src['link']}:{src['side']}" if src.get("link") else
+                   f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else "")   # its own family
         for block in blocks or self._blocks():
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:

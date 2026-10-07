@@ -87,7 +87,7 @@ def _readers(dataset: str, event: str) -> list[dict]:
 
 #: the fields of a fit's key that make up its reader (`monolith.assemble`'s source)
 READER_KEYS = ("source", "mark", "bounds", "missing", "classifier", "structure", "casemix", "indicator", "success",
-               "link", "side", "anchor", "sign")
+               "link", "side", "anchor", "sign", "column")
 
 
 def _linked(dataset: str, event: str, link: str, side: str, years: list[int], places: np.ndarray,

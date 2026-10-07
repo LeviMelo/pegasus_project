@@ -903,11 +903,14 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     return out
 
 
-def code_list_counts(dataset: str, event: str, year: int, column: str,
-                     places: pa.Array | None = None) -> EventCounts:
+def code_list_counts(dataset: str, event: str, year: int, column: str | list[str],
+                     places: pa.Array | None = None, classifier: str | None = None) -> EventCounts:
     """Events per (u, year, sex, age, ICD category) for a column that holds several codes
-    concatenated (SINASC's CODANOMAL: "Q02Q690"): an event counts once under each distinct
-    category it carries. Events carrying none are the complement, not counted here."""
+    concatenated (SINASC's CODANOMAL: "Q02Q690"), or several columns read together (the lines of a
+    death certificate: every cause it mentions): an event counts once under each distinct
+    category it carries. Events carrying none are the complement, not counted here. ``classifier`` names the field's
+    family (a declared group's role) and reads nothing."""
+    columns = [column] if isinstance(column, str) else list(column)
     strata = _strata(dataset)
     key = {"what": "code_list_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "column": column,
            "data": config.data_version()}
@@ -915,16 +918,17 @@ def code_list_counts(dataset: str, event: str, year: int, column: str,
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    cols = [strata["residence"], strata["age"], column] + ([strata["sex"]] if strata["sex"] else [])
+    cols = [strata["residence"], strata["age"], *columns] + ([strata["sex"]] if strata["sex"] else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, cols)
     con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
+    text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)},
-            list_distinct(list_transform(regexp_extract_all(upper(CAST("{column}" AS VARCHAR)),
+            list_distinct(list_transform(regexp_extract_all(upper({text}),
                 '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3))) AS codes
-        FROM r WHERE "{column}" IS NOT NULL AND trim(CAST("{column}" AS VARCHAR)) <> ''""")
+        FROM r WHERE trim({text}) <> ''""")
     reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN len(codes) = 0 THEN 'code' END"""
@@ -934,7 +938,7 @@ def code_list_counts(dataset: str, event: str, year: int, column: str,
         GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, NULL AS code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
-    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): {column} exploded"})
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): {columns} exploded"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
 
@@ -1314,6 +1318,17 @@ def epi_week(dates: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     first = jan4 - ((jan4.astype(np.int64) + 4) % 7).astype("timedelta64[D]")
     week = ((start - first).astype(np.int64) // 7 + 1).astype(np.int64)
     return year.astype(np.int64), week
+
+
+def code_groups(dataset: str) -> dict[str, list[str]]:
+    """The columns pegasus_data declares to be read together as one set of codes (its linkage roles of type
+    ``codes``: every diagnosis of an admission, every cause a death certificate mentions), by role."""
+    from pegasus_data.linkage.roles import load_roles
+
+    spec = load_roles().get(dataset.upper().replace(".", "-"))
+    if spec is None:
+        return {}
+    return {name: [r.column, *r.also] for name, r in spec.roles.items() if getattr(r, "type", "") == "codes"}
 
 
 def link_specs() -> dict:
