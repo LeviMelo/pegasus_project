@@ -199,9 +199,14 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                        and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")]
             key = _key("triage", dataset=sys_.dataset, leads=sorted(x.id for x in answers))
             if answers and (force or not _done(key)):
-                s.triage(register=answers, log=log)
-                _mark(key, {"leads": len(answers)})
+                done = s.triage(register=answers, log=log)
+                # stage E's independent units: another record system at the lead's places and years (§8.3)
+                corr = s.corroborate(done, log=log)
+                s.register.add(corr)
+                _mark(key, {"leads": len(answers), "corroborated": len(corr)})
                 out[f"triage {sys_.dataset}"] = len(answers)
+                out[f"corroboration {sys_.dataset}"] = sum(bool(x.replications.get("corroboration", {}).get("ok"))
+                                                          for x in corr)
             else:
                 out[f"triage {sys_.dataset}"] = "nothing new" if answers else "no answers"
     if plan.report:

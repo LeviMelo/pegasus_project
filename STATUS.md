@@ -42,6 +42,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | interaction patterns (§7.4) | interaction built, off | 2026-10-06 | read ψ, ω, τ of one block |
 | exact reference fit (OPEN_QUESTIONS 2) | not run | 2026-10-06 | one block by HMC against the Laplace draws |
 | the readable dossier and human verdicts (stage F) | a Markdown table | 2026-10-07 | one page per lead, a verdict written back |
+| corroboration's sources (§8.3) | in the default stage E since 2026-10-07; `corroborate.RULES` hand-written | 2026-10-07 | derive the corroborating system from declarations (SINAN agravos' ICD codes, the ICD tree shared by SIM and SIH) |
 
 **Where each stage stands:**
 
