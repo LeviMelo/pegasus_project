@@ -61,6 +61,17 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
     Question("trend", "C", "a course bending upward from some period", "B1", "area × window", "rate ratio", (
         Method("excess_trend", "multiscale graph peaks of hinge contrasts"),
     ), ("trend",)),
+    # the questions the declared positives also ask (harness.POSITIVES), answered for now by their v0 lenses alone:
+    # a question is kept while its departure model (ARCHITECTURE §12, O6: BYM2 exceedance, the group interaction) is
+    # built, never dropped with its lens (CLAUDE.md)
+    Question("cluster", "C", "a connected set of places above the expectation over the whole period", "B0", "area",
+             "rate ratio", (
+                 Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
+             )),
+    Question("group", "C", "a place whose excess differs across sex × age groups from the national pattern", "B0",
+             "area × group", "rate ratio", (
+                 Method("group_disparity", "likelihood-ratio heterogeneity of the groups' SIRs; the v0 lens"),
+             )),
 )}
 
 

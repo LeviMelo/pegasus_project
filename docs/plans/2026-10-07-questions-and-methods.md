@@ -59,3 +59,10 @@ The first questions:
 - trend: trend.
 
 An answer none of whose findings takes one of these shapes is returned apart (`AnswerList.other_shape`), never dropped. Measured on the documented events: docs/evaluation/2026-10-07-real-events.md, v10.
+
+## Records and the full set of questions (2026-10-07, later)
+
+- **The documented events are one registry.** `harness.POSITIVES` holds 25 declarations made before their runs, plus the 5 events of 2026-10-07. Each is read through the question its lens asked (`Positive.question`). `harness.event_record` (`pegasus-core events`) scores every method of the question against each positive.
+- **Nothing is dropped.** A positive whose question is not built, whose locus a script derives, or whose dataset is not served, is listed with that status.
+- **`cluster` and `group` are questions,** answered for now by their v0 lenses alone (`spatial_cluster`, `group_disparity`). They stay while their departure models (O6) are built.
+

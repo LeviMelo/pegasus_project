@@ -196,6 +196,28 @@ def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
 
 
 @app.command()
+def events(years: str = Years) -> None:
+    """Every method of every built question against the documented positives (`harness.event_record`)."""
+    from . import harness
+
+    t = Table("positive", "question", "status / methods")
+    for r in harness.event_record(years=_years(years), log=lambda m: None):
+        cell = r.get("status") if r.get("status") != "scored" else ", ".join(
+            f"{k} {'error' if 'error' in v else 'FOUND' if v['found'] else 'missed'}" for k, v in r["methods"].items())
+        t.add_row(r["name"][:60], r["question"], cell)
+    console.print(t)
+
+
+@app.command()
+def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
+    """The register as a person reads it: answers per question and block with named places, then relations."""
+    from . import report as report_mod
+
+    path = report_mod.write(out, limit=limit)
+    console.print(f"written {path}")
+
+
+@app.command()
 def stories(limit: int = 25) -> None:
     """Leads grouped into stories (by place or subset), best first."""
     from . import leads as register

@@ -40,6 +40,9 @@ from .scans import maps, pairs, subset
 Q = 0.05
 
 
+EVENT_CRITERION = "a finding whose years overlap the event's, with half its places or more in its area, of the question's shape"
+
+
 @dataclass(frozen=True)
 class Positive:
     name: str
@@ -54,8 +57,33 @@ class Positive:
     grain: str = "year"
     note: str = ""
 
+    @property
+    def question(self) -> str:
+        """The question it is a positive for (`questions`): its declared lens's (`LENS_QUESTION`), or the question a
+        later declaration names directly in the lens's place."""
+        return LENS_QUESTION.get(self.lens, self.lens)
+
+
+# the v0 lens of each declaration and the question it asked; the declarations stay as made (their commit order is the
+# evidence), the record reads them through the questions
+LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "step", "trend_divergence": "trend",
+                 "spatial_cluster": "cluster", "group_disparity": "group", "E_w": "relation", "E_b": "relation",
+                 "E_b|Z": "relation", "explain_away": "explanation"}
+
 
 POSITIVES: tuple[Positive, ...] = (
+    # declared 2026-10-07 before their first run (data/real_events.py; evaluation 2026-10-07, real events), each by the
+    # question it is a positive for
+    Positive("Yellow fever deaths, the 2017–18 sylvatic outbreak", "SIM.DO", "death", "A95", "excess", "B1",
+             "uf:31,32,35,33", (2017, 2018), criterion=EVENT_CRITERION),
+    Positive("Measles admissions, Roraima and Amazonas 2018–19", "SIH-RD", "hospitalisation", "B05", "excess", "B1",
+             "uf:14,13", (2018, 2019), criterion=EVENT_CRITERION, note="importation from Venezuela"),
+    Positive("Chikungunya and other arboviral fevers, the Northeast 2016–17", "SIH-RD", "hospitalisation", "A92",
+             "excess", "B1", "ibge_macroregion:2", (2016, 2017), criterion=EVENT_CRITERION),
+    Positive("Accidental deaths, Brumadinho 2019", "SIM.DO", "death", "V01-X59", "excess", "B1", "mun:310900",
+             (2019, 2019), criterion=EVENT_CRITERION, note="the dam collapse of 25 January 2019"),
+    Positive("COVID-19 deaths in the North 2020–21, relative to Brazil", "SIM.DO", "death", "B25-B34", "excess", "B1",
+             "ibge_macroregion:1", (2020, 2021), criterion=EVENT_CRITERION),
     Positive("COVID-19 deaths, Amazonas", "SIM.DO", "death", "B34", "space_time", "B2", "uf:13",
              (2020, 2021), note="SIM codes COVID-19 as underlying cause B34.2 (U07.1 only as a marker); "
                                 "Manaus, January 2021; national 2020–21"),
@@ -811,3 +839,104 @@ def absorbed(rows: list[dict]) -> dict[str, Any]:
             out["|".join(key)] = {"plants": len(a), "median": round(float(np.median(a)), 3),
                                   "quartiles": [round(float(x), 3) for x in np.percentile(a, [25, 75])]}
     return out
+
+
+# ---------------------------------------------------------------------- documented events as held-out checks (§10.1)
+
+DATASET_ALIAS = {"SINASC": ("SINASC-DN", "birth"), "SIH.RD": ("SIH-RD", "hospitalisation")}
+
+
+def _served(p: Positive) -> tuple[str, str]:
+    """The session's dataset and event of a declaration (older ones name SINAN families with a dot)."""
+    if p.dataset in DATASET_ALIAS:
+        return DATASET_ALIAS[p.dataset]
+    return p.dataset.replace("SINAN.", "SINAN-"), p.event
+
+
+def _area(spec: str):
+    """A declaration's locus as a test on municipality codes, or None when a script derives it."""
+    kind, _, codes = spec.partition(":")
+    if kind not in ("uf", "ibge_macroregion", "mun"):
+        return None
+    if codes == "*":
+        return lambda p: np.ones(len(p), dtype=bool)
+    vals = [int(c) for c in codes.split(",")]
+    div = {"uf": 10000, "ibge_macroregion": 100000, "mun": 1}[kind]
+    return lambda p: np.isin(np.asarray(p, dtype=np.int64) // div, vals)
+
+
+def event_record(positives: tuple[Positive, ...] = POSITIVES, years: list[int] | None = None, grains=("year",),
+                 log=print) -> list[dict[str, Any]]:
+    """Every method of every built question against the documented positives (§10.1; the methods' records of
+    docs/plans/2026-10-07-questions-and-methods.md): per positive and method, whether a finding meets the event
+    criterion (its years overlapping the event's, half its places or more in the event's area, of a shape the
+    question takes, `questions._shape` where the method states none), the matching finding, and how many findings
+    the field had. A positive whose question is not built yet, whose locus a script derives, or whose dataset is not
+    served is recorded with that status, never dropped. Kept in the store (kind ``event_record``)."""
+    from . import questions, tools
+
+    years = list(range(2010, 2024)) if years is None else years
+    sessions: dict = {}
+    out = []
+    for p in positives:
+        rec: dict[str, Any] = {"name": p.name, "question": p.question, "dataset": p.dataset, "node": p.node,
+                               "places": p.places, "years": list(p.years)}
+        out.append(rec)
+        qn = questions.QUESTIONS.get(p.question)
+        area = _area(p.places)
+        if p.question in ("relation", "explanation"):
+            rec["status"] = (f"a {p.question} positive: scored by stage {'D' if p.question == 'relation' else 'E'}'s own "
+                             "controls, not by this record of stage C")
+        elif qn is None:
+            rec["status"] = f"no method yet: the question {p.question!r} is not built"
+        elif p.grain not in grains:
+            rec["status"] = f"{p.grain} grain: not in this record"
+        elif area is None:
+            rec["status"] = "its locus is derived by a script (scripts/declare_positives.py)"
+        if "status" in rec:
+            log(f"{p.name}: {rec['status']}")
+            continue
+        ds, ev = _served(p)
+        key = (ds, ev, p.grain)
+        try:
+            if key not in sessions:
+                sessions[key] = tools.Session(ds, ev, years, source={"grain": p.grain} if p.grain != "year" else {})
+            s = sessions[key]
+        except Exception as exc:  # noqa: BLE001 - an unserved dataset is recorded, the record goes on
+            rec["status"] = f"not served: {type(exc).__name__}: {exc}"
+            log(f"{p.name}: {rec['status']}")
+            continue
+        rec["methods"] = {}
+        for m in qn.methods:
+            try:
+                found = s.scan(p.node, m.id)
+            except Exception as exc:  # noqa: BLE001 - one method's failure is its record
+                rec["methods"][m.id] = {"error": f"{type(exc).__name__}: {exc}"}
+                continue
+            best = None
+            for f in found:
+                yrs = f.locus.get("years") or [years[0], years[-1]]
+                pl = f.locus.get("places", [])
+                if not pl or yrs[0] > p.years[1] or yrs[-1] < p.years[0] or area(pl).mean() < 0.5:
+                    continue
+                if "shape" not in f.stats:
+                    f.stats["shape"] = questions._shape(s, p.node, f, "B1")
+                shape = f.stats["shape"].get("shape", "unattributed")
+                if qn.shapes and shape not in qn.shapes and shape != "unattributed":
+                    continue
+                if best is None or f.p < best.p:
+                    best = f
+            rec["methods"][m.id] = {"found": best is not None, "findings": len(found),
+                                    "match": None if best is None else {
+                                        "years": best.locus.get("years"), "places": len(best.locus.get("places", [])),
+                                        "effect": round(float(best.effect), 2), "p": float(f"{best.p:.3g}"),
+                                        "shape": best.stats.get("shape", {}).get("shape")}}
+        rec["status"] = "scored"
+        verdicts = []
+        for k, v in rec["methods"].items():
+            verdicts.append(f"{k} " + ("error" if "error" in v else "FOUND" if v["found"] else "missed"))
+        log(f"{p.name}: " + ", ".join(verdicts))
+    record("event_record", {"positives": [p.name for p in positives], "years": years, "grains": list(grains)},
+           {"records": out})
+    return out
+
