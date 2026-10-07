@@ -887,6 +887,12 @@ def code_list_counts(dataset: str, event: str, year: int, column: str,
     return EventCounts(counts, unallocated, key)
 
 
+def strata(dataset: str) -> dict:
+    """The subject's residence, sex and age columns, their entity, and the sex implied when the strata are another
+    person's (SINASC: the mother's), from pegasus_data's roles."""
+    return _strata(dataset)
+
+
 def _strata(dataset: str) -> dict:
     """The subject's residence, sex and age columns, from pegasus_data's roles."""
     import pegasus_data as pg

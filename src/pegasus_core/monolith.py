@@ -293,7 +293,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     # categories differ in admissibility is split by it, and each group's exposure is zero outside its cells
     # (`Monolith._prof`). For an underlying cause, the codes that cannot be one are not leaves at all
     underlying = dataset == "SIM.DO" and source == "events"
-    adm, never = ({}, set()) if block == "*" else _admissible(edges, underlying)
+    # the restrictions are on the coded person's sex and age: they apply only where the population's strata are that
+    # person's. SINASC's strata are the mother's (her sex implied by pegasus_data's roles) while CODANOMAL codes the
+    # birth: applied there, male-only anomaly classes had no exposure and the fit's start was NaN (2026-10-06)
+    own_strata = gateway.strata(dataset)["implied_sex"] is None
+    adm, never = ({}, set()) if block == "*" or not own_strata else _admissible(edges, underlying)
     never = never & set(categories)
     every = (np.ones(2 * nB, dtype=bool), "")
     cls = {c: adm.get(c, every) for c in categories}
@@ -303,6 +307,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     carrier = {c: (f"{k}|{cls[c][1]}" if k in mixed and cls[c][1] else k) for c, k in carrier.items()}
     groups = sorted(set(carrier.values()))
     group_cells = np.array([next(cls[c][0] for c in categories if carrier[c] == k) for k in groups])
+    exposed = N.sum(axis=(0, 1)) > 0                                     # the age–sex cells the population holds
+    empty = [g for g, cells in zip(groups, group_cells, strict=True) if not (cells & exposed).any()]
+    if empty:
+        raise ValueError(f"{dataset} {block}: groups {empty} have no admissible cell the population holds "
+                         "(a restriction applied to the wrong person, or a population without the group's sex or ages)")
     group_outer = outer_groups = None
     if geography is not None and geography != profile:
         if geography not in ("chapter", "group", "block", "category"):
