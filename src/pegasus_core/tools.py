@@ -538,7 +538,11 @@ class Session:
                     w = (s.years >= span[0]) & (s.years <= span[-1])
                     obs, exp_ = float(s.y[sel][:, w].sum()), float(s.mu[sel][:, w].sum())
                 def run(x=x, rows=rows, span=span, direction=direction, obs=obs, exp_=exp_, ev=ev):
-                    run.verdict = explain.triage(x.estimand, rows, span, direction, ev, obs, exp_)
+                    if x.estimand == "institution":      # an institution's step reads its own statistics
+                        st_i = (x.provenance.get("by_method", {}).get("institution_step") or {}).get("stats", {})
+                        run.verdict = explain.institution_triage(st_i)
+                    else:
+                        run.verdict = explain.triage(x.estimand, rows, span, direction, ev, obs, exp_)
                     v = run.verdict
                     pv = v.evidence.get("p")
                     return {"tested": pv is not None, "p": 1.0 if pv is None else float(pv),

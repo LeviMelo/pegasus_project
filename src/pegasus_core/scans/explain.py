@@ -244,6 +244,19 @@ def _moves(a: np.ndarray, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -
     return w - b, (w - b) / se
 
 
+def institution_triage(stats: dict) -> Triage:
+    """An institution's step (`facility.institution_lattice`): a step its other chapters follow (``kind`` volume: the
+    facility's share of the nation's other admissions moves the same way, at least `facility.VOLUME_FOLLOWS` of it) is
+    capacity, an opening, closing or expansion, and accounts for the step by the share its other chapters moved
+    (grade bound); a step specific to the field is the institution question's own finding."""
+    lr, lo = float(stats.get("log_ratio", 0.0)), float(stats.get("other_log_ratio", 0.0))
+    info = {"log_ratio": round(lr, 3), "other_log_ratio": round(lo, 3), "window": [stats.get("start"), stats.get("end")]}
+    if stats.get("kind") == "volume":
+        return Triage(SYSTEM, "capacity: the institution's other chapters moved with the step (an opening, closing or "
+                      "expansion)", info, BOUND, bound=float(min(1.0, abs(lo) / max(abs(lr), 1e-12))))
+    return Triage(SIGNAL, "one institution's step specific to this field", info)
+
+
 def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: int, ev: Evidence,
            observed: float | None = None, expected: float | None = None) -> Triage:
     """Classify one lead. ``rows`` index its places in the evidence arrays, ``span`` its years (first, last),
