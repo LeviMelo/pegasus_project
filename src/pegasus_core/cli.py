@@ -149,8 +149,7 @@ def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 @app.command()
 def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "contiguity",
          kinds: str = "place,cluster,region,state,macro", shapes: str = "spike,step,trend,group", grain: str = "year",
-         lenses: str = ",".join(("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence",
-                                "group_disparity")),
+         lenses: str = typer.Option(None, help="methods to read, comma-separated; default every method of the questions"),
          worlds: int = 4, null_worlds: int = 4, replicates: int = 100, out: str = typer.Option(None),
          minimum_effects: str = typer.Option(None, help='JSON of minimum effects (theta0) per lens, e.g. {"outbreak": [1.0, 1.2, 1.5]}'),
          tiers: str = typer.Option(None, help='JSON of expectation tiers per lens, e.g. {"change_point": ["B1", "B2"]}')
@@ -160,7 +159,7 @@ def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "
     from . import harness as h
 
     res = h.grid(_session(dataset, event, years, graph, grain), node, kinds=tuple(kinds.split(",")),
-                 shapes=tuple(shapes.split(",")), lens_names=tuple(lenses.split(",")), worlds=worlds,
+                 shapes=tuple(shapes.split(",")), lens_names=tuple(lenses.split(",")) if lenses else h.question_methods(), worlds=worlds,
                  null_worlds=null_worlds, replicates=replicates, log=console.print,
                  sink=str(Path(out).with_suffix(".jsonl")) if out else None,
                  minimum_effects={k: tuple(v) for k, v in json.loads(minimum_effects).items()} if minimum_effects else None,

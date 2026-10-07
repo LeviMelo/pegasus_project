@@ -491,7 +491,12 @@ GRID_KINDS = ("place", "cluster", "region", "state", "macro")
 GRID_SHAPES = ("spike", "step", "trend", "group")
 GRID_THETAS = (1.1, 1.2, 1.5, 2.0, 3.0)
 GRID_LOAD = 0.05     # a world's planted excess in any period, at most this share of the field's expected events then (beyond its first plant)
-GRID_LENSES = ("outbreak", "change_point", "space_time", "spatial_cluster", "trend_divergence", "group_disparity")
+def question_methods() -> tuple[str, ...]:
+    """Every method of every stage-C question (`questions.QUESTIONS`): what the grid reads by default."""
+    from . import questions
+
+    return tuple(dict.fromkeys(m.id for qn in questions.QUESTIONS.values() for m in qn.methods))
+
 MINIMUM_EFFECT_ARG = {"cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio",
                       "excess_level": "rate_ratio", "excess_trend": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "space_time": "rate_ratio",
                       "spatial_cluster": "rate_ratio", "trend_divergence": "ratio", "group_disparity": "sd"}
@@ -695,7 +700,7 @@ def _score(plants: list[Plant], found: list, places: np.ndarray, periods: np.nda
 
 
 def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: tuple[str, ...] = GRID_SHAPES,
-         lens_names: tuple[str, ...] = GRID_LENSES, worlds: int = 4, thetas: tuple[float, ...] = GRID_THETAS,
+         lens_names: tuple[str, ...] | None = None, worlds: int = 4, thetas: tuple[float, ...] = GRID_THETAS,
          replicates: int = 100, null_worlds: int = 0, minimum_effects: dict[str, tuple] | None = None,
          tiers: dict[str, tuple] | None = None, weighted: tuple[bool, ...] = (True,), sink: str | None = None,
          log=print) -> dict[str, Any]:
@@ -712,6 +717,7 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     the store (kind ``grid``)."""
     from . import control, tools
 
+    lens_names = tuple(lens_names) if lens_names else question_methods()
     ex = session.expectations
     f = ex.field(node)
     m = ex.model(f.block)

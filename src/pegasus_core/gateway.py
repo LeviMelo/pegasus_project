@@ -1156,8 +1156,6 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     ``report`` date (SINAN's data entry, DT_DIGITA; SIH's processing month; SIM's registration). Rows with either
     date missing or a negative delay are left out and counted in the table's metadata. Columns: u, year, week,
     delay, n."""
-    from . import surveillance
-
     when = onset or _when(dataset)
     key = {"what": "delay_counts", "dataset": dataset, "event": event, "year": year, "onset": when, "report": report,
            "data": config.data_version(), **_df_key(dataset, year)}
@@ -1174,7 +1172,7 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     d1 = t.column("d1").to_numpy(zero_copy_only=False).astype("datetime64[D]")
     u = t.column("u").to_numpy(zero_copy_only=False)
     ok = ~np.isnat(d0) & ~np.isnat(d1) & (d1 >= d0) & np.isfinite(u.astype(float))
-    ey, ew = surveillance.epi_week(d0[ok])
+    ey, ew = epi_week(d0[ok])
     delay = ((d1[ok] - d0[ok]).astype(np.int64) // 7).astype(np.int64)
     df = pd.DataFrame({"u": u[ok].astype(np.int64), "year": ey, "week": ew, "delay": delay})
     out = pa.Table.from_pandas(df.groupby(["u", "year", "week", "delay"]).size().rename("n").reset_index(),
@@ -1189,3 +1187,15 @@ def municipality_names() -> dict[str, dict[str, str]]:
 
     return geography.municipalities()
 
+
+def epi_week(dates: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(epidemiological year, week) of each date (datetime64[D]): weeks run Sunday to Saturday, and week 1 of year
+    Y is the week holding 4 January of Y, so a week belongs to the year of its Wednesday."""
+    d = np.asarray(dates, dtype="datetime64[D]")
+    dow = (d.astype(np.int64) + 4) % 7                   # 1970-01-01 was a Thursday: 0 = Sunday
+    start = d - dow.astype("timedelta64[D]")
+    year = (start + np.timedelta64(3, "D")).astype("datetime64[Y]").astype(np.int64) + 1970
+    jan4 = (np.array(year - 1970, dtype="datetime64[Y]").astype("datetime64[D]") + np.timedelta64(3, "D"))
+    first = jan4 - ((jan4.astype(np.int64) + 4) % 7).astype("timedelta64[D]")
+    week = ((start - first).astype(np.int64) // 7 + 1).astype(np.int64)
+    return year.astype(np.int64), week

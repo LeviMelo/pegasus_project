@@ -64,13 +64,18 @@ class Plan:
 
 
 def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
-              device: str = "cpu", log=print):
-    """Assemble one block, fit its monolith and store it (the `fit` command's and the update's one path)."""
+              device: str = "cpu", source: dict | None = None, warm: str | None = "auto", log=print):
+    """Assemble one block, fit its model and store it: the one fitting path (`fit`, `update`, scripts/fit_blocks.py).
+    ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
+    ``warm`` starts from the best related stored fit ("auto") or from nothing (None)."""
     from . import graphs, monolith
 
-    data = monolith.assemble(dataset, event, block, years)
-    model = monolith.Monolith(data, graphs.graph(data.places, graph), graph, device=device)
-    model.fit(log=lambda line: log(f"{dataset} {block} {line}"))
+    source = dict(source or {})
+    if "bounds" in source:
+        source["bounds"] = tuple(source["bounds"])
+    data = monolith.assemble(dataset, event, block, years, **source)
+    model = monolith.model_class(source)(data, graphs.graph(data.places, graph), graph, device=device)
+    model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
     model.save()
     return model
 

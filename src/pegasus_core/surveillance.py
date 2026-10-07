@@ -30,18 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import stats
 
-
-def epi_week(dates: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """(epidemiological year, week) of each date (datetime64[D]): weeks run Sunday to Saturday, and week 1 of year
-    Y is the week holding 4 January of Y, so a week belongs to the year of its Wednesday."""
-    d = np.asarray(dates, dtype="datetime64[D]")
-    dow = (d.astype(np.int64) + 4) % 7                   # 1970-01-01 was a Thursday: 0 = Sunday
-    start = d - dow.astype("timedelta64[D]")
-    year = (start + np.timedelta64(3, "D")).astype("datetime64[Y]").astype(np.int64) + 1970
-    jan4 = (np.array(year - 1970, dtype="datetime64[Y]").astype("datetime64[D]") + np.timedelta64(3, "D"))
-    first = jan4 - ((jan4.astype(np.int64) + 4) % 7).astype("timedelta64[D]")
-    week = ((start - first).astype(np.int64) // 7 + 1).astype(np.int64)
-    return year.astype(np.int64), week
+from .gateway import epi_week  # noqa: F401 - the week rule is the data's (gateway); re-exported for readers
 
 
 @dataclass
