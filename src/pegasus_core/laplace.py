@@ -91,7 +91,8 @@ class Posterior:
         with torch.no_grad():
             for x in self.draws:
                 tm, xx = (self.m, x) if x_fn is None else x_fn(x)
-                mu, mu2 = tm.expected(leaves, spatial, x=xx)
+                with tm.without_offset():           # a draw's mean is e^η: N2's offset is the draws' own spread
+                    mu, mu2 = tm.expected(leaves, spatial, x=xx)
                 if relevel:
                     ref, _ = tm.expected(leaves, True, x=xx)
                     c = ref.sum(0) / np.maximum(mu.sum(0), 1e-300)
@@ -102,6 +103,61 @@ class Posterior:
                 sm2 = sm2 + mu2
         mean = s1 / n
         return {"mean": mean, "var": np.maximum(s2 / n - mean ** 2, 0.0) * n / max(n - 1, 1), "mu2": sm2 / n}
+
+
+def marginal(model: monolith.Monolith, draws: int = 100, iterations: int = 12, tol: float = 0.05, poisson: bool = False,
+             damping: float = 0.5, seed: int | None = None, log=None) -> monolith.Monolith:
+    """N2 (ARCHITECTURE §12; evaluation 2026-10-06, SBC): the mean refitted so that the posterior, not its mode,
+    reproduces the data. The joint mode of a log-link hierarchical model sets data-poor effects at zero and moves the
+    mass their e^η would carry into the intercept and the large places (the joint-mode bias of GLMMs: Breslow & Lin
+    1995; lme4's nAGQ = 0 against the Laplace marginal of nAGQ = 1). SBC showed it on SIM VII and XIII alike: every
+    count-scale sum of the Laplace draws above its truth.
+
+    The remedy is the Gaussian variational approximation of a Poisson GLMM (Ormerod & Wand 2012): the posterior is
+    N(m, Σ), m solving the score with every cell's mean at e^(η + v/2), v = Var(η | y) the cell's posterior variance
+    (to first order, the Laplace marginal likelihood's score in the globals: TMB, Kristensen et al. 2016), and Σ the
+    inverse Hessian with the weights at those means. Fixed point: the draws at the current fit give v per
+    leaf-place-period (the variance of log μ over the draws), the mean is refitted with the offset v/2 at the same
+    strengths (`Monolith.refit`, warm), until the offset moves by less than ``tol``. The returned model's expectation is
+    the posterior mean; its draws (`Posterior`) are evaluated without the offset (`Monolith.without_offset`)."""
+    m = model
+    E = len(m.data.leaves)
+    prev = None
+    for it in range(iterations):
+        t0 = time.time()
+        post = Posterior(m, poisson=poisson)
+        post.sample(draws, seed=config.seed("marginal", m.key(), it) if seed is None else seed + it)
+        U, T = m.N.shape[:2]
+        s1 = np.zeros((E, U, T))
+        s2 = np.zeros((E, U, T))
+        pos = np.ones((E, U, T), dtype=bool)
+        with torch.no_grad(), m.without_offset():
+            for x in post.draws:
+                for e in range(E):
+                    mu = m.expected(np.array([e]), True, x=x)[0]
+                    pos[e] &= mu > 0
+                    lm = np.log(np.maximum(mu, 1e-300))
+                    s1[e] += lm
+                    s2[e] += lm ** 2
+        n = len(post.draws)
+        v = np.maximum(s2 / n - (s1 / n) ** 2, 0.0) * n / max(n - 1, 1)
+        # pooled over each leaf-place's periods: a sparse cell's variance is its leaf's and place's effects', nearly
+        # constant in time, and 100 draws alone left the fixed point moving by ±1 at log-variances near 12 (SIM VII)
+        cnt = pos.sum(2, keepdims=True)
+        v = np.where(pos, (np.where(pos, v, 0.0).sum(2, keepdims=True) / np.maximum(cnt, 1)), 0.0)
+        off = torch.as_tensor(0.5 * v, dtype=m.dtype, device=m.device)
+        if prev is not None:                # damped: the plain fixed point oscillated on SIM VII (2026-10-07)
+            off = damping * off + (1 - damping) * prev
+        moved = float((off - prev).abs().max()) if prev is not None else float(off.abs().max())
+        post.draws = []
+        m = m.refit(m.data, off=off)
+        prev = off
+        if log:
+            log(f"N2 iteration {it}: offset max {float(off.max()):.3g}, mean {float(off.mean()):.3g}, moved {moved:.3g}, "
+                f"{time.time() - t0:.0f}s")
+        if moved < tol:
+            break
+    return m
 
 
 def predictive_phi(mean: np.ndarray, var: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:

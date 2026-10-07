@@ -367,18 +367,22 @@ class Session:
         return questions.ask(self, question, node, q, **kw)
 
     def survey_questions(self, blocks: list[str] | None = None, questions: tuple[str, ...] | None = None,
-                         q: float = 0.05, log=print) -> list[leads.Lead]:
+                         q: float = 0.05, levels: tuple[str, ...] | None = None, log=print) -> list[leads.Lead]:
         """The pass over every field with events, asking questions instead of running lenses (`questions`): per field
         and question, the methods' answers (each method at q/k inside the field, merged by overlapping loci); an
         answer's p is its smallest method p times k (Bonferroni over the methods, valid under any dependence);
         across fields, Benjamini–Bogomolov per (question, block) family. Each lead names the question, the methods
-        that agree, each one's effect and scale. Retrospective, in the fields' order."""
+        that agree, each one's effect and scale. Retrospective, in the fields' order. ``levels`` keeps the fields of
+        those tree levels (None: every level). An answer of another shape than its question's (`questions.ask`'s
+        ``other_shape``) is logged and left to the question of its shape, whose own methods test it."""
         from . import questions as qs
 
         names = questions or tuple(qs.QUESTIONS)
         found: dict[str, list] = {}
         for block in blocks or self._blocks():
             for f in self.fields(block):
+                if levels is not None and f.level not in levels:
+                    continue
                 for qn in names:
                     k = len(qs.QUESTIONS[qn].methods)
                     try:
@@ -388,7 +392,8 @@ class Session:
                         continue
                     for a in answers:
                         found.setdefault(f"{qn}|{block}", []).append((f.id, a, min(1.0, a.p * k)))
-                    log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}")
+                    log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
+                        f"{len(getattr(answers, 'other_shape', []))} of another shape")
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)
         admitted = []

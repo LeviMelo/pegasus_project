@@ -322,13 +322,21 @@ def lagged(d: Departures, lags: int) -> Departures:
 
 
 def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
-                                                                        0.2, 0.5, 2.01)) -> dict[str, Departures]:
+                                                                        0.2, 0.5, 2.01), min_cells: int = 0, log=print
+          ) -> dict[str, Departures]:
     """The departures in graph-frequency bands (`multiscale.GraphSpectrum`; no zoning): each field's departures
     standardised by their sampling sd (i.i.d. under the null), projected on the Laplacian's eigenvectors (orthonormal,
     so the noise stays i.i.d. per coefficient), and split by eigenvalue into ``edges_of_bands``. A smooth regional
     factor concentrates in the low bands, a local one in the high. Each band is a `Departures` over its coefficients
     with unit sampling variance, keyed by its label: the eigenvalue range and the effective places of the heat kernel
-    at s = 1/λ (the band's spatial scale)."""
+    at s = 1/λ (the band's spatial scale).
+
+    A band with fewer than ``min_cells`` cells (coefficients × periods; pass the number of lagged fields to be fitted)
+    is not returned, and is named in the log as unanswered: a factor model on fewer cells than variables is not
+    identified, and its implied correlations are not relations. With SIH's places permuted, the national band
+    (5 eigenvectors × 12 periods against 195 lagged fields) reported 42 false cross-system relations against 1
+    observed, and merged up to 216 cells it reported 377 (2026-10-07, evaluation relations-real). The relations of
+    the national and macro-regional scales are OPEN_QUESTIONS 9's."""
     import torch
 
     lam, Q = spectrum._eig
@@ -345,6 +353,10 @@ def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.0
             continue
         mid = float(np.sqrt(max(lo, lam_[idx].min(), 1e-6) * hi))
         label = f"λ {lo:g}-{hi:g} (~{spectrum.footprint(1.0 / mid):.0f} places)"
+        if idx.size * T < min_cells:
+            if log:
+                log(f"band {label}: {idx.size * T} cells for {min_cells}: not identified, unanswered (OPEN_QUESTIONS 9)")
+            continue
         out[label] = Departures(d.fields, idx, d.periods, xh[:, idx, :], np.ones((F, idx.size, T)))
     return out
 

@@ -31,6 +31,7 @@ parser.add_argument("last", type=int)
 parser.add_argument("--replicates", type=int, default=100)
 parser.add_argument("--draws", type=int, default=99)
 parser.add_argument("--seed", type=int, default=20261006)
+parser.add_argument("--marginal", action="store_true", help="N2: the fit and every refit by laplace.marginal")
 args = parser.parse_args()
 
 
@@ -48,7 +49,7 @@ def tracked(m: monolith.Monolith, x: dict[str, torch.Tensor]) -> dict[str, float
     big = np.argsort(-m.data.N.sum(axis=(1, 2)))[:5]
     for u in big:
         out[f"place[{int(m.data.places[u])}]"] = float(x["s_all"][0][u] + x["v_all"][0][u])
-    with torch.no_grad():
+    with torch.no_grad(), m.without_offset():         # a draw's own mean, e^η
         for k, g in enumerate(m.data.groups):
             leaves = np.nonzero(m.data.leaf_group == k)[0]
             out[f"total[{g}]"] = float(np.log(m.expected(leaves, x=x)[0].sum()))
@@ -84,6 +85,8 @@ def main() -> None:
     t0 = time.time()
     m.fit(outer=40, mean_tol=1.0, log=lambda s: None)
     print(f"fitted {args.block}: {time.time() - t0:.0f}s, {len(m.history)} outers", flush=True)
+    if args.marginal:
+        m = laplace.marginal(m, poisson=True, log=lambda s: print(s, flush=True))
     taus = {n: c.tau for n, c in m.components.items()}
     truths = laplace.Posterior(m, poisson=True).sample(args.replicates, seed=args.seed)
     ranks: dict[str, list[int]] = {}
@@ -97,6 +100,9 @@ def main() -> None:
             for n, v in m.params.items():
                 m2.params[n].copy_(v)                                         # start at the fit's MAP
         solver.fit_mean(m2, iterations=30, loglik_tol=1e-3)
+        if args.marginal:
+            m2.phi = m.phi
+            m2 = laplace.marginal(m2, poisson=True)
         draws = laplace.Posterior(m2, poisson=True).sample(args.draws, seed=args.seed + r + 1)
         truth = tracked(m2, x_true)
         drawn = [tracked(m2, x) for x in draws]
@@ -107,12 +113,14 @@ def main() -> None:
         print(f"replicate {r}: {time.time() - t1:.0f}s, {int(sim.y.sum())} events", flush=True)
     bins = 10
     out = {"dataset": args.dataset, "block": args.block, "years": [args.first, args.last],
-           "replicates": args.replicates, "draws": args.draws, "taus": taus, "quantities": {}}
+           "replicates": args.replicates, "draws": args.draws, "taus": taus, "marginal": args.marginal,
+           "quantities": {}}
     for q, rk in ranks.items():
         hist = np.histogram(rk, bins=bins, range=(0, args.draws + 1))[0]
         chi2 = stats.chisquare(hist)
         out["quantities"][q] = {"ranks": rk, "histogram": hist.tolist(), "chi2_p": float(chi2.pvalue)}
-    path = Path("data/probes/sbc") / f"{args.dataset}_{args.block}_{args.first}_{args.last}.json"
+    path = Path("data/probes/sbc") / (f"{args.dataset}_{args.block}_{args.first}_{args.last}"
+                                      f"{'_marginal' if args.marginal else ''}.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1), encoding="utf-8")
     ps = sorted((v["chi2_p"], q) for q, v in out["quantities"].items())
