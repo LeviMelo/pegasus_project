@@ -263,6 +263,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | what PegaSUS is: the six stages (§1.1), principles P1–P16, mathematics, code, roadmap (§12), maturity and departures (§13) | `ARCHITECTURE.md` |
 | the order of work, each package's steps and acceptance | `docs/plans/2026-10-06-overhaul.md` (N1, N2, O1–O10) |
 | the solver's speed design and timings | `docs/plans/2026-10-06-optimization.md` |
+| the joint relation model's design (O7) | `docs/plans/2026-10-06-o7-joint-relations.md` |
 | how much of the architecture is built and measured, item by item; the gaps ranked | `docs/architecture_coverage.md` |
 | accepted decisions | `DECISIONS.md` (an index; one file per ADR under `docs/decisions/`) |
 | measurements, harness and grid runs | `EVALUATION.md` (an index; entries under `docs/evaluation/`) |
