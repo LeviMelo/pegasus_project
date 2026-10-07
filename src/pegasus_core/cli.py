@@ -30,14 +30,21 @@ def _session(dataset: str, event: str, years: str, graph: str, grain: str = "yea
 def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
         device: str = "cpu") -> None:
     """Fit monolith blocks (chapters) and store them."""
-    from . import graphs, monolith
+    from . import pipeline
 
     for block in blocks:
-        data = monolith.assemble(dataset, event, block, _years(years))
-        model = monolith.Monolith(data, graphs.graph(data.places, graph), graph, device=device)
-        model.fit(log=lambda line, b=block: console.print(f"{b} {line}"))
-        model.save()
+        model = pipeline.fit_block(dataset, event, block, _years(years), graph, device, log=console.print)
         console.print_json(json.dumps(model.summary(), default=float))
+
+
+@app.command()
+def run(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
+        force: bool = typer.Option(False, help="rerun every step, done or not")) -> None:
+    """The pipeline from data to report (`pipeline`): fit, questions, relations, triage, report; incremental."""
+    from . import pipeline
+
+    out = pipeline.run(pipeline.Plan.load(plan), force=force, log=console.print)
+    console.print_json(json.dumps(out, default=str))
 
 
 @app.command()
@@ -205,6 +212,18 @@ def events(years: str = Years) -> None:
         cell = r.get("status") if r.get("status") != "scored" else ", ".join(
             f"{k} {'error' if 'error' in v else 'FOUND' if v['found'] else 'missed'}" for k, v in r["methods"].items())
         t.add_row(r["name"][:60], r["question"], cell)
+    console.print(t)
+
+
+@app.command()
+def alarms(dataset: str, event: str, node: str, as_of: str, report: str = typer.Option("DT_DIGITA", help="the date an event becomes known"),
+           years: str = Years, recurrence: float = 260.0, weeks: int = 8) -> None:
+    """Phase 4: the place-weeks before AS_OF whose nowcast exceeds the alarm baseline at the declared recurrence."""
+    s = _session(dataset, event, years, "contiguity")
+    t = Table("place", "week", "known", "nowcast", "threshold", "P(exceed)")
+    for r in s.alarms(node, as_of, report, recurrence, weeks)[:40]:
+        t.add_row(str(r["place"]), str(r["week"]), str(r["known"]), f"{r['nowcast']:.1f}", f"{r['threshold']:.0f}",
+                  f"{r['p_exceed']:.2f}")
     console.print(t)
 
 

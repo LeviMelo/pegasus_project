@@ -46,13 +46,14 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
 PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
-SCALE = {"cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
+SCALE = {"cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
+         "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
 
@@ -350,7 +351,7 @@ class Session:
         if lens == "cell_excess":                     # a departure model (stage C, O6)
             from . import departures
             return departures.cell_excess(s, self.ledger, **kw)
-        if lens in ("excess", "excess_step", "excess_trend"):  # departures at unknown spatial scale (stage C, O6)
+        if lens in ("excess", "excess_step", "excess_trend", "excess_level"):  # at unknown spatial scale (stage C, O6)
             from . import departures
             return departures.excess(s, self.ledger, self.spectrum(), shape=lens.partition("_")[2] or "spike", **kw)
         if lens == "step":                     # the step departure model (stage C, O6)
@@ -359,6 +360,50 @@ class Session:
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)
         return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
+
+    def alarms(self, node: str, as_of: str, report: str, recurrence: float = 260.0, weeks: int = 8,
+               confidence: float = 0.5) -> list[dict]:
+        """Phase 4 (`surveillance`; ADR-0004): the alarms of the last ``weeks`` epidemiological weeks before the date
+        ``as_of`` (ISO) for every place of a field. The events known by then are the current year's records whose
+        ``report`` date (SINAN's DT_DIGITA) precedes it (`gateway.delay_counts`); each place's reporting delay comes
+        from the last closed year; the baseline is the alarm tier (BPA, ADR-0012) fitted on the years before, at its
+        own grain and allocated to weeks in proportion to their days (stated: a weekly alarm fit replaces it).
+        Returns one row per place-week that alarms, strongest first."""
+        from . import gateway, surveillance
+
+        day = np.datetime64(as_of, "D")
+        year = int(str(day)[:4])
+        closed = surveillance.delays(gateway.delay_counts(self.dataset, self.event, year - 1, report))
+        cur = gateway.delay_counts(self.dataset, self.event, year, report).to_pandas()
+        ey, ew = surveillance.epi_week(np.array([day]))
+        now = int(ew[0])
+        cur = cur[(cur["year"] == int(ey[0])) & (cur["week"] > now - weeks) & (cur["week"] <= now)]
+        cur = cur[cur["delay"] <= now - cur["week"]]                      # known by as_of
+        known = cur.groupby(["u", "week"])["n"].sum()
+        s = self.surprise(node, "BPA", train_last=year - 1)
+        yrs = np.asarray(s.years)
+        monthly = bool(yrs.max() > 10000)                   # periods labelled YYYYMM at the monthly grain
+        month = int(str(day)[5:7])
+        col = np.flatnonzero(yrs == (year * 100 + month if monthly else year))
+        if col.size == 0:
+            raise ValueError(f"the alarm baseline has no period holding {as_of}: the session's years must include {year}")
+        first = np.datetime64(f"{year}-{month:02d}", "M")
+        days = int(((first + 1).astype("datetime64[D]") - first.astype("datetime64[D]")).astype(int)) if monthly else 365.25
+        mu_week = s.mu[:, col[0]] * 7 / days
+        phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[:, col[0]]
+        index = {int(p): i for i, p in enumerate(s.places)}
+        out = []
+        for (u, w), y in known.items():
+            i = index.get(int(u))
+            if i is None:
+                continue
+            a = surveillance.alarm(np.array([y]), np.array([closed.F(int(u), now - int(w))]), np.array([mu_week[i]]),
+                                   np.array([phi[i]]), recurrence, confidence)
+            if a["alarm"][0]:
+                out.append({"place": int(u), "week": int(w), "known": int(y), "nowcast": float(a["nowcast"][0]),
+                            "threshold": float(a["threshold"][0]), "p_exceed": float(a["p_exceed"][0]),
+                            "baseline_week": float(mu_week[i])})
+        return sorted(out, key=lambda r: -r["p_exceed"])
 
     def ask(self, question: str, node: str, q: float = 0.05, **kw) -> list:
         """A question of `questions.QUESTIONS` on one field: every method answering it at q/k, their findings merged
@@ -1132,7 +1177,7 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
 
     from . import multiscale, relations
 
-    surps, edges, n_places = [], None, None
+    surps, edges, n_places, excluded = [], None, None, []
     for ds, ev, blocks in plan:
         s = Session(ds, ev, years, graph)
         for b in blocks:
@@ -1141,8 +1186,14 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
                 if f.level not in levels and not (b == "*" and f.node == "*"):
                     continue
                 x = s.surprise(f.node, "B1")
-                if x.y.sum() >= min_events:
-                    surps.append(x)
+                if x.y.sum() < min_events:
+                    continue
+                if x.calibration.get("calibrated") is False:
+                    # invariant 8 (ARCHITECTURE): a field whose predictive is miscalibrated is never in a pair scan;
+                    # its relations are unanswered, and say why
+                    excluded.append(f"{x.field.id}: miscalibrated (KS {x.calibration.get('ks', float('nan')):.3f})")
+                    continue
+                surps.append(x)
             if edges is None:
                 edges, n_places = s.edges(), len(m.data.places)
             s.expectations._models = {}
@@ -1157,9 +1208,10 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
                            locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
                            interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
                            null="independent fields' innovations (factor model per band)", calibrated=True,
-                           provenance={"z": float(r["z"]), "unanswered": out["unanswered"]})
+                           provenance={"z": float(r["z"]), "unanswered": out["unanswered"] + excluded})
                 for r in rep]
     leads.Register().add(admitted)
-    log(f"{len(rep)} relations reported of {len(out['rows'])} pairs; unanswered: {len(out['unanswered'])} bands")
+    log(f"{len(rep)} relations reported of {len(out['rows'])} pairs; unanswered: {len(out['unanswered'])} bands, "
+        f"{len(excluded)} miscalibrated fields")
     return admitted
 

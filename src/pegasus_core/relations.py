@@ -355,7 +355,8 @@ def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.0
         label = f"λ {lo:g}-{hi:g} (~{spectrum.footprint(1.0 / mid):.0f} places)"
         if idx.size * T < min_cells:
             if log:
-                log(f"band {label}: {idx.size * T} cells for {min_cells}: not identified, unanswered (OPEN_QUESTIONS 9)")
+                log(f"band {label}: {idx.size * T} cells for {min_cells}: not identified by the band model; its scale "
+                    "is read on the fields' courses (`course_relations`)")
             continue
         out[label] = Departures(d.fields, idx, d.periods, xh[:, idx, :], np.ones((F, idx.size, T)))
     return out
@@ -526,12 +527,15 @@ def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) 
     return rows
 
 
-def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, log=None) -> dict:
+def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, courses: bool = True,
+                 log=None) -> dict:
     """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
     frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
     stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
-    (`factor_model`), and every pair, lag and band under one BH at q (`relation_table`). Returns ``rows`` (every
-    pair, ``reported`` marking the relations), ``unanswered`` (the bands not fitted) and ``fields``."""
+    (`factor_model`), and every pair, lag and band under one BH at q (`relation_table`). The scales the bands
+    cannot identify are answered on the fields' courses (``courses``: `course_relations`, national and macro-regional,
+    their own family at q). Returns ``rows`` (every pair, ``reported`` marking the relations), ``unanswered`` (the
+    bands not fitted) and ``fields``."""
     d = innovations(surprises)
     T = len(d.periods)
     min_cells = int(np.ceil((lags + 1) * len(d.fields) * T / max(T - lags, 1)))   # lagged cells ≥ lagged fields
@@ -548,5 +552,81 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
         if log:
             log(f"band {label}: {db.r.shape[1]} coefficients, "
                 f"{int((fits[label].gamma > 1e-3 * fits[label].gamma.max()).sum())} factors kept")
-    return {"rows": relation_table(fits, q=q), "unanswered": unanswered, "fields": d.fields}
+    rows = relation_table(fits, q=q)
+    if courses:
+        rows += course_relations(surprises, lags=lags, q=q)
+        if log:
+            log(f"courses: {sum(r['reported'] for r in rows if r['support'] in ('national', 'macro-regional'))} "
+                "national and macro-regional relations")
+    return {"rows": rows, "unanswered": unanswered, "fields": d.fields}
 
+
+
+# ---------------------------------------------------------------------- the national and macro-regional courses
+
+
+def phase_surrogates(x: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """[n, T] surrogates of a series with its power spectrum kept and its phases drawn at random (Theiler et al.
+    1992): its own autocorrelation stays, any relation to another series is destroyed."""
+    T = len(x)
+    f = np.fft.rfft(x - x.mean())
+    ph = rng.uniform(0, 2 * np.pi, (n, len(f)))
+    ph[:, 0] = 0.0
+    if T % 2 == 0:
+        ph[:, -1] = 0.0                                  # the Nyquist term stays real
+    return np.fft.irfft(np.abs(f)[None, :] * np.exp(1j * ph), n=T) + x.mean()
+
+
+def course_relations(surprises: list, lags: int = 2, q: float = 0.05, replicates: int = 999, seed: int = 0) -> list[dict]:
+    """Relations at the scales the band factor model cannot identify (OPEN_QUESTIONS 9): each field's course as the
+    yearly log ratio of observed to expected, nationally and in each macro-region (the IBGE code's first digit). A
+    pair's statistic at lag ℓ is the correlation of follower(t) with leader(t − ℓ), pooled over the regions after
+    centring each region's series. Its null comes from phase surrogates of the leader's series (`phase_surrogates`),
+    which keep each series' own autocorrelation, so the test has the T periods' degrees of freedom and no more; a
+    place permutation is no null here, as it keeps every course (evaluation 2026-10-07, relations real). Two
+    supports: ``national`` and ``macro-regional``. Rows as `relation_table`'s, with one BH at q over them all."""
+    from . import control
+
+    rng = np.random.default_rng(seed)
+    names = [s.field.id for s in surprises]
+    places = np.asarray(surprises[0].places).astype(np.int64)
+    regions = places // 100000
+    supports = {"national": [np.ones(len(places), dtype=bool)],
+                "macro-regional": [regions == r for r in np.unique(regions)]}
+    rows = []
+    for support, masks in supports.items():
+        series = []                                      # [F][R] the centred log-ratio courses
+        for s in surprises:
+            pl = np.asarray(s.places).astype(np.int64)
+            per = []
+            for mk in masks:
+                sel = np.isin(pl, places[mk])
+                o, e = s.y[sel].sum(0), s.mu[sel].sum(0)
+                lr = np.log((o + 0.5) / (e + 0.5))
+                per.append(lr - lr.mean())
+            series.append(per)
+        T = len(series[0][0])
+        surrogates = [[phase_surrogates(x, replicates, rng) for x in per] for per in series]   # once per field
+        for i in range(len(names)):
+            for j in range(len(names)):
+                if i == j:
+                    continue
+                for ell in range(lags + 1):
+                    if ell == 0 and j < i:
+                        continue                         # lag 0 is symmetric: each pair once
+                    a = np.concatenate([x[ell:] for x in series[i]])
+                    b_series = series[j]
+                    b = np.concatenate([x[:T - ell] for x in b_series])
+                    r = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else 0.0
+                    sur = np.concatenate([x[:, :T - ell] for x in surrogates[j]], 1)
+                    sur = sur - sur.mean(1, keepdims=True)
+                    ac = a - a.mean()
+                    rs = (sur @ ac) / np.maximum(np.linalg.norm(sur, axis=1) * np.linalg.norm(ac), 1e-300)
+                    p = (1 + int(np.sum(np.abs(rs) >= abs(r)))) / (replicates + 1)
+                    rows.append({"support": support, "field": names[i], "leader": names[j], "lag": ell, "rho": r,
+                                 "z": float(stats.norm.isf(p / 2) * np.sign(r)), "p": p})
+    if rows:
+        keep = control.bh(np.array([r["p"] for r in rows]), q)
+        for r, k in zip(rows, keep, strict=True):
+            r["reported"] = bool(k)
+    return rows

@@ -27,6 +27,7 @@ P16 gives each object one stage. Revision 3's items:
 | 7.5 (O7) | relations as one joint model of all fields' departures | **P**. The band factor model with innovations, lags and BH (`relations`) is BM: the cross-system positive controls are found, and SIH's place permutation leaves 2.0 % false above the national scale. The national and macro-regional bands are unanswered (OPEN_QUESTIONS 9). The spectral factor model is BU (E:2026-10-07-relations-real) |
 | 10 | validation split: statistical bench (B–D) and epidemiological checks (E) | **P**: written; the harness module still holds both |
 
+*(2026-10-07, later: the pipeline (§9.3), phase 4's surveillance module, the course relations for national scales (OPEN_QUESTIONS 9) and invariant 8 in the relation map are built, unmeasured. See the rows below.)*
 *(Re-ranked 2026-10-07; N1 is done.)*
 **The gaps, re-ranked by revision 3:**
 1. N2, marginal uncertainty: the variational fixed point is built, and the skew of sparse levels is next.
@@ -119,7 +120,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | fit one hierarchical model of "normal Brazil" from all the data read through pegasus_data | P | 107 stored fits, 45 distinct full-period (see Data coverage) | four systems; no SIA, CIHA, CNES events, most SINAN; no completeness, race |
 | read leads from it (7.1-7.3 departures, 7.4 structure, 7.5-7.6 relations) | BM | `E:harness-gate`, `E:lens-positives`, `E:dependency-map` | 7.3 and the 7.4 structure are not read (see §7) |
 | serve to people and agents (§9) | P | `E:mcp-tools`, ADR-0008 | built and paused by the author; no UI; no agent runtime (OQ-4) |
-| phase 4 prospective surveillance | NB | ADR-0004, `E:surveillance-lags` | feasibility only |
+| phase 4 prospective surveillance | BU (2026-10-07) | `surveillance`: epidemiological weeks, per-place reporting delays shrunk to the nation's, the nowcast by binomial thinning, alarms at a recurrence interval against BPA; `Session.alarms` | not run: no weekly alarm fit, no revisions of preliminary files, no InfoDengue benchmark |
 | P1 expectation first | BM | `E:harness-gate`: false leads on NB surrogates ≤ q | none |
 | P2 events and marks modelled, not column correlations | P | counts: all blocks; mark: PESO only | marks (see 4.4) |
 | P3 every cell carries its information | BM | w in `surprise.py`, pair weights `E:pairs-gate` | none |
@@ -306,7 +307,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 9.1 lead object, rank | BM | `leads.py`; `E:sim-survey-readout` | |
 | 9.1 kinds: relation, pattern, cohort, observation, structural | NB | 33,228 leads are residual (30,332) and subset (2,896) | pairs live in `pegasus_home/maps`, not the register |
 | 9.2 append-only ledger, written before execution | BM | 29,313 pending, 29,240 results | 73 without result |
-| 9.3 survey per data update (refit, surprises, scans, lead update) | NB | `Session.survey` is run by hand | no trigger, no scheduler, no incremental lead update |
+| 9.3 survey per data update (refit, surprises, scans, lead update) | BU (2026-10-07) | `pipeline.run` (`pegasus-core run plans/default.yml`): every step keyed by data and code versions, skipped when done | no trigger on a pegasus_data update yet; not run end to end |
 | API `leads`, `lead`, `fields`, `field`, `expected`, `surprise`, `scan`, `explain_away`, `confirm`, replication calls | BM | `tools.py`, `cli.py` | |
 | API `compare`, `subset_scan` | NB | `dependency_map` and `scans.subset` are separate entry points | not a `Session` method |
 | API `decompose` | BU | `Session.decompose` | |
@@ -358,7 +359,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | inv. 5 every test in the ledger before it runs | BM | 29,313 pending rows | |
 | inv. 6 nulls preserve dependence, no Monte-Carlo floor | P | | B0 spatial cluster and group disparity nulls fail (§13 row 8.4); corroboration floor fixed |
 | inv. 7 tested against the minimum effect | BM | | |
-| inv. 8 miscalibrated field never in a pair scan | NB | | not enforced (6.2) |
+| inv. 8 miscalibrated field never in a pair scan | BU (2026-10-07) | `tools.relation_survey` leaves a field whose calibration fails out of the relation map, named as unanswered | `maps` and `pairs` (v0) still do not read it |
 | inv. 9 overlap above 0.05 never tested | BM | `maps.testable` | |
 | inv. 10 no array above the population tensor | BM | | |
 | inv. 11 modelled input carries its model version | BM | `gateway.population_key` | |

@@ -31,12 +31,12 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 
 | stage | state | what is next |
 |---|---|---|
-| **A. Data** (pegasus_data) | SIM, SIH, SINASC, SINAN served. ICD structure, admissibility, the ICD-9 bridge and code lists are in pegasus_data | breadth (O9) |
-| **B. Expectation** | the solver is v1 for every model (exact Newton, LAML; IX 32 s, XX 107 s); ICD carriers and admissibility (ADR-0024); O2 settled (ADR-0025); monthly grain, including code lists | **N1:** the predictive ignores serial correlation (lag-1 within places: 0.03 stroke, 0.23 ill-defined, 0.27 births, 0.39 SIH pneumonia). **N2:** Laplace draws miscalibrate the intercept and count sums (SBC) |
-| **C. Departures** | v0 lenses only, now screens. Their 2026-10-06 settings (ADR-0026 θ0, ADR-0027 baselines, weighted outbreak) are interim. Held-out sizing (`Session.held_out`) and the absorption finding stand | **O6:** departure models, after N1 |
-| **D. Relations** | `relations.distributed_lag` (confirmation of one link; planted curves recovered, null windows 1/100); `pegasus-core relation`; the arbovirus → microcephaly protocol declared | **O7:** the joint model's design note |
-| **E. Interpretation** | triage with rule versions; replication tiers; the facility layer for SIH | O8 |
-| **F. Use** | the register with method records (ADR-0028); the v0 register (33,228 leads, pre-refit) and the first v1 survey (41,700 leads, the lenses' baseline) are not reading lists | regenerated after O6 |
+| **A. Data** (pegasus_data) | SIM, SIH, SINASC and every SINAN agravo served; SINAN's notification block declared once for all 58 agravos (pegasus_data, its decision 0153). ICD structure, admissibility, the ICD-9 bridge and code lists | SIA/APAC, CIHA (O9) |
+| **B. Expectation** | v1 solver; robust stage B (trimming) by default; **N1 done** (recovers its own worlds); the SINAN agravos fitted as single fields (O9, running) | **N2:** exact conditional sweeps of the levels built (SIM VII's posterior total 9.0 M → 274 against 277); SBC running |
+| **C. Departures** | the questions registry (excess, step, trend, cluster, group), each answered by all its methods with agreement and shape (Chen & Liu); multiscale peaks with a null per absorption class; cell excess; every 2026-10-07 documented event found; the first question survey (SIM I, IX, X, XX; SIH I, X) running | cluster and group departure models (BYM2 exceedance, group interaction); the Bayesian step's power |
+| **D. Relations** | `relations.relation_map` and `pegasus-core relations` (band factor model on N1 innovations; relations to the register); calibrated above the national scale by SIH place permutation (2.0 %) | national-scale relations (OPEN_QUESTIONS 9); SINAN agravos as cross-system positive controls |
+| **E. Interpretation** | triage with rule versions, replication tiers, the facility layer; triage reads question answers; `harness.event_record` scores every method against the declared positives (`pegasus-core events`) | triage of the first question survey; rival explanations per lead (O8) |
+| **F. Use** | the register; `pegasus-core report` (answers with named municipalities, methods, shapes, triage; relations; scales unanswered) | the first readable register, after the survey's triage |
 
 **The bench** (O5, statistical characterisation of stages B–D): the grid of planted signals in refitted worlds (`harness.grid`, `pegasus-core grid`), run on SIM dense and sparse, SIH, SINASC, SINAN and monthly dengue; null worlds and negatives; SBC (`scripts/sbc.py`).
 

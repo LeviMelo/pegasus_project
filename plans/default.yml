@@ -1,0 +1,10 @@
+# The default plan (pegasus-core run plans/default.yml): the systems fitted so far, by ICD group
+years: 2010-2023
+systems:
+  - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group]}
+  - {dataset: SIH-RD, event: hospitalisation, blocks: [I, X], levels: [group]}
+  - {dataset: SINASC-DN, event: birth, blocks: ['*']}
+  - {dataset: SINAN-SIFC, event: notification, blocks: ['*']}
+relations: true
+triage: true
+report: reports/leads.md

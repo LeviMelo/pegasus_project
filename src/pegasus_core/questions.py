@@ -66,6 +66,8 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
     # built, never dropped with its lens (CLAUDE.md)
     Question("cluster", "C", "a connected set of places above the expectation over the whole period", "B0", "area",
              "rate ratio", (
+                 Method("excess_level", "multiscale graph peaks of the whole period's excess against B0 (no place "
+                                        "effects), STEM; a cluster at its own scale, no zoning"),
                  Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
              )),
     Question("group", "C", "a place whose excess differs across sex × age groups from the national pattern", "B0",

@@ -1146,3 +1146,36 @@ def raw_field(name: str, years: list[int]):
         warnings.simplefilter("ignore")
         return pg.load_field(name, years=years, settings=pg.load_settings(root=config.data_root()))
 
+
+
+def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | None = None) -> pa.Table:
+    """The reporting delay of one publication year (phase 4, ADR-0004): events by residence ``u``, the epidemiological
+    week of their onset (``onset``; default the event's date, `_when`) and the whole weeks between it and the
+    ``report`` date (SINAN's data entry, DT_DIGITA; SIH's processing month; SIM's registration). Rows with either
+    date missing or a negative delay are left out and counted in the table's metadata. Columns: u, year, week,
+    delay, n."""
+    from . import surveillance
+
+    when = onset or _when(dataset)
+    key = {"what": "delay_counts", "dataset": dataset, "event": event, "year": year, "onset": when, "report": report,
+           "data": config.data_version(), **_df_key(dataset, year)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    strata = _strata(dataset)
+    raw = _records(dataset, event, year, [strata["residence"], when, report])
+    con = duckdb.connect()
+    con.register("r", raw)
+    t = con.execute(f"""SELECT {_residence_sql(strata["residence"])} AS u, {_date_sql(when)} AS d0,
+                        {_date_sql(report)} AS d1 FROM r""").fetch_arrow_table()
+    d0 = t.column("d0").to_numpy(zero_copy_only=False).astype("datetime64[D]")
+    d1 = t.column("d1").to_numpy(zero_copy_only=False).astype("datetime64[D]")
+    u = t.column("u").to_numpy(zero_copy_only=False)
+    ok = ~np.isnat(d0) & ~np.isnat(d1) & (d1 >= d0) & np.isfinite(u.astype(float))
+    ey, ew = surveillance.epi_week(d0[ok])
+    delay = ((d1[ok] - d0[ok]).astype(np.int64) // 7).astype(np.int64)
+    df = pd.DataFrame({"u": u[ok].astype(np.int64), "year": ey, "week": ew, "delay": delay})
+    out = pa.Table.from_pandas(df.groupby(["u", "year", "week", "delay"]).size().rename("n").reset_index(),
+                               preserve_index=False)
+    store.put_table("gateway", key, out, {**key, "left_out": int((~ok).sum()), "records": int(len(ok))})
+    return out

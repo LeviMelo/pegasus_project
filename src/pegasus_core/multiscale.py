@@ -95,11 +95,13 @@ class GraphSpectrum:
 
 def contrasts(T: int, shape: str, min_past: int = 3, min_years: int = 2) -> tuple[np.ndarray, list[tuple[int, int]]]:
     """Temporal contrasts [T, m] of a departure shape and each one's window [t0, t1): ``spike``, one period each;
-    ``step``, the sum from a start τ to the series' end, for τ leaving ``min_past`` periods before and ``min_years``
+    ``level``, the whole period (a cluster, read against B0, which has no place effects); ``step``, the sum from a start τ to the series' end, for τ leaving ``min_past`` periods before and ``min_years``
     after (the change-point windows); ``trend``, a course bending upward from τ, the hinge (t − τ)₊ over the same
     starts (a trend change; from τ = 0 it is the series' own slope against the reference)."""
     if shape == "spike":
         return np.eye(T), [(t, t + 1) for t in range(T)]
+    if shape == "level":            # the whole period: a place's level against a reference without place effects
+        return np.ones((T, 1)), [(0, T)]
     if shape == "step":
         starts = range(min_past, T - min_years + 1)
         C = np.stack([(np.arange(T) >= tau).astype(float) for tau in starts], 1)
