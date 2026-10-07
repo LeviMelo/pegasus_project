@@ -413,7 +413,8 @@ class Session:
         measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
                    f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
                    f"|link:{src['link']}:{src['side']}" if src.get("link") else
-                   f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else "")   # its own family
+                   f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else
+                   f"|away:{src['place']}" if src.get("place") else "")   # its own family
         for block in blocks or self._blocks():
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
@@ -1006,7 +1007,8 @@ def kinds_of(x: leads.Lead) -> set[str]:
 
 
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
-READER_FIELDS = ("source", "classifier", "structure", "mark", "indicator", "success", "link", "side", "anchor", "column")
+READER_FIELDS = ("source", "classifier", "structure", "mark", "indicator", "success", "link", "side", "anchor", "column",
+                 "place")
 
 
 def fitted(dataset: str | None = None, event: str | None = None, graph: str | None = None,

@@ -858,6 +858,43 @@ def share_moments(dataset: str, event: str, year: int, indicator: str, success: 
     return EventCounts(counts, comp.unallocated, {**comp.key, "what": "share_moments", "success": list(success)})
 
 
+def away_counts(dataset: str, event: str, year: int, place: str, classifier: str | None = None,
+                places: pa.Array | None = None) -> EventCounts:
+    """Care flows as a share per (u, year, sex, age, code), u the residence: n events with ``place`` recorded (a
+    municipality where the event happened: the hospital, the place of death or birth, the place of infection) and k of
+    them away from the residence municipality. A place not recorded is unallocated ('place not recorded')."""
+    strata = _strata(dataset)
+    key = {"what": "away_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+           "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year)}
+    cached = store.get_table("gateway", key)
+    cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
+    if cached is not None and cached_un is not None:
+        return EventCounts(cached, cached_un, key)
+    cols = [strata["residence"], strata["age"], place] + ([strata["sex"]] if strata["sex"] else []) + \
+        ([classifier] if classifier else [])
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
+    con = duckdb.connect()
+    con.register("r", raw)
+    valid = places if places is not None else population([year]).column("u").unique()
+    con.register("v", pa.table({"u": valid}))
+    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
+            {_residence_sql(place)} AS w FROM r""")
+    reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
+                     WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
+                     WHEN code IS NULL OR code = '' THEN 'code'
+                     WHEN w IS NULL OR w NOT IN (SELECT u FROM v) THEN 'place not recorded' END"""
+    counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
+            CAST(sum(CASE WHEN w <> u THEN 1 ELSE 0 END) AS INTEGER) AS k
+        FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
+    unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
+            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): {place} against residence"})
+    store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
+    return EventCounts(counts, unallocated, key)
+
+
 def store_facility_effects(table: pa.Table) -> str:
     """Stores a (facility, delta) table of log-mark effects and returns the id `mark_moments` reads it by (a digest of its content)."""
     import hashlib

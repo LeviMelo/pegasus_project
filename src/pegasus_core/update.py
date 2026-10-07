@@ -41,6 +41,7 @@ class System:
     intervals: list[str] | str | None = None     # "all", or `fields.declared` interval:<date> fields: days from the event
     classifiers: list[str] | str | None = None   # "all", or alternative classifier columns: counts by their own tree
     mentions: list[str] | str | None = None      # "all", or `fields.declared_mentions` fields: every code a record carries
+    flows: list[str] | str | None = None         # "all", or `fields.declared_flows` fields: events away from residence
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
@@ -67,7 +68,7 @@ class Plan:
             years = list(range(int(a), int(b) + 1))
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
                           s.get("compositions"), s.get("links"), s.get("disparities"), s.get("intervals"),
-                          s.get("classifiers"), s.get("mentions"))
+                          s.get("classifiers"), s.get("mentions"), s.get("flows"))
                    for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
@@ -218,6 +219,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         wanted = [d.column for d in fields.declared_mentions(sys_.dataset)]
         readers += [(c, fields.mentions_source(sys_.dataset, c)) for c in wanted
                     if sys_.mentions == "all" or c in (sys_.mentions or [])]
+        readers += [(d.column, fields.flow_source(sys_.dataset, sys_.event, d.column))
+                    for d in fields.declared_flows(sys_.dataset) if sys_.flows == "all" or d.column in (sys_.flows or [])]
         resolved[sys_.dataset] = list(blocks)
         readers = [(column, source, list(blocks)) for column, source in readers]
         # another classifier's counts: the same events by its own tree, every chapter of it

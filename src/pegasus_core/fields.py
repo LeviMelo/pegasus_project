@@ -346,6 +346,33 @@ def measure_source(dataset: str, event: str, column: str) -> dict:
             **({"classifier": primary} if primary else {}), **({"casemix": casemix} if casemix else {})}
 
 
+def declared_flows(dataset: str) -> list[Declared]:
+    """The care-flow fields of ``dataset``: every place column in the residence's own code system (its first declared
+    codelist) that is not an attribute of the person (its entity is not the residence's: a birthplace is the person's,
+    a hospital or a place of death is the event's) is a field ``away:<column>``, the share of events that happened away
+    from the residence municipality (`gateway.away_counts`)."""
+    from . import gateway
+
+    rows = gateway.roles(dataset)
+    res = next((r for r in rows if r["column"] == gateway._strata(dataset)["residence"]), None)
+    if res is None or not res.get("codelists"):
+        return []
+    system = res["codelists"][0]
+    return [Declared(dataset, f"away:{r['column']}", r["role"], f"events away from residence ({r['role']})", "away")
+            for r in rows if r["kind"] == "place" and r["column"] != res["column"] and r.get("reviewed", True)
+            and (r.get("codelists") or [None])[0] == system and r["entity"] != res["entity"]]
+
+
+def flow_source(dataset: str, event: str, column: str) -> dict:
+    """The reader of a care-flow field (`declared_flows`): its place against the residence, on the event type's primary
+    classifier."""
+    from . import gateway
+
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    return {"source": "away", "place": column.split(":", 1)[1], **({"classifier": primary} if primary else {})}
+
+
 def declared_mentions(dataset: str) -> list[Declared]:
     """The multiple-code fields of ``dataset``: every group of columns pegasus_data declares to be read together as one
     set of codes (`gateway.code_groups`: an admission's diagnoses, the causes a certificate mentions) is a field
