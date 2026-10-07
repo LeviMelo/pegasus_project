@@ -527,7 +527,7 @@ def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarr
 def _lag1_correlation(s: surprise.Surprise, scale: scales_mod.Scale) -> np.ndarray:
     """Each unit's lag-1 correlation of its series under the predictive's noise structure (stage B, N1): within-place
     covariances summed over the unit's places, over the geometric mean of consecutive variances."""
-    if s.noise.rho <= 0 or s.y.shape[1] < 2:
+    if s.noise.corr(1) <= 0 or s.y.shape[1] < 2:
         return np.zeros(scale.n)
     phi = s.phi if np.ndim(s.phi) else np.full(s.mu.shape, s.phi)
     var = surprise.cell_variance(s.mu, phi, s.noise)

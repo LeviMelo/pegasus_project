@@ -290,7 +290,6 @@ def innovations(surprises: list) -> Departures:
         places = np.intersect1d(places, s.places)
         periods = np.intersect1d(periods, np.asarray(s.years))
     T = len(periods)
-    lag = np.abs(np.arange(T)[:, None] - np.arange(T)[None, :])
     out = []
     for s in surprises:
         ui = np.searchsorted(s.places, places)
@@ -301,7 +300,7 @@ def innovations(surprises: list) -> Departures:
         V = sp_.cell_variance(mu, phi, s.noise)
         x = np.where(bad, 0.0, (y - mu) / np.sqrt(np.where(bad, 1.0, V)))
         f = np.where(bad, 0.0, (V - mu) / np.where(bad, 1.0, V))
-        S = np.sqrt(f[:, :, None] * f[:, None, :]) * s.noise.rho ** lag
+        S = np.sqrt(f[:, :, None] * f[:, None, :]) * s.noise.corr_matrix(T)[None]
         S[:, np.arange(T), np.arange(T)] = 1.0
         L = np.linalg.cholesky(S)
         out.append(np.linalg.solve(L, x[..., None])[..., 0])

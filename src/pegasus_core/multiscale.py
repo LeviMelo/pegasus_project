@@ -118,7 +118,7 @@ def contrast_variance(s: surprise.Surprise, C: np.ndarray) -> np.ndarray:
     out = surprise.cell_variance(s.mu, phi, s.noise) @ (C ** 2)
     T = C.shape[0]
     for lag in range(1, T):
-        if s.noise.rho <= 0 or s.noise.rho ** lag < 1e-4:
+        if abs(s.noise.corr(lag)) < 1e-4:
             break
         cov = surprise.lag_covariance(s.mu, phi, s.noise, lag)              # [U, T − lag]
         out += 2 * np.einsum("ut,tj->uj", cov, C[:-lag] * C[lag:])

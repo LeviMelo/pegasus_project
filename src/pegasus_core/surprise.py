@@ -12,6 +12,7 @@ parameters on demand and caches it only when asked (scanned fields).
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -63,9 +64,27 @@ class Noise:
     places independent. Measured on 2026-10-07: the multiscale statistic of stroke deaths spread 1.18× (spikes) and
     1.39× (steps) wider than the place-independent predictive at 256-place footprints."""
     kappa: float = 1.0
-    rho: float = 0.0
+    rho: float = 0.0         # the latent correlation at lag 1
     omega: float = 0.0       # the spatially correlated share of the latent field
     scale: float = 0.0       # s* of its heat kernel (the graph's own units; `multiscale.GraphSpectrum.footprint`)
+    decay: float | None = None   # the correlation's decay after lag 1: c_k = ρ δ^(k−1) (ARMA(1,1)); None: δ = ρ (AR(1))
+
+    def corr(self, k: int) -> float:
+        """The latent correlation at lag k ≥ 1: ρ δ^(k−1)."""
+        d = self.rho if self.decay is None else self.decay
+        return self.rho * d ** (k - 1) if k >= 1 else 1.0
+
+    def corr_matrix(self, T: int) -> np.ndarray:
+        """[T, T] the latent correlation over periods, projected to the nearest positive semi-definite matrix
+        with unit diagonal if the two parameters leave it outside."""
+        lag = np.abs(np.arange(T)[:, None] - np.arange(T)[None, :])
+        R = np.vectorize(self.corr)(lag).astype(float)
+        w, v = np.linalg.eigh(R)
+        if w.min() < 1e-8:
+            R = (v * np.clip(w, 1e-8, None)) @ v.T
+            d = np.sqrt(np.diag(R))
+            R = R / np.outer(d, d)
+        return R
 
     @property
     def null(self) -> bool:
@@ -249,7 +268,7 @@ class Expectations:
         phi_tr = 1.0 / (1.0 / laplace.predictive_phi(mu_tr, np.zeros_like(mu_tr), mu2_tr, model.phi)
                         + 1.0 / np.broadcast_to(np.asarray(extra, dtype=float), np.shape(extra)))
         noise = noise_structure(model.observed(li), mu_tr, np.broadcast_to(phi_tr, mu_tr.shape))
-        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho}
+        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay}
         out = Surprise(f, PURPOSE_TIER[purpose], tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal,
                        noise=noise)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
@@ -469,7 +488,7 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
         phi_agg = cells
         u, z = randomised_pit(y, mu, phi_agg, seed)
     noise = noise_structure(y, mu, phi_agg)
-    cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho}
+    cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay}
     phi_agg, u, z, w, noise = with_noise(y, mu, phi_agg, noise, seed)
     return Surprise(f, tier, m.data.places, m.data.periods(), y, mu, phi_agg, u, z, w, flags, cal, noise=noise)
 
@@ -642,14 +661,16 @@ def _detrend_projection(T: int) -> np.ndarray:
     return np.eye(T) - X @ np.linalg.solve(X.T @ X, X.T)
 
 
-def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 2) -> Noise:
+def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 4) -> Noise:
     """ARCHITECTURE §6.1, N1 (ADR-0029): the predictive's noise structure over periods (`Noise`), by the bias-corrected
     moments of regression residuals. Each place's standardised residual series z = (y − μ)/√V loses its own level and
     linear trend (e = Mz, `_detrend_projection`); then E[Σ_t e_t e_{t+k}] = tr(L_k M Σ_u M), with
-    Σ_u = p_u I + κ f_u R(ρ), p_u and f_u the place's Poisson and frailty shares of V, and R(ρ) the AR(1) correlation
+    Σ_u = p_u I + κ f_u R, p_u and f_u the place's Poisson and frailty shares of V, and R the latent correlation
+    c_k = ρ δ^(k−1) (ARMA(1,1): lag 1 and the decay apart; an AR(1), δ = ρ, overstated the variance of multi-year sums
+    on stroke deaths, the step statistic's spread 0.79 of the model's at single places, 2026-10-07)
     (the copula's latent correlation stands for the frailties' own: exact as κ/φ → 0, and the frailty shares of the
     fields measured are a few per cent).
-    (κ, ρ) match the pooled lag 0..``lags`` sums by least squares. The places with at least ``min_expected`` events a
+    (κ, ρ, δ) match the pooled lag 0..``lags`` sums by least squares. The places with at least ``min_expected`` events a
     period enter.
 
     Why the detrending (measured 2026-10-06, `data/probes/noise_structure.json`): B1's residual covariances fall from
@@ -680,23 +701,26 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     tk = np.arange(T)
     trLM = np.array([np.trace(M, offset=k) for k in range(K + 1)])  # tr(L_k M): L_k picks the entries (t, t + k)
 
+    lag = np.abs(tk[:, None] - tk[None, :])
+
     def expected(par: np.ndarray) -> np.ndarray:
-        kap, rh = par
-        MRM = M @ (rh ** np.abs(tk[:, None] - tk[None, :])) @ M
+        kap, rh, dc = par
+        R = np.where(lag == 0, 1.0, rh * dc ** np.maximum(lag - 1, 0))
+        MRM = M @ R @ M
         return P * trLM + kap * F * np.array([np.trace(MRM, offset=k) for k in range(K + 1)])
 
     scale = float(np.abs(obs).max()) or 1.0
-    fit = optimize.least_squares(lambda par: (expected(par) - obs) / scale, x0=[1.0, 0.2],
-                                 bounds=([0.0, -0.5], [1e3, 0.95]))
-    kap, rh = (float(x) for x in fit.x)
-    return Noise(round(kap, 4), round(rh, 4))
+    fit = optimize.least_squares(lambda par: (expected(par) - obs) / scale, x0=[1.0, 0.2, 0.2],
+                                 bounds=([0.0, -0.5, 0.0], [1e3, 0.95, 0.95]))
+    kap, rh, dc = (float(x) for x in fit.x)
+    return Noise(round(kap, 4), round(rh, 4), decay=round(dc, 4))
 
 
 def lag_covariance(mu: np.ndarray, phi: np.ndarray, noise: Noise, k: int) -> np.ndarray:
     """[U, T − k] Cov(y_t, y_{t+k}) of a place's cells under the predictive's noise structure (`Noise`; the copula's
     correlation taken as the frailties')."""
     s2 = noise.frailty_variance(np.broadcast_to(np.asarray(phi, dtype=float), mu.shape))
-    return mu[:, :-k] * mu[:, k:] * noise.rho ** k * np.sqrt(s2[:, :-k] * s2[:, k:])
+    return mu[:, :-k] * mu[:, k:] * noise.corr(k) * np.sqrt(s2[:, :-k] * s2[:, k:])
 
 
 def cell_variance(mu: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
@@ -711,29 +735,23 @@ def suffix_variance(mu: np.ndarray, phi: np.ndarray, noise: Noise, scale: float 
     phi_ = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
     row = np.zeros(mu.shape)                                      # Σ_k Cov(y_t, y_{t+k}): cell t's forward covariances
     k = 1
-    while noise.rho > 0 and k < mu.shape[1] and noise.rho ** k >= tol:
+    while k < mu.shape[1] and abs(noise.corr(k)) >= tol:
         row[:, :-k] += lag_covariance(m, phi_, noise, k)
         k += 1
     return np.cumsum((cell_variance(m, phi_, noise) + 2 * row)[:, ::-1], 1)[:, ::-1]
 
 
-def copula_normals(shape: tuple, rho: float, rng: np.random.Generator, omega: float = 0.0,
-                   root: np.ndarray | None = None) -> np.ndarray:
-    """Standard normals [..., U, T] with an AR(1) correlation ρ over the last axis and, with ``omega`` > 0, the
-    spatial correlation (1 − ω)I + ωH over the places axis (``root`` [U, U], a square root of H with unit diagonal:
-    `spatial_root`): the copula's latent field."""
-    def innovation() -> np.ndarray:
-        z = rng.standard_normal(shape[:-1])
-        if omega > 0:
-            z = np.sqrt(1.0 - omega) * z + np.sqrt(omega) * (rng.standard_normal(shape[:-1]).astype(np.float32) @ root.T)
-        return z
-
-    eps = np.empty(shape)
-    eps[..., 0] = innovation()
-    innov = np.sqrt(max(1.0 - rho ** 2, 0.0))
-    for t in range(1, shape[-1]):
-        eps[..., t] = rho * eps[..., t - 1] + innov * innovation()
-    return eps
+def copula_normals(shape: tuple, noise: Noise, rng: np.random.Generator, root: np.ndarray | None = None) -> np.ndarray:
+    """Standard normals [..., U, T], the copula's latent field: correlated over the last axis by ``noise``'s
+    correlation over periods (its Cholesky factor) and, with ω > 0, over the places axis by (1 − ω)I + ωH (``root``
+    [U, U], a square root of H with unit diagonal: `spatial_root`). Separable in space and time."""
+    z = rng.standard_normal(shape)
+    if noise.omega > 0:
+        zs = np.swapaxes(rng.standard_normal(shape).astype(np.float32), -1, -2) @ root.T      # [..., T, U]
+        z = np.sqrt(1.0 - noise.omega) * z + np.sqrt(noise.omega) * np.swapaxes(zs, -1, -2)
+    if noise.rho != 0:
+        z = z @ np.linalg.cholesky(noise.corr_matrix(shape[-1])).T
+    return z
 
 
 def spatial_root(spectrum, s: float) -> np.ndarray:
@@ -780,7 +798,7 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
     Q2 = Qt * Qt
     a = Q2.T @ torch.as_tensor(p, dtype=dt, device=dev)                           # Σ_u q_uk² p_u
     b = Q2.T @ torch.as_tensor(f, dtype=dt, device=dev)                           # Σ_u q_uk² f_u
-    R = s.noise.rho ** np.abs(np.arange(T)[:, None] - np.arange(T)[None, :])
+    R = s.noise.corr_matrix(T)
     cR, cM = float(np.trace(M @ R @ M)), float(np.trace(M))
     target = obs - cM * a
     sqf = torch.as_tensor(np.sqrt(f), dtype=dt, device=dev)
@@ -799,7 +817,7 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
         sse = float((((obs - fit) ** 2) * w).sum())
         if sse < best[0]:
             best = (sse, om, sc)
-    return Noise(s.noise.kappa, s.noise.rho, round(best[1], 4), best[2])
+    return dataclasses.replace(s.noise, omega=round(best[1], 4), scale=best[2])
 
 
 
@@ -820,7 +838,7 @@ def frailty(phi: np.ndarray, noise: Noise, rng: np.random.Generator, root: np.nd
     """A draw of the predictive's frailty [U, T] (`Noise`): gamma marginals joined by the Gaussian copula, AR(1) over
     periods and, with ω > 0, correlated over places (``root``: `spatial_root` at the noise's scale)."""
     phi_ = np.asarray(phi, dtype=float)
-    return gamma_frailty(copula_normals(phi_.shape, noise.rho, rng, noise.omega, root), phi_, noise)
+    return gamma_frailty(copula_normals(phi_.shape, noise, rng, root), phi_, noise)
 
 
 def replicate_correlated(mu: np.ndarray, phi: np.ndarray, noise: Noise, rng: np.random.Generator,
@@ -837,7 +855,7 @@ def with_noise(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, noise: Noise, see
     phi_eff = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape) / max(noise.kappa, 1e-12)
     u, z = randomised_pit(y, mu, phi_eff, seed)
     w = np.where(np.isinf(phi_eff), mu, mu / (1 + mu / phi_eff))
-    return phi_eff, u, z, w, Noise(1.0, noise.rho)
+    return phi_eff, u, z, w, dataclasses.replace(noise, kappa=1.0)
 
 
 def trend_inflation(rho_count: np.ndarray | float) -> np.ndarray | float:

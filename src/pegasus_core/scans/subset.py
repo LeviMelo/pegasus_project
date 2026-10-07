@@ -420,7 +420,7 @@ def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, re
             from .. import surprise
             nrng = np.random.default_rng([seed % (2 ** 63), start])
             phi_c = np.broadcast_to(np.asarray(phi, dtype=float), m.shape)
-            fr = surprise.gamma_frailty(surprise.copula_normals((R, U, T), noise.rho, nrng), phi_c, noise)
+            fr = surprise.gamma_frailty(surprise.copula_normals((R, U, T), noise, nrng), phi_c, noise)
             Y = torch.poisson(M * torch.as_tensor(fr, dtype=torch.float32, device=dev), generator=gen)
         else:
             finite = torch.isfinite(phi_t) & (M > 0)
