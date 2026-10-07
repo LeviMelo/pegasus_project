@@ -34,3 +34,25 @@ Diarrhoea and dengue track their observed totals within a few per cent.
 **Still open.**
 - **Diffuse outbreaks.** They are partly absorbed until regional trimming has a calibrated null (the replicates of `multiscale.peaks`).
 - **Cost.** About 15 minutes per chapter on the CPU.
+
+## The courses' trade-off, and the default (later the same night)
+
+**The finding.** v7's flexible courses absorbed a category-wide epidemic: SIH measles 2018–19 was expected at 876 and 830 admissions against 891 and 833 observed, and the multiscale spike missed it.
+
+**v8** made the courses smooth (RW2), and the structure round smooth (group courses at 10³ their strength, courses fixed at τ = 10³):
+
+| field | ordinary years, observed | ordinary years, expected under v8 | event years, observed | event years, expected under v8 |
+|---|---|---|---|---|
+| yellow fever (A95) | 0–8 | 14 | 195, 257 | 66, 80 |
+| B34 | 50–90 | about 985 | – | – |
+
+COVID-19's 2020–22 rise was long enough for any course to follow, and pulled the category's level up. **Rejected.**
+
+**The trade-off.**
+- A flexible category course absorbs that category's national epidemics.
+- A rigid one cannot represent a genuine regime change such as COVID-19's arrival in B34.
+- Without courses, the siblings of a dominant category are mis-expected.
+
+Which reference a question takes (the background, or the category's own course) belongs to the question registry, not to a single default.
+
+**Default (v9): trimming only, courses off**, with flagged cells imputed by their full expectation over groups. This is the configuration that found all five documented events. The courses remain an option (`robust(courses=True)`).

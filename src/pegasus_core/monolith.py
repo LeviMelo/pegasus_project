@@ -1685,7 +1685,7 @@ class Monolith:
         np.add.at(out, (self.data.u[m], self.data.t[m], self.data.g[m]), self.data.y[m])
         return out
 
-    def refit(self, data: BlockData, hc: torch.Tensor | None = None) -> Monolith:
+    def refit(self, data: BlockData, hc: torch.Tensor | None | type(...) = ..., tau_scale: dict | None = None) -> Monolith:
         """This model's mean refitted on other counts of the same lattice (a planted world, a held-out locus), from
         this fit's MAP at this fit's strengths and dispersion, to the production fit's closing tolerance. Re-learning
         the strengths changed what a refit absorbs by under 0.001 (evaluation 2026-10-06, absorption) at 3–5 times
@@ -1696,18 +1696,22 @@ class Monolith:
             raise NotImplementedError("a refit of the interaction's model is not built")
         m2 = Monolith(data, self.graph, self.graph_kind, device=str(self.device), prior=self.prior)
         for n, c in m2.components.items():
-            c.tau = self.components[n].tau
+            c.tau = self.components[n].tau * (tau_scale or {}).get(n, 1.0)
         with torch.no_grad():
             for n, v in self.params.items():
                 m2.params[n].copy_(v)
-        m2.hc = hc                  # the category courses as a fixed offset of this mean (`robust`'s alternation)
+        # the category courses as a fixed offset of this mean: by default this fit's own (a world drawn from a robust
+        # fit and refitted without them read every category's course as a departure: 25–39 findings per null world,
+        # 2026-10-07); `robust`'s alternation passes its own
+        m2.hc = self.hc if hc is ... else hc
         solver.fit_mean(m2, iterations=30, loglik_tol=1.0)
         m2._solver_v1 = None        # the solver and the model refer to each other: a world's factor freed with it, not
         m2.phi = self.phi           # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)
         return m2
 
     def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
-               max_sweeps: int = 5, sweep_tol: float = 0.05, footprints: tuple[float, ...] = ()) -> Monolith:
+               max_sweeps: int = 5, sweep_tol: float = 0.05, footprints: tuple[float, ...] = (),
+               courses: bool = False) -> Monolith:
         """This fit made robust to the departures stage C must report (docs/plans/2026-10-07-robust-expectation.md):
         each round flags the leaf × place × period cells beyond the predictive's upper ``trim`` quantile (their
         observed totals against NB(μ, φ_x), φ_x the leaf-place-period dispersion by trimmed likelihood, so the flags
@@ -1733,7 +1737,29 @@ class Monolith:
         # cells against an expectation, and before the courses exist a category in a group another dominates is
         # mis-expected everywhere; its ordinary counts were flagged as excesses, imputed away, and the courses then fit
         # the imputed zeros (B25–B33 expected near zero in ordinary years, 2026-10-07). Structure first, trimming second
-        for r in range(rounds + 1):
+        # ``courses`` (off by default): each category's own time course, fitted with the mean (`fit_category_courses`).
+        # On the documented events the plain robust fit found all five by three methods or more; with flexible
+        # courses (v7) a category-wide epidemic became its own course (measles 2018–19 expected at 876 and 830 against
+        # 891 and 833) and with smooth ones (v8) COVID-19 lifted B34's level fifteenfold in every ordinary year. The
+        # courses fix the siblings of a category that dominates its group (B25–B33 under COVID-19). Which reference a
+        # question takes, the background or the category's own course, is the question registry's to declare
+        # (evaluation 2026-10-07, robust expectation)
+        for r in range(0 if courses else 1, rounds + 1):
+            if not courses:
+                mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)])        # [E, U, T]
+                live = (mu >= min_expected) | (obs > 0)
+                o, mm = obs[live][:, None], mu[live][:, None]
+                phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
+                k = float(phi_x) if np.isfinite(phi_x) else 1e12
+                p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
+                flag = (p < trim) & (obs > mu)
+                flag |= self._regional_flags(obs, mu, k, trim, footprints)
+                info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()),
+                             "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
+                log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
+                    f"({obs[flag].sum():.0f} events against {mu[flag].sum():.0f} expected)")
+                m = self.refit(m._impute(d, flag), hc=None)
+                continue
             if r == 0:
                 y_new = d.y.astype(float)
                 info.append({"round": 0, "structure": True})
@@ -1763,11 +1789,16 @@ class Monolith:
             if r == 0:
                 dw = dataclasses.replace(d, y=y_new)
 
-            def course_map(model, h, dw=dw, flag=flag):
+            # the structure round fits the time courses smooth (the group's at 10³ its strength), so no epidemic becomes
+            # a course before the first trimming can see it; the trimming rounds refit at the learned strengths
+            smooth = {"h_grp": 1e3, "h_all": 1e3} if r == 0 else None
+
+            def course_map(model, h, dw=dw, flag=flag, smooth=smooth):
                 """One sweep: the mean refitted with the courses ``h`` as an offset (warm, from ``model``'s MAP), then
                 the courses given it."""
-                nxt = model.refit(dw, hc=h)
-                nxt.category_courses = nxt.fit_category_courses(d.y, missing=flag, data=d, log=lambda _x: None)
+                nxt = model.refit(dw, hc=h, tau_scale=smooth)
+                nxt.category_courses = nxt.fit_category_courses(d.y, missing=flag, data=d, log=lambda _x: None,
+                                                                taus=[1e3] if smooth else None)
                 return nxt, nxt.hc
 
             # the fixed point of the sweep map, accelerated by SQUAREM (Varadhan & Roland 2008): two sweeps, an
@@ -1796,7 +1827,7 @@ class Monolith:
         m.phi = m._dispersion()
         m.data = d
         m.robust_info = info
-        m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 7}   # its own cache key
+        m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 9, "courses": courses}
         log(f"robust: φ {self.phi:.3g} -> {m.phi:.3g}")
         return m
 
@@ -1805,10 +1836,13 @@ class Monolith:
                              log=print) -> dict:
         """Each category's own time course h_cat[e, t] (docs/plans/2026-10-07-robust-expectation.md, step 4): given
         every other effect, the category's yearly totals O[e, t] (of ``y``, the cells' counts; None: the data's) are
-        Poisson(M[e, t] e^{h[e, t]}), M the expectation without the course; h has an RW1 prior of precision τ shared
+        Poisson(M[e, t] e^{h[e, t]}), M the expectation without the course; h has an RW2 prior of precision τ shared
         by the block and is centred over periods (a penalty ``centre`` on its mean: the course is a shape, the level
         stays the category's θ_cat; a free level drifted between the two from sweep to sweep and the alternation of
         `robust` never settled, 2026-10-07), τ chosen by the Laplace marginal likelihood summed over the categories.
+        RW2, not RW1: a background is a smooth course and an epidemic a one- or two-year spike, the separation of
+        the outbreak-detection baselines (Farrington et al. 1996; Noufaily et al. 2013). Under RW1 the measles course
+        followed 2018–19 itself (876 and 830 expected against 891 and 833 observed).
         ``missing`` [E, U, T] marks cells left out of both totals (`robust`'s flagged departures): the exact likelihood
         of the courses without them, where imputing them by the expectation (an EM step) converged slowly and let a
         course follow half of yellow fever's 2017–18 outbreak. A category whose epidemic dominates its ICD group's
@@ -1834,7 +1868,7 @@ class Monolith:
         if self.supply is not None:
             M = np.stack([self.expected(np.array([e]))[0].sum(0) for e in range(E)])
         self.hc = saved
-        D = np.diff(np.eye(T), axis=0)
+        D = np.diff(np.eye(T), n=2, axis=0)            # RW2: curvature penalised, a slow trend free
         R = D.T @ D
         M = np.maximum(M, 1e-12)
 
@@ -1934,7 +1968,7 @@ class Monolith:
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
         else made and stored."""
-        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 7}   # v7: cell trimming, structure first, SQUAREM
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 9, "courses": False}   # v9: trimming only
         key = {**self.key(), "robust": tag}
         arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
         if arrays is not None and meta is not None:

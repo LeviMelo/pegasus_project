@@ -278,13 +278,19 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     return found, null
 
 
-def footprint(spectrum: GraphSpectrum, centre: int, s: float, mass: float = 0.5) -> list[int]:
-    """The smallest set of places holding ``mass`` of K_s's row at ``centre``."""
+def footprint(spectrum: GraphSpectrum, centre: int, s: float, mass: float = 0.5,
+              excess: np.ndarray | None = None) -> list[int]:
+    """The smallest set of places holding ``mass`` of a peak: of the kernel-weighted ``excess`` [U] (each place's
+    (y − μ)₊ over the finding's window) when given, so the places reported are those carrying the departure; else of
+    K_s's row at ``centre``. The kernel's own mass reported places beside planted steps that carried none of them:
+    the multiscale step's findings that touched no plant (false share 0.12 on stroke, grid v6, 2026-10-07)."""
     if s == 0:
         return [centre]
     torch, _ = _torch()
     lam, Q = spectrum._eig
     row = ((Q[centre] * torch.exp(-s * lam)) @ Q.T).cpu().numpy()
+    if excess is not None and float((row * np.clip(excess, 0, None)).sum()) > 0:
+        row = row * np.clip(excess, 0, None)
     order = np.argsort(row)[::-1]
     k = int(np.searchsorted(np.cumsum(row[order]) / row.sum(), mass)) + 1
     return order[:k].tolist()

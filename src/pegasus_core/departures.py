@@ -180,7 +180,9 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
         if not keep[i]:
             continue
         pk = found[i]
-        fp = set(multiscale.footprint(spectrum, pk.centre, pk.s))
+        t0, t1 = pk.window
+        exc = (s.y[:, t0:t1] - s.mu[:, t0:t1]).sum(1)          # each place's excess over the finding's window
+        fp = set(multiscale.footprint(spectrum, pk.centre, pk.s, excess=exc))
         overlapping = [(c, other) for (c, other, w) in taken if w[0] < pk.window[1] and pk.window[0] < w[1]]
         if any(pk.centre in other or c in fp for c, other in overlapping):
             continue

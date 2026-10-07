@@ -362,7 +362,7 @@ class Expectations:
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 3}   # 3: N1 (κ, ARMA, space, background), 2026-10-07
+        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 5}   # 5: N1 time noise untrimmed again, 2026-10-07
         if cache:
             hit = store.get_table("surprise", key)
             if hit is not None:
@@ -735,8 +735,10 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     keep = mu.mean(1) >= min_expected
     if keep.sum() < 10:
         return Noise()
-    inside = background(y, mu, phi)
-    m, r = mu[keep], np.where(inside, y - mu, 0.0)[keep]
+    # every cell, departures included: selecting the bulk (`background`, by cell or by whole place) shrank the lag-0
+    # variance more than the lag-k covariances and sent ρ to its bound (stroke deaths 0.93–0.95 against 0.62; the
+    # multiscale step then called 4 of 5 null worlds, 2026-10-07). Untrimmed, the moments recover planted (κ, ρ, δ)
+    m, r = mu[keep], (y - mu)[keep]
     ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
     s2 = Noise().frailty_variance(ph)
     v = m + m ** 2 * s2
