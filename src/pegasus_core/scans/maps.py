@@ -9,7 +9,7 @@ calibrated δ_E) applied to all the pairs of a field set at once, in two layers:
   context; one only in the conditional layer is suppressed by it.
 
 The conditional layer can also carry a **utilization factor** (``adjust`` = k): the first k principal factors of the
-SIH chapters' place effects, extracted from the fields of the map itself (so a negative world re-extracts them from its
+care-use fields' place effects (admissions, authorisations: `map_inputs.CARE_KINDS`), extracted from the fields of the map itself (so a negative world re-extracts them from its
 own surrogates), join Z for every pair that has an SIH member. An SIH chapter is an admission rate per resident, and
 the shared level of a place's hospital use (access, referral, billing) enters all of them; a relation between two
 chapters, or between one and a mortality or birth field, is read net of it (evaluation 2026-10-05, utilization).
@@ -37,7 +37,6 @@ from . import pairs
 DELTA_Z = 0.1   # the conditional layer's minimum effect, calibrated on the map's own negatives (evaluation 2026-10-05, dependency map): 0.05 admits false edges
 
 MAX_OVERLAP = 0.05
-GROUPS = ("SIM", "SIH", "SINASC", "context")
 
 
 @dataclass
@@ -110,10 +109,13 @@ def exclude_miscalibrated(inp: MapInputs, calibration: dict[str, dict], tier: st
     return out
 
 
-UTILIZATION_GROUP = "SIH"
+def care(inp: MapInputs) -> set[str]:
+    """The groups of the map whose events count care used (`map_inputs.CARE_KINDS`), whose fields share a place's level
+    of use."""
+    return set(inp.meta.get("care", ()))
 
 
-def factors(inp: MapInputs, k: int, group: str = UTILIZATION_GROUP) -> tuple[np.ndarray, np.ndarray, dict]:
+def factors(inp: MapInputs, k: int, group: set[str] | None = None) -> tuple[np.ndarray, np.ndarray, dict]:
     """The first ``k`` principal factors of the place effects of the fields of ``group``: (scores [U, k], their sd
     [U, k], info). Each field is z-scored under the place weights w(u) = geometric mean of its fields' 1/sd² (the
     weights of the pair statistic, §7.5, shared so that the fields have one covariance), the factors are the leading
@@ -121,7 +123,8 @@ def factors(inp: MapInputs, k: int, group: str = UTILIZATION_GROUP) -> tuple[np.
     field adds nothing), standardised to weighted unit variance and signed so that the loadings sum positive. The sd
     of a score propagates the fields' posterior sd. ``info``: eigenvalues (all), loadings [F_g, k], the fields, the
     weighted correlation matrix."""
-    idx = [i for i, g in enumerate(inp.groups) if g == group]
+    group = care(inp) if group is None else group
+    idx = [i for i, g in enumerate(inp.groups) if g in group]
     B, SD = inp.B[:, idx], inp.SD[:, idx]
     ok = np.isfinite(B) & np.isfinite(SD)
     prec = np.where(ok, 1.0 / np.maximum(SD, 1e-6) ** 2, 0.0)
@@ -173,7 +176,7 @@ def _conditional(inp: MapInputs, basis: pairs.MoranBasis, ii: np.ndarray, jj: np
     N = np.full((F, F), np.nan)
     wanted = {(int(i), int(j)) for i, j in zip(ii, jj, strict=True)}
     eff = inp.effects()
-    sih = {i for i, g in enumerate(inp.groups) if g == UTILIZATION_GROUP}
+    sih = {i for i, g in enumerate(inp.groups) if g in care(inp)}
 
     def put(names, Rm, Nm, Z, keep=lambda i, j: True):
         q = Z.shape[1]

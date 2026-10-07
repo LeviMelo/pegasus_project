@@ -1098,34 +1098,35 @@ def method_status() -> dict[str, Any]:
 
 
 def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only: bool = False,
-                   ledger: control.Ledger | None = None) -> dict[str, Any]:
-    """A dependency map (§7.6) of SIM chapters, SIH chapters (admissions that did not end in death), SINASC indicators
-    and the context fields over ``years``: the inputs from the store (built through the gateway on first use), the
+                   ledger: control.Ledger | None = None, plan: str = "plans/default.yml") -> dict[str, Any]:
+    """A dependency map (§7.6) of every fitted field of the ``plan``'s systems (`map_inputs.build`: chapters, measures,
+    shares; "not linked to" twins where a declared link records the same events) and the context fields over
+    ``years``: the inputs from the store (built through the gateway on first use), the
     marginal and conditional layers controlled over the whole map, and with ``worlds`` > 0 the false-edge rate on that
     many worlds of Moran-randomised surrogates (``health_only``: contexts kept real). Returns the summary and the edges."""
-    from . import harness, store
+    from . import harness, store, update
     from .scans import map_inputs, maps, pairs
 
     years = years or map_inputs.YEARS
-    key = {"what": "map_inputs", "years": years, "v": 2}     # v2: admission by power at rho 0.3 (ADR-0022)
+    systems = [(x.dataset, x.event, x.blocks) for x in update.Plan.load(plan).systems]
+    key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "v": 3}   # v3: declared fields
     inp = maps.MapInputs.load(key)
     if inp is None:
-        inp = map_inputs.build(years)
+        inp = map_inputs.build(systems, years)
         inp.save(key)
     # §11.4: a chapter whose count expectation failed calibration at B1 (the first tier with geography, whose field
     # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones
     calibration = {}
-    for dataset, event, group in (("SIM.DO", "death", "SIM"), ("SIH-RD", "hospitalisation", "SIH")):
+    for dataset, event, _ in systems:
         session = Session(dataset, event, FIT_YEARS)
         for name in inp.names:
-            if name.startswith(group + ":"):
+            if name.startswith(dataset + ":") and "|" not in name:      # a count field (its twin shares its fit)
                 calibration[name] = session.calibration_of(name.split(":", 1)[1], "B1")
     inp = maps.exclude_miscalibrated(inp, calibration, "B1")
     basis, gen = pairs.MoranBasis(inp.places), pairs.MoranBasis(inp.places, "knn8")
     dm = maps.dependency_map(inp, basis, ledger or control.Ledger(), tag="-".join(map(str, (years[0], years[-1]))))
     out: dict[str, Any] = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
-                           "admitted": dm.controlled, "seconds": dm.seconds, "left_out": inp.meta.get("left_out", {}),
-                           "admission_power": inp.meta.get("admission_power", {}),
+                           "admitted": dm.controlled, "seconds": dm.seconds, "linked_share": inp.meta.get("linked_share", {}),
                            "excluded_calibration": inp.meta.get("excluded_calibration", {})}
     if worlds:
         neg = harness.map_negatives(inp, basis, gen, worlds, health_only)

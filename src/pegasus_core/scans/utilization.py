@@ -2,7 +2,6 @@
 2026-10-05, utilization).
 
 The extraction that the dependency map needs (``maps.factors``) lives in maps.py. Here are the checks around it: the
-SIH chapters as a place × year × chapter tensor with its expectation (the input of CP-APR, ``patterns.fit``), the
 number of factors against Moran-randomised surrogates (parallel analysis under ADR-0005's null: each field keeps its
 own spatial spectrum, the fields are made independent), and the correlation of a factor with the context fields
 under the same E_b null.
@@ -12,31 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .. import store
-from . import map_inputs, maps, pairs
-
-
-def tensor(inp: maps.MapInputs) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Observed and expected SIH admissions (survivors) by place × year × chapter [U, T, F] for the SIH fields of
-    ``inp``, the expectation indirectly standardised on the national rates by year × sex × band (the map's own,
-    ``map_inputs``), cached in the store."""
-    years = inp.meta["years"]
-    key = {"what": "sih_tensor", "years": years, "first": int(inp.places[0]), "n": len(inp.places), "v": 1}
-    names = [n for n, g in zip(inp.names, inp.groups, strict=True) if g == "SIH"]
-    hit = store.get_arrays("maps", key)
-    if hit is not None and hit["names"].tolist() == names:
-        return hit["y"], hit["mu"], names
-    PA = map_inputs._population(inp.places, years)
-    counts = map_inputs._chapter_counts(("SIH-RD", "hospitalisation"), inp.places, years, True)
-    y = np.zeros((len(inp.places), len(years), len(names)))
-    mu = np.zeros_like(y)
-    for f, n in enumerate(names):
-        Y = counts[n.split(":")[1]]
-        rate = Y.sum(0) / np.maximum(PA.sum(0), 1e-9)
-        y[:, :, f] = Y.sum((2, 3))
-        mu[:, :, f] = (PA * rate[None]).sum((2, 3))
-    store.put_arrays("maps", key, {"y": y, "mu": mu, "names": np.array(names)})
-    return y, mu, names
+from . import maps, pairs
 
 
 def parallel_analysis(inp: maps.MapInputs, gen_basis: pairs.MoranBasis, worlds: int = 200, seed: tuple = ("utilization",)
@@ -46,7 +21,7 @@ def parallel_analysis(inp: maps.MapInputs, gen_basis: pairs.MoranBasis, worlds: 
     set of spatially structured fields that share nothing."""
     from .. import config
     rng = np.random.default_rng(config.seed(*seed, "parallel"))
-    idx = [i for i, g in enumerate(inp.groups) if g == maps.UTILIZATION_GROUP]
+    idx = [i for i, g in enumerate(inp.groups) if g in maps.care(inp)]
     out = []
     for _ in range(worlds):
         B = inp.B.copy()

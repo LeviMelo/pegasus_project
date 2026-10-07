@@ -39,7 +39,7 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | institutions in the likelihood (§4.5) | facility triage, mark facility effects | 2026-10-05 | from the declared `institution` roles (same plan) |
 | breadth: SIA/APAC, CIHA, SIGTAP (O9) | SINAN agravos fitted 2026-10-07 | 2026-10-05 | fields from roles first, then the systems |
 | one model across chapters (§5.4) | not built | never started | design note |
-| interaction patterns (§7.4) | interaction built, off | 2026-10-06 | read ψ, ω, τ of one block |
+| interaction patterns (§7.4) | interaction built, off; `scans/patterns.py` (CP-APR) with no input since the map's SIH tensor went (2026-10-07) | 2026-10-06 | read ψ, ω, τ of one block |
 | exact reference fit (OPEN_QUESTIONS 2) | not run | 2026-10-06 | one block by HMC against the Laplace draws |
 | the readable dossier and human verdicts (stage F) | `dossier` (HTML, series per answer), `verdict`; confirmed answers enter the event record (`harness.verdict_positives`) | 2026-10-07 | the author records verdicts on the first dossiers |
 | corroboration's sources (§8.3) | derived from declarations (ICD-10-coded event types, declared links for overlap, the disasters field's ICD-10 correspondence) | 2026-10-07 | the linked overlap read on a full update |

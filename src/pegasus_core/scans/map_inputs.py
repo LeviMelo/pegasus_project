@@ -1,32 +1,25 @@
-"""The fields of a dependency map: place effects of SIM and SIH chapters, SINASC indicators and context fields.
+"""The fields of a dependency map: place effects of every fitted field of the plan's systems and the context fields.
 
-Every health field is a count over the window, indirectly standardised on the national rates (SIM, SIH: by year × sex ×
-five-year age band; SINASC: the national share of births), its place effect b̂(u) the shrunk Poisson intercept of
-``surprise.refit_place`` over that expectation, with its posterior sd (the pair weight is 1/sd², §7.5). SIH is the
-admissions that did not end in death: the in-hospital deaths are SIM records (§8.5), so no SIM and SIH field shares an
-event. A context is a complete count or a rate over a registered denominator, z-scored, with the constant sd 0.05 the
-gate used (it cannot change ρ). A field whose power to see a shared latent of correlation 0.3 is below 0.5 (§8.4, ADR-0022) is left out and reported.
+Every field is read from the production fits through declarations, nothing named here: a count field's place effect
+b̂(u) is the shrunk Poisson intercept of ``surprise.refit_place`` over its tier-B0 expectation (the national rates by
+age, sex and period, no place effects) summed over the window, with its posterior sd (the pair weight is 1/sd², §7.5);
+a measure's or a share's is its precision-weighted mean residual, shrunk (`gaussian_effect`). Two systems share events
+only where a declared link records the same event in both (`same_event`: a death in hospital is an admission and a
+certificate); there a field's overlap with the other system is its measured linked share, and past `maps.MAX_OVERLAP`
+the field's "not linked to" twin (its events less the expected linked ones) enters instead, sharing nothing (§8.5).
+A context is a complete count or a rate over a registered denominator, z-scored, with the constant sd 0.05 the gate
+used (it cannot change ρ). Every field with events enters (ADR-0028: no field is left out for power).
 """
 
 from __future__ import annotations
 
-import duckdb
 import numpy as np
-import pyarrow as pa
 
 from .. import gateway, surprise
-from . import pairs
 from .maps import MapInputs
 
 CONTEXT_SD = 0.05
 YEARS = list(range(2015, 2020))
-SINASC = {"lbw": "PESO > 0 and PESO < 2500", "preterm": "SEMAGESTAC > 0 and SEMAGESTAC < 37", "cesarean": "PARTO = 2",
-          "teen_mother": "IDADEMAE < 20", "prenatal_lt7": "CONSULTAS >= 1 and CONSULTAS <= 3",
-          "twin": "GRAVIDEZ >= 2 and GRAVIDEZ <= 3", "apgar5_lt7": "APGAR5 < 7"}
-SINASC_LABEL = {"lbw": "birth weight < 2,500 g", "preterm": "gestation < 37 weeks", "cesarean": "caesarean delivery",
-                "teen_mother": "mother under 20", "prenatal_lt7": "fewer than 7 prenatal visits",
-                "twin": "multiple pregnancy", "apgar5_lt7": "Apgar at 5 minutes < 7"}
-POWER_REPS = 30        # planted-latent replicates behind a field's admission power (Monte-Carlo se of the power 0.09)
 
 
 def _population(places: np.ndarray, years: list[int]) -> np.ndarray:
@@ -40,51 +33,10 @@ def _population(places: np.ndarray, years: list[int]) -> np.ndarray:
     return out
 
 
-def _chapter_map() -> pa.Table:
-    tree = gateway.code_structure("ICD10")
-    codes = tree.column("code").to_pylist()
-    parent = dict(zip(codes, tree.column("parent").to_pylist(), strict=True))
-    level = dict(zip(codes, tree.column("level").to_pylist(), strict=True))
-    rows = []
-    for c in codes:
-        if level[c] != "category":
-            continue
-        x = c
-        while parent.get(x) is not None:
-            x = parent[x]
-        rows.append((c, x))
-    return pa.table({"code3": [r[0] for r in rows], "chapter": [r[1] for r in rows]})
-
-
-def _chapter_counts(system: tuple[str, str], places: np.ndarray, years: list[int], survivors: bool) -> dict[str, np.ndarray]:
-    """Events by chapter as [U, T, 2, 17]."""
-    ix = {int(u): i for i, u in enumerate(places)}
-    chapters = _chapter_map()
-    out: dict[str, np.ndarray] = {}
-    for k, year in enumerate(years):
-        kw = {"survivors_only": True} if survivors else {}
-        ec = gateway.event_counts(*system, year, places=pa.array(places.astype(np.int64)), **kw)
-        con = duckdb.connect()
-        con.register("c", ec.counts)
-        con.register("m", chapters)
-        rows = con.execute("""SELECT m.chapter, c.u, c.sex, least(c.age // 5, 16) AS band, sum(c.y)
-                              FROM c JOIN m ON left(c.code, 3) = m.code3 WHERE c.sex IN (1, 2) GROUP BY ALL""").fetchall()
-        for ch, u, s, a, v in rows:
-            if u in ix:
-                out.setdefault(ch, np.zeros((len(places), len(years), 2, 17)))[ix[u], k, s - 1, a] += v
-    return out
-
-
 def place_effect(y: np.ndarray, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
     """The shrunk Poisson place intercept over the expectation (B0 for E_b) and its posterior sd."""
     _, b, sd, tau = surprise.refit_place(y[:, None], mu[:, None], np.full((len(y), 1), np.inf), np.ones((1, 1)))
     return b[:, 0], sd[:, 0], float(tau[0])
-
-
-def _standardised(Y: np.ndarray, PA: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Observed and indirectly standardised expected events per place (national sex × band rates by year)."""
-    rate = Y.sum(0) / np.maximum(PA.sum(0), 1e-9)
-    return Y.sum((1, 2, 3)), (PA * rate[None]).sum((1, 2, 3))
 
 
 def _field(places: np.ndarray, rows) -> np.ndarray:
@@ -170,86 +122,181 @@ def contexts(places: np.ndarray, years: list[int]) -> dict[str, tuple[np.ndarray
     return out
 
 
-def build(years: list[int] | None = None, places: np.ndarray | None = None) -> MapInputs:
+#: the event kinds that count care used rather than a health state (pegasus_data `event_types` kind): a place's level of
+#: use (access, referral, billing) enters every such field, and the map reads them net of it (`maps.factors`)
+CARE_KINDS = ("hospitalisation", "authorisation")
+
+
+def _window(su, years: list[int], places: np.ndarray) -> tuple[np.ndarray, ...]:
+    """A surprise summed over the map's years on the map's places: y, μ [U], and the place weights Σw, Σw·(y − μ) [U]
+    (a Gaussian location's precision and residual)."""
+    cols = np.isin(np.asarray(su.years), years)
+    index = {int(p): i for i, p in enumerate(su.places)}
+    rows = np.array([index.get(int(u), -1) for u in places])
+    have = rows >= 0
+    out = [np.zeros(len(places)) for _ in range(4)]
+    y, mu, w = (np.nan_to_num(np.asarray(a, dtype=float)[rows[have]][:, cols]) for a in (su.y, su.mu, su.w))
+    out[0][have], out[1][have], out[2][have], out[3][have] = y.sum(1), mu.sum(1), w.sum(1), (w * (y - mu)).sum(1)
+    return tuple(out)
+
+
+def gaussian_effect(sw: np.ndarray, swr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """A location field's place effect: each place's precision-weighted mean residual over the window, shrunk toward 0
+    by the between-place variance τ² its places show beyond their sampling variance (a moment estimate); its sd."""
+    ok = sw > 0
+    r = np.where(ok, swr / np.where(ok, sw, 1.0), np.nan)
+    v = np.where(ok, 1.0 / np.where(ok, sw, 1.0), np.nan)
+    tau2 = max(float(np.nanvar(r) - np.nanmean(v)), 1e-12)
+    return np.where(ok, r * tau2 / (tau2 + v), np.nan), np.where(ok, np.sqrt(tau2 * v / (tau2 + v)), np.nan)
+
+
+def _readers(dataset: str, event: str) -> list[dict]:
+    """The readers of a system's fitted fields on the production years: the counts ({}), and every measure, share or
+    linked field fitted from its declarations (the reader its fit's key records; race-stratified fits are disparity
+    readings, not map fields)."""
+    from .. import tools
+
+    out: list[dict] = [{}]
+    for k in tools.fitted(dataset, event, years=tools.FIT_YEARS):
+        key = k["key"]
+        if key.get("source") in (None, "events") or key.get("race") or key.get("grain"):
+            continue
+        reader = {f: (tuple(v) if f == "bounds" else v) for f, v in key.items() if f in READER_KEYS}
+        if reader not in out:
+            out.append(reader)
+    return out
+
+
+#: the fields of a fit's key that make up its reader (`monolith.assemble`'s source)
+READER_KEYS = ("source", "mark", "bounds", "missing", "classifier", "structure", "casemix", "indicator", "success",
+               "link", "side", "anchor", "sign")
+
+
+def _linked(dataset: str, event: str, link: str, side: str, years: list[int], places: np.ndarray,
+            leaves: dict[str, set]) -> dict[str, np.ndarray]:
+    """[U] the expected number of each field's events with a partner across ``link`` (Σ p_match, `gateway.linked_counts`
+    on the event type's primary classifier), summed over the map's years, by field (``leaves``: its categories)."""
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    index = {int(u): i for i, u in enumerate(places)}
+    out = {name: np.zeros(len(places)) for name in leaves}
+    for year in years:
+        t = gateway.linked_counts(dataset, event, year, link, side, classifier=primary).counts
+        code3 = [str(c)[:3] for c in t.column("code").to_pylist()]
+        for u, c, k in zip(t.column("u").to_pylist(), code3, t.column("k").to_pylist(), strict=True):
+            i = index.get(int(u))
+            if i is None or not k:
+                continue
+            for name, cats in leaves.items():
+                if c in cats or "*" in cats:
+                    out[name][i] += k
+    return out
+
+
+def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = None,
+          places: np.ndarray | None = None) -> MapInputs:
+    """The map's fields (module docstring), from declarations and the production fits: for every (dataset, event,
+    blocks) in ``systems``, each chapter field of its count fits and every fitted measure, share or linked field, its
+    place effect over ``years`` against tier B0 (`Session.surprise`: the national rates by age, sex and period, no
+    place effects); the context fields; and, where a declared link records the same events in two systems
+    (`same_event`), each field's measured overlap with the other system, with its "not linked to" field where that
+    overlap passes `maps.MAX_OVERLAP` (its events less the expected linked ones: no event shared with the other)."""
+    from .. import tools
+    from .maps import MAX_OVERLAP
+
     years = years or YEARS
     if places is None:
         places = np.sort(gateway.population([years[-1]]).column("u").unique().to_numpy())
-    U = len(places)
-    PA = _population(places, years)
-    names, groups, labels, B, SD, left = [], [], [], [], [], {}
-    tree = gateway.code_structure("ICD10")
-    title = dict(zip(tree.column("code").to_pylist(), tree.column("label").to_pylist(), strict=True))
-
-    from .. import fields, harness  # imported here: harness imports the scans
-    test_basis, gen_basis = pairs.MoranBasis(places), pairs.MoranBasis(places, "knn8")
-    powers: dict[str, float] = {}
-
-    def admit(tag: str, y: np.ndarray, mu: np.ndarray, b: np.ndarray, tau: float) -> bool:
-        """Admission to the pair scan (§8.4): the power of E_b at its minimum effect to see a latent of correlation
-        0.3 shared by this field and a partner of its own spatial spectrum, the field refitted as in production."""
-        pw = harness.pair_power(mu, 1 / np.sqrt(tau), b, b, b, gen_basis, test_basis, rhos=(fields.PAIR_RHO,),
-                                reps=POWER_REPS, seed=("admission", tag))[fields.PAIR_RHO]["power"]
-        powers[tag] = pw
-        if pw < fields.MIN_POWER:
-            left[tag] = f"power {pw:.2f} at rho {fields.PAIR_RHO} ({y.sum():.0f} events in {int((y > 0).sum())} places)"
-        return pw >= fields.MIN_POWER
-
-    for group, system, survivors in (("SIM", ("SIM.DO", "death"), False), ("SIH", ("SIH-RD", "hospitalisation"), True)):
-        for ch, Y in sorted(_chapter_counts(system, places, years, survivors).items(), key=lambda kv: _roman(kv[0])):
-            y, mu = _standardised(Y, PA)
-            b, sd, tau = place_effect(y, mu)
-            if not admit(f"{group}:{ch}", y, mu, b, tau):
-                continue
-            names.append(f"{group}:{ch}")
-            groups.append(group)
-            labels.append(title.get(ch, ch).split(" - ", 1)[-1][:60] + (" (admissions surviving)" if survivors else " (deaths)"))
-            B.append(b)
-            SD.append(sd)
-    births = np.zeros(U)
-    ind = {k: np.zeros(U) for k in SINASC}
-    overlap_n: dict[tuple[str, str], int] = {}
-    ix = {int(u): i for i, u in enumerate(places)}
-    for year in years:
-        tb, ov = gateway.indicator_counts("SINASC-DN", "birth", year, SINASC, pa.array(places.astype(np.int64)))
-        for n, u, v in zip(tb.column("name").to_pylist(), tb.column("u").to_pylist(), tb.column("y").to_pylist(), strict=True):
-            (births if n == "*" else ind[n])[ix[u]] += v
-        for k, v in ov.items():
-            overlap_n[k] = overlap_n.get(k, 0) + v
-    for k in SINASC:
-        mu = births * ind[k].sum() / births.sum()
-        b, sd, tau = place_effect(ind[k], mu)
-        if not admit(f"SINASC:{k}", ind[k], mu, b, tau):
-            continue
-        names.append(f"SINASC:{k}")
-        groups.append("SINASC")
-        labels.append(SINASC_LABEL[k])
+    names, groups, labels, B, SD = [], [], [], [], []
+    cats: list[set] = []            # each field's categories (the overlap of two fields of one system)
+    def add(name: str, group: str, label: str, b: np.ndarray, sd: np.ndarray, categories: set) -> None:
+        names.append(name)
+        groups.append(group)
+        labels.append(label)
         B.append(b)
         SD.append(sd)
+        cats.append(categories)
+
+    counts: dict[str, tuple[np.ndarray, np.ndarray]] = {}       # a count field's (y, μ) for its linked variant
+    kinds: dict[str, str] = {}
+    for dataset, event, blocks in systems:
+        kinds[dataset] = gateway.event_type(dataset, event).get("kind") or ""
+        for reader in _readers(dataset, event):
+            s = tools.Session(dataset, event, tools.FIT_YEARS, source=reader)
+            tag = "" if not reader else "|" + ":".join(str(reader.get(f)) for f in ("source", "mark", "indicator",
+                                                                                   "link", "classifier") if reader.get(f))
+            for block in (blocks if not reader else s._blocks()):
+                if block not in s._blocks():
+                    continue
+                node = block
+                su = s.surprise(node, "B0")
+                y, mu, sw, swr = _window(su, years, places)
+                field_cats = set(s.expectations.registry.leaves(node)) if node != "*" else {"*"}
+                name = f"{dataset}:{node}{tag}"
+                label = (s.expectations.field(node).label or node)[:60] + (f" ({tag[1:]})" if tag else "")
+                if surprise.gaussian(su):
+                    b, sd = gaussian_effect(sw, swr)
+                    if np.isfinite(b).sum() >= 2:
+                        add(name, dataset, label, b, sd, field_cats | {tag})
+                    continue
+                if y.sum() <= 0:
+                    continue
+                b, sd, _ = place_effect(y, mu)
+                add(name, dataset, label, b, sd, field_cats)
+                counts[name] = (y, mu)
+    # the same events in two systems: measured overlap, and the "not linked to" fields
+    shared: dict[tuple[int, str], float] = {}           # (field index, other dataset) -> its events' linked share
+    in_map = {ds.upper().replace(".", "-"): (ds, ev) for ds, ev, _ in systems}
+    for spec_name, spec in gateway.link_specs().items():
+        if not spec.same_event:
+            continue
+        for side, sd_, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
+            mine, theirs = sd_.dataset.upper().replace(".", "-"), other.dataset.upper().replace(".", "-")
+            if mine not in in_map or theirs not in in_map or (sd_.group and sd_.where):
+                continue
+            ds, ev = in_map[mine]
+            idx = [i for i, n in enumerate(names) if groups[i] == ds and n in counts]
+            linked = _linked(ds, ev, spec_name, side, years, places, {names[i]: cats[i] for i in idx})
+            for i in idx:
+                y, mu = counts[names[i]]
+                k = np.minimum(linked[names[i]], y)
+                share = float(k.sum() / max(y.sum(), 1e-12))
+                shared[(i, in_map[theirs][0])] = share
+                if share <= MAX_OVERLAP:
+                    continue
+                y2 = y - k
+                mu2 = mu * (y2.sum() / max(y.sum(), 1e-12))     # the national share not linked, on B0's expectation
+                b, sd, _ = place_effect(y2, mu2)
+                add(f"{names[i]}|not linked to {in_map[theirs][0]}", ds,
+                    labels[i] + f" (not linked to {in_map[theirs][0]})", b, sd, cats[i] | {f"unlinked:{in_map[theirs][0]}"})
     for k, (v, label) in contexts(places, years).items():
         z = (v - np.nanmean(v)) / np.nanstd(v)
-        names.append(f"ctx:{k}")
-        groups.append("context")
-        labels.append(label)
-        B.append(z)
-        SD.append(np.where(np.isfinite(z), CONTEXT_SD, np.nan))
+        add(f"ctx:{k}", "context", label, z, np.where(np.isfinite(z), CONTEXT_SD, np.nan), set())
     F = len(names)
     overlap = np.zeros((F, F))
-    sin = [i for i, g in enumerate(groups) if g == "SINASC"]
-    for a in sin:
-        for b in sin:
-            if a < b:
-                ka, kb = names[a].split(":")[1], names[b].split(":")[1]
-                n = overlap_n.get((ka, kb), overlap_n.get((kb, ka)))
-                m = min(ind[ka].sum(), ind[kb].sum())
-                overlap[a, b] = overlap[b, a] = np.nan if n is None else n / m
+    for a in range(F):
+        for b in range(a + 1, F):
+            ga, gb = groups[a], groups[b]
+            if "context" in (ga, gb):
+                continue
+            if ga == gb:            # one system: fields share events where their categories meet
+                base_a, base_b = names[a].split("|not linked")[0], names[b].split("|not linked")[0]
+                ov = 1.0 if (base_a == base_b or (cats[a] & cats[b]) - {""}) else 0.0
+            else:
+                base = {n: names.index(n.split("|not linked")[0]) for n in (names[a], names[b])}
+                ia, ib = base[names[a]], base[names[b]]
+                unl_a = f"unlinked:{gb}" in cats[a]
+                unl_b = f"unlinked:{ga}" in cats[b]
+                sa, sb = shared.get((ia, gb)), shared.get((ib, ga))
+                if unl_a or unl_b or (sa is None and sb is None):
+                    ov = 0.0        # no declared same-event link, or one side's linked events removed
+                else:
+                    ov = max(v for v in (sa, sb) if v is not None)
+            overlap[a, b] = overlap[b, a] = ov
     return MapInputs(places, names, groups, labels, np.stack(B, 1), np.stack(SD, 1), overlap,
-                     {"years": years, "left_out": left, "admission_power": powers, "missing_context": {n: int(np.isnan(B[i]).sum())
-                                                                            for i, n in enumerate(names) if groups[i] == "context"}})
-
-
-def _roman(x: str) -> int:
-    v = {"I": 1, "V": 5, "X": 10}
-    t = 0
-    for a, b in zip(x, x[1:] + " ", strict=True):
-        t += -v[a] if v.get(b, 0) > v[a] else v[a]
-    return t
+                     {"years": years, "systems": [list(x[:2]) for x in systems], "care": [d for d, k in kinds.items()
+                                                                                 if k in CARE_KINDS],
+                      "linked_share": {f"{names[i]}->{d}": v for (i, d), v
+                                                                                     in shared.items()},
+                      "missing_context": {n: int(np.isnan(B[i]).sum()) for i, n in enumerate(names)
+                                          if groups[i] == "context"}})

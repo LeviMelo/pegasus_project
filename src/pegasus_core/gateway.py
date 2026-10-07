@@ -51,7 +51,6 @@ _Z80 = 1.2815515655446004    # the 80% interval's half-width in standard deviati
 MODIFIERS = {"kappa": ("system_completeness", "system-completeness-2"), "sus": ("population_without_private_coverage", "sus-dependent-2"),
              "confusion": ("race_confusion_infant", "race-confusion-infant-1")}
 RACE = {"1": "branca", "2": "preta", "3": "amarela", "4": "parda", "5": "indigena"}   # RACACOR code -> the account's race
-RACE_COLUMN = {"SINASC-DN": "RACACORMAE", "SIM.DO": "RACACOR"}    # the mother's declared race; the race recorded on the certificate
 RATIO_YEARS = list(range(2015, 2024))       # the years the declared-race rate ratios are estimated over
 CONFUSION_YEARS = (2021, 2022)              # the years the infant matrix was measured on (the age mixture is read there)
 SYSTEM = {"SIM.DO": "SIM", "SINASC-DN": "SINASC"}    # the systems with a completeness series; the others read κ = 1
@@ -467,7 +466,7 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
 
 
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                 places: pa.Array | None = None, survivors_only: bool = False, race: str | None = None) -> EventCounts:
+                 places: pa.Array | None = None, race: str | None = None) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
 
     The columns come from pegasus_data's roles (the subject's residence, sex and age as
@@ -475,10 +474,9 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     without one (births, a notifiable disease) has the single code ``*``. A subject without a
     sex stratum takes the sex its entity implies (a mother: 2), or fails. ``places`` is the
     set of valid municipalities (the population's); a residence outside it is unallocated,
-    never guessed. ``survivors_only`` (SIH): the admissions that did not end in death (MORTE = 0); the in-hospital
-    deaths are SIM records (ARCHITECTURE §8.5), so these share no event with a SIM field.
-    ``race`` (a RACACOR code 1-5): only the events of that race, by the mother's declaration (SINASC-DN) or as recorded on
-    the certificate (SIM.DO); events with no valid race are unallocated ('race unknown').
+    never guessed. Events two systems share are read through their declared link (`linked_counts`), never by a
+    system's own column. ``race`` (a race code 1-5): only the events of that race, by the subject's declared race
+    stratum (the mother's on a birth); events with no valid race are unallocated ('race unknown').
     """
     import pegasus_data as pg
 
@@ -488,20 +486,16 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     strata = _strata(dataset)
     key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": column,
            "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1,
-           **_df_key(dataset, year), **({"survivors": 1} if survivors_only else {}), **({"race": race} if race else {})}
+           **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
     by = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + ([column] if column else [])
     if race:
-        by = by + [RACE_COLUMN[dataset]]
-    alive = ""
-    if survivors_only:
-        if not dataset.startswith("SIH"):
-            raise ValueError("survivors_only is the SIH admissions that did not end in death")
-        by = by + ["MORTE"]
-        alive = "WHERE coalesce(TRY_CAST(CAST(\"MORTE\" AS VARCHAR) AS INTEGER), 0) = 0"
+        if not strata.get("race"):
+            raise LookupError(f"{dataset}: no race stratum among pegasus_data's roles")
+        by = by + [strata["race"]]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         raw = pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
@@ -512,7 +506,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     con.register("v", pa.table({"u": valid}))
     sex = _sex_sql(strata, dataset, raw)
     code = f'upper(trim("{column}"))' if column else "'*'"
-    race_col = f', TRY_CAST(CAST("{RACE_COLUMN[dataset]}" AS VARCHAR) AS INTEGER) AS race' if race else ""
+    race_col = f', TRY_CAST(CAST("{strata["race"]}" AS VARCHAR) AS INTEGER) AS race' if race else ""
     race_bad = "WHEN race IS NULL OR race NOT BETWEEN 1 AND 5 THEN 'race unknown'" if race else ""
     race_mine = f" AND (race = {int(race)} OR race IS NULL OR race NOT BETWEEN 1 AND 5)" if race else ""
     con.execute(f"""CREATE TEMP TABLE e AS SELECT
@@ -520,7 +514,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
             {sex} AS sex,
             CAST(least(floor(TRY_CAST("{strata['age']}" AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age,
             {code} AS code, CAST(events AS INTEGER) AS y{race_col}
-        FROM r {alive}""")
+        FROM r""")
     reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age' {race_bad}
                      WHEN code IS NULL OR code = '' THEN 'code' END"""
@@ -934,7 +928,8 @@ def strata(dataset: str) -> dict:
 
 
 def _strata(dataset: str) -> dict:
-    """The subject's residence, sex and age columns, from pegasus_data's roles."""
+    """The subject's residence, sex, age and race columns, from pegasus_data's roles (race: the subject's declared
+    race stratum, the mother's on a birth, None where none is declared)."""
     import pegasus_data as pg
 
     rows = [r for r in pg.roles(dataset) if r.get("model") == "stratum"]
@@ -949,7 +944,8 @@ def _strata(dataset: str) -> dict:
     if "sex" not in by_prop and implied is None:
         raise LookupError(f"{dataset}: no sex stratum, and entity {entity!r} implies none")
     return {"residence": by_prop["residence"]["column"], "age": age["column"],
-            "sex": by_prop["sex"]["column"] if "sex" in by_prop else None, "implied_sex": implied, "entity": entity}
+            "sex": by_prop["sex"]["column"] if "sex" in by_prop else None, "implied_sex": implied, "entity": entity,
+            "race": by_prop["race"]["column"] if "race" in by_prop else None}
 
 
 CANONICAL_LEVELS = ("chapter", "group", "category", "subcategory")
