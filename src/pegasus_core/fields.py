@@ -259,3 +259,90 @@ def lift(values: np.ndarray, places: np.ndarray, support: str, law: str = "sum",
 def common_support(a: Field, b: Field) -> str:
     """The finest support both fields lift to."""
     return SUPPORTS[max(SUPPORTS.index(a.support), SUPPORTS.index(b.support))]
+
+
+# ---------------------------------------------------------------------- fields from declarations (S1)
+
+
+@dataclass(frozen=True)
+class Declared:
+    """A field pegasus_data's roles declare beyond the counts (docs/plans/2026-10-07-fields-from-roles.md):
+    ``kind`` measure (a number that is a measurement) or composition (a category's codes), the ``column``, its role
+    and name, and for a measure its declared missing codes and domain. ``reason`` is set when it is not modelled."""
+    dataset: str
+    column: str
+    role: str
+    name: str
+    kind: str
+    missing: tuple[str, ...] = ()
+    domain: tuple[float, float] | None = None
+    reason: str = ""
+
+
+def declared(dataset: str) -> list[Declared]:
+    """Every mark or dimension column of ``dataset`` as a field, or with the reason it is not one: a draft role, a
+    number that is no measurement, a measurement whose missing codes are undeclared, a kind not yet read (a date, a
+    place, a code tree, a text). Nothing is named here: every field comes from the declarations (`gateway.roles`)."""
+    from . import gateway
+
+    out = []
+    for r in gateway.roles(dataset):
+        if r.get("model") not in ("mark", "dimension"):
+            continue
+        base = {"dataset": dataset, "column": r["column"], "role": r["role"], "name": r.get("name") or ""}
+        if not r.get("reviewed", True):
+            out.append(Declared(**base, kind="", reason="role is a draft"))
+        elif r["kind"] == "number":
+            if not r.get("measure"):
+                out.append(Declared(**base, kind="", reason="a number that is not a measurement"))
+            elif r.get("missing") is None:
+                out.append(Declared(**base, kind="measure", reason="missing codes not declared"))
+            else:
+                dom = r.get("domain")
+                out.append(Declared(**base, kind="measure", missing=tuple(r["missing"]),
+                                    domain=tuple(dom) if dom else None))
+        elif r["kind"] == "category":
+            if r.get("missing") is None:
+                out.append(Declared(**base, kind="composition", reason="missing codes not declared"))
+            else:
+                out.append(Declared(**base, kind="composition", missing=tuple(r["missing"])))
+        else:
+            out.append(Declared(**base, kind="", reason=f"kind {r['kind']} not yet read"))
+    return out
+
+
+def measure_source(dataset: str, event: str, column: str) -> dict:
+    """The reader of a declared measure (`monolith.assemble`'s ``source``): positive values on the log scale, the
+    declared domain (else positive) and missing codes, the event type's primary classifier, and as case-mix its first
+    alternative classifier with a structure (SIH's procedures), all from the declarations."""
+    from . import gateway
+
+    d = next(x for x in declared(dataset) if x.column == column)
+    if d.kind != "measure" or d.reason:
+        raise ValueError(f"{dataset}.{column} is not a modelled measure: {d.reason or d.kind}")
+    et = gateway.event_type(dataset, event)
+    cls = et.get("classifiers") or []
+    primary = next((c["column"] for c in cls if c["role"] == "primary"), None)
+    casemix = next((c["column"] for c in cls if c["role"] == "alternative" and c.get("structure")), None)
+    lo, hi = d.domain if d.domain else (0.0, 1e300)
+    return {"source": "mark", "mark": column, "bounds": (max(lo, 1e-9), hi), "missing": list(d.missing),
+            **({"classifier": primary} if primary else {}), **({"casemix": casemix} if casemix else {})}
+
+
+def share_sources(dataset: str, event: str, column: str, probe_year: int) -> list[tuple[str, dict]]:
+    """The share fields of a declared composition: one per recorded value of ``column`` except its most frequent (the
+    reference: a value's share and its complement carry one question), each with its reader (`monolith.assemble`'s
+    ``source``: indicator, success, the declared missing codes, the event type's primary classifier). The values are
+    read from the data of ``probe_year`` (`gateway.composition_counts`), never listed here."""
+    from . import gateway
+
+    d = next(x for x in declared(dataset) if x.column == column)
+    if d.kind != "composition" or d.reason:
+        raise ValueError(f"{dataset}.{column} is not a modelled composition: {d.reason or d.kind}")
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    comp = gateway.composition_counts(dataset, event, probe_year, column, d.missing, primary).counts.to_pandas()
+    order = comp.groupby("value")["n"].sum().sort_values(ascending=False).index.tolist()
+    return [(v, {"source": "share", "indicator": column, "success": (v,), "missing": list(d.missing),
+                 **({"classifier": primary} if primary else {})}) for v in order[1:]]
+

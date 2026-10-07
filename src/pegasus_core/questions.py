@@ -31,6 +31,7 @@ class Method:
     id: str                     # the name `tools.Session.scan` runs
     assumptions: str
     regimes: str = "any"
+    kinds: tuple[str, ...] = ("count",)     # the field kinds it reads (count; mark: a measurement's location)
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,8 @@ class Question:
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
     Question("excess", "C", "counts above the expectation in a place and period, at any spatial scale", "B1",
              "area × period", "rate ratio", (
-                 Method("cell_excess", "two-group model on the PIT scores; supports from the IBGE ladder"),
+                 Method("cell_excess", "two-group model on the PIT scores; supports from the IBGE ladder",
+                        kinds=("count", "mark")),
                  Method("excess", "multiscale graph peaks of a gamma tail score; places joined by N1's noise"),
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
              ), ("spike", "transient")),
@@ -74,6 +76,11 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
              "recording practice (the ill-defined share) or composition", "B1", "area × period", "share ratio", (
                  Method("share_excess", "beta-binomial on the observed total, the share expected from stage B, "
                                         "θ by central matching; two-sided"),
+             )),
+    Question("institution", "C", "one institution's events departing, over a window, from its catchment's expectation "
+             "(a step specific to it, or the volume of all its chapters)", "B1", "institution × window", "rate ratio", (
+                 Method("institution_step", "best window's likelihood ratio against the facility's constant ratio to "
+                                            "its catchment; Bonferroni over the T(T+1)/2 windows; the v0 lattice's gates"),
              )),
     Question("group", "C", "a place whose excess differs across sex × age groups from the national pattern", "B0",
              "area × group", "rate ratio", (
@@ -130,10 +137,12 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
     """Every method of ``question`` on the field ``node`` at q/k, the union merged into answers by overlapping loci,
     strongest first. A method that fails is reported in the answer list's ``failed`` attribute and the rest go on."""
     qn = QUESTIONS[question]
-    k = len(qn.methods)
+    kind = session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count")
+    methods = [m for m in qn.methods if kind in m.kinds]
+    k = max(len(methods), 1)
     answers: list[Answer] = []
-    failed = {}
-    for m in qn.methods:
+    failed = {} if methods else {"*": f"no method of {question!r} reads a {kind} field yet"}
+    for m in methods:
         try:
             found = session.scan(node, m.id, q=q / k, **kw)
         except Exception as exc:  # noqa: BLE001 - one method's failure is reported, the question still answered
@@ -161,12 +170,14 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
     out = AnswerList([a for a, ok in zip(answers, fits, strict=True) if ok])
     out.other_shape = [a for a, ok in zip(answers, fits, strict=True) if not ok]
     out.failed = failed
+    out.k = k                   # the methods that read this field's kind: the answer's Bonferroni factor
     return out
 
 
 class AnswerList(list):
     failed: dict
     other_shape: list
+    k: int
 
 
 def agreement(answers: list[Answer]) -> dict[str, int]:

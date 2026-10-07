@@ -35,8 +35,10 @@ def _answer_row(ld: register_mod.Lead, names: dict) -> str:
                        if v.get("stats", {}).get("shape"))
     tri = ld.robustness.get("triage", {})
     yrs = ld.locus.get("years") or ["", ""]
-    return (f"| {ld.fields[0].split(':')[-1]} | {yrs[0]}–{yrs[-1]} | {', '.join(_place(c, names) for c in pl[:4])}"
-            f"{f' (+{len(pl) - 4})' if len(pl) > 4 else ''} | {ld.effect:.2f} | {'+'.join(ld.provenance.get('methods', []))} "
+    where = ", ".join(_place(c, names) for c in pl[:4]) + (f" (+{len(pl) - 4})" if len(pl) > 4 else "")
+    if ld.locus.get("institutions"):
+        where = "institution " + ", ".join(ld.locus["institutions"][:3]) + (f"; {where}" if where else "")
+    return (f"| {ld.fields[0].split(':')[-1]} | {yrs[0]}–{yrs[-1]} | {where} | {ld.effect:.2f} | {'+'.join(ld.provenance.get('methods', []))} "
             f"| {shapes} | {tri.get('class', '')} | {ld.replication} | {ld.q:.1e} |")
 
 

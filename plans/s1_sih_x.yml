@@ -1,0 +1,7 @@
+# S1's first end-to-end measurement field: SIH chapter X, its declared length of stay
+years: 2010-2023
+systems:
+  - {dataset: SIH-RD, event: hospitalisation, blocks: [X], levels: [group], measures: [DIAS_PERM]}
+relations: false
+triage: true
+report: reports/s1_sih_x_measure.md

@@ -23,7 +23,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from . import config, store
+from . import config, fields, store
 
 
 @dataclass
@@ -32,6 +32,8 @@ class System:
     event: str
     blocks: list[str]
     levels: list[str] | None = None
+    measures: list[str] | str | None = None     # "all", or columns of `fields.declared`: the measurement fields read
+    compositions: list[str] | str | None = None  # "all", or category columns of `fields.declared`: their share fields
 
 
 @dataclass
@@ -55,8 +57,8 @@ class Plan:
         if isinstance(years, str):
             a, b = years.split("-")
             years = list(range(int(a), int(b) + 1))
-        systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"))
-                   for s in raw.get("systems") or ()]
+        systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), s.get("levels"), s.get("measures"),
+                          s.get("compositions")) for s in raw.get("systems") or ()]
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
@@ -78,6 +80,24 @@ def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str
     model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
     model.save()
     return model
+
+
+def _measures(sys_: System) -> list[str]:
+    return _declared(sys_, "measure", sys_.measures)
+
+
+def _declared(sys_: System, kind: str, wanted: list[str] | str | None) -> list[str]:
+    """The declared fields of ``kind`` a system's plan reads: every modelled one of `fields.declared` ("all"), or the
+    columns listed (each must be modelled)."""
+    if not wanted:
+        return []
+    modelled = [d.column for d in fields.declared(sys_.dataset) if d.kind == kind and not d.reason]
+    if wanted == "all":
+        return modelled
+    unknown = [c for c in wanted if c not in modelled]
+    if unknown:
+        raise ValueError(f"{sys_.dataset}: not modelled {kind} fields {unknown} (`fields.declared` says why)")
+    return list(wanted)
 
 
 def _key(step: str, **inputs: Any) -> dict[str, Any]:
@@ -119,6 +139,25 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             out[f"questions {sys_.dataset}"] = len(leads)
         else:
             out[f"questions {sys_.dataset}"] = "done on these versions"
+        readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_)]
+        readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions)
+                    for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
+        for column, source in readers:
+            ms = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=source)
+            for block in sys_.blocks:
+                try:
+                    ms.expectations.model(block)
+                except LookupError:
+                    fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source=source, log=log)
+            key = _key("questions", dataset=sys_.dataset, event=sys_.event, blocks=sys_.blocks, levels=sys_.levels,
+                       measure=column, questions=plan.questions, years=plan.years)
+            if force or not _done(key):
+                leads = ms.survey_questions(sys_.blocks, tuple(plan.questions) if plan.questions else None,
+                                            levels=tuple(sys_.levels) if sys_.levels else None, log=log)
+                _mark(key, {"answers": len(leads)})
+                out[f"questions {sys_.dataset} {column}"] = len(leads)
+            else:
+                out[f"questions {sys_.dataset} {column}"] = "done on these versions"
     if plan.relations and len(plan.systems) >= 1:
         spec = [(x.dataset, x.event, x.blocks) for x in plan.systems]
         key = _key("relations", plan=spec, years=plan.years)

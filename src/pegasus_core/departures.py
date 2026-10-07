@@ -127,7 +127,12 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
         p[ok] = fit["pi0"] * stats.norm.sf(sk.z[ok], fit["delta0"], fit["sigma0"])
         parts.append((sk, sc, fit, lfdr, ok))
         ps.append(p.ravel())
-        rel.append(lenses._upper_tail(sk.y, rr * sk.mu, sk.phi).ravel())     # P(Y ≥ y | rate θ0·μ)
+        if s.extras.get("kind") == "mark":
+            # a measurement on the log scale: P(N(μ + log θ0, var) ≥ y), var the cell mean's (1/w)
+            sd = np.sqrt(np.where(sk.w > 0, 1.0 / np.where(sk.w > 0, sk.w, 1.0), np.inf))
+            rel.append(stats.norm.sf((sk.y - sk.mu - np.log(rr)) / sd).ravel())
+        else:
+            rel.append(lenses._upper_tail(sk.y, rr * sk.mu, sk.phi).ravel())     # P(Y ≥ y | rate θ0·μ)
     p_all, rel_all = np.concatenate(ps), np.concatenate(rel)
     sig = control.bh(p_all, q) & (rel_all <= q)
     out, offset = [], 0
@@ -136,7 +141,8 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
         for i in np.nonzero(sig[offset:offset + U * T])[0]:
             out.append(lenses.Finding("cell_excess", s.field.id, s.tier,
                                       {"places": _members(s, sc, i // T), "years": [int(sk.years[i % T])]},
-                                      lenses._rr(sk.y.flat[i], sk.mu.flat[i]), float(p_all[offset + i]),
+                                      (float(np.exp(sk.y.flat[i] - sk.mu.flat[i])) if s.extras.get("kind") == "mark"
+                                       else lenses._rr(sk.y.flat[i], sk.mu.flat[i])), float(p_all[offset + i]),
                                       {"support": "municipality" if sc is None else sc.name,
                                        "unit": str(sk.places[i // T]), "observed": float(sk.y.flat[i]),
                                        "expected": float(sk.mu.flat[i]), "lfdr": float(lfdr.flat[i]),

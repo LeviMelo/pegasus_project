@@ -1,6 +1,6 @@
 # Fields from pegasus_data's roles
 
-**Status:** design for the author (2026-10-07), not built. It replaces the hand-named mark of today's code (`source="mark"`, `PESO`) and my earlier proposal to "add marks as questions" by naming variables, which the author rejected as a breach of the data-agnostic principle.
+**Status:** building (S1, 2026-10-07). Built: the registry (`fields.declared`), measures (`fields.measure_source`, readers with declared missing codes and domains; pegasus_data ADR-0154), compositions (`fields.share_sources`, `gateway.composition_counts`), institutions as the `institution` question, methods declaring the field kinds they read, measures and compositions in `update` plans. Pending: pegasus_data's missing-code declarations beyond SIH's measures (`scripts/propose_missing.py` there), intervals, code trees as second classifiers, the first end-to-end readings. It replaces the hand-named mark of today's code (`source="mark"`, `PESO`) and my earlier proposal to "add marks as questions" by naming variables, which the author rejected as a breach of the data-agnostic principle.
 
 ## The problem
 

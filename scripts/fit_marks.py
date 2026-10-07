@@ -1,4 +1,4 @@
-"""Fit and read the SIH marks (ARCHITECTURE §4.4): length of stay, cost, death in hospital, ICU days.
+"""Fit and read one declared measure of SIH (ARCHITECTURE §4.4; MARK is its column, from `fields.declared`).
 
     python scripts/fit_marks.py fit  MARK BLOCK FIRST LAST     fit one mark of one chapter (stores the model, the facility effects)
     python scripts/fit_marks.py read MARK BLOCK FIRST LAST     calibration of the tiers, the lenses, negatives, top leads with their triage
@@ -46,7 +46,7 @@ def read(mark: str, block: str, first: int, last: int) -> None:
     years = list(range(first, last + 1))
     rec = json.loads(Path(marks.HOME, f"{tag(mark, block)}.json").read_text(encoding="utf-8"))
     fx = rec.get("final_reader_effects")
-    source = marks.reader(mark, fx)
+    source = marks.reader(DATASET, EVENT, mark, fx)
     sess = tools.Session(DATASET, EVENT, years, source=source)
     node = block
     out: dict = {"mark": mark, "block": block, "years": [first, last], "tiers": {}, "lenses": {}, "negatives": {}}
@@ -85,7 +85,7 @@ def read(mark: str, block: str, first: int, last: int) -> None:
         places = f.locus["places"]
         desc = {"lens": lens, "places": [place_name(names, p) for p in places[:4]] + ([f"+{len(places) - 4}"] if len(places) > 4 else []),
                 "years": f.locus["years"], "effect": float(f.effect), "p": float(f.p), "direction": f.locus.get("direction")}
-        if "casemix" in marks.SPECS[mark]:
+        if "casemix" in marks.spec(DATASET, EVENT, mark):
             desc["triage"] = marks.triage_lead(model, mark, years, np.array(places), f.locus["years"], fx, names)
         out["leads"].append(desc)
         print("LEAD", json.dumps(desc, default=float, ensure_ascii=False), flush=True)

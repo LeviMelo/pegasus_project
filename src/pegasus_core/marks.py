@@ -28,25 +28,25 @@ import torch
 
 from . import gateway, graphs, monolith
 
-#: the SIH marks: the reader's source and arguments. ``block`` of every one is an ICD-10 chapter of the principal diagnosis.
-SPECS: dict[str, dict] = {
-    "los": {"source": "mark", "mark": "DIAS_PERM", "bounds": (1, 365), "classifier": "DIAG_PRINC", "casemix": "PROC_REA"},
-    "cost": {"source": "mark", "mark": "VAL_TOT", "bounds": (1, 500000), "classifier": "DIAG_PRINC", "casemix": "PROC_REA"},
-    "death": {"source": "share", "indicator": "MORTE", "success": ("1",), "classifier": "DIAG_PRINC"},
-    "icu": {"source": "count", "mark": "UTI_MES_TO", "bounds": (1, 400), "classifier": "DIAG_PRINC"},
-}
 SHRINK_ITERATIONS = 200
 MIN_FACILITY_YEARS = 3      # a facility's own change in time needs this many years with admissions
 MIN_FACILITY_N = 30         # admissions of a facility-year below which the year carries nothing
 HOME = Path("data/marks")
 
 
-def reader(name: str, facility_effects: str | None = None) -> dict:
-    """The ``source`` of `monolith.assemble` / `surprise.Expectations` for a mark (JSON-clean: bounds a tuple)."""
-    spec = dict(SPECS[name])
+def spec(dataset: str, event: str, column: str) -> dict:
+    """A declared measure's reader (`fields.measure_source`): nothing here names a column (S1)."""
+    from . import fields
+
+    return fields.measure_source(dataset, event, column)
+
+
+def reader(dataset: str, event: str, column: str, facility_effects: str | None = None) -> dict:
+    """The ``source`` of `monolith.assemble` / `surprise.Expectations` for a declared measure (bounds a tuple)."""
+    out = dict(spec(dataset, event, column))
     if facility_effects:
-        spec["facility_effects"] = facility_effects
-    return spec
+        out["facility_effects"] = facility_effects
+    return out
 
 
 def nu_table(model: monolith.MarkModel, year_index: int) -> pa.Table:
@@ -66,13 +66,14 @@ def nu_table(model: monolith.MarkModel, year_index: int) -> pa.Table:
 def facility_residuals(model: monolith.MarkModel, name: str, years: list[int], facility_effects: str | None,
                        places: np.ndarray | None = None) -> pa.Table:
     """(facility, year, n, sr, sr2) over the years: the admissions' residuals from the fitted location, by recording facility."""
-    spec = SPECS[name]
+    sp = spec(model.data.dataset, model.data.event, name)
     edges = gateway.age_edges(model.data.population)
     parts = []
     for i, year in enumerate(years):
         parts.append(gateway.mark_facility_moments(
-            model.data.dataset, model.data.event, int(year), spec["mark"], tuple(spec["bounds"]), nu_table(model, i), edges,
-            classifier=spec["classifier"], casemix=spec.get("casemix"), facility_effects=facility_effects,
+            model.data.dataset, model.data.event, int(year), sp["mark"], tuple(sp["bounds"]), nu_table(model, i), edges,
+            classifier=sp.get("classifier"), casemix=sp.get("casemix"), facility_effects=facility_effects,
+            missing=sp.get("missing", ()),
             places=None if places is None else pa.array(places, pa.int32())))
     return pa.concat_tables(parts)
 
@@ -168,13 +169,14 @@ def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: 
     from . import facility as fac_mod
     from .scans import lenses
 
-    spec = SPECS[name]
+    sp = spec(model.data.dataset, model.data.event, name)
     d = model.data
     edges = gateway.age_edges(d.population)
     use = [i for i, y in enumerate(years) if window[0] <= y <= window[1]]
-    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), spec["mark"], tuple(spec["bounds"]), nu_table(model, i),
-                                           edges, classifier=spec["classifier"], casemix=spec.get("casemix"),
-                                           facility_effects=facility_effects, places=pa.array(places.astype(np.int32)))
+    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu_table(model, i),
+                                           edges, classifier=sp.get("classifier"), casemix=sp.get("casemix"),
+                                           facility_effects=facility_effects, places=pa.array(places.astype(np.int32)),
+                                           missing=sp.get("missing", ()))
              for i in use]
     df = pa.concat_tables(parts).to_pandas().groupby("facility", as_index=False)[["n", "sr"]].sum()
     n_all, sr_all = float(df.n.sum()), float(df.sr.sum())
@@ -207,18 +209,19 @@ def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: 
 
 def fit_chapter(name: str, block: str, years: list[int], graph: str = "contiguity", device: str = "cpu", rounds: int = 2,
                 dataset: str = "SIH-RD", event: str = "hospitalisation", outer: tuple[int, int] = (40, 12), log=print) -> dict:
-    """One mark of one chapter: the location fitted, the facility effects estimated from its residuals and taken out
+    """One declared measure (``name``: its column, `fields.declared`) of one chapter: the location fitted, the facility effects estimated from its residuals and taken out
     (a log-normal mark with a facility: ``rounds`` = 2), the location refitted from the first fit (``outer``: the outer
     iterations allowed to the first fit and to the refit). Stores the final model
     (`Monolith.save`, under the reader's key, which carries the facility effects' id) and returns the record."""
     start = time.time()
-    cls = monolith.model_class(SPECS[name])
+    sp = spec(dataset, event, name)
+    cls = monolith.model_class(sp)
     fx_id = None
     record: dict = {"mark": name, "block": block, "years": [years[0], years[-1]], "graph": graph}
     previous = None
     cumulative: dict[str, float] = {}
-    for r in range(rounds if "casemix" in SPECS[name] else 1):
-        source = {k: (tuple(v) if k == "bounds" else v) for k, v in reader(name, fx_id).items()}
+    for r in range(rounds if "casemix" in sp else 1):
+        source = {k: (tuple(v) if k == "bounds" else v) for k, v in reader(dataset, event, name, fx_id).items()}
         data = monolith.assemble(dataset, event, block, years, **source)
         log(f"round {r}: assembled {len(data.y)} cells, {data.n.sum():.0f} events, unallocated {data.unallocated} ({time.time() - start:.0f}s)")
         model = cls(data, graphs.graph(data.places, graph), graph, device=device)
@@ -231,7 +234,7 @@ def fit_chapter(name: str, block: str, years: list[int], graph: str = "contiguit
         model.fit(outer=outer[0] if previous is None else outer[1], log=lambda line, r=r: log(f"  r{r} {line}"))
         model.save()
         record[f"round{r}"] = {"fit": model.summary(), "facility_effects": fx_id, "seconds": round(time.time() - start)}
-        if "casemix" in SPECS[name]:
+        if "casemix" in sp:
             res = facility_residuals(model, name, years, fx_id)
             fit = shrink_facilities(res)
             for f, d in zip(fit.facilities.tolist(), fit.delta.tolist(), strict=True):
@@ -265,4 +268,4 @@ def save_record(record: dict, tag: str) -> Path:
     return path
 
 
-__all__ = ["SPECS", "reader", "fit_chapter", "triage_lead", "shrink_facilities", "facility_jumps", "facility_residuals", "save_record"]
+__all__ = ["spec", "reader", "fit_chapter", "triage_lead", "shrink_facilities", "facility_jumps", "facility_residuals", "save_record"]

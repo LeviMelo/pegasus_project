@@ -695,7 +695,8 @@ CASEMIX_CHARS = 2    # the procedure's group: the first two digits of a SIGTAP c
 
 
 def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], classifier: str | None,
-                places: pa.Array | None, casemix: str | None, facility_effects: str | None, facility: bool = False) -> pa.Table:
+                places: pa.Array | None, casemix: str | None, facility_effects: str | None, facility: bool = False,
+                missing: tuple[str, ...] = ()) -> pa.Table:
     """Registers in ``con`` the table ``adj`` of a year's admissions with a valid mark: (u, sex, age, code, fac, m, lm), ``lm`` the
     log mark less the facility's effect (``facility_effects``: a stored table, `store_facility_effects`) and less the case-mix
     offset of its (diagnosis category, procedure group) stratum when ``casemix`` names the procedure column: the stratum's
@@ -714,13 +715,16 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     pg = f"coalesce(left(trim(CAST(\"{casemix}\" AS VARCHAR)), {CASEMIX_CHARS}), '')" if casemix else "''"
     fac = f"coalesce(trim(CAST(\"{fcol}\" AS VARCHAR)), '')" if fcol else "''"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            TRY_CAST(CAST("{mark}" AS VARCHAR) AS DOUBLE) AS m, {pg} AS pg, {fac} AS fac FROM r""")
+            trim(CAST("{mark}" AS VARCHAR)) AS mraw, TRY_CAST(CAST("{mark}" AS VARCHAR) AS DOUBLE) AS m, {pg} AS pg,
+            {fac} AS fac FROM r""")
+    miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
     con.unregister("r")
     del raw
     reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                       WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
-                      WHEN code IS NULL OR code = '' THEN 'code' WHEN m IS NULL THEN 'mark missing'
-                      WHEN m < {bounds[0]} OR m > {bounds[1]} THEN 'mark out of bounds' END"""
+                      WHEN code IS NULL OR code = '' THEN 'code' WHEN mraw IN ({miss}) THEN 'mark not recorded'
+                      WHEN m IS NULL THEN 'mark missing' WHEN m < {bounds[0]} OR m > {bounds[1]} THEN 'mark out of bounds'
+                      END"""
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     if facility_effects:
@@ -748,14 +752,14 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
 
 def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float],
                  classifier: str | None = None, places: pa.Array | None = None, casemix: str | None = None,
-                 facility_effects: str | None = None) -> EventCounts:
+                 facility_effects: str | None = None, missing: tuple[str, ...] | list = ()) -> EventCounts:
     """Accumulator states of a positive numeric mark per (u, year, sex, age, code): n, Σm, Σm², Σlog m, Σ(log m)²
     (ARCHITECTURE §4.4; handoff §4 asks pegasus_data to serve these). The log moments are of the *adjusted* log mark
     when ``casemix`` (the procedure column) or ``facility_effects`` are given (`_mark_frame`); Σm and Σm² are raw.
     Values outside ``bounds`` (sentinels, impossible values) and missing values are counted
     as unallocated with their reason, never dropped silently."""
     key = {"what": "mark_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
-           "bounds": list(bounds), "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
+           "bounds": list(bounds), "missing": list(missing), "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"casemix": casemix, "shrink": MARK_SHRINK, "chars": CASEMIX_CHARS} if casemix else {}),
            **({"facility_effects": facility_effects} if facility_effects else {})}
     cached = store.get_table("gateway", key)
@@ -763,7 +767,8 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
     con = duckdb.connect()
-    unallocated = _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects)
+    unallocated = _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects,
+                              missing=tuple(missing))
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
             CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n, sum(m) AS s1,
             sum(m * m) AS s2, sum(lm) AS l1, sum(lm * lm) AS l2
@@ -773,41 +778,55 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     return EventCounts(counts, unallocated, key)
 
 
-def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...], classifier: str | None = None,
-                  places: pa.Array | None = None) -> EventCounts:
-    """A binary mark's states per (u, year, sex, age, code): n admissions and k of them with ``indicator`` among the ``success``
-    codes (SIH ``MORTE`` = 1: died in hospital). A record whose value is missing is unallocated with its reason."""
+def composition_counts(dataset: str, event: str, year: int, column: str, missing: tuple[str, ...] | list = (),
+                       classifier: str | None = None, places: pa.Array | None = None) -> EventCounts:
+    """A category column's composition per (u, year, sex, age, code, value): the events carrying each value. A value
+    among the column's declared ``missing`` codes (pegasus_data roles) is unallocated as 'value not recorded', a blank
+    one as 'value missing'. One read serves every share of the column (`share_moments`)."""
     strata = _strata(dataset)
-    key = {"what": "share_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
-           "indicator": indicator, "success": list(success), "classifier": classifier, "data": config.data_version(),
-           **_df_key(dataset, year)}
+    key = {"what": "composition_counts", **_places_key(places, year), "dataset": dataset, "event": event,
+           "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
+           "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    cols = [strata["residence"], strata["age"], indicator] + ([strata["sex"]] if strata["sex"] else []) + \
-        ([classifier] if classifier else [])
+    cols = [strata["residence"], strata["age"], column] + ([strata["sex"]] if strata["sex"] else []) +         ([classifier] if classifier else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
-    yes = ", ".join(f"'{s}'" for s in success)
+    miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            trim(CAST("{indicator}" AS VARCHAR)) AS x FROM r""")
-    reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
+            trim(CAST("{column}" AS VARCHAR)) AS x FROM r""")
+    reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
-                     WHEN code IS NULL OR code = '' THEN 'code' WHEN x IS NULL OR x = '' THEN 'value missing' END"""
+                     WHEN code IS NULL OR code = '' THEN 'code' WHEN x IS NULL OR x = '' THEN 'value missing'
+                     WHEN x IN ({miss}) THEN 'value not recorded' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
-            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
-            CAST(sum(CASE WHEN x IN ({yes}) THEN 1 ELSE 0 END) AS INTEGER) AS k
+            CAST(sex AS TINYINT) AS sex, age, code, x AS value, CAST(count(*) AS INTEGER) AS n
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
-    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): share of {indicator} in {list(success)}"})
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): composition of {column}"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
+
+
+def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...], classifier: str | None = None,
+                  places: pa.Array | None = None, missing: tuple[str, ...] | list = ()) -> EventCounts:
+    """A share's states per (u, year, sex, age, code): n events with ``indicator`` recorded and k of them with a value
+    among ``success`` (SIH ``MORTE`` = 1: died in hospital), from the column's composition (`composition_counts`)."""
+    comp = composition_counts(dataset, event, year, indicator, missing, classifier, places)
+    con = duckdb.connect()
+    con.register("c", comp.counts)
+    yes = ", ".join("'" + str(s).replace("'", "''") + "'" for s in success)
+    counts = con.execute(f"""SELECT u, year, sex, age, code, CAST(sum(n) AS INTEGER) AS n,
+            CAST(sum(CASE WHEN value IN ({yes}) THEN n ELSE 0 END) AS INTEGER) AS k
+        FROM c GROUP BY u, year, sex, age, code ORDER BY code, u, sex, age""").fetch_arrow_table()
+    return EventCounts(counts, comp.unallocated, {**comp.key, "what": "share_moments", "success": list(success)})
 
 
 def store_facility_effects(table: pa.Table) -> str:
@@ -823,7 +842,8 @@ def store_facility_effects(table: pa.Table) -> str:
 
 def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], nu: pa.Table,
                           edges: list[int], classifier: str | None = None, casemix: str | None = None,
-                          facility_effects: str | None = None, places: pa.Array | None = None) -> pa.Table:
+                          facility_effects: str | None = None, places: pa.Array | None = None,
+                          missing: tuple[str, ...] | list = ()) -> pa.Table:
     """A year's residuals of the admissions' adjusted log mark from a fitted location, summed by recording facility:
     (facility, year, n, sr, sr2) with r = lm − ν, ν looked up by (category, residence, sex, age band) in ``nu``
     (columns code3, u, sex, band, nu), the fitted model's cells. Admissions in a cell the fit has none of are left out."""
@@ -839,7 +859,8 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     if hit is not None:
         return hit
     con = duckdb.connect()
-    _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects, facility=True)
+    _mark_frame(con, dataset, event, year, mark, bounds, classifier, places, casemix, facility_effects, facility=True,
+                missing=tuple(missing))
     con.register("nu", nu)
     con.register("ab", pa.table({"age": pa.array(range(MAX_AGE + 1), pa.int16()),
                                  "band": pa.array([int(np.searchsorted(edges, a, side="right") - 1) for a in range(MAX_AGE + 1)],

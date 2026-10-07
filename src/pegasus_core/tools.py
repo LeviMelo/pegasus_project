@@ -44,13 +44,13 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"institution_step": "B1", "share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
 PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
-SCALE = {"share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
+SCALE = {"institution_step": "rate_ratio", "share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
          "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
@@ -287,6 +287,17 @@ class Session:
             phi = float(self.expectations.model(self.expectations.field(node).block).phi)
             return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
                                           **{"phi": phi, **kw})
+        if lens == "institution_step":               # one institution against its catchment (E_i, §4.5)
+            from scipy import stats as st
+
+            res = self.institutions(node)
+            T = len(self.surprise(node, "B1").years)
+            windows = T * (T + 1) / 2
+            return [lenses.Finding("institution_step", self.expectations.field(node).id, "B1",
+                                   {"institutions": [r["facility"]], "years": [r["start"], r["end"]], "places": []},
+                                   float(np.exp(r["log_ratio"])), float(min(1.0, windows * st.chi2.sf(2 * r["g"], 1))),
+                                   {k: v for k, v in r.items() if k != "facility"})
+                    for r in res["steps"]]
         if lens == "share_excess":                   # the field's share of all events (§7.1, the observation lens)
             from . import departures
             s = self.surprise(node, "B1")
@@ -392,19 +403,22 @@ class Session:
 
         names = questions or tuple(qs.QUESTIONS)
         found: dict[str, list] = {}
+        src = self.source
+        measure = (f"|{src['mark']}" if src.get("mark") else
+                   f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else "")   # its own family
         for block in blocks or self._blocks():
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
                     continue
                 for qn in names:
-                    k = len(qs.QUESTIONS[qn].methods)
                     try:
                         answers = self.ask(qn, f.node, q=q)
+                        k = getattr(answers, "k", len(qs.QUESTIONS[qn].methods))
                     except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
                         log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
                         continue
                     for a in answers:
-                        found.setdefault(f"{qn}|{block}", []).append((f.id, a, min(1.0, a.p * k)))
+                        found.setdefault(f"{qn}|{block}{measure}", []).append((f.id, a, min(1.0, a.p * k)))
                     log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
                         f"{len(getattr(answers, 'other_shape', []))} of another shape")
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
@@ -421,7 +435,10 @@ class Session:
                 best = min(a.findings.values(), key=lambda x: x.p)
                 admitted.append(leads.Lead(
                     kind="answer", estimand=fam.split("|")[0], tier="B1", fields=[fid],
-                    locus={"places": sorted(a.places), "years": list(a.years)}, effect=float(best.effect),
+                    locus={"places": sorted(a.places), "years": list(a.years),
+                           **({"institutions": inst} if (inst := sorted({i for x in a.findings.values()
+                                                                         for i in x.locus.get("institutions", [])}))
+                              else {})}, effect=float(best.effect),
                     scale="rate_ratio", interval=None, p=float(p), q=float(qq), family=fam,
                     null="each method's own (questions.QUESTIONS)",
                     calibrated=all(records.get(m, {}).get("calibrated") is True for m in a.methods),
