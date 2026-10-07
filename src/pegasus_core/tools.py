@@ -447,8 +447,8 @@ class Session:
                     calibrated=all(records.get(m, {}).get("calibrated") is True for m in a.methods),
                     method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"})
                             for m in a.methods},
-                    provenance={"graph": self.graph, "methods": a.methods,
-                                "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
+                    provenance={"graph": self.graph, "methods": a.methods, "source": dict(self.source),
+                                "years": list(self.years), "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
                                               for m, x in a.findings.items()}}))
         self.register.add(admitted)
         return admitted

@@ -56,6 +56,7 @@ class Positive:
     criterion: str = "locus Jaccard ≥ 0.5 and effect sign"
     grain: str = "year"
     note: str = ""
+    source: tuple = ()              # the field's reader beyond counts (`tools.Session.source`), as sorted items
 
     @property
     def question(self) -> str:
@@ -872,7 +873,28 @@ def _area(spec: str):
     return lambda p: np.isin(np.asarray(p, dtype=np.int64) // div, vals)
 
 
-def event_record(positives: tuple[Positive, ...] = POSITIVES, years: list[int] | None = None, grains=("year",),
+def verdict_positives() -> tuple[Positive, ...]:
+    """The answers a person confirmed (`report.record_verdict`) as documented events: the event record then judges
+    the methods on what people confirmed, beside the declarations of the literature."""
+    from . import leads
+
+    out = []
+    for ld in leads.Register().current():
+        v = ld.robustness.get("verdict") or {}
+        if ld.kind != "answer" or v.get("verdict") != "confirmed" or not ld.locus.get("places") or not ld.locus.get("years"):
+            continue
+        ds, ev, *_ = ld.fields[0].split(":")
+        src = {k: (tuple(x) if isinstance(x, list) else x) for k, x in (ld.provenance.get("source") or {}).items()
+               if k != "grain"}
+        yrs = ld.locus.get("years") or []
+        out.append(Positive(f"verdict:{ld.id}", ds, ev, ld.fields[0].split(":")[-1], ld.estimand, "B1",
+                            "mun:" + ",".join(str(c) for c in ld.locus["places"]), (yrs[0], yrs[-1]),
+                            EVENT_CRITERION, note=f"confirmed by {v.get('by')} {v.get('at')}: {v.get('note', '')}",
+                            source=tuple(sorted(src.items()))))
+    return tuple(out)
+
+
+def event_record(positives: tuple[Positive, ...] | None = None, years: list[int] | None = None, grains=("year",),
                  log=print) -> list[dict[str, Any]]:
     """Every method of every built question against the documented positives (§10.1; the methods' records of
     docs/plans/2026-10-07-questions-and-methods.md): per positive and method, whether a finding meets the event
@@ -883,6 +905,7 @@ def event_record(positives: tuple[Positive, ...] = POSITIVES, years: list[int] |
     from . import questions, tools
 
     years = list(range(2010, 2024)) if years is None else years
+    positives = POSITIVES + verdict_positives() if positives is None else positives
     sessions: dict = {}
     out = []
     for p in positives:
@@ -904,10 +927,11 @@ def event_record(positives: tuple[Positive, ...] = POSITIVES, years: list[int] |
             log(f"{p.name}: {rec['status']}")
             continue
         ds, ev = _served(p)
-        key = (ds, ev, p.grain)
+        key = (ds, ev, p.grain, p.source)
         try:
             if key not in sessions:
-                sessions[key] = tools.Session(ds, ev, years, source={"grain": p.grain} if p.grain != "year" else {})
+                sessions[key] = tools.Session(ds, ev, years, source={**({"grain": p.grain} if p.grain != "year" else {}),
+                                                                     **dict(p.source)})
             s = sessions[key]
         except Exception as exc:  # noqa: BLE001 - an unserved dataset is recorded, the record goes on
             rec["status"] = f"not served: {type(exc).__name__}: {exc}"

@@ -283,6 +283,24 @@ def disparity(dataset: str, event: str, node: str, years: str = Years, reference
 
 
 @app.command()
+def dossier(out: str = typer.Option("reports/dossier.html", help="the HTML page written"), limit: int = 30) -> None:
+    """One page of dossiers, the leads in rank order: claim, series, methods, stage E's reading, verdict."""
+    from . import report as report_mod
+
+    console.print(f"written {report_mod.dossier(out, limit=limit)}")
+
+
+@app.command()
+def verdict(lead_id: str, kind: str = typer.Argument(..., help="confirmed | artefact | unknown"),
+            note: str = typer.Option("", help="what the verdict rests on")) -> None:
+    """Record a person's verdict on a lead (written back to the register; confirmed leads become documented events)."""
+    from . import report as report_mod
+
+    x = report_mod.record_verdict(lead_id, kind, note)
+    console.print(f"{x.id}: {kind} ({x.status})")
+
+
+@app.command()
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod
