@@ -70,7 +70,7 @@ Leads are statistical objects, not conclusions.
 
 ### 1.1 The six stages (revision 3)
 
-PegaSUS is a pipeline of six stages. Each answers one question with one kind of computation and is judged by one kind of validity. Every object in the code belongs to one stage. An object that fuses two is a defect (P16).
+PegaSUS is one model of the marked point process, read in six stages. They are readings of one persistent state (the fits, the ledger, the register), not steps of a chain and not a build order (the roadmap, §12, builds the whole system end to end first). Each answers one question with one kind of computation and is judged by one kind of validity. Every object in the code belongs to one stage. An object that fuses two is a defect (P16).
 
 | stage | question | computation | judged by | output | sections |
 |---|---|---|---|---|---|
@@ -1131,7 +1131,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `relations` (O7, stage D) | relation models (§7.5): the joint factor model of every field's departures (EM factor analysis with ARD; lagged copies for leads; graph-frequency bands for the spatial scale, no zoning) and its relation table with one FDR; each relation marked direct or carried by a shared driver (`direct_relations`: the graphical lasso of the residual after the factors, StARS, §7.6); the national and macro-regional courses with phase-surrogate nulls where the bands cannot be identified (`course_relations`); `relation_map` runs it all; the penalised distributed-lag term as the pairwise confirmation | numpy, scipy, torch, scikit-learn, multiscale |
 | `questions` (stages C–E) | the questions and the methods that answer them (docs/plans/2026-10-07-questions-and-methods.md): each method at q/k, the union merged by overlapping loci, agreement reported; `Session.ask` | tools |
 | `report` (stage F) | the register as a person reads it: answers per question and block with named municipalities, methods, shapes, triage and tier; relations with the scales left unanswered; `pegasus-core report` | leads, pegasus_data geography |
-| `pipeline` (stages B–F) | one declared plan from data to report: fit what is not fitted, the questions, the relations, triage, the report; each step recorded under the data and code versions and skipped when done (§9.3); `pegasus-core run` | tools, report |
+| `update` (§9.3) | the persistent state (fits, register, report) brought up to a declared plan, each reading redone only where its inputs changed; `pegasus-core update` | tools, report |
 | `surveillance` (phase 4) | epidemiological weeks by one rule; reporting delays per place, shrunk to the nation's; the nowcast by binomial thinning; alarms at a declared recurrence interval per place against the alarm baseline (ADR-0004, ADR-0012); `Session.alarms`, `pegasus-core alarms` | gateway (delay_counts) |
 | `multiscale` (stages C–D) | space at every scale from the place graph: the normalised Laplacian's spectrum, heat kernels exp(−sL) with closed-form footprints, and multiscale peak testing (STEM with a simulated peak-height law) | numpy, scipy, torch, surprise |
 | `departures` (O6, stage C) | departure models (§7.0): cell excess (two-group model), excess at unknown spatial scale (multiscale peaks), step (Bayesian change point), each with its FDR and relevance test | surprise, control, multiscale |
@@ -1198,27 +1198,23 @@ A solver change is measured on the benchmark before it is adopted.
 
 ---
 
-## 12. Roadmap: the overhaul, re-cut to the stages (revision 3)
+## 12. Roadmap: the whole system first (revision 4, 2026-10-07)
 
-**Phases 0–3 of 2026-10-04** were built as v0 by 2026-10-05. **Revision 2** (ADR-0023) ordered the overhaul O0–O10; **revision 3** (ADR-0029) re-cuts it to the six stages of §1.1 and changes the order. Details, acceptance and the running state are in `docs/plans/2026-10-06-overhaul.md`.
+**Why revised.** The stage-ordered overhaul (O0–O10, N1, N2) deepened one slice, the counts, through stages B–D, while persons, marks, race, institutions and use stayed absent or stranded (`docs/discussion/2026-10-07-whole-system-review.md`). Each package below lands **end to end** before the next starts: declared fields, a fitted expectation, the questions, ledgered leads with their method record, stage E's independent tests, and a reading. Depth comes afterwards, where a reading needs it.
 
-| package | stage | builds | accepted when | state (2026-10-07) |
-|---|---|---|---|---|
-| **O0** | — | revisions 2 and 3 | written | done (ADR-0023, ADR-0029) |
-| **O1, solver** | B | the arrowhead Hessian, sparse Cholesky, LAML, the benchmark | v0 optimum reached; budgets met or revised | done |
-| **O2, settle** | B | the interaction's rank, the tree prior, κ and SUS | each with its held-out measurement | done (ADR-0025); race with O3, SINAN wave 1 open |
-| **O4, ICD** | A–B | the tree, admissibility, carriers, list and conserved fields | one chapter refitted, held out | mostly done (ADR-0024) |
-| **N1, noise** | B | a residual place × period term whose correlation over periods is learned per field (marginal likelihood), so the predictive states each field's own serial dependence | the negatives that failed by serial correlation pass with **no per-system constant**, and held-out likelihood does not fall | **done** (2026-10-07): gamma frailty, ARMA(1,1) copula over periods, a spatial share; κ by central matching, ρ and δ on winsorised normal scores; recovers its own worlds (evaluation 2026-10-06, noise structure) |
-| **N2, uncertainty** | B | marginal estimates of the levels (nested Laplace, or importance-corrected draws), so posteriors of totals and of the intercept calibrate (SBC) | SBC's intercept and totals uniform on a sparse and a dense block | **in progress**: Laplace draws with exact conditional sweeps of the nested levels (`Posterior.sample(sweeps=)`): on SIM VII the draws' expected total 9.0 million → 274 (277 observed); SBC running (plan N2) |
-| **O6, departures** | C | departure models per estimand (§7.0): cell excess (two-group model), step (Bayesian change point on the past-course reference), trend (BaySTDetect), cluster (BYM2 exceedance), group interaction; the Bayesian FDR of §8.2; relevance as P(effect > minimum) | each matches or beats its v0 lens on the grid at equal FDR | **mostly done**: cell excess; multiscale spike, step and trend (STEM, null per absorption class); shape attribution; the questions registry and its survey. All documented events found; step null worlds 1/10. Open: the Bayesian step's power, cluster and group interaction as questions |
-| **O5, characterise** | B–D checks | the grid, null worlds and negatives, SBC: the statistical bench for N1, O6 and O7 | every stage-B–D method has its power surface and null record | grid built; gate retired (ADR-0028); weights across fields, seasonal and lagged plants open |
-| **O7, relations** | D | the joint model of all fields' departures (shared latent space–time factors, sparse lagged dependence; absorbs the top model of §5.6); the pairwise lag test as confirmation | planted relations recovered at controlled false discoveries; the declared arbovirus → microcephaly link confirmed | **in progress**: band factor model on N1 innovations; positive controls found; SIH place-permutation control 2.0 % false above the national scale; national and macro-regional bands unanswered (OPEN_QUESTIONS 9) |
-| **O8, interpretation** | E | recording terms and coding regimes, graded re-triage, rule versions, replication, corroboration, documented events as held-out checks | no lead removed by an untested explanation; every lead read at its conserved level | rule versions built; triage and replication read the lens leads, the question leads next |
-| **O3, race and ages** | A–B | race as an axis of G, the recording model, single child ages | births, infant deaths and one adult chapter fitted with race | open, in parallel |
-| **O9, breadth** | A–B | more systems (SINAN families, SIH marks, SIA/APAC, CIHA, the SIH↔SIM link), each fitted with N1's noise term and no per-system tuning | each calibrated and characterised | open, in parallel |
-| **O10, use and surveillance** | F | ranking, reports, the register, phase 4's prospective alarms | timeliness and false alarms against the benchmark | last |
+| # | package | done when |
+|---|---|---|
+| S0 | consolidate: one lead writer per kind, every test ledgered, method records from measurement, one stage-D mechanism, the gateway the only door, dead code gone | every lead carries a measured method record; nothing the CLI does is unledgered |
+| S1 | fields from pegasus_data's declarations: marks, compositions and institutions (`docs/plans/2026-10-07-fields-from-roles.md`) | every declared column of SIM, SIH, SINASC and SINAN is a field or names why not, and is asked the questions |
+| S2 | persons: link tables and draws, `cohort()`, outcome-after-event fields, person-level corroboration (§7.8) | a cohort scan and an outcome-after-event field in the register, with linkage uncertainty |
+| S3 | race as an axis of G, recorded race through the measured confusion, disparities (§3.4) | births and infant deaths fitted with race; disparity answers read |
+| S4 | interpretation by independent units on every lead kind (§8.3, §8.6) | every reported lead carries independent replication or says why none is possible |
+| S5 | the reader: one dossier per lead, human verdicts written back (§9) | the author records verdicts on the first dossiers |
+| S6 | breadth through S1: CIHA, foetal deaths, SIA/APAC, SIGTAP, all SINAN agravos, aggregates, climate, care flows | each system's fields in the register |
+| S7 | surveillance alarms as leads; serving and agents (phase 3–4) | — |
+| D | depth on demand: posterior departure models, N2, the top model, BYM2, 33 age classes, interaction patterns | each item has a reading that needed it |
 
-**Order:** N1 → N2 → O6 (cell excess, step, trend, cluster, group) → O7 (design, then build) → O8, with O3 and O9 alongside → O10. The lead register is regenerated after O6, from departure models, not from the v0 lenses (the 2026-10-06 v1 survey of 41,700 leads is kept only as the lenses' baseline).
+The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.md` and the evaluations.
 
 ## 13. Departures and maturity
 

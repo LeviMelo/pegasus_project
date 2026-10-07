@@ -528,14 +528,18 @@ def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) 
 
 
 def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, courses: bool = True,
-                 direct: bool = True, log=None) -> dict:
+                 direct: bool = True, ledger=None, log=None) -> dict:
     """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
     frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
     stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
     (`factor_model`), and every pair, lag and band under one BH at q (`relation_table`). The scales the bands
     cannot identify are answered on the fields' courses (``courses``: `course_relations`, national and macro-regional,
     their own family at q). Returns ``rows`` (every pair, ``reported`` marking the relations), ``unanswered`` (the
-    bands not fitted) and ``fields``."""
+    bands not fitted) and ``fields``. Every band's family and the courses' are written to ``ledger`` (a fresh
+    `control.Ledger` when None) before they are fitted, and completed with their result (§9.2)."""
+    from . import control
+
+    ledger = ledger if ledger is not None else control.Ledger()
     d = innovations(surprises)
     T = len(d.periods)
     min_cells = int(np.ceil((lags + 1) * len(d.fields) * T / max(T - lags, 1)))   # lagged cells ≥ lagged fields
@@ -546,8 +550,11 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
         if log:
             log(msg)
 
-    fits, graphs_ = {}, {}
+    fits, graphs_, tests = {}, {}, {}
+    fields_spec = sorted(d.fields)
     for label, db in bands(d, spectrum, min_cells=min_cells, log=note).items():
+        tests[label] = ledger.register(control.Hypothesis(f"relation|{label}", "scan", {
+            "model": "band factor model on N1 innovations", "fields": fields_spec, "lags": lags, "K": K}))
         dl = lagged(db, lags)
         fits[label] = factor_model(dl, K=K)
         if direct:
@@ -556,6 +563,10 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
             log(f"band {label}: {db.r.shape[1]} coefficients, "
                 f"{int((fits[label].gamma > 1e-3 * fits[label].gamma.max()).sum())} factors kept")
     rows = relation_table(fits, q=q)
+    for label, tid in tests.items():
+        mine = [r for r in rows if r["support"] == label]
+        ledger.complete(tid, float(min((r["p"] for r in mine), default=1.0)), None,
+                        {"pairs": len(mine), "reported": sum(r["reported"] for r in mine)})
     for r in rows:              # direct given the factors (§7.6), or carried by a shared driver
         g = graphs_.get(r["support"])
         if g is not None:
@@ -566,7 +577,12 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
             # factors over-explaining a shared movement (dengue deaths and admissions: ρ +0.44, partial −0.38, 2026-10-07)
             r["direct"] = abs(r["partial"]) > 1e-8 and np.sign(r["partial"]) == np.sign(r["rho"])
     if courses:
-        rows += course_relations(surprises, lags=lags, q=q)
+        tid = ledger.register(control.Hypothesis("relation|courses", "scan", {
+            "model": "national and macro-regional courses, phase surrogates", "fields": fields_spec, "lags": lags}))
+        cr = course_relations(surprises, lags=lags, q=q)
+        ledger.complete(tid, float(min((r["p"] for r in cr), default=1.0)), None,
+                        {"pairs": len(cr), "reported": sum(r["reported"] for r in cr)})
+        rows += cr
         if log:
             log(f"courses: {sum(r['reported'] for r in rows if r['support'] in ('national', 'macro-regional'))} "
                 "national and macro-regional relations")

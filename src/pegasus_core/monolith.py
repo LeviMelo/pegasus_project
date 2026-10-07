@@ -1710,7 +1710,7 @@ class Monolith:
         return m2
 
     def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
-               max_sweeps: int = 5, sweep_tol: float = 0.05, footprints: tuple[float, ...] = (),
+               max_sweeps: int = 5, sweep_tol: float = 0.05,
                courses: bool = False) -> Monolith:
         """This fit made robust to the departures stage C must report (docs/plans/2026-10-07-robust-expectation.md):
         each round flags the leaf × place × period cells beyond the predictive's upper ``trim`` quantile (their
@@ -1753,7 +1753,6 @@ class Monolith:
                 k = float(phi_x) if np.isfinite(phi_x) else 1e12
                 p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
                 flag = (p < trim) & (obs > mu)
-                flag |= self._regional_flags(obs, mu, k, trim, footprints)
                 info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()),
                              "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
                 log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
@@ -1776,7 +1775,6 @@ class Monolith:
                 p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
                 flag = (p < trim) & (obs > mu)
                 cells = int(flag.sum())
-                flag |= self._regional_flags(obs, mu, k, trim, footprints)
                 dw = m._impute(d, flag)
                 info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()), "by_cell": cells,
                              "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
@@ -1920,50 +1918,6 @@ class Monolith:
             parts_y.append(mg[ii, gg])
         return dataclasses.replace(d, e=np.concatenate(parts_e), u=np.concatenate(parts_u), t=np.concatenate(parts_t),
                                    g=np.concatenate(parts_g), y=np.concatenate(parts_y))
-
-    def _regional_flags(self, obs: np.ndarray, mu: np.ndarray, k: float, trim: float,
-                        footprints: tuple[float, ...]) -> np.ndarray:
-        """[E, U, T] cells inside a regional excess: a cell is flagged when, at some heat-kernel scale on the place
-        graph (`multiscale`), the kernel-weighted count around it is a discovery of BH at q = 0.05 over every centre
-        and period of that scale (its gamma upper-tail probability); the region-period is then missing whole.
-        Tested at the cells' own level (0.005) instead, chance alone marked hundreds of regions over ~50,000 tests
-        per scale and trimmed 33,677 cells of SIM I against 8,358 by cells alone (2026-10-07).
-
-        **Off by default** (``footprints=()`` in `robust`): with BH and whole regions missing the flags still grew
-        round after round (SIM I: 48,195 then 161,661 cells), because this null takes cells as independent while
-        N1's spatial share makes neighbourhood aggregates more variable; trimming the regions it over-calls lowers
-        the background and calls more. A calibrated regional null (the replicates with N1's spatial noise of
-        `multiscale.peaks`) is the debt; until then diffuse outbreaks are partly absorbed (yellow fever 2017–18:
-        expected 44 and 76 deaths against 195 and 257 observed, still a 3–4× departure). Diffuse outbreaks of one or two events per place pass a
-        cell-by-cell trim (yellow fever 2017–18: p ≈ 0.01 per cell) and lifted the category's course."""
-        import torch as th
-
-        from . import multiscale
-
-        if not footprints:
-            return np.zeros(obs.shape, bool)
-        E, U, T = obs.shape
-        sp = getattr(self, "_spectrum", None)
-        if sp is None:
-            sp = self._spectrum = multiscale.GraphSpectrum(self.graph[0], U, self.graph[1])
-        Ob = th.as_tensor(obs.transpose(1, 0, 2).reshape(U, E * T), dtype=th.float32)
-        M = th.as_tensor(mu.transpose(1, 0, 2).reshape(U, E * T), dtype=th.float32)
-        V = M + M * M / max(k, 1e-9)
-        from . import control
-
-        out = np.zeros((U, E * T), dtype=bool)
-        for s in sp.scales(footprints):
-            K = sp.kernel(s).cpu()
-            z = multiscale.tail_z(K @ Ob, K @ M, (K * K) @ V)
-            p = th.special.ndtr(-z.double()).numpy()
-            live = (M.numpy() > 0)
-            sel = np.zeros(p.shape, dtype=bool)
-            sel[live] = control.bh(p[live], 0.05)
-            out |= sel
-        # the region-period is missing whole, its cells below their expectation too: keeping only the cells above it
-        # selected the upper half of the region's noise, pulled the background down and let the flags grow round after
-        # round (SIM I: 15,636 then 27,011 cells, 2026-10-07)
-        return out.reshape(U, E, T).transpose(1, 0, 2)
 
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),

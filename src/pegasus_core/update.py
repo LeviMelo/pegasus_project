@@ -1,25 +1,17 @@
-"""The pipeline from data to report (ARCHITECTURE §9.3): one declared plan, run stage after stage, incremental.
+"""The update of PegaSUS's persistent state when data arrive (ARCHITECTURE §9.3).
 
-A plan names the years, the systems (dataset, event, blocks, the tree levels read) and which later stages run:
+PegaSUS is one model of the events, read many ways; its state is the fitted blocks, the ledger and the register.
+`run` brings that state up to a declared plan (the systems and blocks it holds, the years, the readings kept current):
+blocks not fitted are fitted (`fit_block`), and each reading (the stage-C questions of every field, the relation map
+across the systems, stage E on the answers, the report) is redone only where its inputs changed: every step is keyed
+by the data and code versions and its inputs in the store. A plan:
 
     years: 2010-2023
     systems:
       - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group]}
-      - {dataset: SIH-RD, event: hospitalisation, blocks: [I, X], levels: [group]}
-    relations: true          # stage D across the systems
-    triage: true             # stage E on the answers
-    report: reports/leads.md # stage F
-
-`run` executes it:
-- **B.** Each block is fitted where it is not (`fit_block`).
-- **C.** The questions are asked of every field of the levels (`tools.Session.survey_questions`).
-- **D.** The relations are mapped across the systems (`tools.relation_survey`).
-- **E.** The answers are triaged and replicated (`tools.Session.triage`).
-- **F.** The register is written as a report (`report`).
-
-Each step is recorded in the store under the data and code versions and its inputs. A step already done on the same
-versions is skipped, so a run after a data update redoes what the update touched, and a run with nothing new does
-nothing. ``force`` reruns everything.
+    relations: true
+    triage: true
+    report: reports/leads.md
 """
 
 from __future__ import annotations
@@ -73,7 +65,7 @@ class Plan:
 
 def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
               device: str = "cpu", log=print):
-    """Assemble one block, fit its monolith and store it (the `fit` command's and the pipeline's one path)."""
+    """Assemble one block, fit its monolith and store it (the `fit` command's and the update's one path)."""
     from . import graphs, monolith
 
     data = monolith.assemble(dataset, event, block, years)
@@ -88,11 +80,11 @@ def _key(step: str, **inputs: Any) -> dict[str, Any]:
 
 
 def _done(key: dict[str, Any]) -> bool:
-    return store.manifest("pipeline", key) is not None
+    return store.manifest("update", key) is not None
 
 
 def _mark(key: dict[str, Any], result: dict[str, Any]) -> None:
-    store.put_table("pipeline", key, pa.table({"done": [time.strftime("%Y-%m-%dT%H:%M:%S")]}), {**key, **result})
+    store.put_table("update", key, pa.table({"done": [time.strftime("%Y-%m-%dT%H:%M:%S")]}), {**key, **result})
 
 
 def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:

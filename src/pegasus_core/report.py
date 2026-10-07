@@ -15,10 +15,10 @@ from . import leads as register_mod
 
 
 def _names() -> dict:
-    try:
-        from pegasus_data import geography
+    from . import gateway
 
-        return geography.municipalities()
+    try:
+        return gateway.municipality_names()
     except Exception:  # noqa: BLE001 - names are a convenience: codes stand in without them
         return {}
 
@@ -50,14 +50,14 @@ def report(leads: list[register_mod.Lead] | None = None, limit: int = 25, title:
         if ld.kind == "answer" and ld.status != "retired":
             answers[ld.family].append(ld)
     for fam in sorted(answers):
-        group = sorted(answers[fam], key=lambda x: x.q)
+        group = sorted(answers[fam], key=lambda x: -x.rank)   # §9.1: evidence × effect × replication
         explained = sum(x.status == "explained" for x in group)
         out += [f"## {fam}: {len(group)} answers{f', {explained} explained by triage' if explained else ''}", "",
                 "| field | years | places | effect | methods | shapes | triage | tier | q |",
                 "|---|---|---|---|---|---|---|---|---|"]
         out += [_answer_row(x, names) for x in group[:limit]]
         out.append("")
-    rel = sorted((x for x in leads if x.kind == "relation" and x.status != "retired"), key=lambda x: x.q)
+    rel = sorted((x for x in leads if x.kind == "relation" and x.status != "retired"), key=lambda x: -x.rank)
     if rel:
         out += [f"## Relations: {len(rel)}", "", "| band | field | leader | lag | ρ | direct | q |", "|---|---|---|---|---|---|---|"]
         out += [f"| {x.locus.get('band')} | {x.fields[0]} | {x.fields[1]} | {x.locus.get('lag')} | {x.effect:+.3f} | "

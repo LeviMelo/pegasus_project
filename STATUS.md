@@ -10,6 +10,8 @@
 
 Stages B–D make statistical claims only; E alone is epidemiological. The next work is **N1**, the expectation's noise structure, then N2 → O6 → O7 → O8 (ARCHITECTURE §12; `docs/plans/2026-10-06-overhaul.md`). The review behind it is `docs/discussion/2026-10-06-course-correction.md`.
 
+**2026-10-07, roadmap revision 4:** the whole system first, end to end (ARCHITECTURE §12, S0–S7; `docs/discussion/2026-10-07-whole-system-review.md`). **S0 in progress:** the v0 survey removed (its 33,111 leads retired); method records from the harness's measurements; stage D ledgered; joint departures, alarms and map pairs are leads; the gateway the only door; the runner reframed as `update`.
+
 **2026-10-07: real data first.** The author found the work stuck in a loop of synthetic benches built from the model's own law; methods are now judged first on documented events (ARCHITECTURE §10, CLAUDE.md design check 8).
 - **The real-data baseline** (`data/real_events.py`): of five documented events, measles 2018–19, chikungunya 2016–17 and COVID-19 in the North were missed by every stage-C method. The cause was in stage B: one dispersion per chapter, and categories' levels set with their epidemic years.
 - **Robust stage B** is the default (`Monolith.robust`: trimming by EM imputation, flags against a trimmed dispersion). With it, all five events are found by three methods (evaluation 2026-10-07, real events).

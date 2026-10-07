@@ -1181,3 +1181,11 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
                                preserve_index=False)
     store.put_table("gateway", key, out, {**key, "left_out": int((~ok).sum()), "records": int(len(ok))})
     return out
+
+
+def municipality_names() -> dict[str, dict[str, str]]:
+    """Every municipality's name, state and macro-region by its six-digit code (pegasus_data's geography)."""
+    from pegasus_data import geography
+
+    return geography.municipalities()
+

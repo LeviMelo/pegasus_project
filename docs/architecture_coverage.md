@@ -307,7 +307,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 9.1 lead object, rank | BM | `leads.py`; `E:sim-survey-readout` | |
 | 9.1 kinds: relation, pattern, cohort, observation, structural | NB | 33,228 leads are residual (30,332) and subset (2,896) | pairs live in `pegasus_home/maps`, not the register |
 | 9.2 append-only ledger, written before execution | BM | 29,313 pending, 29,240 results | 73 without result |
-| 9.3 survey per data update (refit, surprises, scans, lead update) | BU (2026-10-07) | `pipeline.run` (`pegasus-core run plans/default.yml`): every step keyed by data and code versions, skipped when done | no trigger on a pegasus_data update yet; not run end to end |
+| 9.3 survey per data update (refit, surprises, scans, lead update) | BU (2026-10-07) | `update.run` (`pegasus-core update plans/default.yml`): every step keyed by data and code versions, skipped when done | no trigger on a pegasus_data update yet; not run end to end |
 | API `leads`, `lead`, `fields`, `field`, `expected`, `surprise`, `scan`, `explain_away`, `confirm`, replication calls | BM | `tools.py`, `cli.py` | |
 | API `compare`, `subset_scan` | NB | `dependency_map` and `scans.subset` are separate entry points | not a `Session` method |
 | API `decompose` | BU | `Session.decompose` | |

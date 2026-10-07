@@ -941,3 +941,55 @@ def event_record(positives: tuple[Positive, ...] = POSITIVES, years: list[int] |
            {"records": out})
     return out
 
+
+def method_records(q: float = Q) -> dict[str, dict[str, Any]]:
+    """Each method's record from what the harness measured and stored (ARCHITECTURE §10.5), never a hand-written
+    table, and from each measurement's latest run only (a method fixed since an earlier run is not charged with it):
+    per documented positive, the last record's verdict for the method (`event_record`); per field, the last grid that
+    read the method (`grid`): its null worlds and how many held a finding, its false share in planted worlds. A
+    method is ``calibrated`` when its null worlds hold findings no more often than max(q, 1/worlds), None when no null
+    world has read it."""
+    events: dict[tuple, tuple] = {}             # (method, positive) -> (written, found)
+    grids: dict[tuple, tuple] = {}              # (method, field) -> (written, rows)
+    for man in store.manifests("harness"):
+        key = man.get("key") or {}
+        kind = key.get("kind")
+        if kind not in ("event_record", "grid"):
+            continue
+        table = store.get_table("harness", key)
+        if table is None:
+            continue
+        written = man.get("written", "")
+        result = json.loads(table.column("result")[0].as_py())
+        if kind == "event_record":
+            for rec in result.get("records", []):
+                for m, v in (rec.get("methods") or {}).items():
+                    if "found" in v and written >= events.get((m, rec["name"]), ("",))[0]:
+                        events[(m, rec["name"])] = (written, bool(v["found"]))
+        else:
+            by_lens: dict[str, list] = {}
+            for row in result.get("false", []):
+                by_lens.setdefault(row["lens"], []).append(row)
+            for lens, rows in by_lens.items():
+                if written >= grids.get((lens, result.get("field")), ("",))[0]:
+                    grids[(lens, result.get("field"))] = (written, rows)
+    out: dict[str, dict[str, Any]] = {}
+    for (m, _), (_, found) in events.items():
+        r = out.setdefault(m, {})
+        r["events_scored"] = r.get("events_scored", 0) + 1
+        r["events_found"] = r.get("events_found", 0) + found
+    for (m, _), (_, rows) in grids.items():
+        r = out.setdefault(m, {})
+        for row in rows:
+            if row["kind"] == "null":
+                r["null_worlds"] = r.get("null_worlds", 0) + 1
+                r["null_worlds_with_findings"] = r.get("null_worlds_with_findings", 0) + (row["findings"] > 0)
+            elif row["findings"]:
+                r["planted_findings"] = r.get("planted_findings", 0) + row["findings"]
+                r["planted_false"] = r.get("planted_false", 0) + row["false"]
+    for r in out.values():
+        n = r.get("null_worlds", 0)
+        r["calibrated"] = (r["null_worlds_with_findings"] / n <= max(q, 1.0 / n)) if n else None
+        if r.get("planted_findings"):
+            r["false_share"] = round(r["planted_false"] / r["planted_findings"], 3)
+    return out

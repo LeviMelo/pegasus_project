@@ -228,11 +228,10 @@ def place_story(place: int | None = None, limit: int = 10, triage_class: str | N
 
 
 @server.tool()
-def method_status(dataset: str | None = None) -> dict[str, Any]:
-    """Each survey method's record (ARCHITECTURE §10.5): its tier, its minimum effect, whether its false-discovery rate
-    is calibrated where it runs, and the evidence. Leads of an uncalibrated method are reported, marked, after the
-    others."""
-    return _clean({"methods": tools.method_status(dataset), "provenance": _provenance()})
+def method_status() -> dict[str, Any]:
+    """Every method's measured record (ARCHITECTURE §10.5): the documented events it found, and its findings in null
+    worlds, from the harness's stored results."""
+    return _clean({"methods": tools.method_status(), "provenance": _provenance()})
 
 
 @server.tool()

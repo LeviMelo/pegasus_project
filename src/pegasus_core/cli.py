@@ -30,20 +30,20 @@ def _session(dataset: str, event: str, years: str, graph: str, grain: str = "yea
 def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
         device: str = "cpu") -> None:
     """Fit monolith blocks (chapters) and store them."""
-    from . import pipeline
+    from . import update
 
     for block in blocks:
-        model = pipeline.fit_block(dataset, event, block, _years(years), graph, device, log=console.print)
+        model = update.fit_block(dataset, event, block, _years(years), graph, device, log=console.print)
         console.print_json(json.dumps(model.summary(), default=float))
 
 
-@app.command()
-def run(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
-        force: bool = typer.Option(False, help="rerun every step, done or not")) -> None:
-    """The pipeline from data to report (`pipeline`): fit, questions, relations, triage, report; incremental."""
-    from . import pipeline
+@app.command("update")
+def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
+                 force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:
+    """Bring the persistent state (fits, register, report) up to a plan, redoing only what changed (`update`)."""
+    from . import update
 
-    out = pipeline.run(pipeline.Plan.load(plan), force=force, log=console.print)
+    out = update.run(update.Plan.load(plan), force=force, log=console.print)
     console.print_json(json.dumps(out, default=str))
 
 
@@ -88,16 +88,11 @@ def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, gra
 def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            blocks: list[str] = typer.Option(None, help="default: every fitted block"),
            levels: list[str] = typer.Option(None, help="tree levels to read (e.g. group); default: every level"),
-           lenses: bool = typer.Option(False, help="the v0 lens pass instead (the prospective alarm's)"),
-           replicates: int = 100
            ) -> None:
     """The scheduled pass over every field with events: each stage-C question asked through all its methods
     (`questions`), error control per question and block, the answers to the register."""
     s = _session(dataset, event, years, graph)
-    if lenses:
-        admitted = s.survey(blocks or None, replicates=replicates, log=console.print)
-    else:
-        admitted = s.survey_questions(blocks or None, levels=tuple(levels) if levels else None, log=console.print)
+    admitted = s.survey_questions(blocks or None, levels=tuple(levels) if levels else None, log=console.print)
     console.print(f"{len(admitted)} leads admitted")
 
 
@@ -231,11 +226,9 @@ def alarms(dataset: str, event: str, node: str, as_of: str, report: str = typer.
 def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g. SIM.DO:death:A90-A99"),
           years: str = Years, q: float = 0.05, limit: int = 30) -> None:
     """Places and periods where several fields depart together (the fast subset scan over fields, §7.3)."""
-    from pegasus_data import geography
+    from . import gateway, tools
 
-    from . import tools
-
-    names = geography.municipalities()
+    names = gateway.municipality_names()
     found = tools.joint([tuple(f.split(":", 2)) for f in fields], _years(years), q=q)
     t = Table("place", "year", "fields", "rate ratio", "p")
     for f in sorted(found, key=lambda x: x.p)[:limit]:
@@ -311,11 +304,10 @@ def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, g
 
 @app.command("split-survey")
 def split_survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
-                 blocks: list[str] = typer.Option(None, help="default: every fitted block"),
-                 replicates: int = 100) -> None:
+                 blocks: list[str] = typer.Option(None, help="default: every fitted block")) -> None:
     """The survey on side A, then the size of each lead it selects read on side E (§8.3: a size, never a verdict)."""
     s = _session(dataset, event, years, graph)
-    admitted = s.side("A").survey(blocks or None, replicates=replicates, log=console.print)
+    admitted = s.side("A").survey_questions(blocks or None, log=console.print)
     console.print(f"{len(admitted)} leads selected on side A")
     done = s.honest_sizes(log=console.print)
     console.print(f"{sum(1 for x in done if x.replications.get('honest', {}).get('sized'))} sized on side E")
@@ -323,11 +315,11 @@ def split_survey(dataset: str, event: str, years: str = Years, graph: str = "con
 
 @app.command("temporal-survey")
 def temporal_survey(dataset: str, event: str, last: int, years: str = Years, graph: str = "contiguity",
-                    blocks: list[str] = typer.Option(None, help="default: every fitted block"), replicates: int = 100) -> None:
+                    blocks: list[str] = typer.Option(None, help="default: every fitted block")) -> None:
     """Select on the years up to LAST (its own register leads_T<LAST>), then test what it selected on the later years of
     ``years`` against a fit that ends at LAST (§8.3, later years). Needs the blocks fitted on the years up to LAST."""
     s = _session(dataset, event, years, graph)
-    admitted = s.train(last).survey(blocks or None, replicates=replicates, log=console.print)
+    admitted = s.train(last).survey_questions(blocks or None, log=console.print)
     console.print(f"{len(admitted)} leads selected on the years up to {last}")
     done = s.temporal_confirm(last, log=console.print)
     console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on the later years")

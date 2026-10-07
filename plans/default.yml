@@ -1,4 +1,4 @@
-# The default plan (pegasus-core run plans/default.yml): the systems fitted so far, by ICD group
+# The default plan (pegasus-core update plans/default.yml): the systems fitted so far, by ICD group
 years: 2010-2023
 systems:
   - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group]}

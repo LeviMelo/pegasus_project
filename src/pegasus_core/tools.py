@@ -4,8 +4,8 @@ A `Session` binds one event type's fitted monolith (dataset, event, years,
 graph) to the ledger and the lead register. Everything that tests something
 goes through the ledger; everything admitted becomes a lead.
 
-`survey` is the scheduled pass: every admissible field of each fitted block, the lenses at their tiers, error
-control across families (Benjamini–Bogomolov, §8.2), and the admitted findings written to the register.
+`survey_questions` is the scheduled pass: every field asked each stage-C question through all its methods
+(`questions`), error control across families (Benjamini–Bogomolov, §8.2), the answers written to the register.
 
 Replication is by units that took no part in the selection (`replication`, ARCHITECTURE §8.3): `train(last)` selects
 on the years up to ``last`` and `temporal_confirm` tests the later years; `spatial_confirm` reads a unit claim in other jurisdictions and against how deaths are recorded (ADR-0019);
@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,46 +55,6 @@ SCALE = {"share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "r
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
 
 
-# The survey's lens/estimand/scale combinations (ARCHITECTURE §10.5, O5): every one runs, and each lead carries its
-# method's record (`method_record`) in place of v0's gate.
-SURVEY_PLAN = (
-    ("outbreak", None, ("municipality",)),
-    ("change_point", None, ("municipality",)),
-    ("trend_divergence", "national", ("municipality", "region", "state")),
-    ("trend_divergence", "neighbours", ("municipality", "region", "state")),
-    ("space_time", None, ("municipality",)),
-    ("spatial_cluster", None, ("municipality",)),
-    ("group_disparity", None, ("municipality", "region", "state")),
-)
-
-#: What the evidence says of a method where it runs: (lens, reference, dataset or None for any, calibrated, evidence).
-#: The first match wins; a method with no entry is calibrated on the grid of ADR-0026/0027.
-METHOD_EVIDENCE = (
-    ("trend_divergence", None, "SIH-RD", False, "SIH trends: time-shift negatives find trends at every θ0, half of them "
-                                                 "with the place × time interaction (ADR-0026; evaluation 2026-10-06, "
-                                                 "minimum effects)"),
-    ("trend_divergence", "neighbours", None, False, "the neighbours estimand recovers no documented positive "
-                                                    "(evaluation 2026-10-05, lens positives)"),
-    ("group_disparity", None, None, False, "fails its spatial negatives below sd 1.0 at the state (ARCHITECTURE §8.4)"),
-    ("spatial_cluster", None, None, True, "θ0 1.5 on SIM, 2.0 on SIH: model worlds within q (ADR-0026)"),
-    ("change_point", None, None, True, "the past course on B1, calibrated on three fields; sparse fields' time "
-                                       "negatives fail (ADR-0027)"),
-    ("outbreak", None, None, True, "B1, calibrated on three fields (ADR-0027)"),
-)
-
-
-def method_record(dataset: str, lens: str, reference: str | None, prospective: bool = False) -> dict[str, Any]:
-    """The record a lead carries of its method (ARCHITECTURE §10.5): its tier, its minimum effect, whether its
-    false-discovery rate is calibrated where it ran, and the evidence."""
-    calibrated, evidence = True, "calibrated on the grid (ADR-0026)"
-    for ln, ref, ds, cal, ev in METHOD_EVIDENCE:
-        if ln == lens and (ref is None or ref == reference) and (ds is None or ds == dataset):
-            calibrated, evidence = cal, ev
-            break
-    theta0 = lenses.GROUP_SD if lens == "group_disparity" else lenses.minimum_effect(lens, dataset + ":")
-    return {"tier": lens_tier(lens, prospective), "theta0": theta0, "calibrated": calibrated, "evidence": evidence}
-
-
 def lens_tier(lens: str, prospective: bool = False) -> str:
     """The expectation tier a lens reads: retrospective (`LENS_TIERS`) or, in a prospective survey, `PROSPECTIVE_TIERS`."""
     if not prospective:
@@ -107,22 +65,6 @@ def lens_tier(lens: str, prospective: bool = False) -> str:
 
 
 FIT_YEARS = list(range(2010, 2024))      # the years of the production fits (the dependency map reads their calibration)
-SURVEY_THREAD_GB = 0.5      # host memory one scanning thread adds over the loaded model (measured, evaluation 2026-10-05)
-
-
-def survey_workers() -> int:
-    """Threads for a survey: PEGASUS_SURVEY_WORKERS, else a quarter of the cores (at most 4), cut to what
-    the free memory carries (this much per thread, and 3 GB left for the machine)."""
-    if os.environ.get("PEGASUS_SURVEY_WORKERS"):
-        return max(1, int(os.environ["PEGASUS_SURVEY_WORKERS"]))
-    n = min(4, max(1, (os.cpu_count() or 4) // 4))
-    try:
-        import psutil
-
-        n = min(n, max(1, int((psutil.virtual_memory().available / 2 ** 30 - 3) / SURVEY_THREAD_GB)))
-    except ImportError:
-        pass
-    return n
 
 
 @dataclass
@@ -406,6 +348,9 @@ class Session:
         mu_week = s.mu[:, col[0]] * 7 / days
         phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[:, col[0]]
         index = {int(p): i for i, p in enumerate(s.places)}
+        test = self.ledger.register(control.Hypothesis(f"alarm|{node}|{as_of}", "scan", {
+            "model": "nowcast against the alarm baseline (BPA)", "field": s.field.id, "as_of": as_of,
+            "recurrence": recurrence, "weeks": weeks}))
         out = []
         for (u, w), y in known.items():
             i = index.get(int(u))
@@ -417,7 +362,16 @@ class Session:
                 out.append({"place": int(u), "week": int(w), "known": int(y), "nowcast": float(a["nowcast"][0]),
                             "threshold": float(a["threshold"][0]), "p_exceed": float(a["p_exceed"][0]),
                             "baseline_week": float(mu_week[i])})
-        return sorted(out, key=lambda r: -r["p_exceed"])
+        out = sorted(out, key=lambda r: -r["p_exceed"])
+        self.ledger.complete(test, 1.0 - max((r["p_exceed"] for r in out), default=0.0), None,
+                             {"place_weeks": int(len(known)), "alarms": len(out)})
+        self.register.add([leads.Lead(
+            kind="residual", estimand="alarm", tier="BPA", fields=[s.field.id],
+            locus={"places": [r["place"]], "years": [int(ey[0]), int(ey[0])], "week": r["week"]},
+            effect=r["nowcast"] / max(r["baseline_week"], 1e-12), scale="rate_ratio", interval=None,
+            p=1.0 - r["p_exceed"], q=1.0 / recurrence, family=f"alarm|{node}", null="the alarm baseline (BPA)",
+            calibrated=False, train_last=year - 1, provenance={"as_of": as_of, **r}) for r in out])
+        return out
 
     def ask(self, question: str, node: str, q: float = 0.05, **kw) -> list:
         """A question of `questions.QUESTIONS` on one field: every method answering it at q/k, their findings merged
@@ -455,6 +409,9 @@ class Session:
                         f"{len(getattr(answers, 'other_shape', []))} of another shape")
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)
+        from . import harness
+
+        records = harness.method_records()
         admitted = []
         for fam, mask in rejected.items():
             qv = control.adjusted(families[fam])
@@ -466,95 +423,15 @@ class Session:
                     kind="answer", estimand=fam.split("|")[0], tier="B1", fields=[fid],
                     locus={"places": sorted(a.places), "years": list(a.years)}, effect=float(best.effect),
                     scale="rate_ratio", interval=None, p=float(p), q=float(qq), family=fam,
-                    null="each method's own (questions.QUESTIONS)", calibrated=True,
+                    null="each method's own (questions.QUESTIONS)",
+                    calibrated=all(records.get(m, {}).get("calibrated") is True for m in a.methods),
+                    method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"})
+                            for m in a.methods},
                     provenance={"graph": self.graph, "methods": a.methods,
                                 "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
                                               for m, x in a.findings.items()}}))
         self.register.add(admitted)
         return admitted
-
-    def survey(self, blocks: list[str] | None = None, lens_names: tuple[str, ...] = ("outbreak", "change_point",
-               "trend_divergence", "space_time", "group_disparity"), q: float = 0.05, replicates: int = 100, log=print,
-               workers: int | None = None, prospective: int | None = None) -> list[leads.Lead]:
-        """The scheduled pass over every field with events; returns the leads admitted. Every combination of
-        `SURVEY_PLAN` runs, and each lead carries its method's record (`method_record`: tier, θ0, whether its
-        false-discovery rate is calibrated where it ran). A call's scales are its multiplicity (BH within each
-        scale at q / number of scales). Fields are scanned by ``workers`` threads (default `survey_workers`; 1: in
-        order, in this thread) over the one loaded model; the lenses of a field share its tiers' expectations. The
-        findings are merged in the fields' order, so the leads do not depend on the number of workers.
-        ``prospective=t0`` runs the plan's prospective lenses (`PROSPECTIVE_TIERS`) on the years after t0 against a
-        fit up to t0: the outbreak lens on the alarm baseline, the others on the calibrated expectation
-        (ADR-0012). It is a different family from the retrospective survey; its leads carry ``train_last`` and
-        ``purpose``, from which explanation, triage and replication rebuild the same prospective expectation."""
-        if prospective is not None:
-            lens_names = tuple(x for x in lens_names if x in PROSPECTIVE_TIERS)
-        found: dict[str, list[lenses.Finding]] = {}
-        log_lock = threading.Lock()
-        calls = []                  # (lens, reference, scale names, family suffix)
-        for lens, reference, scale_names in SURVEY_PLAN:
-            if lens not in lens_names or (prospective is not None and reference):
-                continue
-            calls.append((lens, reference, scale_names, "|national" if reference == "national" else ""))
-
-        def one(block: str, f: fields.Field) -> list[tuple[str, list[lenses.Finding]]]:
-            self._local.memo = {}      # B2 serves three lenses: computed once per field
-            out = []
-            try:
-                for lens, reference, scale_names, tag in calls:
-                    kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster", "change_point") else {}
-                    if lens in ("trend_divergence", "group_disparity"):
-                        kw["scales"] = scale_names
-                    if reference:
-                        kw["reference"] = reference
-                    name = " ".join(x for x in (lens, reference, "+".join(scale_names)) if x)
-                    if prospective is not None:
-                        kw["train_last"] = prospective
-                    try:
-                        hits = self.scan(f.node, lens, **kw)
-                    except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
-                        with log_lock:
-                            log(f"FAIL {f.id} {name}: {type(exc).__name__}: {exc}")
-                        continue
-                    out.append((f"{lens}|{lens_tier(lens, prospective is not None)}|{block}{tag}", hits))
-                    with log_lock:
-                        log(f"{f.id} {name}: {len(hits)}")
-            finally:
-                self._local.memo = None
-            return out
-
-        tasks = [(block, f) for block in blocks or self._blocks() for f in self.fields(block)]
-        n = survey_workers() if workers is None else max(1, workers)
-        self.edges()
-        self.scales()
-        if n > 1 and tasks:
-            results = [one(*tasks[0])]                             # the first field warms the shared caches alone
-            with ThreadPoolExecutor(n) as pool:
-                results += pool.map(lambda t: one(*t), tasks[1:])
-        else:
-            results = [one(*t) for t in tasks]
-        for res in results:
-            for family, hits in res:
-                found.setdefault(family, []).extend(hits)
-        # error control across families: families selected by Simes, BH inside at the reduced level
-        families = {k: np.array([h.p for h in v]) for k, v in found.items() if v}
-        rejected = control.bogomolov(families, q)
-        admitted = []
-        for fam, mask in rejected.items():
-            qv = control.adjusted(families[fam])
-            admitted += leads.admit(found[fam], mask, qv, lambda h, qq, fam=fam: self._lead(h, qq, fam, prospective))
-        self.register.add(admitted)
-        return admitted
-
-    def _lead(self, h: lenses.Finding, q: float, family: str, train_last: int | None = None) -> leads.Lead:
-        return leads.Lead(kind="subset" if h.lens in ("space_time", "spatial_cluster") else "residual",
-                          estimand=h.lens, tier=h.tier, fields=[h.field], locus=h.locus, effect=h.effect,
-                          scale=SCALE[h.lens], interval=None, p=h.p, q=q, family=family,
-                          null="Gumbel on NB replicates" if h.lens in ("space_time", "spatial_cluster", "change_point")
-                          else "NB predictive",
-                          calibrated=bool(h.stats.get("calibrated", True)), robustness={},
-                          method=method_record(self.dataset, h.lens, h.stats.get("estimand"), train_last is not None),
-                          train_last=train_last,
-                          provenance={"graph": self.graph, "stats": h.stats})
 
     # ---- on demand -------------------------------------------------------------------
 
@@ -1145,12 +1022,11 @@ def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict
                                         for r in claims[-10:]]}}
 
 
-def method_status(dataset: str | None = None) -> dict[str, Any]:
-    """Each survey method's record (ARCHITECTURE §10.5): tier, minimum effect, whether its false-discovery rate is
-    calibrated, and the evidence, per combination of `SURVEY_PLAN` (for ``dataset``; SIM by default)."""
-    ds = dataset or "SIM.DO"
-    return {" ".join(x for x in (lens, reference) if x): method_record(ds, lens, reference)
-            for lens, reference, _ in SURVEY_PLAN}
+def method_status() -> dict[str, Any]:
+    """Every method's measured record (ARCHITECTURE §10.5; `harness.method_records`)."""
+    from . import harness
+
+    return harness.method_records()
 
 
 def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only: bool = False,
@@ -1189,6 +1065,19 @@ def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only:
                             "delta_conditional": harness.map_delta(neg, "conditional")}
         harness.record("depmap", {"years": years, "worlds": worlds, "health_only": health_only}, out["negatives"])
     store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
+    # the admitted pairs are relation leads (§9.1), read and triaged with every other lead; the between-places
+    # estimand with context fields (E_b) is this map's alone until the relation map reads contexts (S1)
+    e = dm.edges.to_pylist()
+    adm = [r for r in e if r.get("admitted")]
+    if adm:
+        qv = dict(zip((id(r) for r in e), control.adjusted(np.array([r["p"] for r in e])), strict=True))
+        leads.Register().add([leads.Lead(
+            kind="relation", estimand="E_b", tier="B1", fields=[r["x"], r["y"]],
+            locus={"band": "between places", "lag": 0, "years": [years[0], years[-1]]}, effect=float(r["rho"]),
+            scale="rho", interval=None, p=float(r["p"]), q=float(qv[id(r)]), family=f"map|{r['family']}",
+            null="Moran spectral randomisation", calibrated=True,
+            method={"dependency_map": {"evidence": "map negatives (harness.map_negatives)"}},
+            provenance={"n_eff": r.get("n_eff")}) for r in adm])
     return {"summary": out, "edges": dm.edges, "inputs": inp}
 
 
@@ -1225,15 +1114,19 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
             s.expectations._models = {}
             gc.collect()
         log(f"{ds}: {len(surps)} fields so far")
-    out = relations.relation_map(surps, multiscale.GraphSpectrum(edges, n_places), q=q, log=log)
+    out = relations.relation_map(surps, multiscale.GraphSpectrum(edges, n_places), q=q, ledger=control.Ledger(), log=log)
     rep = [r for r in out["rows"] if r["reported"]]
     qv = control.adjusted(np.array([r["p"] for r in out["rows"]]))
     qmap = {id(r): float(v) for r, v in zip(out["rows"], qv, strict=True)}
     family = "relations|" + "+".join(f"{ds}:{','.join(b)}" for ds, _, b in plan)
+    from . import harness
+
+    record = harness.method_records().get("relation_map", {"calibrated": None, "evidence": "not characterised"})
     admitted = [leads.Lead(kind="relation", estimand="co-movement", tier="B1", fields=[r["field"], r["leader"]],
                            locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
                            interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
-                           null="independent fields' innovations (factor model per band)", calibrated=True,
+                           null="independent fields' innovations (factor model per band)",
+                           calibrated=record.get("calibrated") is True, method={"relation_map": record},
                            provenance={"z": float(r["z"]), "unanswered": out["unanswered"] + excluded,
                                        **({"partial": r["partial"], "direct": bool(r["direct"])} if "direct" in r else {})})
                 for r in rep]
@@ -1256,7 +1149,17 @@ def joint(fields: list[tuple[str, str, str]], years: list[int], graph: str = "co
         s = sessions.setdefault((ds, ev), Session(ds, ev, years, graph))
         surps.append(s.surprise(node, "B1"))
     first = next(iter(sessions.values()))
-    return departures.joint_excess(surps, first.ledger, q=q, replicates=replicates)
+    found = departures.joint_excess(surps, first.ledger, q=q, replicates=replicates)
+    if found:
+        qv = control.adjusted(np.array([f.p for f in found]))
+        family = "joint|" + "+".join(f"{ds}:{node}" for ds, _, node in fields)
+        leads.Register().add([leads.Lead(
+            kind="subset", estimand="joint_excess", tier="B1", fields=f.locus["fields"],
+            locus={"places": f.locus["places"], "years": f.locus["years"]}, effect=float(f.effect), scale="rate_ratio",
+            interval=None, p=float(f.p), q=float(qq), family=family, null="each field's predictive (N1), GPD tail",
+            calibrated=False, method={"joint_excess": {"calibrated": None, "evidence": "not characterised"}},
+            provenance={"stats": f.stats}) for f, qq in zip(found, qv, strict=True)])
+    return found
 
 
 def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
@@ -1274,7 +1177,7 @@ def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], 
         surps.append(s.surprise(node, "B1"))
     first = next(iter(sessions.values()))
     spectrum = multiscale.GraphSpectrum(first.edges(), len(surps[0].places))
-    return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q)["rows"]
+    return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q, ledger=first.ledger)["rows"]
 
 
 def records(dataset: str, event: str, year: int, columns: list[str], places: list[int] | None = None):
