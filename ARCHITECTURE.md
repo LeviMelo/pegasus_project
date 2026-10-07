@@ -1,6 +1,6 @@
 # ARCHITECTURE.md: PegaSUS
 
-**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). **Revision 2, 2026-10-06 (ADR-0023),** on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It replaces how the model is solved (§5), how departures and relations are read (§7), how methods are validated (§8.4, §10), and the roadmap (§12). The model itself (§4) and the boundary with pegasus_data (§2) stand. **Revision 3, 2026-10-06 (ADR-0029),** after the author's critique of that day's work (`docs/discussion/2026-10-06-course-correction.md`): PegaSUS is **six stages, one computation each** (§1.1); the noise structure belongs to the expectation (§6), detection is departure models (§7.0), relations are one joint model (§7.5), validity is statistical in stages B–D and epidemiological only in stage E (§10), and the roadmap is re-cut to the stages (§12). The design drafts are in `docs/discussion/2026-10-04-design-v0.2.md`. When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
+**The authority on what PegaSUS is, its mathematics and its code.** Accepted by the author on 2026-10-04 (ADR-0002). **Revision 2, 2026-10-06 (ADR-0023),** on the author's instruction after the review `docs/discussion/2026-10-06-architecture-review.md`. It replaces how the model is solved (§5), how departures and relations are read (§7), how methods are validated (§8.4, §10), and the roadmap (§12). The model itself (§4) and the boundary with pegasus_data (§2) stand. **Revision 3, 2026-10-06 (ADR-0029),** after the author's critique of that day's work (`docs/discussion/2026-10-06-course-correction.md`): PegaSUS is **six stages, one computation each** (§1.1); the noise structure belongs to the expectation (§6), detection is departure models (§7.0), relations are one joint model (§7.5), validity is statistical in stages B–D and epidemiological only in stage E (§10), and the roadmap is re-cut to the stages (§12). **Revision 4, 2026-10-07 (ADR-0030),** after the whole-system review (`docs/discussion/2026-10-07-whole-system-review.md`): the roadmap becomes packages S0–S7 that each land end to end (§12), fields come from pegasus_data's declarations (§3.2, §4.4), and the evening's survey (`docs/discussion/2026-10-07-survey.md`) brought §11.1 and §13 to the code. The design drafts are in `docs/discussion/2026-10-04-design-v0.2.md`. When code and this document disagree, one of them is wrong: fix it, or record the departure in §13.
 
 **Maturity.** Each component is at one of three levels, stated where it is described and summarised in §13:
 - **v0**, a first version that runs;
@@ -24,8 +24,8 @@ Section map:
 | 9 | leads, the ledger, use |
 | 10 | validation: characterisation, not permission |
 | 11 | code: package, artefacts, invariants |
-| 12 | roadmap: the overhaul's work packages |
-| 13 | maturity by component; departures |
+| 12 | roadmap: packages S0–S7, each end to end |
+| 13 | maturity by component; departures, hand-set constants among them |
 
 ---
 
@@ -142,6 +142,19 @@ Field
   signature           the predicate defining its events (for measured overlap, §8.5)
   provenance          pegasus_data data version, query
 ```
+
+**Fields come from declarations (revision 4).** No field names a variable: each is derived from a role pegasus_data declares (`fields.declared`, `gateway.declared_fields`), so a new system or column needs a declaration, not code. The kinds read today:
+
+| kind | from the declaration | read as |
+|---|---|---|
+| count | an event type and its classifier tree | events per cell (§4.1) |
+| measure | a column with a measurement domain | the cell's location (§4.4); the count family when the domain admits zero |
+| composition | a categorical column's values | each value's share of the cell's events |
+| interval | two declared dates of one record | the time between them, as a measure |
+| linked share | a declared link (`same_event` stated) | the share of one side's records found on the other |
+| other classifier | a second code structure of the event type | its tree at each canonical level |
+| mentions | a linkage role of type `codes` (the certificate's lines) | events mentioning each group |
+| care flow | residence and a recording place | the share of a place's events recorded away from it |
 
 **Block.** A subtree of a classifier structure fitted together: an ICD-10 chapter, a SIGTAP group.
 
@@ -318,14 +331,16 @@ Every structured effect is a **Gaussian Markov random field** whose precision is
 
 ### 4.4 Marks
 
-For a mark m of event type e (length of stay, cost, birth weight, gestational weeks, Apgar, interval between dates), observed through accumulator states per cell × institution:
+For a mark m of event type e (any column pegasus_data declares as a measure with its domain, or an interval between two declared dates), observed through accumulator states per cell × institution:
 
 | mark type | model |
 |---|---|
 | positive continuous | log-normal: `log m ~ N(ν, ς²)`. The likelihood needs only (n, Σlog m, Σ(log m)²) per cell (pegasus_data's `logmoments`). A cell's mean log has variance σ²_w/n + σ²_c: σ²_w within cells from the log-moments, σ²_c a cell-level component by moments, re-estimated each outer iteration. There are no empty cells and no factorised total. |
-| count-valued (prenatal visits, ICU days) | negative binomial on (n, Σm, Σm²) by moments, or on the histogram |
-| bounded score (Apgar) | ordinal (cumulative logit) on the histogram |
-| binary share (death in hospital, caesarean) | beta-binomial |
+| count-valued (a domain of whole numbers that admits zero) | negative binomial on (n, Σm, Σm²) by moments, or on the histogram |
+| bounded score (a declared ordinal range) | ordinal (cumulative logit) on the histogram |
+| binary share (a declared indicator, or a category's share) | beta-binomial |
+
+**As built (v0, 2026-10-07):** a measure and a share are read as a Gaussian location per cell (log mean, logit) with the variance of §4.4's first row; the count family's PIT is the randomised PIT of the place-year sum under the NB. The ordinal and beta-binomial models are not built (§13.2).
 
 The location ν follows the structure of §4.2, plus **case-mix** (the event type's classifier and declared case-mix roles) and an institution effect (shrunk) where the mark has an institution.
 
@@ -973,6 +988,8 @@ Lead
 | `confirm(claim)` | one run on the reserved period (§8.3), ledgered, under LOND |
 | `train(t)`, `temporal_confirm(t)`, `spatial_confirm(leads)`, `corroborate(leads)`, `honest_sizes()`, `retier(leads, selected)` | the independent-unit tests, sizes after selection, the tier (§8.3) |
 
+**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method; nothing bounds or shows the cost of a reading (`docs/discussion/2026-10-07-survey.md` §2b). How a reading is chosen and bounded is the author's ruling (survey §4.4), pending.
+
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 
 
@@ -1082,7 +1099,7 @@ For a field and locus S, inject `y' = y + Poisson((θ − 1) · μ_S)` with a kn
 
 ### 10.4 Null surrogates
 
-The full pipeline is run on `y* ~ NB(μ̂, φ̂)`, independent across fields. **The leads found are the false-lead rate per lens.**
+The full survey is run on `y* ~ NB(μ̂, φ̂)`, independent across fields. **The leads found are the false-lead rate per lens.**
 
 ### 10.5 No gate: what replaces it
 
@@ -1116,29 +1133,29 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 
 | module | responsibility | may import |
 |---|---|---|
-| `gateway` | the **only** importer of pegasus_data: roles, event types, structures, graphs, population, aggregates, records; returns Arrow; records data versions | pegasus_data |
+| `gateway` | the **only** importer of pegasus_data: roles, event types, structures, graphs, population, aggregates, records, declared fields and context values, code trees and groups, link pairs from stored runs only (`stored_pairs`; `PEGASUS_COMPUTE_LINKS=1` to compute); returns Arrow; records data versions | pegasus_data |
 | `config` | homes, versions, seeds | — |
-| `fields` | field specs, registry, list and conserved fields, common-support lifting, overlap requests (admission retired, ADR-0028) | gateway |
+| `fields` | field specs, registry, list and conserved fields, common-support lifting, overlap requests (admission retired, ADR-0028); the fields of every declared kind (§3.2: `declared`, `measure_source`, `share_sources`, `interval_source`, `classifier_sources`, `flow_source`) | gateway |
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
 | `graphs` | named proximity graphs over places (contiguity weighted by border length, distance kernels, kNN), from pegasus_data through `gateway` | gateway, structures |
 | `monolith` | model spec (§4), factorised likelihood (§5.1), dispersion (§5.2), the fit's outer loop (§5.4), blocks and model choice (§5.6), marks' likelihoods (§4.4), prediction for any slice | structures, fields, solver |
 | `solver` (O1, built for every model) | the assembled block-arrowhead Hessian with leaf-specific features (the interaction's active leaves, the mark models' cells), per-place elimination, the graph's supernodal sparse Cholesky and solves, the Schur complement on the globals, constraints by contrast bases and kriging, LAML and its gradient, the interaction's joint step, exact Laplace draws (§5.3–5.5) | structures (scikit-sparse, numba, torch) |
-| `marks` | the mark models' fitting per chapter: specs (length of stay, cost, death, ICU), empirical-Bayes facility effects, the mark lead's facility triage (§4.4) | monolith, facility |
+| `marks` | the mark models' fitting per chapter from declared measures, empirical-Bayes facility effects, the mark lead's facility triage (§4.4) | monolith, facility, scans.lenses |
 | `laplace` | the Laplace posterior of a fitted count block (§5.3): information from pairwise marginals, perturbation draws, predictive moments, the history's forecast error, full-Hessian Fellner–Schall | monolith |
 | `surprise` | tiers (§6.1), PIT and calibration (§6.2), the virtual cube (§6.3) | monolith, laplace, prospective |
 | `prospective` | BP's predictive (§6.1): the training fit's φ_extra, the place course, the mixture PIT | monolith, laplace, surprise |
-| `scans` | a subpackage: `lenses` (§7.1), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `maps`, `map_inputs` and `utilization` (§7.6), `explain` (§7.7), `cohort` (§7.8); `departures` (§7.0, to build) and `relations` (§7.5's relation models, to build) | surprise, monolith, fields, solver |
+| `scans` | a subpackage: `lenses` (§7.1, now methods of the questions), `subset` (§7.2–7.3), `patterns` (§7.4), `pairs` (§7.5), `scales` (municipality, region, state), `maps`, `map_inputs` (the dependency map's inputs from declarations: place effects, care flows, contexts by their declared denominator) and `utilization` (§7.6), `explain` (§7.7: triage, `institution_triage`), `cohort` (§7.8) | surprise, monolith, fields, solver |
 | `relations` (O7, stage D) | relation models (§7.5): the joint factor model of every field's departures (EM factor analysis with ARD; lagged copies for leads; graph-frequency bands for the spatial scale, no zoning) and its relation table with one FDR; each relation marked direct or carried by a shared driver (`direct_relations`: the graphical lasso of the residual after the factors, StARS, §7.6); the national and macro-regional courses with phase-surrogate nulls where the bands cannot be identified (`course_relations`); `relation_map` runs it all; the penalised distributed-lag term as the pairwise confirmation | numpy, scipy, torch, scikit-learn, multiscale |
 | `questions` (stages C–E) | the questions and the methods that answer them (docs/plans/2026-10-07-questions-and-methods.md): each method at q/k, the union merged by overlapping loci, agreement reported; `Session.ask` | tools |
-| `report` (stage F) | the register as a person reads it: answers per question and block with named municipalities, methods, shapes, triage and tier; relations with the scales left unanswered; `pegasus-core report` | leads, pegasus_data geography |
-| `update` (§9.3) | the persistent state (fits, register, report) brought up to a declared plan, each reading redone only where its inputs changed; `pegasus-core update` | tools, report |
+| `report` (stage F) | the register as a person reads it: answers per question and block with named municipalities, methods, shapes, triage and tier; relations with the scales left unanswered; the dossier of a lead (HTML) and the person's verdict written back; `pegasus-core report`, `dossier`, `verdict` | leads, pegasus_data geography |
+| `update` (§9.3) | the persistent state (fits, register, report) brought up to a declared plan (`Plan`, `plans/*.yml`); each step keyed by its inputs and, today, the repository's commit (§13.2); `pegasus-core update` | tools, report |
 | `surveillance` (phase 4) | epidemiological weeks by one rule; reporting delays per place, shrunk to the nation's; the nowcast by binomial thinning; alarms at a declared recurrence interval per place against the alarm baseline (ADR-0004, ADR-0012); `Session.alarms`, `pegasus-core alarms` | gateway (delay_counts) |
 | `multiscale` (stages C–D) | space at every scale from the place graph: the normalised Laplacian's spectrum, heat kernels exp(−sL) with closed-form footprints, and multiscale peak testing (STEM with a simulated peak-height law) | numpy, scipy, torch, surprise |
 | `departures` (O6, stage C) | departure models (§7.0): cell excess (two-group model), excess at unknown spatial scale (multiscale peaks), step (Bayesian change point), each with its FDR and relevance test | surprise, control, multiscale |
 | `control` | the ledger (§9.2), families and FDR (§8.2), splits and replication (§8.3), LOND | store |
 | `replication` | the later-years and other-places tests, sizes on side E, matching a lead to its selecting finding, size/power simulations (§8.3) | monolith, surprise, scans, leads, control |
 | `facility` | the event cube by residence × recording facility × code × year (gateway-cached per year), the per-lead facility tally for the `facility` triage class (§7.7), the supply term of a block's expectation and the institution lattice (§4.5) | gateway, store, config |
-| `corroborate` | the independent fields (S2iD, SINAN, SIH) and the place-set null (§8.3) | gateway, store |
+| `corroborate` | the independent sources from declarations (any ICD-10-coded served event type less its linked records; context fields declaring `icd10` and `harm`), the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, surrogates, the designed grid of planted signals in refitted worlds and its power surfaces (§10.3; the gate retired, ADR-0028) | all of the above |
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
@@ -1146,7 +1163,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
 | `cli` | the `pegasus-core` command | tools |
 
-**Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it.
+**Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it. **Departures (survey 2026-10-07):** `tools` and `update`, and `tools` and `report`, import each other (inside functions); `scans.map_inputs` imports `tools`; `departures` and `marks` import `scans.lenses`.
 
 ### 11.2 Interfaces
 
@@ -1218,31 +1235,35 @@ The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.m
 
 ## 13. Departures and maturity
 
-### 13.1 Maturity by component (2026-10-06)
+### 13.1 Maturity by component (2026-10-07)
 
 | component | § | maturity | raised by |
 |---|---|---|---|
 | model (§4): levels, profiles, geography, history, season | 4 | v1 (the established LGM), BYM instead of BYM2 | O1 |
 | tree prior: Gaussian per level; horseshoe built as `prior="horseshoe"` | 4.3 | v1; the horseshoe measured and not adopted: held out equal to 2·10⁻⁵ on SIM I, XVII and SIH IX (ADR-0025) | — |
 | low-rank interaction ψωτ | 4.2 | v1 built (ADR-0021); off by default, rank per block (ADR-0025: IX +0.015 per death at rank 4, SIH X +0.001 at rank 1) | O10 (the model-choice loop) |
-| marks | 4.4 | v0 (PESO); SIH marks built, not run nationally | O9 |
+| marks and the other declared field kinds (§3.2) | 4.4 | v0: every kind of §3.2 built from declarations (S1); read on one year each, SIH chapter X with one measure end to end; no documented positive for any new kind; a second noise estimator for Gaussian locations (§13.2) | S1 |
 | mean solver | 5.3 | v1, **the default for every model** since 2026-10-06 (exact Newton; IX cold 59 s against v0's 501 s, a better optimum and held-out; monthly grain, the interaction, marks and shares verified against autodiff); v0 retired (the horseshoe reads exact Laplace variances) | O1 |
 | strengths | 5.4 | v1 built (Newton on log τ, exact traces); held-out equal to v0 on IX | O1 |
 | uncertainty | 5.5 | v1: exact Laplace draws from the factor (off by default); selected inversion not built | O1 |
 | tiers, PIT calibration, φ_extra hierarchy | 6 | v1 | — |
 | lenses and their nulls | 7.1–7.2 | v0, now screens | O5, O6 |
-| departure models | 7.0 | not built | O6 |
+| departure models and the questions | 7.0 | v0: the questions registry (excess, step, trend, cluster, share, institution, group), each answered by several methods at q/k (lenses, multiscale peaks, change point); trend divergence, the space–time lens and the prospective survey are in no question (to restore); method records vacuous at one measurement | S0 |
 | E_b and E_b\|Z pair screens, maps | 7.5–7.6 | v1 as screens (Dutilleul n_eff, MSR negatives) | — |
 | E_w | 7.5 | v0, screen only, failed its positive twice | O7 |
-| relation models (distributed lag, shared component, endemic–epidemic) | 7.5 | not built | O7 |
+| relation models | 7.5 | v0: `relation_map` (band factor model on N1 innovations, calibrated above the national scale); the dependency map rebuilt from declarations (checked on SINASC only); distributed lag as confirmation; shared-component and endemic–epidemic not built | O7 |
 | triage | 7.7 | v0 rules with thresholds; graded, re-scoping (ADR-0019) | O8 |
 | replication on independent units | 8.3 | v1 (ADR-0015, ADR-0019) | — |
 | admission | 8.4 | v1: no exclusion, every lead with its method's record (ADR-0028); the weights built and not yet applied | O5 |
 | recording as measurement | 8.6 | κ and race built; conserved-level fields and coding regimes not built | O8 |
-| validation | 10 | v0 (positives, negatives, power curves of four lenses, a gate) | O5 |
+| validation | 10 | v0: positives, negatives, the planted grid; the gate retired (ADR-0028); confirmed verdicts score the methods that found them (a defect, survey §2) | O5 |
 | race as an axis, the recording model, disparities | 3.4, 4.1, 4.2 | v0 race-stratified blocks for births and infant deaths, unmeasured; adults, SIH and SINAN read no race | O3 |
 | the ICD ontology | 3.3 | the tree to the category; lists, attributes, ICD-9, relations not used | O4 |
-| top model, model-choice loop | 5.6 | not built | O10 |
+| top model, model-choice loop | 5.6 | not built | D |
+| corroboration, later years, other jurisdictions | 8.3 | v0 built and ledgered (S4): sources from declarations; open: shaped on documented events, any of an unbounded set of sources, a year without a stored link read as unlinked | S4 |
+| persons: cohorts, linked shares | 7.8 | v0 built (S2); links from stored runs only (2021–2022); not run | S2 |
+| the reader: dossier, verdicts | 9 | v0 built (S5), unused; an `artefact` verdict removes a lead (a defect, P14) | S5 |
+| use: plans, `update` | 9.3 | v0: every field, question and method, with no bound or estimate of cost; keyed by the commit | the author's ruling (§9.3) |
 
 ### 13.2 Departures
 
@@ -1268,4 +1289,14 @@ The earlier packages' work and evidence are in `docs/plans/2026-10-06-overhaul.m
 | 8.4, 10.2 | δ is the smallest value at which no family's false-lead rate on the negatives exceeds q; single-field lenses have negatives that keep the field's dependence | re-made on the grid (ADR-0026): θ0 1.1 for the cell lenses and trend divergence, spatial cluster 1.5 on SIM and 2.0 on SIH; refitted model worlds beside the MSR (knn8) and per-place-shift negatives on normal scores | θ0 2.0 loses the Chagas positive; the B0 residuals carry smooth place effects, which a Poisson scan reads as clusters. Closes with a B0 scan null that carries the field's spatial spectrum |
 | 7.6 | a sparse + low-rank Gaussian graphical model, penalties by StARS, edges also passing the pair test | pairwise E_b and E_b\|Z given the declared contexts, no joint model; run 2026-10-05 (ADR-0013): delta_E|Z 0.1, 0 false edges in 40 surrogate worlds | each pair carries its own spatial n_eff, which a joint likelihood has no place for; the conditional layer conditions on declared contexts as the low-rank part would |
 | 4.5 | the facility effect is part of the model: a place × facility supply term estimated with the monolith, and crossed place and facility effects at the node level | the supply term is a multiplier of the fitted expectation, with two exponents chosen by likelihood after the fit on the same cells (opt-in); the facility's own handling of a node (coding) is not subtracted, only read on the lattice | the independent evidence (other chapters) removes 11 % of the facility class and 6.5 % of the signals (evaluation 2026-10-05, institutions); what the facility does with the block's own codes cannot be subtracted without absorbing an outbreak that one hospital serves. A refit with the term inside the likelihood, and crossed effects where places share facilities, are the next stage |
+| 6.1, 4.4 | one noise structure (N1) per field, learned with the expectation | Gaussian-location fields (measures, shares) carry their own estimator, `surprise.gaussian_noise`: one pooled AR(1) of the standardised residuals | the count N1 reads counts; a second mechanism (CLAUDE.md §4) to fold into N1 |
+| 8.4 | the minimum relevant effect is a statement of relevance, stated per estimand | `surprise.LOCATION_EFFECT = 0.1` (a location shift of 0.1 standard deviations of the place's unit) for every Gaussian-location field | set by hand on 2026-10-07; to be stated per estimand or measured on the grid |
+| 7.7 | triage classes from measured statistics | `institution_triage`: a step is a volume step when the other chapters stepped by at least `facility.VOLUME_FOLLOWS = 0.5` of its log step | hand-set |
+| 8.3 | a departure's persistence is tested on later years | `replication.PASSING = ("spike", "transient")`: the courses of `departures.attribute` that are not tested on later years, left to corroboration | by definition of a passing course; the attribution's own error is not carried |
+| 7.6 | contexts enter the map with their uncertainty | `map_inputs.CONTEXT_SD = 0.05` for every context's normal score; `CARE_KINDS = ("hospitalisation", "authorisation")` names the event kinds read as care | hand-set; the kinds should come from a declaration |
+| 8.5 | measured overlap above 0.05 makes a pair untestable | the constant is defined twice (`fields.MAX_OVERLAP`, `scans.maps.MAX_OVERLAP`), and the map's "not linked to" twins reuse it | one constant to keep |
+| 3.1 | dates come from pegasus_data's roles | the alarm's entry date is the first of `gateway.ENTRY_PROPERTIES = ("entry_date", "registration_date", "processing_month")` a type declares | an ordered list of property names; to become a declared role |
+| 2 | every input comes through the gateway, which computes nothing expensive by surprise | links are computed only with `PEGASUS_COMPUTE_LINKS=1`; otherwise read from stored runs, and a year without one is reported (`LinkNotStored`) | a national linkage run is hours; corroboration and cohorts on unlinked years are open (survey §2) |
+| 10.0 | a method's record says where it was calibrated, with its power | `harness` marks a method calibrated when its null worlds hold findings no more often than max(q, 1/worlds): true by construction at one world | to be read from the grid's worlds, with tier, θ0, power and maturity (§9.1) |
+| 11.3 | a stale artefact is never served; keys hash what an artefact reads | the assembly key hashes gateway.py's bytes (any edit re-assembles every block); `update` keys each step by the repository's commit (any commit redoes every step) and omits the corroborators | survey 3; keys by the code an artefact reads are the fix |
 | 4.1 | κ and N^{(SUS)} are factors of μ; groups g = age × sex × race | κ and the SUS share are exposure modifiers of the source string (`popsvs+kappa`, `+sus`), opt-in; race groups are race-stratified blocks (own θ, f, g, h per race), not a race axis of G; infant deaths by recorded race use the exposure Σ_j C(k\|j) r_j N_j with r_j fitted on the recorded counts, valid when declared races share one shape; SUS before 2021 is the 2021-23 cell mean with a measured random-walk σ | η's age-sex profile is a random walk over G and is another front's ground; a race axis needs it; the SUS product holds 2021-23 only (ADR-0020) |

@@ -155,13 +155,22 @@ $PY scripts/check_docs.py
 1. **A correct statistical claim.** A false lead is worse than none: it is followed, and it costs a study. Every other budget yields to this one.
 2. **Information.** The data hold a finite amount of evidence. Searching more cannot create more. Size every search to it (ARCHITECTURE §8.4).
 3. **Wall clock and memory on this machine** (32 GB RAM, 6 GB GPU). Correct but unusably slow is not finished. **No dense object larger than the population tensor** (ARCHITECTURE P10).
-4. **The FTP server and disk** are pegasus_data's constraints. PegaSUS never forces a large download implicitly.
+4. **The FTP server and disk** are pegasus_data's constraints. PegaSUS never forces a large download implicitly. Downloads and installs the project needs are approved in advance (author, 2026-10-05), but each is explicit and its size known before it starts.
+5. **Scope** (author, 2026-10-06): the ICD-9 era (SIM before 1996) is low priority; an ICD-9 → ICD-10 mapping is welcome, an ICD-9-era reader is not planned.
 
 ---
 
 # 4. Autonomy
 
-- **Decide.** Architectural, statistical and semantic calls are the agent's. Adjudicate, write the decision with its evidence (an ADR, only once final), and proceed. Do not hand the author a menu.
+- **Decide what is the agent's; ask what is the author's.** Do not hand the author a menu of obvious choices, and do not present them as "decisions" (author, 2026-10-07).
+
+  | the agent decides, records and proceeds | the author decides (bring a recommendation) |
+  |---|---|
+  | methods, estimators, numerical choices, fixes, refactors, the documentation | goals, the reader, what a finished reading is |
+  | an ADR once a decision is final | use and cost: how a reading is chosen, bounded and shown (ARCHITECTURE §9.3) |
+  | the order of work inside a package | interfaces, serving, agents and MCP (S7; author, 2026-10-05 and 2026-10-07) |
+  | | scope, priorities, the roadmap's packages; a big stage's design before it is built |
+  | | anything outward: push, publish, contact |
 - **Never act outward as the author.** Pushing, publishing, submitting and contacting anyone need explicit authorisation, each time.
 - **Replace, never build beside.** Before adding a mechanism, find the one that does the job (ARCHITECTURE §11.1). Two mechanisms for one job is a defect.
 - **Never lose a question** (author, 2026-10-06). A method is retired only when its successor answers every question it answered (retrospective and prospective, every support, every shape), measured on the grid. Until then both run, and the docs say "takes over question X", never "replaces" or "drops". A method that answers wrongly is fixed or kept with its record; a question is never withdrawn because a method for it failed.
@@ -169,7 +178,7 @@ $PY scripts/check_docs.py
 - **Never idle on a wait; work fronts in parallel** (author, 2026-10-03, repeated 2026-10-06). While a fit, a scan or an agent runs, advance a task that does not depend on it: other code, documentation of finished work, analysis of results at hand. Launching a job and then waiting on it is the failure this rule names.
   - **Parallel is my work, not the heavy jobs.** Heavy fits run one at a time through `scripts/heavy.py` (a sequence through `data/chain.py` under one slot), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
   - Launch detached, check it started, set a watcher that catches completion and failure, then turn to the next front at once.
-- **Subagents** run on the cheaper model (Sonnet) for reading, searching and auditing. Spawn few, with precise briefs.
+- **Subagents** (author, 2026-10-07): none for development; core work stays in the main session. Read-only audits and surveys only, on Sonnet, few (one to three at once), each with one bounded deliverable written to a file, no polling in the brief.
 - **Keep pegasus_data and pegasus_view working.**
   - pegasus_data is developed from this session too (branch `pegasus-core-fixes`), under its own CLAUDE.md: a declaration PegaSUS reads is made there, with its evidence, never guessed here.
   - pegasus_view's contract with pegasus_data is pegasus_data's to keep; PegaSUS never touches pegasus_view.
@@ -181,7 +190,9 @@ $PY scripts/check_docs.py
 - **The harness is the test suite** (ARCHITECTURE §10): known positives, known negatives, planted signals and null surrogates, on real data.
   - A statistical capability is verified by running the harness cases it affects, and by **comparing on identical data**: old code against new; approximate against exact fits, on samples across scopes, never only the densest slice.
   - **No unit tests written alongside the change:** they pass by construction.
-- **Read the output, not the exit code.** Look at the leads, maps and numbers. Count against an independent figure. **A number that looks implausible is a bug report until shown otherwise.**
+- **Read the output, not the exit code.** Look at the leads, maps and numbers. **A number that looks implausible is a bug report until shown otherwise.**
+- **No ritual validation** (author, 2026-10-05). Reconcile against an independent figure (TabNet, an official total) only where a number is suspicious or meaning is at stake, never as a routine step. **Not everything is confirmed by a run** (author, 2026-10-07): what inspection of the code and a small check settle is not run at national scale.
+- **Findings drive architecture** (author, 2026-10-06). On every result ask whether it changes a design assumption; if so it goes to ARCHITECTURE (or §13.2) in the same commit. A promising lead is declared in the ledger (locus, window, criteria, negative control) before its confirmatory look.
 - **A synthetic that reproduces a symptom can validate the wrong mechanism.** Confirm every fix on the real object, and rerun the headline result after it.
 - **Locate a phenomenon in the model before fixing it.** A recurring patch means a missing abstraction.
 - **Check a fact before stating it:** a count, a date, what a document or a paper says.
@@ -210,6 +221,7 @@ Every random draw is seeded; every artefact carries its data and code versions.
 A lead is a statistical object, not a conclusion; nothing claims causation.
 One stage, one computation: no object fuses expectation, departure, relation, interpretation or use.
 No method carries logic or constants specific to one data system.
+No field names a variable: every field comes from a pegasus_data declaration (author, 2026-10-07; ARCHITECTURE §3.2).
 A null that fails is fixed in the expectation's noise model, measured per field, never by a threshold.
 Statistical claims (stages B-D) never decide whether a departure is real; that is stage E's.
 Relevance lives in the departure posterior or the ranking, never in a calibration patch.
@@ -243,8 +255,21 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | the state of the work | `STATUS.md` (rewritten, not appended) |
 | a new command | `RUNBOOK.md` |
 | an open question | `OPEN_QUESTIONS.md`. A resolved row moves to `docs/history/open_questions_resolved.md`, whole and annotated. |
-| what PegaSUS needs from pegasus_data | `docs/handoffs/` |
+| what PegaSUS needs from pegasus_data | made in pegasus_data under its CLAUDE.md, or `docs/handoffs/` |
 
+**One owner per kind of fact** (survey 2026-10-07). A fact is written once, in its owner; every other document points to it. Memory is a cache of these documents, never the only home of a rule.
+
+| fact | owner |
+|---|---|
+| what PegaSUS is: goals, principles, objects, module map, departures and hand-set constants | `ARCHITECTURE.md` |
+| how to work, and every rule the author states (dated, "author") | this file; commands in `RUNBOOK.md` |
+| where the work stands, what is next, the dormant register | `STATUS.md` |
+| each architecture item's status | `docs/architecture_coverage.md` |
+| a final decision | an ADR and its `DECISIONS.md` row |
+| a measurement | one evaluation entry |
+| the plan of one package | `docs/plans/<date>-<package>.md`, its status one of design, building, implemented, superseded |
+
+- **No documentation-only commits** (author, 2026-10-07): documentation ships in the commit of the change it describes. A commit that changes a module, a constant or a default updates its owner in the same commit.
 - **A documented number found wrong is corrected where it was written,** saying so there.
 - **The documentation must not outweigh the code it describes.**
 - `scripts/check_docs.py` stays green.

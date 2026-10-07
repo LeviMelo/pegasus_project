@@ -1,67 +1,63 @@
 # Status
 
-**2026-10-06, evening: ARCHITECTURE revision 3** (ADR-0029). PegaSUS is six stages, one computation each (ARCHITECTURE §1.1):
-- A data and meaning;
-- B expectation, with its noise structure;
-- C departures;
-- D relations;
-- E interpretation;
-- F use.
+**2026-10-07, evening.** Roadmap revision 4 (ARCHITECTURE §12): the whole system end to end, packages S0–S7, each landing end to end before the next. A survey of the day's drift, the author's goals and the cost of readings (`docs/discussion/2026-10-07-survey.md`) found the canonical documents behind the code, the budgets of §5.8 unchecked, and new capability unverified. **Until its defects (§2 there) are fixed and the documentation repaired, no new capability is built**, and nothing heavy runs except a check the author needs.
 
-Stages B–D make statistical claims only; E alone is epidemiological. The next work is **N1**, the expectation's noise structure, then N2 → O6 → O7 → O8 (ARCHITECTURE §12; `docs/plans/2026-10-06-overhaul.md`). The review behind it is `docs/discussion/2026-10-06-course-correction.md`.
+Words used below: **built** (the code exists), **checked** (what ran, named), **done** (the package's acceptance is met).
 
-**2026-10-07, roadmap revision 4:** the whole system first, end to end (ARCHITECTURE §12, S0–S7; `docs/discussion/2026-10-07-whole-system-review.md`). **S0 in progress:** the v0 survey removed (its 33,111 leads retired); method records from the harness's measurements; stage D ledgered; joint departures, alarms and map pairs are leads; the gateway the only door; the runner reframed as `update`.
+## The packages (ARCHITECTURE §12)
 
-**2026-10-07: real data first.** The author found the work stuck in a loop of synthetic benches built from the model's own law; methods are now judged first on documented events (ARCHITECTURE §10, CLAUDE.md design check 8).
-- **The real-data baseline** (`data/real_events.py`): of five documented events, measles 2018–19, chikungunya 2016–17 and COVID-19 in the North were missed by every stage-C method. The cause was in stage B: one dispersion per chapter, and categories' levels set with their epidemic years.
-- **Robust stage B** is the default (`Monolith.robust`: trimming by EM imputation, flags against a trimmed dispersion). With it, all five events are found by three methods (evaluation 2026-10-07, real events).
-- **Category courses (`h_cat`) are built but not the default.** A flexible course absorbs its category's own national epidemic (measles 2018–19); a rigid one cannot follow COVID-19's arrival. The default (v9) is trimming only. Which reference a question takes belongs to the registry (evaluation 2026-10-07, robust expectation).
-- **N1 re-estimated:**
-  - κ by central matching of the PIT quartiles (measles κ 1000 → 20);
-  - ρ, δ from winsorised lag moments with their own frailty scale (ρ was at its bound on its own worlds).
-- **A finding's course in time is attributed** (`departures.attribute`, Chen & Liu 1993); the multiscale step's matches of spike events were spikes.
-- **The empirical null of the multiscale peaks is per scale and absorption class.** Pooled over every contrast, it put the multiscale step's false findings in 8 of 10 null worlds; per contrast it lost COVID-19 in the North. Now 1 of 10, and all five events found (evaluations 2026-10-06 departure models, 2026-10-07 real events).
-- **Built:** the question → methods registry (`questions`, `Session.ask`, `Session.survey_questions`).
-- **The space of stages C–D is the graph's own:**
-  - multiscale peaks on heat kernels, scored as gamma tail probits;
-  - relations in graph-frequency bands on N1-whitened innovations;
-  - the spectral-density factor model;
-  - the care-flow graph.
-  The zoning ladder survives only where its successor has not yet matched it.
+| package | state | what is next |
+|---|---|---|
+| **S0 consolidate** | the v0 lens survey removed, but trend divergence, the space–time lens and the prospective survey were left in no question and no schedule (to restore); stage E's tests ledgered before they run (corroboration, later years, other jurisdictions, triage; checked on SIM and SIH leads); method records read from the harness (vacuous at one measurement); the gateway the only importer (private pegasus_data functions still used); the dependency map rebuilt from declarations (checked on SINASC only) | the survey's open defects; ARCHITECTURE §11.1 and §13 brought to the code |
+| **S1 fields from declarations** | built: measures (count family when the domain admits zero), compositions, intervals, linked shares, other classifiers' trees, multiple causes (`mentions`), care flows (`away`), institutions as a question; SIH, SIM, SINASC and SINAN dengue declarations (pegasus_data's decision 0154). Checked: readers on one year each; SIH chapter X with length of stay end to end (16,790 count answers, 79 % from three methods with no measured record; 641 length-of-stay answers). Not done: no documented positive for any new kind | the acceptance on real data: documented positives for a measure and a composition |
+| **S2 persons** | built: `cohort()`, linked shares, record identities by pegasus_data's rule, grouped link sides; links read from stored runs only (`PEGASUS_COMPUTE_LINKS=1` to compute). Not run: stored national runs exist for 2021–2022 only | one cohort on a stored year, after S1 |
+| **S3 race** | parts exist, not integrated, never run: pegasus_data's population account with race slices (its decision 0151) and the infant and women's confusion products (its decisions 0143, 0149); pegasus_core's race-stratified fits, the recorded-race exposure at age 0 and `tools.disparity` (ADR-0020). Adults read recorded race; the women's matrix is unused | a design for one race path, with the author |
+| **S4 independent interpretation** | built: corroboration sources from declarations, later years in `update` (`confirm_last`), passing departures left to corroboration; spatial confirmation repaired (it failed on every unit claim). Open defects: corroboration shaped on documented events, unbounded sources, unlinked years | the survey's defects |
+| **S5 reader** | built: `dossier` (HTML), `verdict`. Not used: no dossier produced for the author. Open defects: an `artefact` verdict removes a lead; confirmed verdicts score the methods that found them | the defects, then a first dossier of SIH chapter X |
+| **S6 breadth** | plans written (SIM-DOFET, SIA APAC, CIHA; `blocks: [all]`); not run. SINAN: 30 agravos fitted, 17 failed earlier | after S1–S5 |
+| **S7 surveillance, serving** | not started; agents and MCP stay here (the author, 2026-10-07) | — |
+| **D depth on demand** | the top model, N2, BYM2, interaction patterns, exact reference fit | when a reading needs one |
 
-**Planned and dormant** (read before choosing any front: an item here is architecture the work has not advanced; 2026-10-07):
+**Speed (P13, ARCHITECTURE §5.8):** a chapter survey's budget is under 2 min; one SIH field's question pass measured 15 min (share 427 s, excess 176 s, step 105 s, trend 67 s, cluster 67 s, institution 32 s, group 20 s). The optimisation plan's unfinished part (`docs/plans/2026-10-06-optimization.md` §5) is the next speed work.
+
+## Where each stage stands
+
+| stage | state |
+|---|---|
+| **A. Data** (pegasus_data) | SIM, SIH, SINASC, every SINAN agravo served; declarations of measures, missing codes and domains, link semantics (`same_event`), context denominators (`over`), multiple-cause groups; label lookups kept fresh (pegasus_data 14f6033). SIA/APAC and CIHA declared, not read |
+| **B. Expectation** | v1 solver; robust fitting by default; N1 built for counts (a second, simpler noise estimator for measures and shares is a departure to resolve); N2 open (SBC defect of the joint mode on data-poor places) |
+| **C. Departures** | the questions registry: excess, step, trend, cluster, share, institution, group; measures read by the multiscale methods since 2026-10-07 (unmeasured) |
+| **D. Relations** | `relation_map` (band factor model on N1 innovations), calibrated above the national scale; the dependency map (between-place E_b) rebuilt from declarations |
+| **E. Interpretation** | triage with rule versions (institution answers read by their own statistics), replication, corroboration, all ledgered |
+| **F. Use** | `report`, `dossier`, `verdict`; no reading delivered to the author yet |
+
+**pegasus_data is developed from this session too** (branch `pegasus-core-fixes`), under its own CLAUDE.md.
+
+**Coverage of the architecture, item by item:** [docs/architecture_coverage.md](docs/architecture_coverage.md) (to be regenerated per package, survey §3).
+
+## Planned and dormant (architecture not advanced, outside the packages above)
 
 | item (ARCHITECTURE) | built | dormant since | next concrete step |
 |---|---|---|---|
-| fields from pegasus_data's roles: marks, dimensions, institutions (§4.4, §4.5) | measures (count family when the domain admits 0), compositions, intervals (every date against the event's), links and other classifiers' trees (SIGTAP), all from declarations; SIH, SIM and SINASC declared | 2026-10-07 | first end-to-end readings of each kind |
-| linkage and cohorts (§7.8, phase 2) | `cohort()`; linked-share fields from declared links | 2026-10-07 | sides filtered or grouped by their spec |
-| race and ages (O3, §4.1) | race-aware population accounts | 2026-10-05 | race as an axis of G on births and infant deaths |
 | institutions in the likelihood (§4.5) | facility triage, mark facility effects | 2026-10-05 | from the declared `institution` roles (same plan) |
-| breadth: SIA/APAC, CIHA, SIGTAP (O9) | SINAN agravos fitted 2026-10-07 | 2026-10-05 | fields from roles first, then the systems |
 | one model across chapters (§5.4) | not built | never started | design note |
 | interaction patterns (§7.4) | interaction built, off; `scans/patterns.py` (CP-APR) with no input since the map's SIH tensor went (2026-10-07) | 2026-10-06 | read ψ, ω, τ of one block |
 | exact reference fit (OPEN_QUESTIONS 2) | not run | 2026-10-06 | one block by HMC against the Laplace draws |
-| the readable dossier and human verdicts (stage F) | `dossier` (HTML, series per answer), `verdict`; confirmed answers enter the event record (`harness.verdict_positives`) | 2026-10-07 | the author records verdicts on the first dossiers |
-| corroboration's sources (§8.3) | derived from declarations (ICD-10-coded event types, declared links for overlap, the disasters field's ICD-10 correspondence) | 2026-10-07 | the linked overlap read on a full update |
 
-**Where each stage stands:**
+## Backlog carried from the v0 engine
 
-| stage | state | what is next |
-|---|---|---|
-| **A. Data** (pegasus_data) | SIM, SIH, SINASC and every SINAN agravo served; SINAN's notification block declared once for all 58 agravos (pegasus_data, its decision 0153). ICD structure, admissibility, the ICD-9 bridge and code lists | SIA/APAC, CIHA (O9) |
-| **B. Expectation** | v1 solver; robust stage B (trimming) by default; **N1 done** (recovers its own worlds); the SINAN agravos fitted as single fields (O9, running) | **N2:** exact conditional sweeps of the levels built (SIM VII's posterior total 9.0 M → 274 against 277); SBC running |
-| **C. Departures** | the questions registry (excess, step, trend, cluster, group), each answered by all its methods with agreement and shape (Chen & Liu); multiscale peaks with a null per absorption class; cell excess; every 2026-10-07 documented event found; the first question survey (SIM I, IX, X, XX; SIH I, X) running | cluster and group departure models (BYM2 exceedance, group interaction); the Bayesian step's power |
-| **D. Relations** | `relations.relation_map` and `pegasus-core relations` (band factor model on N1 innovations; relations to the register); calibrated above the national scale by SIH place permutation (2.0 %) | national-scale relations (OPEN_QUESTIONS 9); SINAN agravos as cross-system positive controls |
-| **E. Interpretation** | triage with rule versions, replication tiers, the facility layer; triage reads question answers; `harness.event_record` scores every method against the declared positives (`pegasus-core events`) | triage of the first question survey; rival explanations per lead (O8) |
-| **F. Use** | the register; `pegasus-core report` (answers with named municipalities, methods, shapes, triage; relations; scales unanswered) | the first readable register, after the survey's triage |
+| item | where |
+|---|---|
+| an epidemic-level component for BP (dengue's prospective forecast 2.0–2.8× off) | O6 (cell excess; alarm baselines against Farrington/Noufaily) |
+| Laplace follow-ups: an MCMC reference; τ's at the full Hessian | O1 (LAML), §10.6 |
+| positives declared for trend divergence, group disparity, marks; the dengue–climate lag | O5 (held out), O7 |
+| race in the groups g; exposure re-asked on population-account-3/4 | O2 |
+| pegasus_data: open question 71 (DF region-code windows); roles bound to the derived columns, with the gateway switch at the next re-warm; streaming aggregation; SIDRA series across census universes; registration completeness rebuilt on population-account-2; account horizons of 1–3 years | requested through `docs/handoffs/`, with the package that needs them |
+| tools over MCP: built (ADR-0008), **paused by the author**; use and integration to be planned together | not scheduled |
 
-**The bench** (O5, statistical characterisation of stages B–D): the grid of planted signals in refitted worlds (`harness.grid`, `pegasus-core grid`), run on SIM dense and sparse, SIH, SINASC, SINAN and monthly dengue; null worlds and negatives; SBC (`scripts/sbc.py`).
+## Architecture learned from results
 
-**Coverage of the architecture:** [docs/architecture_coverage.md](docs/architecture_coverage.md), item by item.
-
-**pegasus_data is developed from this session too:** branch `pegasus-core-fixes`.
-
-**Architecture learned from results** (each row: what a measurement showed, and where it now lives).
+Each row: what a measurement showed, and where it now lives (the register the author asked to keep; a row whose design was demoted stays as history of the reasoning).
 
 | finding | architectural consequence | where |
 |---|---|---|
@@ -91,34 +87,3 @@ Stages B–D make statistical claims only; E alone is epidemiological. The next 
 | a refit absorbs a planted departure in proportion to its share of a component's support: place-year 9–21 %, macro-region-year ~40 %, regional step to the end 45–63 %, national year 100 % (SIM IX) | O5's planted worlds are refitted; a lead's size is re-estimated with its locus masked out of the fit; ADR-0022's fixed-μ admission curves overstate power | ARCHITECTURE §10.3; absorption evaluation |
 | SBC on SIM VII (sparse) and XIII (dense): the intercept, the large places and the count-scale sums miscalibrate in both: the joint mode puts data-poor place effects at zero and their mass in the intercept, and Laplace draws centred there inherit it | the Laplace draws are not used for count-scale functionals until levels are estimated marginally (nested Laplace or importance correction); production surprises stay mode-centred | OPEN_QUESTIONS 2; SBC evaluation |
 | on SIH, trend divergence finds trends in every time-shifted negative world at any θ0; the rank-1 interaction halves both the real trend leads (1,426 → 636, J09-J18) and the negatives' findings, but not to zero | a SIH trend lead is read net of the interaction, and its remaining place-specific course goes to the facility layer; no threshold calibrates SIH trends | minimum-effects evaluation; ADR-0026 |
-
-**The roadmap (revision 3, ARCHITECTURE §12).** The order is N1 → N2 → O6 → O7 → O8, with O3 and O9 alongside, then O10.
-
-| package | stage | state |
-|---|---|---|
-| O0 | — | revisions 2 and 3 written (ADR-0023, ADR-0029) |
-| O1 solver | B | done |
-| O2 settle | B | done (ADR-0025); race (with O3) and SINAN wave 1 open |
-| O4 ICD | A–B | mostly done (ADR-0024); lists as effects, recording-quality fields open |
-| **N1 noise structure** | B | **built**: NB(μ, φ/κ), an ARMA(1,1) Gaussian copula over periods and a spatial share on the graph, all estimated on the background cells only; `MINIMUM_EFFECT_BY` reduced to SIH's spatial cluster (a reference debt) |
-| N2 marginal uncertainty | B | after the O6 acceptance and the regenerated lead register (production reads the mode, which the SBC defect does not touch; it touches the intervals of totals): integrated marginals of the place effects (nested Laplace), entry points `laplace.Posterior.sample`, `solver.StructuredNewton.draws`; accepted when SBC calibrates on VII and XIII |
-| **O6 departure models** | C | **in progress**: cell excess accepted for the retrospective cell question (the outbreak lens stays for prospective alarms until cell excess runs on BPA); step built, power low, over the ladder of supports next; trend, cluster, group open |
-| O5 bench | B–D checks | grid built, the gate retired (ADR-0028); seasonal and lagged plants, weights across fields open |
-| **O7 relations** | D | **in progress**: N1-whitened innovations, graph-frequency bands (no zoning), lagged stacking, EM factor analysis with ARD: clean null and planted worlds; real fields next |
-| O8 interpretation | E | rule versions built; recording terms, replication, corroboration, documented events open |
-| O3 race and ages | A–B | open |
-| O9 breadth | A–B | open |
-| O10 use and surveillance | F | last |
-
-**Carried into the overhaul from the v0 backlog** (the rest is done; its history is in git):
-
-| item | package |
-|---|---|
-| an epidemic-level component for BP (dengue's prospective forecast 2.0–2.8× off) | O6 (cell excess; alarm baselines against Farrington/Noufaily) |
-| Laplace follow-ups: an MCMC reference; τ's at the full Hessian | O1 (LAML), §10.6 |
-| positives declared for trend divergence, group disparity, marks; the dengue–climate lag | O5 (held out), O7 |
-| race in the groups g; exposure re-asked on population-account-3/4 | O2 |
-| pegasus_data: open question 71 (DF region-code windows); roles bound to the derived columns, with the gateway switch at the next re-warm; streaming aggregation; SIDRA series across census universes; registration completeness rebuilt on population-account-2; account horizons of 1–3 years | requested through `docs/handoffs/`, with the package that needs them |
-| tools over MCP: built (ADR-0008), **paused by the author**; use and integration to be planned together | not scheduled |
-
-**Unblocked:** ICD-10 U07/U09/U10 exist (pegasus_data 70b56fc), so chapter XXII (COVID-19) can be fitted (O2).

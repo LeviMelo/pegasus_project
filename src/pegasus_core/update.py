@@ -261,7 +261,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             else:
                 out[f"disparity {sys_.dataset} {node}"] = "done on these versions"
     if plan.relations and len(plan.systems) >= 1:
-        spec = [(x.dataset, x.event, x.blocks) for x in plan.systems]
+        spec = [(x.dataset, x.event, resolved.get(x.dataset, x.blocks)) for x in plan.systems]   # `all` resolved
         key = _key("relations", plan=spec, years=plan.years)
         if force or not _done(key):
             levels = tuple(sorted({lv for x in plan.systems for lv in (x.levels or ["group"])}))
