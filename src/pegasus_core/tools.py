@@ -272,8 +272,11 @@ class Session:
     def _blocks(self) -> list[str]:
         """The blocks fitted for this session's reader (the counts, or its measure, share or classifier)."""
         mine = json.loads(json.dumps({f: self.source.get(f) for f in READER_FIELDS}))     # tuples as the key's lists
-        return sorted({k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)
-                       if all(k["key"].get(f) == mine[f] for f in READER_FIELDS)})
+        found = {k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)
+                 if all(k["key"].get(f) == mine[f] for f in READER_FIELDS)}
+        if self.expectations.registry.classifier != "*":
+            found.discard("*")      # a classified type's total is a share's denominator, not a block of its tree
+        return sorted(found)
 
     # ---- scanning ----------------------------------------------------------------
 
@@ -578,8 +581,32 @@ class Session:
         return self._fac
 
     def _prepare_grid(self) -> None:
-        """Every fitted block's observed counts (all causes, the ill-defined chapter) on one grid."""
+        """The event type's observed counts on one grid (all causes, the ill-defined chapter) and its person-years: at
+        the annual grain from one cached read per year (`gateway.event_counts`), never from every fitted block's cells
+        (assembling SIH's twenty chapters for this alone took minutes)."""
         if getattr(self, "_pop", None) is not None:
+            return
+        if self.source.get("grain", "year") == "year" and self.expectations.registry.classifier != "*":
+            pop_t = gateway.population(list(self.years)).group_by(["u", "year"]).aggregate([("n", "sum")])
+            places = np.sort(np.asarray(pop_t.column("u").unique().to_pylist()))
+            years = np.asarray(self.years)
+            ui = {int(u): i for i, u in enumerate(places)}
+            ti = {int(y): j for j, y in enumerate(years)}
+            pop = np.zeros((len(places), len(years)))
+            for u, y, n in zip(*(pop_t.column(c).to_pylist() for c in ("u", "year", "n_sum")), strict=True):
+                pop[ui[int(u)], ti[int(y)]] = n
+            reg = self.expectations.registry
+            total, ill = np.zeros_like(pop), np.zeros_like(pop)
+            for year in self.years:
+                c = gateway.event_counts(self.dataset, self.event, int(year)).counts
+                u = np.array([ui.get(int(x), -1) for x in c.column("u").to_pylist()])
+                ok = u >= 0
+                y = np.asarray(c.column("y").to_numpy(), dtype=float)
+                np.add.at(total[:, ti[int(year)]], u[ok], y[ok])
+                chap = np.array([reg.chapter(str(x)[:3]) == "XVIII" for x in c.column("code").to_pylist()])
+                np.add.at(ill[:, ti[int(year)]], u[ok & chap], y[ok & chap])
+            self._grid_places, self._grid_years, self._per_year = places, years, 1
+            self._total, self._ill, self._pop = total, ill, pop
             return
         blocks = self._blocks()
         total = ill = pop = None
@@ -597,9 +624,23 @@ class Session:
         self._total, self._ill, self._pop = total, ill, pop
 
     def _expected_total(self) -> np.ndarray:
-        """[U, T] the expected events of every fitted block (stage B1), on the evidence grid: a share's denominator.
-        Kept in the store under the blocks' fit keys; a block read only for this total is released at once (holding
-        every chapter's model at the same time took 13 GB on SIH-RD, 2026-10-07)."""
+        """[U, T] the expected events of the whole event type (stage B1), on the evidence grid: a share's denominator.
+        One fit of the all-events field (block ``*``, fitted once where missing), not a sum over every chapter's fit
+        (twenty robust fits on SIH-RD, hours, and 13 GB held at once, 2026-10-07)."""
+        if getattr(self, "_mu_total", None) is None and self.expectations.registry.classifier != "*":
+            from . import update
+
+            self._prepare_grid()
+            try:
+                m = self.expectations.model("*")
+            except LookupError:
+                update.fit_block(self.dataset, self.event, "*", list(self.years), self.graph, source=self.source or None)
+                m = self.expectations.model("*")
+            mu = m.expected(np.arange(len(m.data.leaves)))[0]
+            index = {int(p): i for i, p in enumerate(m.data.places)}
+            rows = np.array([index.get(int(p), -1) for p in self._grid_places])
+            self._mu_total = np.where(rows[:, None] >= 0, mu[np.maximum(rows, 0)], 0.0)
+            return self._mu_total
         if getattr(self, "_mu_total", None) is None:
             self._prepare_grid()
             key = {"what": "expected_total", "dataset": self.dataset, "event": self.event, "years": list(self.years),

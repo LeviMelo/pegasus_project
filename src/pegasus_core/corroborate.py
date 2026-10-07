@@ -23,6 +23,7 @@ are taken as sharing no record.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -209,6 +210,9 @@ class Fields:
                     t = source_year(source, int(y))
                 except gateway.nothing_published():      # not published for the year (chikungunya before 2015): no events
                     continue
+                except gateway.LinkNotStored:           # no stored link that year: its events whole, the overlap unknown
+                    t = source_year(dataclasses.replace(source, link=None), int(y))
+                    self._cache.setdefault(("unlinked_years", source), []).append(int(y))
                 parts.append(t.append_column("year", pa.array(np.full(t.num_rows, int(y), dtype=np.int16))))
             self._cache[("table", source)] = pa.concat_tables(parts) if parts else None
         return self._cache[("table", source)]
@@ -346,6 +350,8 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
         tot = float(y[rows][:, cols].sum() + linked[rows][:, cols].sum())
         if source.link:
             detail["overlap"] = float(linked[rows][:, cols].sum() / tot) if tot > 0 else 0.0
+            if fields._cache.get(("unlinked_years", source)):
+                detail["years_without_stored_link"] = fields._cache[("unlinked_years", source)]
         base = np.median(y[:, other], axis=1) if other.any() else np.zeros(len(y))
 
         def ratio(r: np.ndarray) -> np.ndarray:

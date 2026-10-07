@@ -360,7 +360,10 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                                    pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width))
         cats = enc.dictionary.to_pylist()
         row_code = enc.indices.to_numpy(zero_copy_only=False)
-        in_block = np.array([c in eidx for c in cats], dtype=bool)[row_code]
+        # block ``*``: every event of the type in its one leaf, whatever its code (a classified type's total)
+        code_of = (np.zeros(len(cats), dtype=np.int64) if block == "*" else
+                   np.array([eidx.get(c, -1) for c in cats], dtype=np.int64))
+        in_block = (code_of >= 0)[row_code]
         other = ~in_block & np.array([level_of.get(c) is None for c in cats], dtype=bool)[row_code]
         if never:
             # a code that cannot be an underlying cause (an asterisk code; the release's rule): counted, not modelled
@@ -382,7 +385,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             in_block = in_block & inside
         sub = tab.filter(pa.array(in_block))
         time_index = (ym[in_block] if grain == "month" else np.full(sub.num_rows, tidx[int(year)], dtype=np.int64))
-        parts.append((np.array([eidx.get(c, -1) for c in cats], dtype=np.int64)[row_code[in_block]],
+        parts.append((code_of[row_code[in_block]],
                       _index_of(places, sub.column("u").to_numpy()),
                       time_index.astype(np.int64),
                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB

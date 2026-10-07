@@ -13,6 +13,7 @@ POPSVS writes 7, whose last digit is the check digit and is removed).
 from __future__ import annotations
 
 import functools
+import os
 import warnings
 from dataclasses import dataclass
 
@@ -1375,6 +1376,34 @@ def link_specs() -> dict:
     return load_links()
 
 
+#: whether a link absent from the store is computed (a national probabilistic linkage: hours per year) or refused;
+#: ``PEGASUS_COMPUTE_LINKS=1`` opts in. Reading stored runs only is the default: a reading never launches one silently
+COMPUTE_LINKS = os.environ.get("PEGASUS_COMPUTE_LINKS", "") == "1"
+
+
+class LinkNotStored(LookupError):
+    """A declared link's run for a year is not in the store, and computing it was not asked for."""
+
+
+def stored_pairs(link: str, year: int) -> pa.Table:
+    """A declared link's national probabilistic pairs for ``year``: the stored run (pegasus_data's link store in
+    PegaSUS's data root), computed only when `COMPUTE_LINKS` allows; else `LinkNotStored`, which a reading reports."""
+    import pegasus_data as pg
+    from pegasus_data.linkage import store as link_store
+    from pegasus_data.linkage.engine import stored_key
+
+    settings = pg.load_settings(root=config.data_root())
+    hit = link_store.load(settings, stored_key(link, "probabilistic", year, "BR"))
+    if hit is not None:
+        return hit[0]
+    if not COMPUTE_LINKS:
+        raise LinkNotStored(f"{link} {year}: no stored run (set PEGASUS_COMPUTE_LINKS=1, or `pegasus-data link "
+                            f"{link} --period {year} --geo BR --method probabilistic`)")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return pg.link(link, period=year, geography="BR", method="probabilistic", root=config.data_root()).pairs
+
+
 def _group_columns(dataset: str, sd) -> list[str]:
     """The columns of a link side's ``group`` roles (pegasus_data's roles), or [] for an ungrouped side."""
     if not sd.group:
@@ -1407,7 +1436,6 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     records the spec groups (the live births of one delivery) pairs one record per group, the smallest identity, as
     pegasus_data's engine chooses it: every member takes its group's partner. A side exploded into days pairs the
     record itself."""
-    import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
@@ -1424,7 +1452,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         return EventCounts(cached, cached_un, key)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        pairs = pg.link(link, period=year, geography="BR", method="probabilistic").pairs
+        pairs = stored_pairs(link, year)
     ids = pairs.column("l" if side == "left" else "r")
     p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
     cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + \
@@ -1460,7 +1488,6 @@ def cohort_records(dataset: str, event: str, year: int, link: str, side: str, co
     """One side of a declared link as persons (`tools.cohort`): its records of ``year`` on the lattice (u, sex, age
     class) with ``columns`` raw-coded and each record's identity (a grouped side's: its group's, as in
     `linked_counts`), and the link's stored pairs."""
-    import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
@@ -1477,5 +1504,5 @@ def cohort_records(dataset: str, event: str, year: int, link: str, side: str, co
             {_rep_sql(group)} AS rid FROM r""").fetch_arrow_table()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        pairs = pg.link(link, period=year, geography="BR", method="probabilistic").pairs
+        pairs = stored_pairs(link, year)
     return t, t.column("rid"), pairs
