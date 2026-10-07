@@ -80,7 +80,7 @@ def sources(dataset: str, served: list[tuple[str, str]]) -> list[Source]:
         link = next(((name, side) for name, s in specs.items()
                      for side, sd, other in (("left", s.left, s.right), ("right", s.right, s.left))
                      if _system(sd.dataset) == _system(ds) and _system(other.dataset) == _system(dataset)
-                     and not (sd.group or sd.explode_days)), None)
+                     and not (sd.group and (sd.where or getattr(sd, "latest", None)))), None)
         out.append(Source("events", ds, ev, col, link))
     from pegasus_data.fields import declared_fields
 

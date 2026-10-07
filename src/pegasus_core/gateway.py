@@ -550,8 +550,9 @@ def _df_key(dataset: str, year: int) -> dict:
 
 
 def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False) -> pa.Table:
-    """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` keeps each
-    record's identity (`_blob_sha256`, `_row`: what pegasus_data's links pair)."""
+    """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` adds each
+    record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`, numbered before any filter):
+    what its links pair."""
     import pegasus_data as pg
     import pyarrow.compute as pc
 
@@ -562,6 +563,10 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
         warnings.simplefilter("ignore")
         table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes",
                          root=config.data_root(), max_download=8 * 1024**3, **({"provenance": "all"} if identity else {}))
+    if identity:
+        from pegasus_data.linkage.identity import record_ids
+
+        table = table.append_column("_rid", record_ids(table))
     if status.get("column") and status.get("values"):
         table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
                                       value_set=pa.array([str(v) for v in status["values"]])))
@@ -1278,25 +1283,48 @@ def link_specs() -> dict:
     return load_links()
 
 
+def _group_columns(dataset: str, sd) -> list[str]:
+    """The columns of a link side's ``group`` roles (pegasus_data's roles), or [] for an ungrouped side."""
+    if not sd.group:
+        return []
+    if getattr(sd, "latest", None) or sd.where:
+        raise NotImplementedError("a grouped side with a filter or a 'latest' order is not read yet")
+    by_role = {r["role"]: r["column"] for r in roles(dataset)}
+    missing = [g for g in sd.group if g not in by_role]
+    if missing:
+        raise LookupError(f"{dataset}: group roles {missing} name no column")
+    return [by_role[g] for g in sd.group]
+
+
+def _rep_sql(group: list[str]) -> str:
+    """A record's identity as its link pairs it: its own, or its group's (the smallest identity of the group, the
+    engine's representative; null keys partition together, as in the engine)."""
+    if not group:
+        return '"_rid"'
+    keys = ", ".join(f'"{c}"' for c in group)
+    return f'min("_rid") OVER (PARTITION BY {keys})'
+
+
 def linked_counts(dataset: str, event: str, year: int, link: str, side: str, classifier: str | None = None,
                   places: pa.Array | None = None) -> EventCounts:
     """The events of one side of a declared link per (u, year, sex, age, code): n, and k the expected number with a
     partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
     national run). The share k/n is an outcome after the event on a cohort's side (births followed by an infant
     death) and a recording measure on the other (deaths that found their birth). A side filtered by its spec (`where`)
-    keeps the event type's denominator: its records outside the filter are unlinked by construction. A grouped side
-    is refused: its pairs name groups, not records."""
+    keeps the event type's denominator: its records outside the filter are unlinked by construction. A side whose
+    records the spec groups (the live births of one delivery) pairs one record per group, the smallest identity, as
+    pegasus_data's engine chooses it: every member takes its group's partner. A side exploded into days pairs the
+    record itself."""
     import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
     if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
-    if sd.group or sd.explode_days:
-        raise NotImplementedError(f"{link} {side}: a grouped side pairs groups, not records; not read yet")
+    group = _group_columns(dataset, sd)
     strata = _strata(dataset)
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
-           "link": link, "side": side, "classifier": classifier, "data": config.data_version(),
+           "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
            **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -1308,7 +1336,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     ids = pairs.column("l" if side == "left" else "r")
     p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
     cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + \
-        ([classifier] if classifier else [])
+        ([classifier] if classifier else []) + group
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
     con.register("r", raw)
@@ -1317,7 +1345,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            CAST("_blob_sha256" AS VARCHAR) || ':' || CAST("_row" AS VARCHAR) AS rid FROM r""")
+            {_rep_sql(group)} AS rid FROM r""")
     reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN code IS NULL OR code = '' THEN 'code' END"""
@@ -1338,24 +1366,23 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 def cohort_records(dataset: str, event: str, year: int, link: str, side: str, columns: list[str]
                    ) -> tuple[pa.Table, pa.Array, pa.Table]:
     """One side of a declared link as persons (`tools.cohort`): its records of ``year`` on the lattice (u, sex, age
-    class) with ``columns`` raw-coded and each record's identity, and the link's stored pairs. A grouped side is
-    refused, as in `linked_counts`."""
+    class) with ``columns`` raw-coded and each record's identity (a grouped side's: its group's, as in
+    `linked_counts`), and the link's stored pairs."""
     import pegasus_data as pg
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
     if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
-    if sd.group or sd.explode_days:
-        raise NotImplementedError(f"{link} {side}: a grouped side pairs groups, not records; not read yet")
+    group = _group_columns(dataset, sd)
     strata = _strata(dataset)
-    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns
+    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns + group
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
     con.register("r", raw)
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
     t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep},
-            CAST("_blob_sha256" AS VARCHAR) || ':' || CAST("_row" AS VARCHAR) AS rid FROM r""").fetch_arrow_table()
+            {_rep_sql(group)} AS rid FROM r""").fetch_arrow_table()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         pairs = pg.link(link, period=year, geography="BR", method="probabilistic").pairs

@@ -1,0 +1,8 @@
+# S1 on births: a count measure (previous pregnancies), a positive measure (birth weight) and an interval (birth to
+# registration), all from pegasus_data's declarations
+years: 2010-2023
+systems:
+  - {dataset: SINASC-DN, event: birth, blocks: ['*'], measures: [QTDGESTANT, PESO], intervals: [interval:DTCADASTRO]}
+relations: false
+triage: true
+report: reports/s1_sinasc_fields.md

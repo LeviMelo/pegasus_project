@@ -51,17 +51,19 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
              "area × period", "rate ratio", (
                  Method("cell_excess", "two-group model on the PIT scores; supports from the IBGE ladder",
                         kinds=("count", "mark")),
-                 Method("excess", "multiscale graph peaks of a gamma tail score; places joined by N1's noise"),
+                 Method("excess", "multiscale graph peaks of a gamma tail score (a location's standardised excess); "
+                                  "places joined by N1's noise", kinds=("count", "mark")),
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
              ), ("spike", "transient")),
     Question("step", "C", "a lasting rise in level from some period to the series' end", "B1",
              "area × window", "rate ratio", (
-                 Method("excess_step", "multiscale graph peaks of suffix sums; N1's correlation over periods"),
+                 Method("excess_step", "multiscale graph peaks of suffix sums; N1's correlation over periods",
+                        kinds=("count", "mark")),
                  Method("step", "Bayesian single change point per place, tempered by N1's correlation"),
                  Method("change_point", "trailing-window NB tails against the place's past course; the v0 lens"),
              ), ("step",)),
     Question("trend", "C", "a course bending upward from some period", "B1", "area × window", "rate ratio", (
-        Method("excess_trend", "multiscale graph peaks of hinge contrasts"),
+        Method("excess_trend", "multiscale graph peaks of hinge contrasts", kinds=("count", "mark")),
     ), ("trend",)),
     # the questions the declared positives also ask (harness.POSITIVES), answered for now by their v0 lenses alone:
     # a question is kept while its departure model (ARCHITECTURE §12, O6: BYM2 exceedance, the group interaction) is
@@ -69,7 +71,7 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
     Question("cluster", "C", "a connected set of places above the expectation over the whole period", "B0", "area",
              "rate ratio", (
                  Method("excess_level", "multiscale graph peaks of the whole period's excess against B0 (no place "
-                                        "effects), STEM; a cluster at its own scale, no zoning"),
+                                        "effects), STEM; a cluster at its own scale, no zoning", kinds=("count", "mark")),
                  Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
              )),
     Question("share", "C", "a field's share of all events departing from its expectation in a place and period: "

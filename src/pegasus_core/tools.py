@@ -317,6 +317,8 @@ class Session:
             mu_total[have] = self._expected_total()[rows[have]]
             return departures.share_excess(s.y, total, s.mu, mu_total, s.places, s.years, s.field.id, self.ledger, **kw)
         s = self.surprise(node, tier, train_last)
+        if "rate_ratio" not in kw and (rr := surprise.location_rate_ratio(s)) is not None:
+            kw["rate_ratio"] = rr                     # a location's relevance is on its own scale, not the counts'
         if lens in ("cell_excess", "step") and "scales" not in kw:
             kw["scales"] = self.scales()              # the departure models run over the ladder of supports
         if lens == "cell_excess":                     # a departure model (stage C, O6)

@@ -220,13 +220,12 @@ def series(s: surprise.Surprise, weights: np.ndarray) -> tuple[np.ndarray, np.nd
     w = np.where(ok.all(1), np.asarray(weights, dtype=float), 0.0)
     nz = np.flatnonzero(np.abs(w) > 1e-12 * max(np.abs(w).max(), 1e-300))
     w, y, mu = w[nz], s.y[nz], s.mu[nz]
-    phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[nz]
     T = y.shape[1]
-    cov = np.diag((w ** 2) @ surprise.cell_variance(mu, phi, s.noise))
+    cov = np.diag((w ** 2) @ surprise.field_cell_variance(s)[nz])
     for lag in range(1, T):
         if abs(s.noise.corr(lag)) < 1e-4:
             break
-        c = (w ** 2) @ surprise.lag_covariance(mu, phi, s.noise, lag)
+        c = (w ** 2) @ surprise.field_lag_covariance(s, lag)[nz]
         cov[np.arange(T - lag), np.arange(lag, T)] = c
         cov[np.arange(lag, T), np.arange(T - lag)] = c
     return w @ y, w @ mu, cov

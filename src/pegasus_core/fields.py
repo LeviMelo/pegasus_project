@@ -409,7 +409,7 @@ def declared_links(dataset: str, event: str) -> list[Declared]:
     """The person-level fields of ``dataset`` (S2): for every declared link (pegasus_data `links.yml`) with a side
     on this dataset, the share of that side's events linked to the other side's (`gateway.linked_counts`): an outcome
     after the event on a cohort's side, a recording measure on the other. ``column`` names the field
-    ``link:<spec>:<side>``; a grouped side carries the reason it is not read yet."""
+    ``link:<spec>:<side>``; a grouped side with a filter carries the reason it is not read yet."""
     from . import gateway
 
     out = []
@@ -417,7 +417,8 @@ def declared_links(dataset: str, event: str) -> list[Declared]:
         for side, sd, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
             if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
                 continue
-            reason = "a grouped side pairs groups, not records; not read yet" if (sd.group or sd.explode_days) else ""
+            reason = ("a grouped side with a filter or a 'latest' order is not read yet"
+                      if sd.group and (sd.where or getattr(sd, "latest", None)) else "")
             out.append(Declared(dataset, f"link:{name}:{side}", f"linked.{other.dataset}",
                                 f"{dataset} events linked to {other.dataset} ({name})", "linked", reason=reason))
     return out

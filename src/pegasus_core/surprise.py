@@ -511,7 +511,7 @@ def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np
         ref, _ = m.expected(leaves, spatial=True)
         shift = (np.nansum(n * ref, 0) - np.nansum(n * mu, 0)) / np.maximum(n.sum(0), 1e-300)
         mu = mu + shift[None, :]
-    extras: dict = {"kind": "mark", "events": n}
+    extras: dict = {"kind": "mark", "events": n, "unit_sd": unit_sd(m)}
     w = np.where(has, 1.0 / np.where(has, var, 1.0), 0.0)
     if tier == "B2":
         s = (m.data.years - m.data.years.mean()) / max(m.data.years.std(), 1e-9)
@@ -519,6 +519,24 @@ def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np
         b, sd, tau = ridge_place(np.where(has, y - mu, 0.0), w, X)
         mu = mu + b @ X.T
         extras.update({"alpha": b[:, 0], "beta": b[:, 1], "alpha_sd": sd[:, 0], "beta_sd": sd[:, 1], "tau": tau})
+    if getattr(m, "family", "") == "count":
+        # a count-valued mark: its place-year sum S has the family's predictive, NB with mean Σnμ and the fitted
+        # variance, so the surprise is the randomised PIT of S (finite where S = 0, which a log mean is not). y keeps
+        # the log-mean scale the contrasts read, an all-zero place-year at log(½ / n) (the half-count convention)
+        s_exp = n * np.exp(np.where(has, mu, 0.0))
+        v_exp = var * s_exp ** 2
+        s_obs = np.rint(np.where(has & np.isfinite(y), n * np.exp(np.where(np.isfinite(y), y, 0.0)), 0.0))
+        size = np.where(v_exp > s_exp * (1 + 1e-9), s_exp ** 2 / np.maximum(v_exp - s_exp, 1e-300), np.inf)
+        u, z = randomised_pit(s_obs, np.maximum(s_exp, 1e-300), size, config.seed(f.id, tier, "count"))
+        u, z = np.where(has, u, 0.5), np.where(has, z, 0.0)
+        y = np.where(has & ~np.isfinite(y), np.log(0.5 / np.maximum(n, 1)), y)
+        cal = calibration(u, has.astype(float), macro)
+        cal["variance_source"], cal["extra_variance"] = "model", 0.0
+        flags = np.where(has, 0, NO_INFORMATION).astype(np.int8) | (0 if cal["calibrated"] else CALIBRATION)
+        w = np.where(has, 1.0 / np.where(has, var, 1.0), 0.0)
+        return Surprise(f, tier, m.data.places, m.data.years, np.where(has, y, np.nan), np.where(has, mu, np.nan),
+                        np.full(y.shape, np.nan), u, z, w, flags.astype(np.int8), cal, extras,
+                        noise=gaussian_noise(z, has))
     extra_var = 0.0
     for source in ("model", "field"):
         sdv = np.sqrt(np.where(has, var + extra_var, 1.0))
@@ -536,7 +554,82 @@ def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np
         flags |= CALIBRATION
     w = np.where(has, 1.0 / np.where(has, var + extra_var, 1.0), 0.0)
     return Surprise(f, tier, m.data.places, m.data.years, np.where(has, y, np.nan), np.where(has, mu, np.nan),
-                    np.full(y.shape, np.nan), u, z, w, flags, cal, extras)
+                    np.full(y.shape, np.nan), u, z, w, flags, cal, extras, noise=gaussian_noise(z, has))
+
+
+#: a location's minimum relevant effect, in units of its events' own spread on the field's scale (a standardised mean
+#: difference; Cohen's "small" is 0.2): the counts' rate ratio (`lenses.RATE_RATIO`) has no meaning for a mean weight
+LOCATION_EFFECT = 0.1
+
+
+def unit_sd(m) -> float:
+    """The spread of one event's value on a mark field's y scale, from the fit's cells: the pooled within-cell SD of
+    log m (a log-normal measure), the coefficient of variation (a count measure: d log mean = d mean / mean), or
+    1/√(p(1 − p)) (a share on the logit: one event's Bernoulli SD there)."""
+    d = m.data
+    n, y, s2 = np.asarray(d.n, float), np.asarray(d.y, float), np.asarray(d.l2, float)
+    fam = getattr(m, "family", "")
+    if fam == "share":
+        p = float(np.sum(y * n) / max(np.sum(n), 1e-300))
+        return float(1.0 / np.sqrt(max(p * (1 - p), 1e-12)))
+    many = n > 1
+    within = float(np.sum((s2 - n * y ** 2)[many]) / max(np.sum(n[many] - 1), 1e-300))
+    if fam == "count":
+        mean = float(np.sum(y * n) / max(np.sum(n), 1e-300))
+        return float(np.sqrt(max(within, 0.0)) / max(mean, 1e-12))
+    return float(np.sqrt(max(within, 0.0)))
+
+
+def location_rate_ratio(s: Surprise) -> float | None:
+    """The minimum relevant effect of a Gaussian location field as a ratio on its y scale (exp of `LOCATION_EFFECT`
+    unit SDs); None for a count field (its lens's own θ0 holds)."""
+    if not gaussian(s) or not s.extras.get("unit_sd"):
+        return None
+    return float(np.exp(LOCATION_EFFECT * s.extras["unit_sd"]))
+
+
+def gaussian_noise(z: np.ndarray, has: np.ndarray) -> Noise:
+    """N1 of a mark field (a Gaussian location per place-period): the lag-1 correlation of its standardised residuals,
+    pooled over every place's consecutive periods with information, as an AR(1)."""
+    a, b = z[:, :-1], z[:, 1:]
+    both = has[:, :-1] & has[:, 1:]
+    den = np.sqrt((a[both] ** 2).sum() * (b[both] ** 2).sum())
+    rho = float(np.clip((a[both] * b[both]).sum() / den, -0.95, 0.95)) if den > 0 else 0.0
+    return Noise(rho=rho)
+
+
+def gaussian(s: Surprise) -> bool:
+    """Whether a field's cells are Gaussian locations (a measure's log mean, a share's logit, a count mark's log
+    mean: `_mark_surprise`) rather than counts."""
+    return s.extras.get("kind") == "mark"
+
+
+def field_cell_variance(s: Surprise) -> np.ndarray:
+    """Var(y) of each cell under the field's predictive: 1/w for a Gaussian location, the count's otherwise."""
+    if gaussian(s):
+        return np.where(s.w > 0, 1.0 / np.where(s.w > 0, s.w, 1.0), 0.0)
+    return cell_variance(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise)
+
+
+def field_lag_covariance(s: Surprise, k: int) -> np.ndarray:
+    """[U, T − k] Cov(y_t, y_{t+k}) under the field's predictive and noise structure."""
+    if gaussian(s):
+        v = field_cell_variance(s)
+        return s.noise.corr(k) * np.sqrt(v[:, :-k] * v[:, k:])
+    return lag_covariance(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise, k)
+
+
+def field_replicate(s: Surprise, noise: Noise, rng: np.random.Generator, root: np.ndarray | None = None) -> np.ndarray:
+    """A replicate field y* [U, T] from the predictive with its noise structure: counts (`replicate_correlated`), or
+    for a Gaussian location μ + √v ε, ε correlated over periods by N1 and over places by its spatial part."""
+    if not gaussian(s):
+        return replicate_correlated(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), noise, rng, root)
+    U, T = s.mu.shape
+    L = np.linalg.cholesky(noise.corr_matrix(T) + 1e-9 * np.eye(T))
+    e = rng.standard_normal((U, T))
+    if root is not None and noise.omega > 0:
+        e = np.sqrt(1 - noise.omega) * e + np.sqrt(noise.omega) * (root @ rng.standard_normal((U, T)))
+    return np.where(s.w > 0, s.mu, 0.0) + np.sqrt(field_cell_variance(s)) * (e @ L.T)
 
 
 def ridge_place(r: np.ndarray, w: np.ndarray, X: np.ndarray, outer: int = 30

@@ -116,13 +116,12 @@ def contrasts(T: int, shape: str, min_past: int = 3, min_years: int = 2) -> tupl
 def contrast_variance(s: surprise.Surprise, C: np.ndarray) -> np.ndarray:
     """[U, m] Var(cᵀ y_u) per place and contrast under the predictive with its noise structure (N1):
     Σ_t c_t² V_t + 2 Σ_k Σ_t c_t c_{t+k} Cov(y_t, y_{t+k})."""
-    phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)
-    out = surprise.cell_variance(s.mu, phi, s.noise) @ (C ** 2)
+    out = surprise.field_cell_variance(s) @ (C ** 2)
     T = C.shape[0]
     for lag in range(1, T):
         if abs(s.noise.corr(lag)) < 1e-4:
             break
-        cov = surprise.lag_covariance(s.mu, phi, s.noise, lag)              # [U, T − lag]
+        cov = surprise.field_lag_covariance(s, lag)                          # [U, T − lag]
         out += 2 * np.einsum("ut,tj->uj", cov, C[:-lag] * C[lag:])
     return out
 
@@ -205,20 +204,23 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     over ``rate_ratio`` times the expectation; the returned dict also holds each scale's calibration."""
     torch, dev = _torch()
     U, T = s.y.shape
-    phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)
+    gauss = surprise.gaussian(s)    # a Gaussian location (a measure, a share): the standardised excess, log effects
     ok = (s.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0
     C, windows = contrasts(T, shape)
     m = C.shape[1]
     Ct = torch.as_tensor(C, dtype=torch.float32, device=dev)
     y0, mu0 = np.where(ok, s.y, 0.0), np.where(ok, s.mu, 0.0)
     D = torch.as_tensor(y0 - mu0, dtype=torch.float32, device=dev) @ Ct                    # [U, m]
-    CM = torch.as_tensor(mu0, dtype=torch.float32, device=dev) @ Ct
+    # the contrast's reference: the expectation's (a count's rate ratio), or the contrast's own weight per place (a
+    # location's mean log difference)
+    CM = torch.as_tensor(np.where(ok, 1.0, 0.0) if gauss else mu0, dtype=torch.float32, device=dev) @ Ct
     W = torch.as_tensor(np.where(ok.all(1, keepdims=True), contrast_variance(s, C), 0.0), dtype=torch.float32,
                         device=dev)                                                         # [U, m]
     rng = np.random.default_rng(seed)
-    noise = surprise.spatial_structure(s, spectrum)                   # N1 with its spatial part, on this graph
+    # N1 with its spatial part, on this graph (a count field's; a location keeps its own temporal N1)
+    noise = s.noise if gauss else surprise.spatial_structure(s, spectrum)
     root = surprise.spatial_root(spectrum, noise.scale) if noise.omega > 0 else None
-    reps = [(np.where(ok, surprise.replicate_correlated(s.mu, phi, noise, rng, root), 0.0) - mu0) @ C
+    reps = [(np.where(ok, surprise.field_replicate(s, noise, rng, root), 0.0) - mu0) @ C
             for _ in range(replicates)]
     Dr = torch.as_tensor(np.concatenate(reps, 1), dtype=torch.float32, device=dev)          # [U, R·m]
     A = (spectrum.neighbours + sp.identity(U)).tocoo()       # a place counts among its own neighbourhood
@@ -229,9 +231,15 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
         K = torch.eye(U, device=dev) if sc == 0 else spectrum.kernel(sc)
         KW = (K * K) @ W
         KM = K @ CM
-        S_all.append(tail_z(K @ D + KM, KM, KW))
-        Sr_all.append(tail_z(K @ Dr + KM.repeat(1, replicates), KM.repeat(1, replicates),
-                             KW.repeat(1, replicates)).reshape(U, replicates, m))
+        if gauss:                    # a location's kernel excess is Gaussian: its standardised value
+            S_all.append(torch.where(KW > 1e-12, (K @ D) / torch_sqrt(KW), torch.zeros_like(KW)))
+            KWr = KW.repeat(1, replicates)
+            Sr_all.append(torch.where(KWr > 1e-12, (K @ Dr) / torch_sqrt(KWr), torch.zeros_like(KWr))
+                          .reshape(U, replicates, m))
+        else:
+            S_all.append(tail_z(K @ D + KM, KM, KW))
+            Sr_all.append(tail_z(K @ Dr + KM.repeat(1, replicates), KM.repeat(1, replicates),
+                                 KW.repeat(1, replicates)).reshape(U, replicates, m))
         places.append(spectrum.footprint(sc))                     # in double precision: far rows underflow in single
         del K, KW
     S_all, Sr_all = torch.stack(S_all), torch.stack(Sr_all)
@@ -288,8 +296,13 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
                 continue
             h = S_all[k][cs, j]
             p = torch.as_tensor(tail_p(null_heights.cpu().numpy(), h.cpu().numpy()), device=dev)
-            rr = KC[cs, j] / torch.clamp(KM[cs, j], min=1e-12)
-            zrel = (KC[cs, j] - rate_ratio * KM[cs, j]) / torch_sqrt(KW[cs, j])
+            if gauss:                # exp of the mean log difference; relevance against log θ0 per unit of contrast
+                kd = KC[cs, j] - KM[cs, j]
+                rr = torch.exp(kd / torch.clamp(KM[cs, j], min=1e-12))
+                zrel = (kd - float(np.log(rate_ratio)) * KM[cs, j]) / torch_sqrt(KW[cs, j])
+            else:
+                rr = KC[cs, j] / torch.clamp(KM[cs, j], min=1e-12)
+                zrel = (KC[cs, j] - rate_ratio * KM[cs, j]) / torch_sqrt(KW[cs, j])
             for c, hh, pp, r, zr in zip(cs.tolist(), h.tolist(), p.tolist(), rr.tolist(), zrel.tolist(), strict=True):
                 found.append(Peak(c, windows[j], sc, places[k], hh, r, zr, pp))
         del K, KW, KC, KM

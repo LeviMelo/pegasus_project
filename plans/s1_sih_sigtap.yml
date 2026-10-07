@@ -1,0 +1,7 @@
+# S1: SIH-RD's admissions by their procedure (SIGTAP), the declared alternative classifier, on its own tree
+years: 2010-2023
+systems:
+  - {dataset: SIH-RD, event: hospitalisation, blocks: [X], levels: [group], classifiers: [PROC_REA]}
+relations: false
+triage: true
+report: reports/s1_sih_sigtap.md
