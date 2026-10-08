@@ -565,7 +565,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | all 19 SIM chapters; all 20 SIH chapters | hours | 10 min; 30 min |
 | survey of one chapter | 65 s (III, 21 fields) to hours; one SIH X field's seven questions 923 s; eight in 191–231 s after S0.2 and S0.7 (evaluation 2026-10-07, question pass) | < 2 min |
 
-**The targets are properties the code must have** (§1.2). A target missed is a defect of the code or its orchestration, found by profiling and fixed by structure or by computing an object once; it never bounds what a reading computes.
+**The targets above were set by hand on 2026-10-06 (the speed review) and are withdrawn** (work plan S0.8, 2026-10-08): no experiment or requirement gave them. Speed is a property the code must have (§1.2), measured as throughput (seconds a field-question, a million cells) on every change and as one number derived from the objective, the time of an exhaustive survey of a system on this machine; a slow path is a defect of the code or its orchestration, found by profiling and fixed by structure or by computing an object once; it never bounds what a reading computes. The table stays as the measurements' record.
 
 **The optimum is the acceptance criterion.** v1 must reach the v0's optimum on the same data: objective within one log-likelihood unit, τ's within the convergence tolerance, the same calibration.
 

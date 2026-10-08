@@ -1158,6 +1158,13 @@ def event_types(dataset: str) -> list[dict]:
     return list(pg.event_types(dataset))
 
 
+def event_datasets() -> list[str]:
+    """Every dataset pegasus_data declares event types for: what a survey of the whole store runs over."""
+    from pegasus_data.semantics.event_types import load_event_types
+
+    return sorted(load_event_types())
+
+
 def code_structure(name: str) -> pa.Table:
     """A code structure as served by pegasus_data (a tree's parent table or a list's memberships)."""
     import pegasus_data as pg

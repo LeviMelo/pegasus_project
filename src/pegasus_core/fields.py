@@ -336,6 +336,14 @@ def declared(dataset: str) -> list[Declared]:
         elif r["kind"] == "date":
             out.append(Declared(**{**base, "column": f"interval:{r['column']}"}, kind="interval",
                                 reason="the event's own date" if r["column"] == anchor else ""))
+        elif r["kind"] == "place":
+            # read by `declared_flows` when its code system nests in the residence's; otherwise the reason is the
+            # declaration's, not a missing reader
+            cl = (r.get("codelists") or [None])[0]
+            out.append(Declared(**base, kind="", reason=(
+                "a place with no code system declared" if cl is None else
+                f"a place in {cl}, a code system that does not nest in the residence's" if cl not in gateway.PLACE_PREFIX
+                else "a place finer than the residence, or a residence with no code system")))
         else:
             out.append(Declared(**base, kind="", reason=f"kind {r['kind']} not yet read"))
     return out
@@ -600,4 +608,25 @@ def coverage(dataset: str, event: str) -> list[dict]:
         }.get(model, f"{model} role of kind {r['kind']}: no field kind reads it yet")
         out.append({"column": col, "role": r["role"], "kind": r["kind"], "model": model, "read_by": what,
                     "reason": reason})
+    return out
+
+
+def coverage_summary() -> list[dict]:
+    """`coverage` over every dataset pegasus_data declares event types for (its first event type): the columns, how
+    many are read, and the reasons the rest are not, grouped by their first clause. A dataset whose coverage does not
+    run says why (no roles declared)."""
+    from collections import Counter
+
+    from . import gateway
+
+    out = []
+    for dataset in gateway.event_datasets():
+        try:
+            rows = coverage(dataset, gateway.event_types(dataset)[0]["name"])
+        except (KeyError, ValueError, LookupError) as exc:     # no roles, or no strata declared: said, not skipped
+            out.append({"dataset": dataset, "columns": 0, "read": 0, "reasons": {}, "error": str(exc)[:120]})
+            continue
+        why = Counter(r["reason"].split(":")[0].split(" (")[0][:60] for r in rows if not r["read_by"])
+        out.append({"dataset": dataset, "columns": len(rows), "read": sum(bool(r["read_by"]) for r in rows),
+                    "reasons": dict(why.most_common())})
     return out

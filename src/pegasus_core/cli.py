@@ -56,11 +56,32 @@ def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: 
 
 
 @app.command()
-def coverage(dataset: str, event: str, gaps: bool = typer.Option(False, help="only the columns read by nothing")) -> None:
-    """Every column pegasus_data declares for a dataset and what reads it, or why nothing does (`fields.coverage`)."""
-    from . import fields as fields_mod
+def coverage(dataset: str = typer.Argument(None, help="a dataset; none: every dataset, summarised"),
+             event: str = typer.Argument(None, help="its event type (default: the first declared)"),
+             gaps: bool = typer.Option(False, help="only the columns read by nothing")) -> None:
+    """Every column pegasus_data declares for a dataset and what reads it, or why nothing does (`fields.coverage`);
+    without a dataset, the same over every dataset with event types (`fields.coverage_summary`)."""
+    from collections import Counter
 
-    rows = fields_mod.coverage(dataset, event)
+    from . import fields as fields_mod
+    from . import gateway
+
+    if dataset is None:
+        rows = fields_mod.coverage_summary()
+        t = Table("dataset", "columns", "read", "not read, by reason")
+        total: Counter = Counter()
+        for r in rows:
+            total.update(r["reasons"])
+            t.add_row(r["dataset"], str(r["columns"]), str(r["read"]),
+                      r.get("error") or "; ".join(f"{n} {k}" for k, n in list(r["reasons"].items())[:3]))
+        console.print(t)
+        ran = [r for r in rows if "error" not in r]
+        console.print(f"{len(ran)} of {len(rows)} datasets: {sum(r['read'] for r in ran)} of "
+                      f"{sum(r['columns'] for r in ran)} columns read")
+        for k, n in total.most_common(8):
+            console.print(f"  {n:5d}  {k}")
+        return
+    rows = fields_mod.coverage(dataset, event or gateway.event_types(dataset)[0]["name"])
     t = Table("column", "model", "kind", "read by", "reason")
     for r in rows:
         if gaps and r["read_by"]:
