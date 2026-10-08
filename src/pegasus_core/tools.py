@@ -574,8 +574,12 @@ class Session:
         Each verdict carries the rules' version (`explain.rules()`). ``stale`` re-triages only the leads whose verdict
         was made by other rules (or none); a lead a superseded rule had explained is open again unless the new verdict
         explains it, and the old verdict is kept beside the new one."""
+        # a lead is triaged by the session of its own reader: a measure's or a linked share's answers were read
+        # against the count field's evidence of the same node
+        own = json.dumps(self.source, sort_keys=True, default=list)
         mine = [x for x in (register if register is not None else self.register.current())
-                if x.fields and x.fields[0].startswith(f"{self.dataset}:") and x.status != "retired"]
+                if x.fields and x.fields[0].startswith(f"{self.dataset}:") and x.status != "retired"
+                and json.dumps(x.provenance.get("source") or {}, sort_keys=True, default=list) == own]
         if stale:
             mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.rules()]
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier

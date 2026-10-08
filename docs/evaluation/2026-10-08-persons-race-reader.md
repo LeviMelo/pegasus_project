@@ -113,3 +113,13 @@ The dossier's top 40 under the reading order:
 - The capacity and single-institution verdicts rest on stage E's reading, stated in each note; only the six place signals and the first eight were read against records.
 - Every verdict carries its evidence. S5.1's condition, a dossier whose top leads have verdicts, is met.
 - A re-triage that loaded the register at 09:25 wrote back, at 09:34, the verdict a person had changed at 09:25:57 (Piên's correction). The register now keeps a lead's newest verdict on record whatever state is written (`Register.add`), and reads one lead without parsing the rest: 8 s → 0.6 s.
+
+**The first outcome-after-event field** (`plans/s2_infant_cohorts.yml`, 2010–2022; births followed by an infant death, every birth year read through the runs of that year and the next; `data/probes/s2_1/`).
+- The plan computed its missing runs (2010 and 2011, 29,072 and 29,782 pairs) after a third pegasus_data fix (86aa7e4: a padded side's years are read one by one, SINASC 2009 lacking columns 2010 has). It fitted the births' block and the field, and asked its questions: 208 answers on the births' counts, 23 on the field.
+- All 23 field answers are deficits (0.07–0.14 of expectation):
+  - 20 are linkage holes: SIM recorded 79 deaths at age 0 at those places and years, and the link found 1.
+  - 3 are places that recorded no infant death that year.
+  - None is an excess. The field reads the link's completeness as much as mortality (OPEN_QUESTIONS 11).
+- The field shared its id with the births' count field (`SINASC-DN:birth:*:*`). A field's id now names its reader, `dataset:event:classifier[reader]:node`.
+- Triage reads only leads of its session's reader. SIH's 646 length-of-stay answers had been triaged on the count field's evidence, 47 of them *explained* by it. They are open and untriaged again: a measure's triage (`marks.triage_lead`) is not wired.
+

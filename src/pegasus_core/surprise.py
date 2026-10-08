@@ -190,7 +190,14 @@ class Expectations:
         return self._posteriors[key]
 
     def field(self, node: str) -> fields.Field:
-        return self.registry.field(node)
+        """The field of ``node`` under this reader: its id names the reader (`fields.reader_tag`) in the classifier's
+        place, dataset:event:classifier[reader]:node, so a measure, a share or a linked share of a node is not its count."""
+        f = self.registry.field(node)
+        tag = fields.reader_tag(self.source)
+        if not tag:
+            return f
+        ds, ev, cls, nd = f.id.split(":", 3)
+        return dataclasses.replace(f, id=f"{ds}:{ev}:{cls}[{tag}]:{nd}")
 
     def prospective(self, node: str | fields.Field, train_last: int, history: str = "auto",
                     course: bool | None = None, purpose: str = "expectation") -> Surprise:

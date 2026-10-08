@@ -45,6 +45,14 @@ class Field:
     signature: dict = field(default_factory=dict, hash=False, compare=False)  # {column: [prefixes]}
 
 
+def reader_tag(source: dict | None) -> str:
+    """A field's reader as part of its id: the reader's arguments in canonical order, without the classifier and
+    structure the id already names ("" for the counts). The births' count field and the share of births followed by an
+    infant death had one id (SINASC-DN:birth:*:*), and triage read the second with the first's evidence (2026-10-08)."""
+    items = sorted((k, v) for k, v in (source or {}).items() if k not in ("classifier", "structure", "column"))
+    return ",".join(f"{k}={v}" for k, v in items).replace(":", ";")
+
+
 class Registry:
     """The fields of one event type's classifier tree, with the tree's relations."""
 
