@@ -32,7 +32,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import scipy.sparse as sp
 import torch
-from scipy import optimize, special
+from scipy import optimize, special, stats
 
 from . import config, control, gateway, store, structures
 
@@ -1735,8 +1735,6 @@ class Monolith:
 
         from scipy import stats as st
 
-        from .surprise import place_year_phi
-
         d = self.data
         E, (U, T) = len(d.leaves), d.N.shape[:2]
         obs = np.zeros((E, U, T))
@@ -2351,6 +2349,108 @@ def model_class(source: dict | None) -> type[Monolith]:
     kind = (source or {}).get("source", "events")
     return {"mark": MarkModel, "count": CountModel, "share": ShareModel, "linked": ShareModel,
             "away": ShareModel}.get(kind, Monolith)
+
+
+# ---------------------------------------------------------------------- dispersion (§5.2)
+
+
+MIN_DISPERSION_CELLS = 200
+
+
+def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray, trim: float = 0.005,
+                   rounds: int = 3) -> float | np.ndarray:
+    """The field's place-year variance component, by maximum likelihood on its aggregate cells:
+    Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
+    within a place-year share variation the expectation does not model; summing them adds it
+    coherently, which the independent-cell φ_cells misses (a U-shaped PIT, chapter IX B1).
+
+    With no ``levels`` one value for the field. With grouping labels per place, coarse to fine
+    (macro-region, then state), the component varies by group: each group's log(1/φ_extra) is
+    estimated by maximum likelihood on its own cells, then shrunk toward its parent's value by
+    the between-group variance τ² the groups themselves show (a random-effects moment estimate
+    on the observed information, so a group with little information keeps its parent's value).
+    Returns φ_extra per place.
+
+    **Robust to the departures it must not absorb** (trimmed likelihood: Neykov, Filzmoser, Dimova & Neytchev
+    2007): the cells beyond the predictive's ``trim`` and 1 − ``trim`` quantiles are left out and every kept
+    cell's likelihood is divided by its probability of lying between those bounds, so the estimate stays consistent
+    with no departure present; the bounds start from the block's dispersion (``phi_cells``, which the field's own
+    departures did not inflate) and are recomputed over ``rounds``. Fitted on every cell, the yellow-fever outbreak of
+    2017-18 (SIM A95: 195 and 257 deaths against 0-8 in other years) set φ ≈ 0.14, under which 180 deaths against
+    16 expected in the four states were no surprise and every stage-C method but two missed it (2026-10-07)."""
+    ok = mu > 1e-9
+    inv_c = np.where(np.isfinite(phi_cells), 1.0 / phi_cells, 0.0)
+    lo, hi = -np.log(1e7), -np.log(1e-2)         # bounds of log κ, κ = 1/φ_extra
+
+    def bounds(k_cells: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """The integer predictive quantiles at trim and 1 − trim per cell, with 1/φ = 1/φ_cells + k."""
+        phi = 1.0 / np.maximum(inv_c + k_cells, 1e-12)
+        p = phi / (phi + np.maximum(mu, 1e-12))
+        return stats.nbinom.ppf(trim, phi, p), stats.nbinom.ppf(1 - trim, phi, p)
+
+    k_ref = np.zeros(mu.shape)
+    a_b = bounds(k_ref)
+    keep = ok & (y >= a_b[0]) & (y <= a_b[1])
+
+    def fit(sel: np.ndarray) -> tuple[float, float]:
+        sel = sel & keep
+        yy, mm, ic = y[sel], mu[sel], inv_c[sel]
+        aa, bb = a_b[0][sel], a_b[1][sel]
+        pos = yy > 0           # a zero count adds only φ log(φ/(φ+μ)): the gamma terms are needed where y > 0 (sparse fields: few)
+        yp, mp, ip = yy[pos], mm[pos], ic[pos]
+
+        def nll(log_k: float) -> float:
+            k = np.exp(log_k)
+            phi = 1.0 / (ic + k)
+            phi_p = 1.0 / (ip + k)
+            pr = phi / (phi + mm)
+            mass = stats.nbinom.cdf(bb, phi, pr) - stats.nbinom.cdf(aa - 1, phi, pr)      # the truncation
+            return -float(np.sum(phi * np.log(phi / (phi + mm)))
+                          + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp)))
+                          - np.sum(np.log(np.maximum(mass, 1e-300))))
+
+        res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
+        h = 0.25
+        info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2     # observed information in log κ
+        return float(res.x), max(info, 1e-9)
+
+    def to_phi(log_k):
+        return np.where(np.asarray(log_k) < lo + 0.01, np.inf, np.exp(-np.asarray(log_k)))
+
+    for _ in range(rounds):
+        top, _ = fit(ok)
+        cur = np.full(mu.shape[0], top) if not levels else _shrink_levels(fit, ok, top, levels, mu.shape[0])
+        k_ref = np.broadcast_to(np.exp(cur)[:, None], mu.shape)
+        a_b = bounds(k_ref)
+        keep = ok & (y >= a_b[0]) & (y <= a_b[1])
+    return float(to_phi(cur[0])) if not levels else to_phi(cur)
+
+
+def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np.ndarray:
+    """`place_year_phi`'s per-group estimates, coarse to fine, each shrunk toward its parent by the between-group τ²."""
+    cur = np.full(U, top)
+    for lab in levels:
+        new = cur.copy()
+        found = []
+        for g in np.unique(lab):
+            rows = lab == g
+            sel = ok & rows[:, None]
+            if sel.sum() >= MIN_DISPERSION_CELLS:
+                est, info = fit(sel)
+                found.append((rows, est - cur[rows][0], 1.0 / info))
+        if found:
+            d = np.array([f[1] for f in found])
+            v = np.array([f[2] for f in found])
+            w = 1.0 / v
+            tau2 = max(0.0, (float(np.sum(w * d ** 2)) - len(d)) / float(np.sum(w)))      # E Σ w d² = τ² Σ w + n
+            for rows, dg, vg in found:
+                new[rows] = cur[rows][0] + dg * tau2 / (tau2 + vg)
+        cur = new
+    return cur
+
+
+# ---------------------------------------------------------------------- N1: the predictive's noise structure
+
 
 
 # ---------------------------------------------------------------------- model choice

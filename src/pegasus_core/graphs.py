@@ -33,7 +33,7 @@ def edges(places: np.ndarray, kind: str = DEFAULT) -> np.ndarray:
 def graph(places: np.ndarray, kind: str = DEFAULT) -> tuple[np.ndarray, np.ndarray]:
     """(edges [m, 2] with i < j, weights [m]) of a named graph over ``places``."""
     key = {"what": "graph", "kind": kind, "places": int(len(places)), "first": int(places[0]),
-           "last": int(places[-1]), "sum": int(np.sum(places)), "v": 3,
+           "last": int(places[-1]), "sum": int(np.sum(places)), "code": config.code_key(graph),
            **({} if kind.startswith("knn") else {"resource": config.resource_version("proximity.parquet")})}
     cached = store.get_arrays("graphs", key)
     if cached is not None:

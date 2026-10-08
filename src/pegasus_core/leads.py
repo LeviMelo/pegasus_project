@@ -114,7 +114,9 @@ class Register:
         for r in sorted(rows, key=lambda r: r["at"]):
             latest[r["id"]] = r
         out = [Lead(**_body(json.loads(r["body"]))) for r in latest.values()]
-        return sorted(out, key=lambda x: (uncalibrated(x), -x.rank))      # leads of an uncalibrated method after the others
+        # leads of an uncalibrated method after the others, and those a person judged an artefact after them
+        return sorted(out, key=lambda x: (uncalibrated(x),
+                                          (x.robustness.get("verdict") or {}).get("verdict") == "artefact", -x.rank))
 
     def get(self, lead_id: str) -> Lead:
         for x in self.current():
@@ -158,10 +160,6 @@ def _json(x: Any) -> Any:
         return x.tolist()
     return str(x)
 
-
-def admit(findings: list[Any], rejected: np.ndarray, qvalues: np.ndarray, make) -> list[Lead]:
-    """Leads from the findings that error control rejected; ``make(finding, q)`` builds the Lead."""
-    return [make(f, float(q)) for f, keep, q in zip(findings, rejected, qvalues, strict=True) if keep]
 
 
 @dataclass

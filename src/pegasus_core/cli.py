@@ -430,14 +430,19 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 def dependency_map(years: str = typer.Option("2015-2019", help="first-last year of the health fields"),
                    negatives: int = typer.Option(0, help="worlds of Moran-randomised surrogates for the false-edge rate"),
                    health_only: bool = typer.Option(False, help="negatives keep the real context fields"),
+                   plan: str = typer.Option("plans/default.yml", help="the plan whose systems and contexts are mapped"),
                    top: int = 20) -> None:
-    """Dependency map (§7.6): SIM and SIH chapters, SINASC indicators and context fields, every testable pair in
-    two layers (marginal E_b, conditional on the contexts), controlled over the whole map."""
+    """Dependency map (§7.6): the plan's systems' fields and its context fields, every testable pair in two layers
+    (marginal E_b, conditional on the contexts), controlled over the whole map (`dependency`)."""
     import numpy as np
 
-    from . import tools
+    from . import dependency, harness, update
 
-    r = tools.dependency_map(_years(years), negatives, health_only)
+    loaded = update.Plan.load(plan)
+    r = dependency.dependency_map([(x.dataset, x.event, x.blocks) for x in loaded.systems],
+                                  loaded.extra.get("contexts") or [], _years(years))
+    if negatives:
+        r["summary"]["negatives"] = harness.dependency_negatives(r, negatives, health_only)
     console.print_json(json.dumps(r["summary"], default=float))
     e = r["edges"].to_pylist()
     e = [x for x in e if x["admitted"] or x.get("admitted_c")]

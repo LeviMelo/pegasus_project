@@ -65,7 +65,7 @@ def node_ingredients(case, leaf_names):
     mui, mu2i = m.expected(li, spatial=True)
     yi = m.observed(li)
     ci = laplace.predictive_phi(mui, np.zeros_like(mui), mu2i, m.phi)
-    extra = np.asarray(surprise.place_year_phi(yi, mui, ci, *case.levels))[:, None]
+    extra = np.asarray(monolith.place_year_phi(yi, mui, ci, *case.levels))[:, None]
     return lf, mui, mu2i, yi, extra
 
 

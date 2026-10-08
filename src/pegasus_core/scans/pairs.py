@@ -90,7 +90,7 @@ class MoranBasis:
     def __init__(self, places: np.ndarray, kind: str = BASIS_GRAPH):
         self.kind, self.n = kind, len(places)
         key = {"what": "moran_basis", "kind": kind, "places": self.n, "first": int(places[0]), "last": int(places[-1]),
-               "sum": int(np.sum(places)), "resource": config.resource_version("proximity.parquet"), "v": 1}
+               "sum": int(np.sum(places)), "resource": config.resource_version("proximity.parquet"), "code": config.code_key(MoranBasis)}
         hit = store.get_arrays("graphs", key)
         if hit is None:
             hit = self._decompose(places, kind)

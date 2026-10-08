@@ -12,6 +12,7 @@ by the data and code versions and its inputs in the store. A plan:
          measures: all, compositions: all, intervals: all, links: all, classifiers: all}   # fields from declarations
     corroborators: [[SINAN-DENG, probable_case]]    # served systems read as independent fields, not modelled
     confirm_last: 2019        # stage E's later years: select on the years up to it, test on the years after
+    prospective: 2021         # the prospective questions: the years after it against fits on the years up to it
     relations: true
     triage: true
     report: reports/leads.md
@@ -46,6 +47,11 @@ class System:
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
+#: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
+#: later years (select on the years up to it, test on the years after); the prospective questions' training years
+EXTRA = {"corroborators", "contexts", "confirm_last", "prospective"}
+
+
 @dataclass
 class Plan:
     years: list[int]
@@ -75,6 +81,9 @@ class Plan:
         systems = [System(s["dataset"], s["event"], list(s.get("blocks") or ["*"]), **{k: s.get(k) for k in keys})
                    for s in raw.get("systems") or ()]       # by name: a positional list put every key one place off
         known = {"years", "systems", "questions", "relations", "triage", "report", "graph"}
+        unknown = set(raw) - known - EXTRA
+        if unknown:
+            raise ValueError(f"plan: unknown keys {sorted(unknown)} (known: {sorted(known | EXTRA)})")
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
                    {k: v for k, v in raw.items() if k not in known})
@@ -186,6 +195,13 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     return {"selected": len(selected), "answers standing on the later years": stood}
 
 
+def monolith_class_load(s, block: str, years: list[int]):
+    """The stored fit of ``block`` on ``years`` for session ``s``'s reader (raises LookupError when missing)."""
+    from . import monolith
+
+    return monolith.model_class(s.source).load(s.dataset, s.event, block, years, s.graph, **s.expectations._reader())
+
+
 def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
     """The all-events fit (block ``*``) a count reader's share question reads as its denominator
     (`tools.Session._expected_total`), fitted as a declared step of the plan."""
@@ -281,11 +297,39 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         for node in sys_.disparities or []:
             key = _key("disparity", (tools.disparity,), dataset=sys_.dataset, event=sys_.event, node=node, years=plan.years)
             if force or not _done(key):
+                for k in gateway.RACE:               # each race's fit of the node's block: declared steps of the plan
+                    rs = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source={"race": k})
+                    block = rs.expectations.field(node).block
+                    try:
+                        rs.expectations.model(block)
+                    except LookupError:
+                        fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source={"race": k}, log=log)
+                        out[f"fit {sys_.dataset} {block} race {k}"] = "fitted (disparity)"
                 found = tools.disparity(sys_.dataset, sys_.event, node, plan.years, graph=plan.graph, log=log)
                 _mark(key, {"leads": len(found)})
                 out[f"disparity {sys_.dataset} {node}"] = len(found)
             else:
                 out[f"disparity {sys_.dataset} {node}"] = "done on these versions"
+    t0 = plan.extra.get("prospective")
+    for sys_ in plan.systems if t0 else ():
+        s = sessions[sys_.dataset]
+        blocks = resolved.get(sys_.dataset, sys_.blocks)
+        train = [y for y in plan.years if y <= int(t0)]
+        for block in blocks:                     # the fits on the training years: declared steps of the plan
+            try:
+                monolith_class_load(s, block, train)
+            except LookupError:
+                fit_block(sys_.dataset, sys_.event, block, train, plan.graph, log=log)
+                out[f"fit {sys_.dataset} {block} {train[0]}-{train[-1]}"] = "fitted (prospective)"
+        key = _key("prospective", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
+                   blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years)
+        if force or not _done(key):
+            found = s.survey_questions(blocks, levels=tuple(sys_.levels) if sys_.levels else None, log=log,
+                                       train_last=int(t0))
+            _mark(key, {"answers": len(found)})
+            out[f"prospective {sys_.dataset}"] = len(found)
+        else:
+            out[f"prospective {sys_.dataset}"] = "done on these versions"
     if plan.relations and len(plan.systems) >= 1:
         spec = [(x.dataset, x.event, resolved.get(x.dataset, x.blocks)) for x in plan.systems]   # `all` resolved
         key = _key("relations", (tools.relation_survey,), plan=spec, years=plan.years)

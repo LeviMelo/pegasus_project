@@ -15,7 +15,7 @@ import time
 import numpy as np
 from scipy import special
 
-from pegasus_core import config, laplace, surprise
+from pegasus_core import config, laplace, monolith, surprise
 
 SIM_CHAPTERS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV", "XVI",
                 "XVII", "XVIII", "XX"]
@@ -78,7 +78,7 @@ def evaluate(tier: str) -> dict:
             agg, extra = cells, None
         else:
             surprise.DISPERSION_LEVELS = levels
-            extra = surprise.place_year_phi(y, mu, cells, *surprise._dispersion_levels(m.data.places, macro))
+            extra = monolith.place_year_phi(y, mu, cells, *surprise._dispersion_levels(m.data.places, macro))
             agg = 1.0 / (1.0 / cells + 1.0 / (np.asarray(extra)[:, None] if np.ndim(extra) else extra))
         u, _ = surprise.randomised_pit(y, mu, agg, seed)
         cal = surprise.calibration(u, mu, macro)

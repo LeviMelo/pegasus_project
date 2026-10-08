@@ -118,16 +118,3 @@ def _scaled(Q: sp.csr_matrix, labels: np.ndarray, isolated: np.ndarray | None = 
     return (root @ Q @ root).tocsr()
 
 
-def tree_paths(leaves: list[str], parent: dict[str, str | None], levels: dict[str, str],
-               keep: list[str]) -> dict[str, dict[str, str]]:
-    """For each leaf, its ancestor at each kept level ({leaf: {level: node}})."""
-    out: dict[str, dict[str, str]] = {}
-    for leaf in leaves:
-        path: dict[str, str] = {}
-        node: str | None = leaf
-        while node is not None:
-            if levels.get(node) in keep:
-                path[levels[node]] = node
-            node = parent.get(node)
-        out[leaf] = path
-    return out

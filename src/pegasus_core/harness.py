@@ -57,6 +57,7 @@ class Positive:
     grain: str = "year"
     note: str = ""
     source: tuple = ()              # the field's reader beyond counts (`tools.Session.source`), as sorted items
+    selected_by: tuple = ()         # methods whose findings selected it (a person's confirmed answer): not scored on it
 
     @property
     def question(self) -> str:
@@ -475,16 +476,6 @@ def group_world(y_g: np.ndarray, mu_g: np.ndarray, phi: float, kind: str, i: int
     return np.where(mu_g > 0, _nb_quantile(special.ndtr(z2), mu_g, phi), 0.0)
 
 
-def wilson_upper(k: int, n: int, conf: float = 0.95) -> float:
-    """Upper limit of the Wilson interval for k of n."""
-    if n == 0:
-        return 1.0
-    z = stats.norm.ppf(1 - (1 - conf) / 2)
-    p = k / n
-    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
-    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
-    return float(min(centre + half, 1.0))
-
 
 # ---------------------------------------------------------------------- the designed grid (§10.3, O5)
 
@@ -873,9 +864,21 @@ def _area(spec: str):
     return lambda p: np.isin(np.asarray(p, dtype=np.int64) // div, vals)
 
 
+def dependency_negatives(result: dict, worlds: int, health_only: bool = False) -> dict:
+    """The false-edge rate of a dependency map (`dependency.dependency_map`'s result) on ``worlds`` worlds of
+    Moran-randomised surrogates (``health_only``: the context fields kept real), recorded (kind ``depmap``)."""
+    inp = result["inputs"]
+    neg = map_negatives(inp, result["basis"], result["generator"], worlds, health_only)
+    out = {"worlds": neg["worlds"], "delta_marginal": map_delta(neg, "marginal"),
+           "delta_conditional": map_delta(neg, "conditional")}
+    record("depmap", {"years": inp.meta.get("years"), "worlds": worlds, "health_only": health_only}, out)
+    return out
+
+
 def verdict_positives() -> tuple[Positive, ...]:
     """The answers a person confirmed (`report.record_verdict`) as documented events: the event record then judges
-    the methods on what people confirmed, beside the declarations of the literature."""
+    the methods on what people confirmed, beside the declarations of the literature, except the methods whose
+    findings made the answer (``selected_by``), which found it by construction (P9)."""
     from . import leads
 
     out = []
@@ -890,7 +893,8 @@ def verdict_positives() -> tuple[Positive, ...]:
         out.append(Positive(f"verdict:{ld.id}", ds, ev, ld.fields[0].split(":")[-1], ld.estimand, "B1",
                             "mun:" + ",".join(str(c) for c in ld.locus["places"]), (yrs[0], yrs[-1]),
                             EVENT_CRITERION, note=f"confirmed by {v.get('by')} {v.get('at')}: {v.get('note', '')}",
-                            source=tuple(sorted(src.items()))))
+                            source=tuple(sorted(src.items())),
+                            selected_by=tuple(ld.provenance.get("methods") or ())))
     return tuple(out)
 
 
@@ -939,8 +943,11 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
             continue
         rec["methods"] = {}
         for m in qn.methods:
+            if m.id in p.selected_by:
+                rec["methods"][m.id] = {"selected": True}      # it found the answer that made the positive: not scored
+                continue
             try:
-                found = s.scan(p.node, m.id)
+                found = s.scan(p.node, m.lens or m.id, **dict(m.settings))
             except Exception as exc:  # noqa: BLE001 - one method's failure is its record
                 rec["methods"][m.id] = {"error": f"{type(exc).__name__}: {exc}"}
                 continue
@@ -951,7 +958,7 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
                 if not pl or yrs[0] > p.years[1] or yrs[-1] < p.years[0] or area(pl).mean() < 0.5:
                     continue
                 if "shape" not in f.stats:
-                    f.stats["shape"] = questions._shape(s, p.node, f, "B1")
+                    f.stats["shape"] = questions._shape(s, p.node, f, f.tier)
                 shape = f.stats["shape"].get("shape", "unattributed")
                 if qn.shapes and shape not in qn.shapes and shape != "unattributed":
                     continue
@@ -972,54 +979,3 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
     return out
 
 
-def method_records(q: float = Q) -> dict[str, dict[str, Any]]:
-    """Each method's record from what the harness measured and stored (ARCHITECTURE §10.5), never a hand-written
-    table, and from each measurement's latest run only (a method fixed since an earlier run is not charged with it):
-    per documented positive, the last record's verdict for the method (`event_record`); per field, the last grid that
-    read the method (`grid`): its null worlds and how many held a finding, its false share in planted worlds. A
-    method is ``calibrated`` when its null worlds hold findings no more often than max(q, 1/worlds), None when no null
-    world has read it."""
-    events: dict[tuple, tuple] = {}             # (method, positive) -> (written, found)
-    grids: dict[tuple, tuple] = {}              # (method, field) -> (written, rows)
-    for man in store.manifests("harness"):
-        key = man.get("key") or {}
-        kind = key.get("kind")
-        if kind not in ("event_record", "grid"):
-            continue
-        table = store.get_table("harness", key)
-        if table is None:
-            continue
-        written = man.get("written", "")
-        result = json.loads(table.column("result")[0].as_py())
-        if kind == "event_record":
-            for rec in result.get("records", []):
-                for m, v in (rec.get("methods") or {}).items():
-                    if "found" in v and written >= events.get((m, rec["name"]), ("",))[0]:
-                        events[(m, rec["name"])] = (written, bool(v["found"]))
-        else:
-            by_lens: dict[str, list] = {}
-            for row in result.get("false", []):
-                by_lens.setdefault(row["lens"], []).append(row)
-            for lens, rows in by_lens.items():
-                if written >= grids.get((lens, result.get("field")), ("",))[0]:
-                    grids[(lens, result.get("field"))] = (written, rows)
-    out: dict[str, dict[str, Any]] = {}
-    for (m, _), (_, found) in events.items():
-        r = out.setdefault(m, {})
-        r["events_scored"] = r.get("events_scored", 0) + 1
-        r["events_found"] = r.get("events_found", 0) + found
-    for (m, _), (_, rows) in grids.items():
-        r = out.setdefault(m, {})
-        for row in rows:
-            if row["kind"] == "null":
-                r["null_worlds"] = r.get("null_worlds", 0) + 1
-                r["null_worlds_with_findings"] = r.get("null_worlds_with_findings", 0) + (row["findings"] > 0)
-            elif row["findings"]:
-                r["planted_findings"] = r.get("planted_findings", 0) + row["findings"]
-                r["planted_false"] = r.get("planted_false", 0) + row["false"]
-    for r in out.values():
-        n = r.get("null_worlds", 0)
-        r["calibrated"] = (r["null_worlds_with_findings"] / n <= max(q, 1.0 / n)) if n else None
-        if r.get("planted_findings"):
-            r["false_share"] = round(r["planted_false"] / r["planted_findings"], 3)
-    return out

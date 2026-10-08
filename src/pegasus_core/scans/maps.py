@@ -9,7 +9,7 @@ calibrated δ_E) applied to all the pairs of a field set at once, in two layers:
   context; one only in the conditional layer is suppressed by it.
 
 The conditional layer can also carry a **utilization factor** (``adjust`` = k): the first k principal factors of the
-care-use fields' place effects (admissions, authorisations: `map_inputs.CARE_KINDS`), extracted from the fields of the map itself (so a negative world re-extracts them from its
+care-use fields' place effects (admissions, authorisations: `dependency.CARE_KINDS`), extracted from the fields of the map itself (so a negative world re-extracts them from its
 own surrogates), join Z for every pair that has an SIH member. An SIH chapter is an admission rate per resident, and
 the shared level of a place's hospital use (access, referral, billing) enters all of them; a relation between two
 chapters, or between one and a mortality or birth field, is read net of it (evaluation 2026-10-05, utilization).
@@ -32,11 +32,11 @@ import numpy as np
 import pyarrow as pa
 
 from .. import control, store
+from ..fields import MAX_OVERLAP
 from . import pairs
 
 DELTA_Z = 0.1   # the conditional layer's minimum effect, calibrated on the map's own negatives (evaluation 2026-10-05, dependency map): 0.05 admits false edges
 
-MAX_OVERLAP = 0.05
 
 
 @dataclass
@@ -110,7 +110,7 @@ def exclude_miscalibrated(inp: MapInputs, calibration: dict[str, dict], tier: st
 
 
 def care(inp: MapInputs) -> set[str]:
-    """The groups of the map whose events count care used (`map_inputs.CARE_KINDS`), whose fields share a place's level
+    """The groups of the map whose events count care used (`dependency.CARE_KINDS`), whose fields share a place's level
     of use."""
     return set(inp.meta.get("care", ()))
 

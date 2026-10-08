@@ -18,7 +18,7 @@ import time
 import numpy as np
 import torch
 
-from pegasus_core import config, laplace, surprise
+from pegasus_core import config, laplace, monolith, surprise
 
 mode = sys.argv[1]
 S = int(sys.argv[2]) if len(sys.argv) > 2 else 32
@@ -52,7 +52,7 @@ def ladder(c: dict) -> dict:
     seed = config.seed(c["f"].id, c["tier"], "pit", c["m"].key())
     u, _ = surprise.randomised_pit(y, mu, cells, seed)
     out = {"block_phi": summary(surprise.calibration(u, mu, macro))}
-    extra = surprise.place_year_phi(y, mu, cells)
+    extra = monolith.place_year_phi(y, mu, cells)
     phi_field = 1.0 / (1.0 / cells + 1.0 / extra)
     u, _ = surprise.randomised_pit(y, mu, phi_field, seed)
     out["field_phi"] = summary(surprise.calibration(u, mu, macro))

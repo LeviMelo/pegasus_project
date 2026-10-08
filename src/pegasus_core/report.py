@@ -180,8 +180,9 @@ def dossier(path: str | Path, limit: int = 30, kinds: tuple[str, ...] = ("answer
 
 def record_verdict(lead_id: str, verdict: str, note: str = "", by: str = "person") -> register_mod.Lead:
     """A person's verdict on a lead, written back to the register (§9.1): confirmed (an event in the world, which
-    becomes a documented event for the methods' records, `harness.verdict_positives`), artefact (status explained),
-    or unknown."""
+    becomes a documented event for the methods that did not find it, `harness.verdict_positives`), artefact, or
+    unknown. A verdict annotates the lead and orders it (an artefact after the others, `leads.Register.current`); it
+    never closes it: only a tested explanation does (P14)."""
     import dataclasses
     import time
 
@@ -190,7 +191,6 @@ def record_verdict(lead_id: str, verdict: str, note: str = "", by: str = "person
     reg = register_mod.Register()
     ld = reg.get(lead_id)
     stamp = {"verdict": verdict, "note": note, "by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    new = dataclasses.replace(ld, robustness={**ld.robustness, "verdict": stamp},
-                              status="explained" if verdict == "artefact" else ld.status)
+    new = dataclasses.replace(ld, robustness={**ld.robustness, "verdict": stamp})
     reg.add([new])
     return new

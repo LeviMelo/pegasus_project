@@ -25,16 +25,6 @@ from . import config, gateway, store
 CODE_CHARS = 3     # the classifier's category level; subcodes are not kept (a 4-character coding habit is seen at 3)
 
 
-def facility_column(dataset: str) -> tuple[str, str | None]:
-    """(facility column, the facility's own municipality column or None) from pegasus_data's roles."""
-    roles = gateway.roles(dataset)
-    fac = [r for r in roles if r.get("model") == "institution" and r.get("property") == "facility"]
-    if not fac:
-        raise LookupError(f"{dataset}: no facility among its institution roles")
-    where = [r for r in roles if r.get("model") == "where" and r.get("property") in ("facility_municipality", "municipality")]
-    return fac[0]["column"], where[0]["column"] if where else None
-
-
 def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     """Events of one year by (u residence, facility, code3). ``facility`` is the CNES code as text, '' when the
     record names none; ``fm`` the facility's municipality as the data gives it ('' if the dataset has none)."""
@@ -43,9 +33,9 @@ def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
     if classifier is None:
         raise LookupError(f"{dataset}/{event}: no primary classifier, no facility cube")
-    fcol, mcol = facility_column(dataset)
+    fcol, mcol = gateway.facility_column(dataset)
     key = {"what": "facility_cube", "dataset": dataset, "event": event, "year": year, "classifier": classifier,
-           "facility": fcol, "data": config.data_version(), "v": 1, **gateway._df_key(dataset, year)}
+           "facility": fcol, "data": config.data_version(), "code": config.code_key(facility_cube), **gateway._df_key(dataset, year)}
     hit = store.get_table("gateway", key)
     if hit is not None:
         return hit

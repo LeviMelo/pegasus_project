@@ -19,7 +19,7 @@ import numpy as np
 import pyarrow as pa
 from scipy import optimize, special, stats
 
-from . import config, facility, fields, gateway, laplace, monolith, prospective, store
+from . import config, facility, fields, gateway, laplace, monolith, store
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP", "BPA")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True, "BPA": True}
@@ -45,7 +45,6 @@ KS_REGION_TOLERANCE = 0.05
 # (ARCHITECTURE §5.2): each level's estimate is shrunk to its parent's, by the between-group
 # variance the data themselves show. () is one value per field.
 DISPERSION_LEVELS: tuple[str, ...] = ("macro", "state")
-MIN_DISPERSION_CELLS = 200
 
 
 @dataclass(frozen=True)
@@ -206,7 +205,7 @@ class Expectations:
         212,821 expected at B1, evaluation 2026-10-04). Calibration is recorded, never flagged:
         departing from the past is what this tier exists to show.
 
-        The predictive of a cell is a mixture of NBs over the history's regimes (`prospective.py`): the
+        The predictive of a cell is a mixture of NBs over the history's regimes (`mixture_pit`): the
         expectation of each member carries the place's own damped course (``course``: None, the annual
         grain), the block's φ and the training fit's own place-year component φ_extra, with the Laplace
         draws' and the exposure's variance when present."""
@@ -233,12 +232,12 @@ class Expectations:
         leaves = np.array([tm.data.leaves.index(c) for c in names])
         li = np.array([model.data.leaves.index(c) for c in names])
         macro = self.macroregions(tm.data.places)
-        extra = prospective.insample_extra(model, li, _dispersion_levels(tm.data.places, macro),
+        extra = insample_extra(model, li, _dispersion_levels(tm.data.places, macro),
                                            self._exposure(model, li, True))
         T = tm.N.shape[1]
         shift, cvar = (0.0, 0.0)
         if (model.data.grain != "month") if course is None else course:
-            shift, cvar = prospective.course(model, li, T)
+            shift, cvar = place_course(model, li, T)
         mu_point, _ = tm.expected(leaves, spatial=True, x=x_point)
         rel = np.expm1(cvar) + 0.0 * mu_point                      # relative Var(mu), added to each member's 1/φ
         if self.laplace:
@@ -256,7 +255,7 @@ class Expectations:
             comps.append((w, mu, 1.0 / (1.0 / cells + 1.0 / extra)))
             mean = mean + w * mu
         y = tm.observed(leaves)
-        u, z, phi = prospective.mixture_pit(y, comps, config.seed(f.id, "BP", "pit", tm.key()))
+        u, z, phi = mixture_pit(y, comps, config.seed(f.id, "BP", "pit", tm.key()))
         cal = calibration(u, mean, macro)
         cal.update({"phi_source": "training fit", "regimes": len(comps), "phi": float(np.median(extra)),
                     "purpose": purpose, "history": regime})
@@ -470,7 +469,7 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
     pop = m.data.N.sum(axis=2)
     seed = config.seed(f.id, tier, "pit", m.key())
     cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
-    extra = place_year_phi(y, mu, cells, *_dispersion_levels(m.data.places, macro))
+    extra = monolith.place_year_phi(y, mu, cells, *_dispersion_levels(m.data.places, macro))
     extra_cells = np.asarray(extra)[:, None] if np.ndim(extra) else extra
     attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra_cells))]
     for source, phi, phi_agg in attempts:
@@ -688,7 +687,7 @@ def _dispersion_levels(places: np.ndarray, macro: np.ndarray) -> list[np.ndarray
 def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Surprise:
     """A Surprise at a coarser scale (`scans.scales.Scale`: immediate region, state): Σy and Σμ per unit and period,
     the dispersion of a sum of independent cells (M² / Σ μ²/φ), with an optional unit-period variance component
-    1/φ_extra on top (`place_year_phi` on the training years), then a fresh randomised PIT. A rare outcome is tested
+    1/φ_extra on top (`monolith.place_year_phi` on the training years), then a fresh randomised PIT. A rare outcome is tested
     here: at the municipality its cells are mostly zero and their surprises noise (dengue → microcephaly)."""
     y, mu = scale.sum(s.y), scale.sum(s.mu)
     v = scale.sum(np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
@@ -702,102 +701,6 @@ def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Sur
     units = units.astype(np.int64) if all(str(k).isdigit() for k in units) else units   # IBGE codes stay integers
     return Surprise(s.field, s.tier, units, s.years, y, mu, phi, u, z, w,
                     np.zeros(y.shape, dtype=np.int8), {}, {"scale": scale.name}, noise=s.noise)
-
-
-def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray, trim: float = 0.005,
-                   rounds: int = 3) -> float | np.ndarray:
-    """The field's place-year variance component, by maximum likelihood on its aggregate cells:
-    Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
-    within a place-year share variation the expectation does not model; summing them adds it
-    coherently, which the independent-cell φ_cells misses (a U-shaped PIT, chapter IX B1).
-
-    With no ``levels`` one value for the field. With grouping labels per place, coarse to fine
-    (macro-region, then state), the component varies by group: each group's log(1/φ_extra) is
-    estimated by maximum likelihood on its own cells, then shrunk toward its parent's value by
-    the between-group variance τ² the groups themselves show (a random-effects moment estimate
-    on the observed information, so a group with little information keeps its parent's value).
-    Returns φ_extra per place.
-
-    **Robust to the departures it must not absorb** (trimmed likelihood: Neykov, Filzmoser, Dimova & Neytchev
-    2007): the cells beyond the predictive's ``trim`` and 1 − ``trim`` quantiles are left out and every kept
-    cell's likelihood is divided by its probability of lying between those bounds, so the estimate stays consistent
-    with no departure present; the bounds start from the block's dispersion (``phi_cells``, which the field's own
-    departures did not inflate) and are recomputed over ``rounds``. Fitted on every cell, the yellow-fever outbreak of
-    2017-18 (SIM A95: 195 and 257 deaths against 0-8 in other years) set φ ≈ 0.14, under which 180 deaths against
-    16 expected in the four states were no surprise and every stage-C method but two missed it (2026-10-07)."""
-    ok = mu > 1e-9
-    inv_c = np.where(np.isfinite(phi_cells), 1.0 / phi_cells, 0.0)
-    lo, hi = -np.log(1e7), -np.log(1e-2)         # bounds of log κ, κ = 1/φ_extra
-
-    def bounds(k_cells: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """The integer predictive quantiles at trim and 1 − trim per cell, with 1/φ = 1/φ_cells + k."""
-        phi = 1.0 / np.maximum(inv_c + k_cells, 1e-12)
-        p = phi / (phi + np.maximum(mu, 1e-12))
-        return stats.nbinom.ppf(trim, phi, p), stats.nbinom.ppf(1 - trim, phi, p)
-
-    k_ref = np.zeros(mu.shape)
-    a_b = bounds(k_ref)
-    keep = ok & (y >= a_b[0]) & (y <= a_b[1])
-
-    def fit(sel: np.ndarray) -> tuple[float, float]:
-        sel = sel & keep
-        yy, mm, ic = y[sel], mu[sel], inv_c[sel]
-        aa, bb = a_b[0][sel], a_b[1][sel]
-        pos = yy > 0           # a zero count adds only φ log(φ/(φ+μ)): the gamma terms are needed where y > 0 (sparse fields: few)
-        yp, mp, ip = yy[pos], mm[pos], ic[pos]
-
-        def nll(log_k: float) -> float:
-            k = np.exp(log_k)
-            phi = 1.0 / (ic + k)
-            phi_p = 1.0 / (ip + k)
-            pr = phi / (phi + mm)
-            mass = stats.nbinom.cdf(bb, phi, pr) - stats.nbinom.cdf(aa - 1, phi, pr)      # the truncation
-            return -float(np.sum(phi * np.log(phi / (phi + mm)))
-                          + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp)))
-                          - np.sum(np.log(np.maximum(mass, 1e-300))))
-
-        res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
-        h = 0.25
-        info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2     # observed information in log κ
-        return float(res.x), max(info, 1e-9)
-
-    def to_phi(log_k):
-        return np.where(np.asarray(log_k) < lo + 0.01, np.inf, np.exp(-np.asarray(log_k)))
-
-    for _ in range(rounds):
-        top, _ = fit(ok)
-        cur = np.full(mu.shape[0], top) if not levels else _shrink_levels(fit, ok, top, levels, mu.shape[0])
-        k_ref = np.broadcast_to(np.exp(cur)[:, None], mu.shape)
-        a_b = bounds(k_ref)
-        keep = ok & (y >= a_b[0]) & (y <= a_b[1])
-    return float(to_phi(cur[0])) if not levels else to_phi(cur)
-
-
-def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np.ndarray:
-    """`place_year_phi`'s per-group estimates, coarse to fine, each shrunk toward its parent by the between-group τ²."""
-    cur = np.full(U, top)
-    for lab in levels:
-        new = cur.copy()
-        found = []
-        for g in np.unique(lab):
-            rows = lab == g
-            sel = ok & rows[:, None]
-            if sel.sum() >= MIN_DISPERSION_CELLS:
-                est, info = fit(sel)
-                found.append((rows, est - cur[rows][0], 1.0 / info))
-        if found:
-            d = np.array([f[1] for f in found])
-            v = np.array([f[2] for f in found])
-            w = 1.0 / v
-            tau2 = max(0.0, (float(np.sum(w * d ** 2)) - len(d)) / float(np.sum(w)))      # E Σ w d² = τ² Σ w + n
-            for rows, dg, vg in found:
-                new[rows] = cur[rows][0] + dg * tau2 / (tau2 + vg)
-        cur = new
-    return cur
-
-
-# ---------------------------------------------------------------------- N1: the predictive's noise structure
-
 
 
 def background(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, trim: float = 0.005) -> np.ndarray:
@@ -1161,11 +1064,6 @@ def refit_place_season(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: floa
                     "season_sin": b[:, 2], "season_cos": b[:, 3], "tau": tau, "eta_var": ev}
 
 
-def place_intercepts(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float) -> tuple[np.ndarray, np.ndarray]:
-    """A field's own place effect over an expectation (B0 for E_b): α_u ~ N(0, 1/τ), shrunk."""
-    _, b, sd, _ = refit_place(y, mu, aggregate_phi(mu, mu2, phi), np.ones((y.shape[1], 1)))
-    return b[:, 0], sd[:, 0]
-
 
 def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
                 outer: int = 20, tau: np.ndarray | None = None, variance: bool = False,
@@ -1223,3 +1121,81 @@ def _from_table(f: fields.Field, tier: str, t: pa.Table, meta: dict | None) -> S
     return Surprise(f, tier, places, years, col("y"), col("mu"), col("phi"), col("pit"), col("z"), col("w"),
                     col("flags"), meta.get("calibration", {}), extras,
                     noise=Noise(**meta.get("calibration", {}).get("noise", {})))
+
+
+# ---------------------------------------------------------------------- the prospective tier's predictive (§6.1)
+#
+# The prospective tier's predictive (ARCHITECTURE §6.1): what BP adds to the fitted effects.
+#
+# BP carries a fit on the years up to t₀ over the later years. Its expectation was the fit's effects with the
+# history h extrapolated; its dispersion the block's φ. Measured on rolling origins (evaluation 2026-10-05, BP
+# level) that is miscentred in three ways, and each has a piece here:
+#
+# * **The place-year component.** B1 needs φ_extra to calibrate in-sample, and BP, which predicts what the fit has
+#   not seen, needs it too. It is estimated on the *training* fit's cells (`insample_extra`), so no departure the
+#   tier is meant to show leaks into it.
+# * **The place's own course** (annual grain). Places drift apart; the fit's place effects are constant. Each
+#   place's B2 trend over the fit is carried forward damped (`place_course`), with the coefficients' posterior variance.
+# * **The regime of the history** (monthly grain). An epidemic series has no level to extrapolate; the predictive
+#   is a mixture over the fit's own years (`monolith.extrapolate_members`), each year's h a member.
+#
+# The predictive of a cell is then a mixture of NBs, one per member (`mixture_pit`).
+
+DAMPING = 0.5          # the place trend carried forward at this fraction (evaluation 2026-10-05, BP level)
+
+
+def insample_extra(model: monolith.Monolith, leaves: np.ndarray, levels: list[np.ndarray],
+                   exposure: np.ndarray | None = None) -> np.ndarray:
+    """The field's φ_extra per place (shape [places, 1]) on the training fit's own B1 cells (macro-region and
+    state hierarchy, `monolith.place_year_phi`)."""
+
+    mu, mu2 = model.expected(leaves, spatial=True)
+    y = model.observed(leaves)
+    cells = laplace.predictive_phi(mu, np.zeros_like(mu) if exposure is None else exposure, mu2, model.phi)
+    return np.asarray(monolith.place_year_phi(y, mu, cells, *levels))[:, None]
+
+
+def place_course(model: monolith.Monolith, leaves: np.ndarray, n_test: int, damping: float = DAMPING,
+           exposure: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Each place's own course carried over ``n_test`` later periods: the shift (log scale) and its variance,
+    both [places, n_test]. The B2 refit on the training fit's B1 cells (log μ' = log μ + α_u + β_u s_t, shrunk to
+    the region's), the slope carried forward damped by ``damping`` and the coefficients' posterior variance
+    X H⁻¹ Xᵀ added."""
+
+    mu, mu2 = model.expected(leaves, spatial=True)
+    y = model.observed(leaves)
+    n = y.shape[1]
+    sd = max(float(np.arange(n).std()), 1e-9)
+    s = (np.arange(n) - (n - 1) / 2) / sd
+    s_new = (np.arange(n, n + n_test) - (n - 1) / 2) / sd
+    phi_agg = aggregate_phi(mu, mu2, model.phi)
+    _, b, _, _, _, _, var = refit_place(y, mu, phi_agg, np.stack([np.ones(n), s], axis=1), variance=True,
+                                                 X_new=np.stack([np.ones(n_test), s_new], axis=1))
+    return b[:, [0]] + damping * b[:, [1]] * s_new[None, :], var
+
+
+def mixture_pit(y: np.ndarray, comps: list[tuple[float, np.ndarray, np.ndarray]], seed: int
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The randomised PIT of a mixture of NBs, ``comps`` = [(weight, μ, φ_agg)], with the surprise z and the
+    mixture's matched dispersion (the NB with its mean and variance, for the information weight)."""
+    v = np.random.default_rng(seed).random(y.shape)
+    low, pm, upp = np.zeros(y.shape), np.zeros(y.shape), np.zeros(y.shape)
+    mean, second = np.zeros(y.shape), np.zeros(y.shape)
+    for w, mu, a in comps:
+        inf = ~np.isfinite(a)
+        d = stats.nbinom(np.where(inf, 1.0, a), np.where(inf, 0.5, a / (a + np.maximum(mu, 1e-300))))
+        dp = stats.poisson(mu)
+        cdf = np.where(inf, dp.cdf(y - 1), d.cdf(y - 1))
+        pmf = np.where(inf, dp.pmf(y), d.pmf(y))
+        low += w * cdf
+        upp += w * np.where(inf, dp.sf(y), d.sf(y))
+        pm += w * pmf
+        mean += w * mu
+        second += w * (mu ** 2 * (1 + np.where(inf, 0.0, 1.0 / np.where(inf, 1.0, a))) + mu)
+    lower = np.clip(low + v * pm, 1e-300, 1.0)
+    upper = np.clip(upp + (1 - v) * pm, 1e-300, 1.0)
+    z = np.where(lower < 0.5, special.ndtri(lower), -special.ndtri(upper))
+    var = np.maximum(second - mean ** 2, 0.0)
+    over = np.divide(var - mean, mean ** 2, out=np.zeros(y.shape), where=mean > 0)
+    phi = np.divide(1.0, over, out=np.full(y.shape, np.inf), where=over > 1e-12)
+    return np.clip(lower, 0.0, 1.0), z, phi

@@ -22,16 +22,20 @@ one question without multiplying its claims:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
 
 @dataclass(frozen=True)
 class Method:
-    id: str                     # the name `tools.Session.scan` runs
-    assumptions: str
+    id: str                     # the method's name in answers and records; the lens `tools.Session.scan` runs unless
+    assumptions: str            # ``lens`` names another
     regimes: str = "any"
     kinds: tuple[str, ...] = ("count",)     # the field kinds it reads (count; mark: a measurement's location)
+    lens: str | None = None
+    settings: tuple = ()        # (name, value) pairs passed to the lens: one lens read two ways is two methods
+    maturity: str = "v0"        # ARCHITECTURE's levels: v0 runs, v1 the established method, v2 v1 measured (§13.1)
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,7 @@ class Question:
     scale: str
     methods: tuple[Method, ...]
     shapes: tuple[str, ...] = ()                # the courses in time that answer it (`departures.attribute`); () any
+    prospective: bool = False                   # asked of the years after a training period (``train_last``) only
 
 
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
@@ -54,6 +59,8 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("excess", "multiscale graph peaks of a gamma tail score (a location's standardised excess); "
                                   "places joined by N1's noise", kinds=("count", "mark")),
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
+                 Method("space_time", "expectation-based Poisson scan over graph-connected place sets and windows of "
+                                      "up to four years, Monte Carlo null; the v0 lens (restored 2026-10-07, S0.4)"),
              ), ("spike", "transient")),
     Question("step", "C", "a lasting rise in level from some period to the series' end", "B1",
              "area × window", "rate ratio", (
@@ -88,6 +95,25 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
              "area × group", "rate ratio", (
                  Method("group_disparity", "likelihood-ratio heterogeneity of the groups' SIRs; the v0 lens"),
              )),
+    # restored 2026-10-07 (work plan S0.4): the v0 survey asked them, and its removal left them unasked
+    Question("divergence", "C", "a unit's trend over the period departing from its neighbours' trends or from the "
+             "field's national course, at the municipality, the immediate region and the state", "B2", "area",
+             "posterior sd", (
+                 Method("divergence_neighbours", "B2's place trend against the mean of its graph neighbours'; "
+                                                 "Student t for coarser units; BH per scale at q/scales",
+                        lens="trend_divergence",
+                        settings=(("scales", ("municipality", "region", "state")), ("reference", "neighbours"))),
+                 Method("divergence_national", "B2's place trend against the field's national course",
+                        lens="trend_divergence",
+                        settings=(("scales", ("municipality", "region", "state")), ("reference", "national"))),
+             )),
+    Question("prospective", "C", "counts in the periods after the training years above what a fit on the years up "
+             "to them expects (ADR-0012: the alarm baseline for epidemics, the calibrated expectation otherwise)",
+             "BP/BPA", "area × period", "rate ratio", (
+                 Method("outbreak", "each cell's NB tail against the alarm baseline (BPA), BH"),
+                 Method("change_point", "trailing-window NB tails against the place's past course (BP)"),
+                 Method("space_time", "expectation-based Poisson space-time scan against BP"),
+             ), prospective=True),
 )}
 
 
@@ -119,12 +145,12 @@ def _years(f) -> tuple[int, int]:
     return int(y[0]), int(y[-1])
 
 
-def _shape(session, node: str, f, tier: str) -> dict:
+def _shape(session, node: str, f, tier: str, train_last: int | None = None) -> dict:
     """A finding's course in time when its method does not report one: `departures.attribute` on the field's series
     summed over the finding's places, its window the finding's years. Every method's answer then carries a shape."""
     from . import departures
 
-    s = session.surprise(node, tier)
+    s = session.surprise(node, tier, train_last if tier in ("BP", "BPA") else None)
     w = np.isin(np.asarray(s.places).astype(int), [int(p) for p in f.locus.get("places", [])]).astype(float)
     if not w.any():
         return {"shape": "unattributed"}
@@ -159,13 +185,13 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     failed = {} if methods else {"*": f"no method of {question!r} reads a {kind} field yet"}
     for m in methods:
         try:
-            found = session.scan(node, m.id, q=q / k, **kw)
+            found = session.scan(node, m.lens or m.id, q=q / k, **dict(m.settings), **kw)
         except Exception as exc:  # noqa: BLE001 - one method's failure is reported, the question still answered
             failed[m.id] = f"{type(exc).__name__}: {exc}"
             continue
         for f in found:
             if "shape" not in f.stats:
-                f.stats["shape"] = _shape(session, node, f, kw.get("tier", "B1"))
+                f.stats["shape"] = _shape(session, node, f, f.tier, kw.get("train_last"))
             pl, (y0, y1) = {int(p) for p in f.locus.get("places", [])}, _years(f)
             home = None
             for a in answers:
@@ -209,3 +235,91 @@ def summary(a: Answer) -> dict:
     return {"question": a.question, "years": list(a.years), "places": len(a.places), "states": states,
             "methods": a.methods, "p": float(f"{a.p:.3g}"), "shapes": a.shapes,
             "effects": {m: round(float(f.effect), 2) for m, f in a.findings.items()}}
+
+
+# ---------------------------------------------------------------------- the methods' measured records
+
+
+def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
+    """Each method's record from what the harness measured and stored (ARCHITECTURE §10.5), never a hand-written
+    table, and from each measurement's latest run only (a method fixed since an earlier run is not charged with it):
+    per documented positive, the last record's verdict for the method (`event_record`); per field, the last grid that
+    read the method (`grid`): its null worlds and how many held a finding, its false share in planted worlds.
+
+    ``calibrated`` reads the null worlds as a binomial sample of the rate at which a method finds anything where
+    nothing is (under the complete null, its false-discovery rate): True when the one-sided 95 % Clopper–Pearson upper
+    bound of that rate is at most q (59 clean worlds at q = 0.05), False when its lower bound exceeds q, None when the
+    worlds are too few to tell. Each record also names the minimum effects its grids
+    read (θ0), its power (the share of planted rows it detected) and its maturity (`questions.Method.maturity`)."""
+    import json
+
+    from scipy.stats import beta
+
+    from . import store
+
+    events: dict[tuple, tuple] = {}             # (method, positive) -> (written, found)
+    grids: dict[tuple, tuple] = {}              # (method, field) -> (written, rows)
+    planted_rows: dict[tuple, list] = {}        # (method, field) -> the planted rows of that grid
+    for man in store.manifests("harness"):
+        key = man.get("key") or {}
+        kind = key.get("kind")
+        if kind not in ("event_record", "grid"):
+            continue
+        table = store.get_table("harness", key)
+        if table is None:
+            continue
+        written = man.get("written", "")
+        result = json.loads(table.column("result")[0].as_py())
+        if kind == "event_record":
+            for rec in result.get("records", []):
+                for m, v in (rec.get("methods") or {}).items():
+                    if "found" in v and written >= events.get((m, rec["name"]), ("",))[0]:
+                        events[(m, rec["name"])] = (written, bool(v["found"]))
+        else:
+            by_lens: dict[str, list] = {}
+            for row in result.get("false", []):
+                by_lens.setdefault(row["lens"], []).append(row)
+            planted: dict[str, list] = {}
+            for row in result.get("rows", []):
+                planted.setdefault(row["lens"], []).append(row)
+            for lens, rows in by_lens.items():
+                if written >= grids.get((lens, result.get("field")), ("",))[0]:
+                    grids[(lens, result.get("field"))] = (written, rows)
+                    planted_rows[(lens, result.get("field"))] = planted.get(lens, [])
+    out: dict[str, dict[str, Any]] = {}
+    for (m, _), (_, found) in events.items():
+        r = out.setdefault(m, {})
+        r["events_scored"] = r.get("events_scored", 0) + 1
+        r["events_found"] = r.get("events_found", 0) + found
+    for (m, fid), (_, rows) in grids.items():
+        r = out.setdefault(m, {})
+        for row in planted_rows.get((m, fid), []):
+            r["planted_rows"] = r.get("planted_rows", 0) + 1
+            r["planted_detected"] = r.get("planted_detected", 0) + bool(row.get("detected"))
+            if row.get("theta0") is not None:
+                r.setdefault("theta0", set()).add(row["theta0"])
+        for row in rows:
+            if row["kind"] == "null":
+                r["null_worlds"] = r.get("null_worlds", 0) + 1
+                r["null_worlds_with_findings"] = r.get("null_worlds_with_findings", 0) + (row["findings"] > 0)
+            elif row["findings"]:
+                r["planted_findings"] = r.get("planted_findings", 0) + row["findings"]
+                r["planted_false"] = r.get("planted_false", 0) + row["false"]
+    maturity = {m.lens or m.id: m.maturity for qn in QUESTIONS.values() for m in qn.methods}
+    for m, r in out.items():
+        n, k = r.get("null_worlds", 0), r.get("null_worlds_with_findings", 0)
+        if n:
+            lo = float(beta.ppf(0.05, k, n - k + 1)) if k else 0.0
+            hi = float(beta.ppf(0.95, k + 1, n - k)) if k < n else 1.0
+            r["null_rate"] = [round(k / n, 3), round(lo, 3), round(hi, 3)]
+            r["calibrated"] = True if hi <= q else False if lo > q else None
+        else:
+            r["calibrated"] = None
+        if r.get("planted_findings"):
+            r["false_share"] = round(r["planted_false"] / r["planted_findings"], 3)
+        if r.get("planted_rows"):
+            r["power"] = round(r["planted_detected"] / r["planted_rows"], 3)
+        if "theta0" in r:
+            r["theta0"] = sorted(r["theta0"])
+        r["maturity"] = maturity.get(m, "v0")
+    return out

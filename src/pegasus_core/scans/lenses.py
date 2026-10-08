@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from scipy import special, stats
 
-from .. import control, graphs, surprise
+from .. import control, surprise
 from . import scales as scales_mod
 from . import subset
 
@@ -451,13 +451,6 @@ def _upper_tail(y: np.ndarray, mean: np.ndarray, phi_agg: np.ndarray) -> np.ndar
     return out
 
 
-def trend_scores(s: surprise.Surprise, edges: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
-    """Each place's trend β_u less its graph neighbours' mean, with the sd of that difference, the minimum
-    divergence δ (a ratio TREND_PERIOD between the period's first and last year, in β's standardised units),
-    and which places have neighbours."""
-    diff, sd, has = _contrast(s.extras["beta"], s.extras["beta_sd"], edges, "neighbours")
-    return diff, sd, _trend_delta(s, "municipality"), has
-
 
 def _trend_delta(s: surprise.Surprise, scale: str = "municipality", ratio: float | dict | None = None) -> float:
     # β is per standard deviation of the years: a divergence δ_β over the standardised range of
@@ -593,5 +586,3 @@ def mean_ref(b: np.ndarray, diff: np.ndarray) -> np.ndarray:
     return b - diff
 
 
-def default_graph(places: np.ndarray) -> np.ndarray:
-    return graphs.edges(places, graphs.DEFAULT)

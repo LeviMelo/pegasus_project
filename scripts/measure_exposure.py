@@ -23,7 +23,7 @@ import time
 import numpy as np
 from scipy import stats
 
-from pegasus_core import config, graphs, laplace, monolith, prospective, surprise
+from pegasus_core import config, graphs, laplace, monolith, surprise
 
 TARGETS = {
     "ix": ("SIM.DO", "death", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),
@@ -74,7 +74,7 @@ def _wrap(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration=True, var=N
 
 
 surprise._assemble = _wrap
-_orig_mix = prospective.mixture_pit
+_orig_mix = surprise.mixture_pit
 bp_cap: list[dict] = []
 
 
@@ -84,7 +84,7 @@ def _wrap_mix(y, comps, seed):
     return out
 
 
-prospective.mixture_pit = _wrap_mix
+surprise.mixture_pit = _wrap_mix
 
 
 def nb_nll(y: np.ndarray, mu: np.ndarray, phi: np.ndarray) -> np.ndarray:
@@ -126,7 +126,7 @@ def score(c: dict, common: np.ndarray | None = None) -> dict:
     cal = surprise.calibration(u[keep], mu[keep], macro[keep])
     out["block_phi"] = {"ks": round(cal["ks"], 4), "regions": {MACRO.get(k, k): round(v, 4) for k, v in cal["ks_by_macroregion"].items()},
                         "nll": float(nb_nll(y[keep], mu[keep], cells[keep]).sum())}
-    extra = surprise.place_year_phi(y, mu, cells)
+    extra = monolith.place_year_phi(y, mu, cells)
     phi_field = 1.0 / (1.0 / cells + 1.0 / extra)
     u, _ = surprise.randomised_pit(y, mu, phi_field, seed)
     cal = surprise.calibration(u[keep], mu[keep], macro[keep])

@@ -297,7 +297,7 @@ def sus_share(years: list[int]) -> pa.Table:
 def _modified(pop: pa.Table, years: list[int], base: str, mods: tuple[str, ...], dataset: str) -> pa.Table:
     """``pop`` (a base source) times κ and/or q: N' = κ_{UF(u),t} · q_{u,sex,band,t} · N, s' the quadrature of the parts.
     Places or years a modifier does not cover are dropped, so their events are unallocated, never given a guess."""
-    key = {"what": "exposure", "version": 3, "base": base, "mods": list(mods), "dataset": dataset, "years": years,
+    key = {"what": "exposure", "code": config.code_key(_modified), "base": base, "mods": list(mods), "dataset": dataset, "years": years,
            **{m: MODIFIERS[m][1] for m in mods}, "data": config.data_version()}
     cached = store.get_table("gateway", key)
     if cached is not None:
@@ -340,7 +340,7 @@ def _infant_age_mix() -> np.ndarray:
     28-364 d) over the years the matrix was measured on: the deaths under the primary classifier's chapter P by the
     subject's age stratum (pegasus_data's decoded fractional years, ``IDADE_anos``) in whole days (its six decimals
     put day 7 at 6.99996: 513 deaths of 2019 crossed the band edge unrounded)."""
-    key = {"what": "infant_age_mix", "years": list(CONFUSION_YEARS), "data": config.data_version(), "v": 2}
+    key = {"what": "infant_age_mix", "years": list(CONFUSION_YEARS), "data": config.data_version(), "code": config.code_key(_infant_age_mix)}
     cached = store.get_table("gateway", key)
     if cached is None:
         import pegasus_data as pg
@@ -385,7 +385,7 @@ def declared_ratios(base: str = "account-3") -> dict[str, float]:
     recorded-race group uses them (ARCHITECTURE §4.1)."""
     from scipy.optimize import minimize
 
-    key = {"what": "declared_ratios", "base": base, "years": RATIO_YEARS, "confusion": MODIFIERS["confusion"][1], "data": config.data_version(), "v": 1}
+    key = {"what": "declared_ratios", "base": base, "years": RATIO_YEARS, "confusion": MODIFIERS["confusion"][1], "data": config.data_version(), "code": config.code_key(declared_ratios)}
     cached = store.get_table("gateway", key)
     if cached is None:
         c = _confusion_mixed()
@@ -430,7 +430,7 @@ def _recorded_exposure(years: list[int], base: str, k: str) -> pa.Table:
     by the ratios. From age 1 the matrix is not measured and the recorded race is the declared one (N_k). ``s`` is the
     quadrature of the races' own sd and the matrix's relative sd (independent cells)."""
     key = {"what": "recorded_exposure", "base": base, "race": k, "years": years, "confusion": MODIFIERS["confusion"][1],
-           "data": config.data_version(), "v": 1}
+           "data": config.data_version(), "code": config.code_key(_recorded_exposure)}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
@@ -491,7 +491,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset)
     key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": column,
-           "data": config.data_version(), "gateway": 3 if dataset != "SIM.DO" else 1,
+           "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -724,7 +724,6 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     mean log mark above its category's, shrunk by n/(n + MARK_SHRINK). With ``anchor`` (the event's date column) the
     mark is an interval: the days from the anchor to the ``mark`` date times ``sign``, plus one (the calendar days
     spanned, so a same-day date is 1 and the log is defined). Returns the unallocated (year, reason, code, y)."""
-    from .facility import facility_column  # the facility module reads this one: imported where used
 
     strata = _strata(dataset)
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
@@ -921,7 +920,7 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
                             + np.ascontiguousarray(nu.column("u").to_numpy()).tobytes()).hexdigest()[:16]
     key = {"what": "mark_facility_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "mark": mark, "bounds": list(bounds), "classifier": classifier, "casemix": casemix, "shrink": MARK_SHRINK,
-           "facility_effects": facility_effects, "nu": digest, "edges": list(edges), "data": config.data_version(), "v": 1,
+           "facility_effects": facility_effects, "nu": digest, "edges": list(edges), "data": config.data_version(), "code": config.code_key(mark_facility_moments),
            **_df_key(dataset, year), **({"anchor": anchor, "sign": sign} if anchor else {})}
     hit = store.get_table("gateway", key)
     if hit is not None:
@@ -1193,7 +1192,7 @@ def declared_fields() -> dict:
 
 
 def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, str]:
-    """A context on ``places`` over the window ``years`` (`map_inputs`): a declared field's value over its declared
+    """A context on ``places`` over the window ``years`` (`dependency`): a declared field's value over its declared
     denominator (pegasus_data `fields.yml` ``over``: another field, or ``population``, the residents), the mean of its
     years in the window, or of the declared year nearest the window's end when it has none there (a census). ``entry``
     is a field's name, numerators of one denominator summed (``a+b``), or {field, where} for a field whose rows are
@@ -1250,21 +1249,6 @@ def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tu
         f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
     return value, label
 
-
-def package_version() -> str:
-    """pegasus_data's package version."""
-    import pegasus_data
-
-    return str(pegasus_data.__version__)
-
-
-def package_dir():
-    """The directory of the pegasus_data package (its shipped resources, its repository)."""
-    from pathlib import Path
-
-    import pegasus_data
-
-    return Path(pegasus_data.__file__).resolve().parent
 
 
 def nothing_published() -> type[Exception]:
@@ -1537,3 +1521,13 @@ def machine_slot(pool: str, slots: int, label: str):
         yield
     finally:
         held.__exit__(None, None, None)
+
+
+def facility_column(dataset: str) -> tuple[str, str | None]:
+    """(facility column, the facility's own municipality column or None) from pegasus_data's roles."""
+    rs = roles(dataset)
+    fac = [r for r in rs if r.get("model") == "institution" and r.get("property") == "facility"]
+    if not fac:
+        raise LookupError(f"{dataset}: no facility among its institution roles")
+    where = [r for r in rs if r.get("model") == "where" and r.get("property") in ("facility_municipality", "municipality")]
+    return fac[0]["column"], where[0]["column"] if where else None

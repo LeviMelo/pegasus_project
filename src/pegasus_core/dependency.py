@@ -1,11 +1,11 @@
-"""The fields of a dependency map: place effects of every fitted field of the plan's systems and the context fields.
+"""The dependency map (ARCHITECTURE §7.6) over the plan's systems: `dependency_map`, and its fields: place effects of every fitted field of the plan's systems and the context fields.
 
 Every field is read from the production fits through declarations, nothing named here: a count field's place effect
 b̂(u) is the shrunk Poisson intercept of ``surprise.refit_place`` over its tier-B0 expectation (the national rates by
 age, sex and period, no place effects) summed over the window, with its posterior sd (the pair weight is 1/sd², §7.5);
 a measure's or a share's is its precision-weighted mean residual, shrunk (`gaussian_effect`). Two systems share events
 only where a declared link records the same event in both (`same_event`: a death in hospital is an admission and a
-certificate); there a field's overlap with the other system is its measured linked share, and past `maps.MAX_OVERLAP`
+certificate); there a field's overlap with the other system is its measured linked share, and past `fields.MAX_OVERLAP`
 the field's "not linked to" twin (its events less the expected linked ones) enters instead, sharing nothing (§8.5).
 A context is a declared field over its declared denominator (``over``), as rank-based normal scores, with the
 constant sd 0.05 the gate used (it cannot change ρ); the plan names which (``contexts``). Every field with events enters (ADR-0028: no field is left out for power).
@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .. import gateway, surprise
-from .maps import MapInputs
+from . import config, gateway, surprise
+from .fields import MAX_OVERLAP
+from .scans.maps import MapInputs
 
 CONTEXT_SD = 0.05
 YEARS = list(range(2015, 2020))
@@ -72,7 +73,7 @@ def _readers(dataset: str, event: str) -> list[dict]:
     """The readers of a system's fitted fields on the production years: the counts ({}), and every measure, share or
     linked field fitted from its declarations (the reader its fit's key records; race-stratified fits are disparity
     readings, not map fields)."""
-    from .. import tools
+    from . import tools
 
     out: list[dict] = [{}]
     for k in tools.fitted(dataset, event, years=tools.FIT_YEARS):
@@ -119,9 +120,8 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
     place effects); the ``contexts`` (declared fields over their declared denominators, `gateway.context_value`, as
     normal scores); and, where a declared link records the same events in two systems
     (`same_event`), each field's measured overlap with the other system, with its "not linked to" field where that
-    overlap passes `maps.MAX_OVERLAP` (its events less the expected linked ones: no event shared with the other)."""
-    from .. import tools
-    from .maps import MAX_OVERLAP
+    overlap passes `fields.MAX_OVERLAP` (its events less the expected linked ones: no event shared with the other)."""
+    from . import tools
 
     years = years or YEARS
     if places is None:
@@ -156,7 +156,7 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                 if surprise.gaussian(su):
                     b, sd = gaussian_effect(sw, swr)
                     if np.isfinite(b).sum() >= 2:
-                        add(name, dataset, label, b, sd, field_cats | {tag})
+                        add(name, dataset, label, b, sd, field_cats)   # its events: its categories'
                     continue
                 if y.sum() <= 0:
                     continue
@@ -221,3 +221,51 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                                                                                      in shared.items()},
                       "missing_context": {n: int(np.isnan(B[i]).sum()) for i, n in enumerate(names)
                                           if groups[i] == "context"}})
+
+
+def dependency_map(systems: list[tuple[str, str, list[str]]], contexts: list | tuple = (),
+                   years: list[int] | None = None, ledger=None) -> dict:
+    """A dependency map (§7.6) of every fitted field of ``systems`` ((dataset, event, blocks), a plan's) and the
+    ``contexts`` over ``years`` (`build`: chapters, measures, shares; "not linked to" twins where a declared link records
+    the same events): the inputs from the store (built on first use), the marginal and conditional layers controlled
+    over the whole map, the admitted pairs as relation leads. Returns the summary, the edges, the inputs and the Moran
+    bases a false-edge measurement reads (`harness.dependency_negatives`)."""
+    from . import control, leads, store, tools
+    from .scans import maps, pairs
+
+    years = years or YEARS
+    contexts = list(contexts or ())
+    key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "contexts": contexts,
+           "code": config.code_key(build)}
+    inp = maps.MapInputs.load(key)
+    if inp is None:
+        inp = build(systems, years, contexts=contexts)
+        inp.save(key)
+    # §11.4: a chapter whose count expectation failed calibration at B1 (the first tier with geography, whose field
+    # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones
+    calibration = {}
+    for dataset, event, _ in systems:
+        session = tools.Session(dataset, event, tools.FIT_YEARS)
+        for name in inp.names:
+            if name.startswith(dataset + ":") and "|" not in name:      # a count field (its twin shares its fit)
+                calibration[name] = session.calibration_of(name.split(":", 1)[1], "B1")
+    inp = maps.exclude_miscalibrated(inp, calibration, "B1")
+    basis, gen = pairs.MoranBasis(inp.places), pairs.MoranBasis(inp.places, "knn8")
+    dm = maps.dependency_map(inp, basis, ledger or control.Ledger(), tag="-".join(map(str, (years[0], years[-1]))))
+    out: dict = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
+                 "admitted": dm.controlled, "seconds": dm.seconds, "linked_share": inp.meta.get("linked_share", {}),
+                 "excluded_calibration": inp.meta.get("excluded_calibration", {})}
+    store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
+    # the admitted pairs are relation leads (§9.1), read and triaged with every other lead
+    e = dm.edges.to_pylist()
+    adm = [r for r in e if r.get("admitted")]
+    if adm:
+        qv = dict(zip((id(r) for r in e), control.adjusted(np.array([r["p"] for r in e])), strict=True))
+        leads.Register().add([leads.Lead(
+            kind="relation", estimand="E_b", tier="B1", fields=[r["x"], r["y"]],
+            locus={"band": "between places", "lag": 0, "years": [years[0], years[-1]]}, effect=float(r["rho"]),
+            scale="rho", interval=None, p=float(r["p"]), q=float(qv[id(r)]), family=f"map|{r['family']}",
+            null="Moran spectral randomisation", calibrated=True,
+            method={"dependency_map": {"evidence": "map negatives (harness.dependency_negatives)"}},
+            provenance={"n_eff": r.get("n_eff")}) for r in adm])
+    return {"summary": out, "edges": dm.edges, "inputs": inp, "basis": basis, "generator": gen}

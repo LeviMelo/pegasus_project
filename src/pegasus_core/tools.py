@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import inspect
 import json
 import pickle
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -127,7 +129,7 @@ class Session:
         """The field's calibration record at a tier (§6.2), kept in the store under the fit's key so a map need not
         refit the block's expectation to read it again."""
         m = self.expectations.model(self.expectations.field(node).block)
-        key = {**m.key(), "field": f"{self.dataset}:{self.event}:{node}", "tier": tier, "what": "calibration", "v": 1}
+        key = {**m.key(), "field": f"{self.dataset}:{self.event}:{node}", "tier": tier, "what": "calibration", "code": config.code_key("pegasus_core.tools:Session.calibration_of")}
         hit = store.manifest("calibration", key)
         if hit is not None and "calibration" in hit:
             return hit["calibration"]
@@ -336,7 +338,10 @@ class Session:
             return departures.step(s, self.ledger, **kw)
         if lens in ("outbreak", "change_point"):
             return getattr(lenses, lens)(s, self.ledger, **kw)
-        return getattr(lenses, lens)(s, self.edges(), self.ledger, **kw)
+        fn = getattr(lenses, lens)
+        if "q" in kw and "q" not in inspect.signature(fn).parameters:      # the scans name their level alpha
+            kw["alpha"] = kw.pop("q")
+        return fn(s, self.edges(), self.ledger, **kw)
 
     def alarms(self, node: str, as_of: str, report: str, recurrence: float = 260.0, weeks: int = 8,
                confidence: float = 0.5) -> list[dict]:
@@ -401,29 +406,39 @@ class Session:
         return questions.ask(self, question, node, q, **kw)
 
     def survey_questions(self, blocks: list[str] | None = None, questions: tuple[str, ...] | None = None,
-                         q: float = 0.05, levels: tuple[str, ...] | None = None, log=print) -> list[leads.Lead]:
+                         q: float = 0.05, levels: tuple[str, ...] | None = None, log=print,
+                         train_last: int | None = None) -> list[leads.Lead]:
         """The pass over every field with events, asking questions instead of running lenses (`questions`): per field
         and question, the methods' answers (each method at q/k inside the field, merged by overlapping loci); an
         answer's p is its smallest method p times k (Bonferroni over the methods, valid under any dependence);
         across fields, Benjamini–Bogomolov per (question, block) family. Each lead names the question, the methods
         that agree, each one's effect and scale. Retrospective, in the fields' order. ``levels`` keeps the fields of
         those tree levels (None: every level). An answer of another shape than its question's (`questions.ask`'s
-        ``other_shape``) is logged and left to the question of its shape, whose own methods test it."""
+        ``other_shape``) is logged and left to the question of its shape, whose own methods test it. With
+        ``train_last`` the prospective questions are asked instead, of the years after it, against fits on the years up
+        to it (ADR-0012); without it they are not asked."""
         from . import questions as qs
 
-        names = questions or tuple(qs.QUESTIONS)
+        names = tuple(n for n in (questions or tuple(qs.QUESTIONS))
+                      if qs.QUESTIONS[n].prospective == (train_last is not None))
+        ask_kw = {"train_last": train_last} if train_last is not None else {}
         found: dict[str, list] = {}
         src = self.source
         measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
                    f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
                    f"|link:{src['link']}:{src['side']}" if src.get("link") else
                    f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else
-                   f"|away:{src['place']}" if src.get("place") else "")   # its own family
+                   f"|away:{src['place']}" if src.get("place") else
+                   f"|classifier:{src['classifier']}" if src.get("classifier") else "")   # its own family
         code = config.code_key(qs.ask)
+        suffix = f"|t{train_last}" if train_last else ""
+        asked_fields, asked_families = set(), set()
         for block in blocks or self._blocks():
+            asked_families |= {f"{qn}|{block}{measure}{suffix}" for qn in names}
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
                     continue
+                asked_fields.add(f.id)
                 # each field's answers are an object of the state (work plan §2): stored when every question was
                 # answered, keyed by the fit, the reader, the questions and the code, so a run killed mid-chapter
                 # resumes at the next field and a rerun recomputes only what changed
@@ -431,7 +446,7 @@ class Session:
                 fit = store.manifest("monolith", m.key()) or {}
                 key = {"what": "field_answers", "field": f.id, "source": json.loads(json.dumps(src, default=str)),
                        "questions": list(names), "q": q, "years": list(self.years), "graph": self.graph,
-                       "fit": m.key(), "fitted": fit.get("written"), "code": code}
+                       "fit": m.key(), "fitted": fit.get("written"), "code": code, **ask_kw}
                 hit = store.get_arrays("answers", key)
                 if hit is not None:
                     rows = pickle.loads(hit["rows"].tobytes())
@@ -441,7 +456,7 @@ class Session:
                     rows, failed = [], False
                     for qn in names:
                         try:
-                            answers = self.ask(qn, f.node, q=q)
+                            answers = self.ask(qn, f.node, q=q, **ask_kw)
                             k = getattr(answers, "k", len(qs.QUESTIONS[qn].methods))
                         except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
                             log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
@@ -456,13 +471,13 @@ class Session:
                         store.put_arrays("answers", key, {"rows": np.frombuffer(pickle.dumps(rows), dtype=np.uint8)})
                 for qn, answers, k in rows:
                     for a in answers:
-                        found.setdefault(f"{qn}|{block}{measure}", []).append((f.id, a, min(1.0, a.p * k)))
+                        found.setdefault(f"{qn}|{block}{measure}{suffix}", []).append((f.id, a, min(1.0, a.p * k)))
         self._local.memo = None
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)
-        from . import harness
-
-        records = harness.method_records()
+        by_lens = qs.method_records()                 # keyed by lens: a method's record is its lens's
+        records = {m.id: {**by_lens[m.lens or m.id], "tier": LENS_TIERS.get(m.lens or m.id)}
+                   for qn in qs.QUESTIONS.values() for m in qn.methods if (m.lens or m.id) in by_lens}
         admitted = []
         for fam, mask in rejected.items():
             qv = control.adjusted(families[fam])
@@ -471,12 +486,12 @@ class Session:
                     continue
                 best = min(a.findings.values(), key=lambda x: x.p)
                 admitted.append(leads.Lead(
-                    kind="answer", estimand=fam.split("|")[0], tier="B1", fields=[fid],
+                    kind="answer", estimand=fam.split("|")[0], tier=best.tier, fields=[fid], train_last=train_last,
                     locus={"places": sorted(a.places), "years": list(a.years),
                            **({"institutions": inst} if (inst := sorted({i for x in a.findings.values()
                                                                          for i in x.locus.get("institutions", [])}))
                               else {})}, effect=float(best.effect),
-                    scale="rate_ratio", interval=None, p=float(p), q=float(qq), family=fam,
+                    scale=SCALE.get(best.lens, "rate_ratio"), interval=None, p=float(p), q=float(qq), family=fam,
                     null="each method's own (questions.QUESTIONS)",
                     calibrated=all(records.get(m, {}).get("calibrated") is True for m in a.methods),
                     method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"})
@@ -484,7 +499,18 @@ class Session:
                     provenance={"graph": self.graph, "methods": a.methods, "source": dict(self.source),
                                 "years": list(self.years), "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
                                               for m, x in a.findings.items()}}))
-        self.register.add(admitted)
+        # an earlier answer of the same families and fields that this pass no longer selects is retired (the data,
+        # the model or the code changed), never left open beside the current answers; a person's verdict keeps it
+        new = {x.id for x in admitted}
+        stale = [x for x in self.register.current() if x.kind == "answer" and x.family in asked_families
+                 and x.fields and x.fields[0] in asked_fields and x.id not in new
+                 and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
+        when = time.strftime("%Y-%m-%d")
+        for x in stale:
+            x.status, x.note = "retired", f"not selected by the question pass of {when}; {x.note}".strip("; ")
+        self.register.add(stale + admitted)
+        if stale:
+            log(f"{len(stale)} earlier answers retired: no longer selected")
         return admitted
 
     # ---- on demand -------------------------------------------------------------------
@@ -816,7 +842,10 @@ class Session:
         """This session over the years up to ``last``, with its own register and ledger: the survey that selects
         what the later years then test (`temporal_confirm`). Nothing after ``last`` is read."""
         home = self.split_home or config.home()
-        tag = "".join(f"_{v}" for k, v in sorted(self.source.items()) if k in ("mark", "indicator", "link", "side"))
+        # every reader its own home: a tag of four of its keys let a classifier's, a mention's or a flow's training
+        # survey share the counts' ledger and register (survey 2026-10-07)
+        reader = {k: v for k, v in self.source.items() if k != "grain"}
+        tag = f"_{config.seed('reader', json.dumps(reader, sort_keys=True, default=str)):x}"[:13] if reader else ""
         return Session(self.dataset, self.event, [y for y in self.years if y <= last], self.graph, self.supply,
                        self.rank, dict(self.source), ledger=control.Ledger(home / f"ledger_T{last}{tag}"),
                        register=leads.Register(home / f"leads_T{last}{tag}"))
@@ -1198,66 +1227,10 @@ def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict
 
 
 def method_status() -> dict[str, Any]:
-    """Every method's measured record (ARCHITECTURE §10.5; `harness.method_records`)."""
-    from . import harness
+    """Every method's measured record (ARCHITECTURE §10.5; `questions.method_records`), with its tier."""
+    from . import questions
 
-    return harness.method_records()
-
-
-def dependency_map(years: list[int] | None = None, worlds: int = 0, health_only: bool = False,
-                   ledger: control.Ledger | None = None, plan: str = "plans/default.yml") -> dict[str, Any]:
-    """A dependency map (§7.6) of every fitted field of the ``plan``'s systems (`map_inputs.build`: chapters, measures,
-    shares; "not linked to" twins where a declared link records the same events) and the context fields over
-    ``years``: the inputs from the store (built through the gateway on first use), the
-    marginal and conditional layers controlled over the whole map, and with ``worlds`` > 0 the false-edge rate on that
-    many worlds of Moran-randomised surrogates (``health_only``: contexts kept real). Returns the summary and the edges."""
-    from . import harness, store, update
-    from .scans import map_inputs, maps, pairs
-
-    years = years or map_inputs.YEARS
-    loaded = update.Plan.load(plan)
-    systems = [(x.dataset, x.event, x.blocks) for x in loaded.systems]
-    contexts = loaded.extra.get("contexts") or []
-    key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "contexts": contexts,
-           "v": 3}   # v3: declared fields and contexts
-    inp = maps.MapInputs.load(key)
-    if inp is None:
-        inp = map_inputs.build(systems, years, contexts=contexts)
-        inp.save(key)
-    # §11.4: a chapter whose count expectation failed calibration at B1 (the first tier with geography, whose field
-    # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones
-    calibration = {}
-    for dataset, event, _ in systems:
-        session = Session(dataset, event, FIT_YEARS)
-        for name in inp.names:
-            if name.startswith(dataset + ":") and "|" not in name:      # a count field (its twin shares its fit)
-                calibration[name] = session.calibration_of(name.split(":", 1)[1], "B1")
-    inp = maps.exclude_miscalibrated(inp, calibration, "B1")
-    basis, gen = pairs.MoranBasis(inp.places), pairs.MoranBasis(inp.places, "knn8")
-    dm = maps.dependency_map(inp, basis, ledger or control.Ledger(), tag="-".join(map(str, (years[0], years[-1]))))
-    out: dict[str, Any] = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
-                           "admitted": dm.controlled, "seconds": dm.seconds, "linked_share": inp.meta.get("linked_share", {}),
-                           "excluded_calibration": inp.meta.get("excluded_calibration", {})}
-    if worlds:
-        neg = harness.map_negatives(inp, basis, gen, worlds, health_only)
-        out["negatives"] = {"worlds": neg["worlds"], "delta_marginal": harness.map_delta(neg, "marginal"),
-                            "delta_conditional": harness.map_delta(neg, "conditional")}
-        harness.record("depmap", {"years": years, "worlds": worlds, "health_only": health_only}, out["negatives"])
-    store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
-    # the admitted pairs are relation leads (§9.1), read and triaged with every other lead; the between-places
-    # estimand with context fields (E_b) is this map's alone until the relation map reads contexts (S1)
-    e = dm.edges.to_pylist()
-    adm = [r for r in e if r.get("admitted")]
-    if adm:
-        qv = dict(zip((id(r) for r in e), control.adjusted(np.array([r["p"] for r in e])), strict=True))
-        leads.Register().add([leads.Lead(
-            kind="relation", estimand="E_b", tier="B1", fields=[r["x"], r["y"]],
-            locus={"band": "between places", "lag": 0, "years": [years[0], years[-1]]}, effect=float(r["rho"]),
-            scale="rho", interval=None, p=float(r["p"]), q=float(qv[id(r)]), family=f"map|{r['family']}",
-            null="Moran spectral randomisation", calibrated=True,
-            method={"dependency_map": {"evidence": "map negatives (harness.map_negatives)"}},
-            provenance={"n_eff": r.get("n_eff")}) for r in adm])
-    return {"summary": out, "edges": dm.edges, "inputs": inp}
+    return {m: {**r, "tier": LENS_TIERS.get(m)} for m, r in questions.method_records().items()}
 
 
 def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], graph: str = "contiguity",
@@ -1298,9 +1271,9 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
     qv = control.adjusted(np.array([r["p"] for r in out["rows"]]))
     qmap = {id(r): float(v) for r, v in zip(out["rows"], qv, strict=True)}
     family = "relations|" + "+".join(f"{ds}:{','.join(b)}" for ds, _, b in plan)
-    from . import harness
+    from . import questions
 
-    record = harness.method_records().get("relation_map", {"calibrated": None, "evidence": "not characterised"})
+    record = questions.method_records().get("relation_map", {"calibrated": None, "evidence": "not characterised"})
     admitted = [leads.Lead(kind="relation", estimand="co-movement", tier="B1", fields=[r["field"], r["leader"]],
                            locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
                            interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
@@ -1435,10 +1408,9 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
     disparity is its race-j ratio over the ``reference`` race's; given the two races' events there, race j's count is
     binomial with probability E_j·θ/(E_j·θ + E_ref), θ the national disparity, so the test (two-sided) reports places
     whose disparity departs from Brazil's, pooled over ``years``. One BH at q over races and places; the leads carry
-    the place's disparity against the national one. Each race's block is fitted where it is not (`update.fit_block`)."""
+    the place's disparity against the national one. Each race's block must be fitted (`update` fits them as a declared
+    step of a plan's ``disparities``); a missing one raises."""
     from scipy import stats as st
-
-    from . import update
 
     races = races or tuple(k for k in gateway.RACE if k != reference)
     out_rows = []
@@ -1446,11 +1418,7 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
     for k in (reference, *races):
         s = Session(dataset, event, years, graph, source={"race": k})
         block = s.expectations.field(node).block
-        try:
-            s.expectations.model(block)
-        except LookupError:
-            update.fit_block(dataset, event, block, years, graph, source={"race": k}, log=log)
-            s = Session(dataset, event, years, graph, source={"race": k})
+        s.expectations.model(block)          # raises LookupError when the race's fit is not stored
         sess[k] = s.surprise(node, "B0")
     ref = sess[reference]
     o_ref, e_ref = ref.y.sum(1), ref.mu.sum(1)

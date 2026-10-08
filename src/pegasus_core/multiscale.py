@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import scipy.sparse as sp
 
-from . import store, surprise
+from . import config, store, surprise
 
 
 def _torch():
@@ -115,7 +115,7 @@ def spectrum(edges: np.ndarray, n: int, weights: np.ndarray | None = None) -> Gr
     h.update(str(n).encode())
     graph = h.hexdigest()[:20]
     if graph not in _SPECTRA:
-        key = {"what": "spectrum", "graph": graph, "v": 1}
+        key = {"what": "spectrum", "graph": graph, "code": config.code_key(GraphSpectrum)}
         a = store.get_arrays("spectrum", key)
         g = GraphSpectrum(edges, n, weights, _eig=(a["lam"], a["Q"]) if a is not None else None)
         if a is None:
