@@ -604,19 +604,32 @@ def gaussian(s: Surprise) -> bool:
     return s.extras.get("kind") == "mark"
 
 
+def memo(s: Surprise, key: tuple, compute):
+    """A quantity of the field's predictive computed once per surprise: kept on the object, keyed also by the identity
+    of the arrays and noise it reads (held with the value, so an identity cannot be reused while it is kept)."""
+    m = s.__dict__.setdefault("_memo", {})
+    full = (key, id(s.noise), id(s.mu), id(s.phi), id(s.w))
+    if full not in m:
+        m[full] = (s.noise, s.mu, s.phi, s.w, compute())
+    return m[full][-1]
+
+
 def field_cell_variance(s: Surprise) -> np.ndarray:
-    """Var(y) of each cell under the field's predictive: 1/w for a Gaussian location, the count's otherwise."""
+    """Var(y) of each cell under the field's predictive: 1/w for a Gaussian location, the count's otherwise (once per
+    surprise: `memo`)."""
     if gaussian(s):
-        return np.where(s.w > 0, 1.0 / np.where(s.w > 0, s.w, 1.0), 0.0)
-    return cell_variance(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise)
+        return memo(s, ("cell_variance",), lambda: np.where(s.w > 0, 1.0 / np.where(s.w > 0, s.w, 1.0), 0.0))
+    return memo(s, ("cell_variance",), lambda: cell_variance(
+        s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise))
 
 
 def field_lag_covariance(s: Surprise, k: int) -> np.ndarray:
-    """[U, T − k] Cov(y_t, y_{t+k}) under the field's predictive and noise structure."""
+    """[U, T − k] Cov(y_t, y_{t+k}) under the field's predictive and noise structure (once per surprise and lag)."""
     if gaussian(s):
         v = field_cell_variance(s)
-        return s.noise.corr(k) * np.sqrt(v[:, :-k] * v[:, k:])
-    return lag_covariance(s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise, k)
+        return memo(s, ("lag_covariance", k), lambda: s.noise.corr(k) * np.sqrt(v[:, :-k] * v[:, k:]))
+    return memo(s, ("lag_covariance", k), lambda: lag_covariance(
+        s.mu, np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape), s.noise, k))
 
 
 def field_replicate(s: Surprise, noise: Noise, rng: np.random.Generator, root: np.ndarray | None = None) -> np.ndarray:
@@ -953,14 +966,27 @@ def spatial_root(spectrum, s: float) -> np.ndarray:
     D^{−1/2} Q e^{−sΛ/2} Qᵀ, D = diag(exp(−sL))."""
     import torch
 
-    lam, Q = spectrum._eig
-    d = (Q * Q) @ torch.exp(-s * lam)
-    R = (Q * torch.exp(-s * lam / 2)) @ Q.T / torch.sqrt(torch.clamp(d, min=1e-300))[:, None]
-    return R.float().cpu().numpy()
+    roots = spectrum.__dict__.setdefault("_roots", {})       # once per graph and scale: s* recurs across fields
+    if s not in roots:
+        lam, Q = spectrum._eig
+        d = (Q * Q) @ torch.exp(-s * lam)
+        R = (Q * torch.exp(-s * lam / 2)) @ Q.T / torch.sqrt(torch.clamp(d, min=1e-300))[:, None]
+        roots[s] = R.float().cpu().numpy()
+    return roots[s]
 
 
 def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2, 4, 8, 16, 32, 64, 128, 256),
                       min_expected: float = 0.0) -> Noise:
+    """`_spatial_structure`, computed once per surprise and graph: every method of a field's questions that reads the
+    same expectation reads one estimate (three of four multiscale calls repeated it, 47 s each on SIH X, survey
+    2026-10-07)."""
+    held = memo(s, ("spatial", id(spectrum), tuple(footprints), min_expected),     # the spectrum held with its result
+                lambda: (spectrum, _spatial_structure(s, spectrum, tuple(footprints), min_expected)))
+    return held[1]
+
+
+def _spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...], min_expected: float = 0.0,
+                       single: bool = True) -> Noise:
     """The spatial part of the noise structure (`Noise`: ω, s*) on the place graph ``spectrum``, by the graph
     periodogram of the residuals (the moments of a stationary process on a graph: Marques, Segarra, Leus & Ribeiro
     2017; Perraudin & Vandergheynst 2017). Each place's standardised series x = (y − μ)/√V loses its level and
@@ -998,11 +1024,13 @@ def spatial_structure(s: Surprise, spectrum, footprints: tuple[float, ...] = (2,
     sqf = torch.as_tensor(np.sqrt(f), dtype=dt, device=dev)
     best = (np.inf, 0.0, 0.0)
     sse0 = None
+    Qs = spectrum._q32 if single else Qt       # the two U × U products per scale in single precision (``single``)
     for fp in footprints:
         sc = spectrum.scales((fp,))[0]
         dK = Q2 @ torch.exp(-sc * lam)                                             # diag(exp(−sL))
-        G = Qt.T @ ((sqf / torch.sqrt(torch.clamp(dK, min=1e-300)))[:, None] * Qt)   # Qᵀ A D^{-1/2} Q
-        h = (torch.exp(-sc * lam)[:, None] * G * G).sum(0)                          # q_kᵀ A H_s A q_k
+        wq = (sqf / torch.sqrt(torch.clamp(dK, min=1e-300))).to(Qs.dtype)
+        G = Qs.T @ (wq[:, None] * Qs)                                              # Qᵀ A D^{-1/2} Q
+        h = (torch.exp(-sc * lam).to(Qs.dtype)[:, None] * G * G).sum(0).to(dt)      # q_kᵀ A H_s A q_k
         base, slope = cR * b, cR * (h - b)
         expected0 = cM * a + base
         w = 1.0 / torch.clamp(expected0, min=1e-6) ** 2

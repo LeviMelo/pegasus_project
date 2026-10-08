@@ -25,12 +25,13 @@ is one finding with its scale and footprint, not hundreds of correlated cells.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 import numpy as np
 import scipy.sparse as sp
 
-from . import surprise
+from . import store, surprise
 
 
 def _torch():
@@ -46,17 +47,22 @@ class GraphSpectrum:
     edges: np.ndarray
     n: int
     weights: np.ndarray | None = None
-    _eig: tuple = field(default=None, repr=False)
+    _eig: tuple = field(default=None, repr=False)      # (λ, Q) as numpy, from the store (`spectrum`), or computed
+    _scales: dict = field(default_factory=dict, repr=False)
+    _footprints: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
         torch, dev = _torch()
         w = np.ones(len(self.edges)) if self.weights is None else np.asarray(self.weights, dtype=float)
         A = sp.coo_matrix((w, (self.edges[:, 0], self.edges[:, 1])), shape=(self.n, self.n))
         A = A.maximum(A.T).tocsr()
-        deg = np.asarray(A.sum(1)).ravel()
-        dinv = np.where(deg > 0, 1.0 / np.sqrt(np.maximum(deg, 1e-300)), 0.0)
-        L = np.eye(self.n) - (sp.diags(dinv) @ A @ sp.diags(dinv)).toarray()   # an island's row is the identity's
-        lam, Q = torch.linalg.eigh(torch.as_tensor(L, dtype=torch.float64, device=dev))
+        if self._eig is not None:
+            lam, Q = (torch.as_tensor(x, dtype=torch.float64, device=dev) for x in self._eig)
+        else:
+            deg = np.asarray(A.sum(1)).ravel()
+            dinv = np.where(deg > 0, 1.0 / np.sqrt(np.maximum(deg, 1e-300)), 0.0)
+            L = np.eye(self.n) - (sp.diags(dinv) @ A @ sp.diags(dinv)).toarray()   # an island's row is the identity's
+            lam, Q = torch.linalg.eigh(torch.as_tensor(L, dtype=torch.float64, device=dev))
         self._eig = (lam.clamp(min=0.0), Q)
         self._q32 = Q.float()
         self._qsq = Q * Q                                   # (Q∘Q): K_s's squared row sums in closed form
@@ -71,26 +77,51 @@ class GraphSpectrum:
         return (Q * torch.exp(-s * lam).float()) @ Q.T
 
     def footprint(self, s: float) -> float:
-        """The median over centres of the effective number of places in K_s's row: (Σ K)² / Σ K²."""
-        torch, _ = _torch()
-        lam, Q = self._eig
-        rows = Q @ (torch.exp(-s * lam) * self._q1)                      # Σ_u K(c, u)
-        squares = self._qsq @ torch.exp(-2 * s * lam)                    # Σ_u K(c, u)² = (K²)_cc
-        return float((rows ** 2 / torch.clamp(squares, min=1e-300)).nanmedian())
+        """The median over centres of the effective number of places in K_s's row: (Σ K)² / Σ K² (once per s)."""
+        if s not in self._footprints:
+            torch, _ = _torch()
+            lam, Q = self._eig
+            rows = Q @ (torch.exp(-s * lam) * self._q1)                      # Σ_u K(c, u)
+            squares = self._qsq @ torch.exp(-2 * s * lam)                    # Σ_u K(c, u)² = (K²)_cc
+            self._footprints[s] = float((rows ** 2 / torch.clamp(squares, min=1e-300)).nanmedian())
+        return self._footprints[s]
 
     def scales(self, footprints: tuple[float, ...] = (1, 3, 10, 30, 100, 300)) -> list[float]:
-        """The s whose median footprint is each of ``footprints`` (bisection on log s; 0 for a single place)."""
-        out = []
+        """The s whose median footprint is each of ``footprints`` (bisection on log s; 0 for a single place), each
+        found once per graph."""
         for target in footprints:
+            if target in self._scales:
+                continue
             if target <= 1:
-                out.append(0.0)
+                self._scales[target] = 0.0
                 continue
             lo, hi = -6.0, 6.0
             for _ in range(40):
                 mid = 0.5 * (lo + hi)
                 lo, hi = (mid, hi) if self.footprint(10 ** mid) < target else (lo, mid)
-            out.append(float(10 ** (0.5 * (lo + hi))))
-        return out
+            self._scales[target] = float(10 ** (0.5 * (lo + hi)))
+        return [self._scales[t] for t in footprints]
+
+
+_SPECTRA: dict[str, GraphSpectrum] = {}
+
+
+def spectrum(edges: np.ndarray, n: int, weights: np.ndarray | None = None) -> GraphSpectrum:
+    """The place graph's spectrum, computed once per graph: kept in this process and in the store (kind ``spectrum``,
+    keyed by the graph's edges and weights), so neither another reader's session nor another process repeats the
+    eigendecomposition (27 s at 5,570 places)."""
+    h = hashlib.sha256(np.ascontiguousarray(edges, dtype=np.int64).tobytes())
+    h.update(np.ascontiguousarray(np.ones(len(edges)) if weights is None else weights, dtype=np.float64).tobytes())
+    h.update(str(n).encode())
+    graph = h.hexdigest()[:20]
+    if graph not in _SPECTRA:
+        key = {"what": "spectrum", "graph": graph, "v": 1}
+        a = store.get_arrays("spectrum", key)
+        g = GraphSpectrum(edges, n, weights, _eig=(a["lam"], a["Q"]) if a is not None else None)
+        if a is None:
+            store.put_arrays("spectrum", key, {"lam": g._eig[0].cpu().numpy(), "Q": g._eig[1].cpu().numpy()})
+        _SPECTRA[graph] = g
+    return _SPECTRA[graph]
 
 
 def contrasts(T: int, shape: str, min_past: int = 3, min_years: int = 2) -> tuple[np.ndarray, list[tuple[int, int]]]:
@@ -220,8 +251,12 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     # N1 with its spatial part, on this graph (a count field's; a location keeps its own temporal N1)
     noise = s.noise if gauss else surprise.spatial_structure(s, spectrum)
     root = surprise.spatial_root(spectrum, noise.scale) if noise.omega > 0 else None
-    reps = [(np.where(ok, surprise.field_replicate(s, noise, rng, root), 0.0) - mu0) @ C
-            for _ in range(replicates)]
+    # the replicate fields depend on the field, its noise and the seed, not on the shape: drawn once for every
+    # question that reads the same expectation (`surprise.memo`), each shape taking its own contrasts of them
+    fields = surprise.memo(s, ("replicates", repr(noise), id(spectrum), seed, replicates),
+                           lambda: [np.where(ok, surprise.field_replicate(s, noise, rng, root), 0.0) - mu0
+                                    for _ in range(replicates)])
+    reps = [r @ C for r in fields]
     Dr = torch.as_tensor(np.concatenate(reps, 1), dtype=torch.float32, device=dev)          # [U, R·m]
     A = (spectrum.neighbours + sp.identity(U)).tocoo()       # a place counts among its own neighbourhood
     rows, cols = A.row, A.col

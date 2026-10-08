@@ -138,7 +138,7 @@ class Session:
         """The institution lattice of a field (E_i, ADR-0016): its facilities' steps against their catchment's expectation
         (`facility.institution_lattice`), read on the B1 expectation without the supply term. Annual grain; SIH-RD, whose
         events all name a facility (SIM-DO's CODESTAB is empty for a death at home)."""
-        su = self.expectations.surprise(node, "B1")
+        su = self.surprise(node, "B1")                 # the survey's memo: built once for all of a field's questions
         codes = list(self.expectations.registry.leaves(node))
         p = facility.pairs(self.dataset, self.event, [int(y) for y in su.years], codes)
         return facility.institution_lattice(p, su.places, np.asarray(su.years), su.mu)
@@ -266,7 +266,7 @@ class Session:
             block = next(iter(self.expectations._models), None) or next(iter(self._blocks()))
             places = self.expectations.model(block).data.places
             e, w = graphs.graph(places, self.graph)
-            self._spectrum = multiscale.GraphSpectrum(e, len(places), w)
+            self._spectrum = multiscale.spectrum(e, len(places), w)
         return self._spectrum
 
     def _blocks(self) -> list[str]:
@@ -587,24 +587,28 @@ class Session:
         if getattr(self, "_pop", None) is not None:
             return
         if self.source.get("grain", "year") == "year" and self.expectations.registry.classifier != "*":
+            import pyarrow.compute as pc
+
             pop_t = gateway.population(list(self.years)).group_by(["u", "year"]).aggregate([("n", "sum")])
-            places = np.sort(np.asarray(pop_t.column("u").unique().to_pylist()))
+            places = np.unique(pop_t.column("u").to_numpy())
             years = np.asarray(self.years)
-            ui = {int(u): i for i, u in enumerate(places)}
-            ti = {int(y): j for j, y in enumerate(years)}
             pop = np.zeros((len(places), len(years)))
-            for u, y, n in zip(*(pop_t.column(c).to_pylist() for c in ("u", "year", "n_sum")), strict=True):
-                pop[ui[int(u)], ti[int(y)]] = n
+            pop[np.searchsorted(places, pop_t.column("u").to_numpy()),
+                np.searchsorted(years, pop_t.column("year").to_numpy())] = pop_t.column("n_sum").to_numpy()
             reg = self.expectations.registry
             total, ill = np.zeros_like(pop), np.zeros_like(pop)
-            for year in self.years:
+            for j, year in enumerate(years):          # vectorised: a Python loop over SIH's rows took 320 s a field
                 c = gateway.event_counts(self.dataset, self.event, int(year)).counts
-                u = np.array([ui.get(int(x), -1) for x in c.column("u").to_pylist()])
-                ok = u >= 0
+                cu = c.column("u").to_numpy()
+                u = np.minimum(np.searchsorted(places, cu), len(places) - 1)
+                ok = places[u] == cu
                 y = np.asarray(c.column("y").to_numpy(), dtype=float)
-                np.add.at(total[:, ti[int(year)]], u[ok], y[ok])
-                chap = np.array([reg.chapter(str(x)[:3]) == "XVIII" for x in c.column("code").to_pylist()])
-                np.add.at(ill[:, ti[int(year)]], u[ok & chap], y[ok & chap])
+                total[:, j] += np.bincount(u[ok], weights=y[ok], minlength=len(places))
+                cat = pc.dictionary_encode(pc.utf8_slice_codeunits(pc.cast(c.column("code"), "string"), 0, 3))                     .combine_chunks()
+                ill_cat = np.array([reg.chapter(str(x)) == "XVIII" for x in cat.dictionary.to_pylist()], dtype=bool)
+                chap = ill_cat[cat.indices.to_numpy(zero_copy_only=False)] if len(ill_cat) else np.zeros(len(cu), bool)
+                total_ill = ok & chap
+                ill[:, j] += np.bincount(u[total_ill], weights=y[total_ill], minlength=len(places))
             self._grid_places, self._grid_years, self._per_year = places, years, 1
             self._total, self._ill, self._pop = total, ill, pop
             return
@@ -1266,7 +1270,7 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
             s.expectations._models = {}
             gc.collect()
         log(f"{ds}: {len(surps)} fields so far")
-    out = relations.relation_map(surps, multiscale.GraphSpectrum(edges, n_places), q=q, ledger=control.Ledger(), log=log)
+    out = relations.relation_map(surps, multiscale.spectrum(edges, n_places), q=q, ledger=control.Ledger(), log=log)
     rep = [r for r in out["rows"] if r["reported"]]
     qv = control.adjusted(np.array([r["p"] for r in out["rows"]]))
     qmap = {id(r): float(v) for r, v in zip(out["rows"], qv, strict=True)}
@@ -1328,7 +1332,7 @@ def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], 
         s = sessions.setdefault((ds, ev), Session(ds, ev, years, graph))
         surps.append(s.surprise(node, "B1"))
     first = next(iter(sessions.values()))
-    spectrum = multiscale.GraphSpectrum(first.edges(), len(surps[0].places))
+    spectrum = multiscale.spectrum(first.edges(), len(surps[0].places))
     return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q, ledger=first.ledger)["rows"]
 
 

@@ -49,8 +49,15 @@ def municipality(places: np.ndarray) -> Scale:
 
 
 def standard(places: np.ndarray) -> list[Scale]:
-    """Municipality, IBGE immediate region (about 500 units) and state (27)."""
-    from .. import gateway
+    """Municipality, IBGE immediate region (about 500 units) and state (27), built once per set of places in a process
+    (8 s, paid by every session of a plan's readers before; survey 2026-10-07)."""
+    key = np.ascontiguousarray(places, dtype=np.int64).tobytes()
+    if key not in _STANDARD:
+        from .. import gateway
 
-    return [municipality(places), Scale("region", gateway.regions(places, "ibge_immediate_region")),
-            Scale("state", gateway.regions(places, "uf"))]
+        _STANDARD[key] = [municipality(places), Scale("region", gateway.regions(places, "ibge_immediate_region")),
+                          Scale("state", gateway.regions(places, "uf"))]
+    return _STANDARD[key]
+
+
+_STANDARD: dict[bytes, list[Scale]] = {}

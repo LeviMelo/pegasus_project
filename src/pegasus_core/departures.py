@@ -23,6 +23,8 @@ its support and the municipalities it covers.
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 from scipy import special, stats
 
@@ -174,8 +176,10 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "multiscale graph peaks (STEM)",
                                                                     "field": s.field.id, "tier": s.tier}))
     scales = spectrum.scales(footprints)
+    # one set of replicate fields per field and tier, read by every shape (each its own contrasts of them): an equally
+    # valid null per shape, drawn once (`multiscale.peaks`)
     found, null = multiscale.peaks(s, spectrum, scales, shape=shape, replicates=replicates,
-                                   seed=config.seed("excess", shape, s.field.id, s.tier), rate_ratio=rr)
+                                   seed=config.seed("excess", s.field.id, s.tier), rate_ratio=rr)
     if not found:
         ledger.complete(test, 1.0, None, {"peaks": 0, "hits": 0})
         return []
@@ -429,6 +433,67 @@ class _Municipal:
 # ---------------------------------------------------------------------- a field's share of all events (ARCHITECTURE §7.1)
 
 
+def betabinom_tails(y: np.ndarray, n: np.ndarray, a: np.ndarray, b: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """P(Y < y), P(Y = y) and P(Y ≥ y) under BetaBinomial(n, a, b), elementwise: each tail summed directly from the
+    pmf at y (log-gamma) by the pmf's ratio recurrence, away from y, until its terms no longer move the sum, so a small
+    tail keeps its relative precision. Compiled (numba): scipy's cdf evaluates one cell at a time in Python, 105 s of
+    one SIH field's share question (survey 2026-10-07)."""
+    shape = np.shape(y)
+    args = [np.ascontiguousarray(np.broadcast_to(x, shape), dtype=np.float64).ravel() for x in (y, n, a, b)]
+    out = _betabinom_kernel()(*args)
+    return tuple(o.reshape(shape) for o in out)
+
+
+@functools.cache
+def _betabinom_kernel():
+    import math
+
+    from numba import njit, prange
+
+    @njit(parallel=True, cache=True)
+    def kernel(y, n, a, b):
+        m = y.shape[0]
+        below, at, upper = np.zeros(m), np.zeros(m), np.zeros(m)
+        for i in prange(m):
+            yi, ni, ai, bi = y[i], n[i], a[i], b[i]
+            if yi < 0:
+                upper[i] = 1.0
+                continue
+            if yi > ni:
+                below[i] = 1.0
+                continue
+            lp = (math.lgamma(ni + 1) - math.lgamma(yi + 1) - math.lgamma(ni - yi + 1)
+                  + math.lgamma(yi + ai) + math.lgamma(ni - yi + bi) - math.lgamma(ni + ai + bi)
+                  + math.lgamma(ai + bi) - math.lgamma(ai) - math.lgamma(bi))
+            at[i] = math.exp(lp)
+            # each tail as Σ P(k)/P(y) from k = y outward, rescaled to stay in range (P(y) may underflow while its
+            # tail does not), then times P(y) in logs
+            s, term, off, k = 0.0, 1.0, 0.0, yi       # P(k-1) = P(k) k (n - k + b) / ((n - k + 1)(k - 1 + a))
+            while k > 0:
+                term *= k * (ni - k + bi) / ((ni - k + 1) * (k - 1 + ai))
+                k -= 1
+                s += term
+                if term > 1e200:
+                    term, s, off = term * 1e-200, s * 1e-200, off + 460.51701859880916
+                if (term <= 1e-17 * s or term == 0.0) and k * (ni - k + bi) <= (ni - k + 1) * (k - 1 + ai):
+                    break                                 # below the mode: the terms only shrink from here
+            below[i] = min(1.0, math.exp(math.log(s) + off + lp)) if s > 0 else 0.0
+            s, term, off, k = 1.0, 1.0, 0.0, yi       # P(k+1) = P(k) (n - k)(k + a) / ((k + 1)(n - k - 1 + b))
+            while k < ni:
+                term *= (ni - k) * (k + ai) / ((k + 1) * (ni - k - 1 + bi))
+                k += 1
+                s += term
+                if term > 1e200:
+                    term, s, off = term * 1e-200, s * 1e-200, off + 460.51701859880916
+                if (term <= 1e-17 * s or term == 0.0) and (ni - k) * (k + ai) <= (k + 1) * (ni - k - 1 + bi):
+                    break                                 # above the mode: likewise
+            upper[i] = min(1.0, math.exp(math.log(s) + off + lp))
+        return below, at, upper
+
+    return kernel
+
+
 def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, mu_total: np.ndarray,
                  places: np.ndarray, years: np.ndarray, field_id: str, ledger: control.Ledger, q: float = 0.05,
                  min_total: float = 20.0, ratio: float = 1.25) -> list:
@@ -451,8 +516,8 @@ def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, m
 
     def pit(log_theta: float) -> np.ndarray:
         th = np.exp(log_theta)                       # θ = a + b, the beta's total concentration
-        d = stats.betabinom(n, pp * th, (1 - pp) * th)
-        return np.clip(d.cdf(y - 1) + v * d.pmf(y), 1e-12, 1 - 1e-12)
+        below, at, _ = betabinom_tails(y, n, pp * th, (1 - pp) * th)
+        return np.clip(below + v * at, 1e-12, 1 - 1e-12)
 
     def gap(log_theta: float) -> float:
         z = special.ndtri(pit(log_theta))
@@ -462,8 +527,8 @@ def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, m
     best = grid[int(np.argmin([gap(g) for g in grid]))]
     log_theta = optimize.minimize_scalar(gap, bounds=(best - 0.5, best + 0.5), method="bounded").x
     th = float(np.exp(log_theta))
-    d = stats.betabinom(n, pp * th, (1 - pp) * th)
-    upper, lower = d.sf(y - 1), d.cdf(y)
+    below, at, upper = betabinom_tails(y, n, pp * th, (1 - pp) * th)
+    lower = below + at
     pv = np.clip(2 * np.minimum(upper, lower), 0, 1)
     share, expect = y / np.maximum(n, 1), pp
     relevant = (share >= ratio * expect) | (share <= expect / ratio)
