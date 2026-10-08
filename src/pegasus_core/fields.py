@@ -483,3 +483,51 @@ def link_source(dataset: str, event: str, column: str) -> dict:
     primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
     return {"source": "linked", "link": name, "side": side, **({"classifier": primary} if primary else {})}
 
+
+def coverage(dataset: str, event: str) -> list[dict]:
+    """Every column pegasus_data declares for ``dataset``, with what reads it (work plan S1.3): the fields it makes
+    (a count tree, a measure, a composition, an interval, mentions, a care flow, a link, another classifier), the axis
+    it is (residence, age, sex, race, the event's dates), the institution question, or the reason it is read by
+    nothing. A column with neither a reader nor a reason is a gap of S1."""
+    from . import gateway
+
+    readers: dict[str, list[str]] = {}
+
+    def add(column: str, what: str) -> None:
+        readers.setdefault(column, []).append(what)
+
+    reasons: dict[str, str] = {}
+    for d in declared(dataset):
+        col = d.column.removeprefix("interval:")
+        if d.reason:
+            reasons[col] = d.reason
+        else:
+            add(col, d.kind)
+    for c in gateway.event_type(dataset, event).get("classifiers") or []:
+        add(c["column"], "count tree" if c["role"] == "primary" else "classifier")
+    for role, cols in (gateway.code_groups(dataset) or {}).items():
+        for c in cols:
+            add(c, f"mentions:{role}")
+    for d in declared_flows(dataset):
+        add(d.column.removeprefix("away:"), "care flow")
+    strata = gateway._strata(dataset)
+    for k in ("residence", "age", "sex", "race"):
+        if strata.get(k):
+            add(strata[k], f"axis: {k}")
+    out = []
+    for r in gateway.roles(dataset):
+        col, model = r["column"], r.get("model")
+        what = list(dict.fromkeys(readers.get(col, [])))
+        if model == "institution":
+            what.append("institution question")
+        elif model in ("when", "stratum") and r["kind"] == "date" and not what:
+            what.append("axis: time")
+        reason = "" if what else reasons.get(col) or {
+            "excluded": f"excluded by pegasus_data: {r.get('note') or 'no reading declared'}",
+            "link_only": "an identifier or address for record linkage (S2), never a field",
+            "where": "a place of the event read by no field yet",
+            "stratum": "a stratum read by no axis yet",
+        }.get(model, f"{model} role of kind {r['kind']}: no field kind reads it yet")
+        out.append({"column": col, "role": r["role"], "kind": r["kind"], "model": model, "read_by": what,
+                    "reason": reason})
+    return out

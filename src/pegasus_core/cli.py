@@ -55,6 +55,23 @@ def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: 
     raise typer.Exit(1 if failed else 0)
 
 
+@app.command()
+def coverage(dataset: str, event: str, gaps: bool = typer.Option(False, help="only the columns read by nothing")) -> None:
+    """Every column pegasus_data declares for a dataset and what reads it, or why nothing does (`fields.coverage`)."""
+    from . import fields as fields_mod
+
+    rows = fields_mod.coverage(dataset, event)
+    t = Table("column", "model", "kind", "read by", "reason")
+    for r in rows:
+        if gaps and r["read_by"]:
+            continue
+        t.add_row(r["column"], str(r["model"]), r["kind"], ", ".join(r["read_by"]), r["reason"])
+    console.print(t)
+    read = sum(bool(r["read_by"]) for r in rows)
+    console.print(f"{len(rows)} columns: {read} read, {len(rows) - read} with a reason, "
+                  f"{sum(not r['read_by'] and not r['reason'] for r in rows)} with neither")
+
+
 @app.command("update")
 def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
                  force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:

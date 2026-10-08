@@ -960,7 +960,11 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
             log(f"{p.name}: {rec['status']}")
             continue
         rec["methods"] = {}
+        kind = s.surprise(p.node, "B1").extras.get("kind", "count")
         for m in qn.methods:
+            if kind not in m.kinds:            # a method that does not read this field's kind is not scored on it
+                rec["methods"][m.id] = {"not_read": kind}
+                continue
             if m.id in p.selected_by:
                 rec["methods"][m.id] = {"selected": True}      # it found the answer that made the positive: not scored
                 continue
@@ -992,7 +996,8 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
         rec["status"] = "scored"
         verdicts = []
         for k, v in rec["methods"].items():
-            verdicts.append(f"{k} " + ("error" if "error" in v else "FOUND" if v["found"] else "missed"))
+            verdicts.append(f"{k} " + ("error" if "error" in v else "not scored" if "found" not in v
+                                        else "FOUND" if v["found"] else "missed"))
         log(f"{p.name}: " + ", ".join(verdicts))
     record("event_record", {"positives": [p.name for p in positives], "years": years, "grains": list(grains)},
            {"records": out})

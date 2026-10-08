@@ -693,7 +693,25 @@ def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Sur
     """A Surprise at a coarser scale (`scans.scales.Scale`: immediate region, state): Σy and Σμ per unit and period,
     the dispersion of a sum of independent cells (M² / Σ μ²/φ), with an optional unit-period variance component
     1/φ_extra on top (`monolith.place_year_phi` on the training years), then a fresh randomised PIT. A rare outcome is tested
-    here: at the municipality its cells are mostly zero and their surprises noise (dengue → microcephaly)."""
+    here: at the municipality its cells are mostly zero and their surprises noise (dengue → microcephaly).
+
+    A location field (a measure's mean, a share's logit: `gaussian`) is no sum: its unit's value is the
+    precision-weighted mean of its cells', with variance 1/Σw and its standardised score from them. Summed as counts,
+    with the counts' dispersion it has no φ for, every immediate region of SIH's length of stay looked extreme: 6 of 20
+    null worlds held a cell-excess finding, all at the region (work plan S1.1, 2026-10-07)."""
+    units = np.asarray(scale.units)
+    units = units.astype(np.int64) if all(str(k).isdigit() for k in units) else units   # IBGE codes stay integers
+    if gaussian(s):
+        w = np.where(np.isfinite(s.y) & (s.w > 0), s.w, 0.0)
+        W = scale.sum(w)
+        has = W > 0
+        y = np.where(has, scale.sum(w * np.nan_to_num(s.y)) / np.where(has, W, 1.0), np.nan)
+        mu = np.where(has, scale.sum(w * np.nan_to_num(s.mu)) / np.where(has, W, 1.0), np.nan)
+        z = np.where(has, (np.nan_to_num(y) - np.nan_to_num(mu)) * np.sqrt(W), 0.0)
+        flags = np.where(has, 0, NO_INFORMATION).astype(np.int8)
+        return Surprise(s.field, s.tier, units, s.years, y, mu, np.full(y.shape, np.nan), special.ndtr(z), z, W, flags,
+                        {}, {**{k: v for k, v in s.extras.items() if k in ("kind", "unit_sd")}, "scale": scale.name},
+                        noise=s.noise)
     y, mu = scale.sum(s.y), scale.sum(s.mu)
     v = scale.sum(np.where(np.isfinite(s.phi), s.mu ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
     phi = np.divide(mu ** 2, v, out=np.full(mu.shape, np.inf), where=v > 0)
@@ -702,8 +720,6 @@ def lift(s: Surprise, scale, extra_phi: float | np.ndarray | None = None) -> Sur
     # one random stream per field and scale: shared draws would correlate fields
     u, z = randomised_pit(y, mu, phi, config.seed(s.field.id, s.tier, "lift", scale.name, scale.n))
     w = np.where(np.isinf(phi), mu, mu / (1 + mu / phi))
-    units = np.asarray(scale.units)
-    units = units.astype(np.int64) if all(str(k).isdigit() for k in units) else units   # IBGE codes stay integers
     return Surprise(s.field, s.tier, units, s.years, y, mu, phi, u, z, w,
                     np.zeros(y.shape, dtype=np.int8), {}, {"scale": scale.name}, noise=s.noise)
 

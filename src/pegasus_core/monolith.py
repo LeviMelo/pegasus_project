@@ -2274,7 +2274,7 @@ class ShareModel(_CellMark):
         return torch.sigmoid(self.eta_nnz(self.effects()))
 
     def _moment(self) -> float:
-        p = self._cell_mean().cpu().numpy().clip(1e-9, 1 - 1e-9)
+        p = self._cell_mean().detach().cpu().numpy().clip(1e-9, 1 - 1e-9)
         n, k = self.data.n, self.data.y * self.data.n
         r2 = (k - n * p) ** 2 / (n * p * (1 - p)) - 1.0
         return float(np.clip(np.sum((n - 1) * r2) / max(np.sum((n - 1) ** 2), 1.0), 0.0, 1.0))
@@ -2325,7 +2325,7 @@ class CountModel(_CellMark):
         return torch.exp(self.eta_nnz(self.effects()))
 
     def _moment(self) -> float:
-        mu = self._cell_mean().cpu().numpy()
+        mu = self._cell_mean().detach().cpu().numpy()
         n, s1, s2 = self.data.n, self.data.y * self.data.n, self.data.l2
         q = np.sum(s2 - 2 * mu * s1 + n * mu ** 2)
         return float(max((q - np.sum(n * mu)) / np.sum(n * mu ** 2), 0.0))
