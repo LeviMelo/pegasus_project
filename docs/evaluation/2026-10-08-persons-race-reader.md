@@ -67,6 +67,22 @@ The test that does separate them: **the events carry the age–sex profile of th
 - The profile test now stands alone. Under the code's own profile its error is bounded by Markov whatever the siblings did.
 - The run re-triaged 43,168 leads, retired ones among them; it now reads only the leads not retired.
 
+**The eight under the standing profile test** (`data/probes/s5_1/check8.py`, nothing written):
+
+| lead | log10 LR (siblings' profile against the code's) | class |
+|---|---|---|
+| Mundo Novo J64 | 10.2 | tested substitution |
+| Manicoré J85 | 24.5 | tested substitution |
+| Carlinda J66.8 | 4.8 | tested substitution |
+| São João Batista J80 | 73.3 | tested substitution |
+| Igarapé Grande J98.9 | 50.5 | tested substitution |
+| Tuntum J06.8 | 30.8 | tested substitution |
+| Fortaleza dos Nogueiras J85.0 | 2.9 | signal (under 3) |
+| Piên J66.8 | −2.0 | signal |
+
+- Piên's 21 admissions are of adults aged 40–78: the profile of the code itself. The test contradicts my verdict *artefact*, which was premature. It is now *unknown*: occupational organic-dust disease in a farming town is a rival reading no record here excludes.
+- Fortaleza dos Nogueiras stays *artefact* by the reading (lung gangrene in infants while asthma fell). The test, at 10^2.9, does not reach it.
+
 **The ledger** held 93,272 part files: stage E wrote two per test.
 - Merged into one in 196 s (`control.Ledger.compact`, now `update`'s last step).
 - Stage E's tests are now registered and completed by batch: a node's leads in triage, a lead's sources in corroboration.
@@ -79,4 +95,21 @@ The test that does separate them: **the events carry the age–sex profile of th
   - It is not a defect of either side's keys: both are complete.
   - Without a birth date (SINAN lost it to the LGPD), death day, residence, sex and age do not single out a person in the large cities where 2015's deaths were.
   - Such a year stays unlinked, and corroboration names it untested, with the reason. S2.2's "no year unlinked" holds only where a link is viable.
+
+**The profile test on local person-years, and the second dossier** (`data/probes/s5_1/retriage3.log`, `reports/dossier.html`).
+
+The test against the code's *national* profile had a confound: a real outbreak in an old or a young town carries the town's ages, like its siblings. Both hypotheses are now rates on the place's own person-years.
+- Tested recodings: 2,400 → 2,210 of the 17,890 SIH leads not retired; 3,025 explained in all.
+- The re-triage ran in 9 min (45 before): batched ledger, stored facility cube.
+
+The dossier's top 40 under the reading order:
+- 5 cohort associations: *confirmed*, the known gradients.
+- 17 institution steps that triage reads as capacity, and one share it reads as a system change (Capim Grosso/BA): *artefact*.
+- 11 single-institution behaviours, tested: *artefact*.
+- Six place signals, read against the records:
+  - Massaranduba/PB 2012 *confirmed*: 83 tonsillectomies and adenoidectomies of children at one facility, a surgical drive. A departure of care, not of disease.
+  - São Pedro da Água Branca/MA *artefact*: one facility's codes move year to year.
+  - Juru/PB, Vitor Meireles/SC, Miguel Alves/PI, Igrapiúna/BA *unknown*: a coding habit or a real exposure or wave, which the records do not settle.
+- The capacity and single-institution verdicts rest on stage E's reading, stated in each note; only the six place signals and the first eight were read against records.
+- Every verdict carries its evidence. S5.1's condition, a dossier whose top leads have verdicts, is met.
 

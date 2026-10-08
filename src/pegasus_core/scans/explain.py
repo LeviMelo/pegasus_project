@@ -189,6 +189,7 @@ class Evidence:
     per_year: int = 1               # periods in a year on the grid: 1 (annual), 12 (``years`` are YYYYMM)
     y_g: np.ndarray | None = None   # the lead's field by age-sex group [places, years, groups]
     siblings_g: np.ndarray | None = None   # the siblings by age-sex group
+    pop_g: np.ndarray | None = None        # person-years by age-sex group [places, years, groups]
 
 
 @dataclass
@@ -389,20 +390,31 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
 
 
 def recoded_profile(ev: Evidence, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> float | None:
-    """log10 of the likelihood ratio of the window's events at the lead's places by age-sex group: under the profile of
-    the siblings there in the base years (the patients whose codes fell) against the lead's own code's national
-    profile. Two simple hypotheses, so under the code's own profile P(LR ≥ k) ≤ 1/k (Markov) whatever the counts: an
-    LR of 1/FAC_P tests the recoding. Pneumoconiosis in two-year-olds has the asthma's ages, not the miners' (S5.1).
-    The siblings' profile is shrunk to their national one by half an event per group; None without groups."""
-    if ev.y_g is None or ev.siblings_g is None or ev.y_g.shape[-1] < 2:
+    """log10 of the likelihood ratio of the window's events at the lead's places by age-sex group, under two simple
+    hypotheses on the same person-years (the places' in the window): the siblings' rates there in the base years (the
+    patients whose codes fell) against the lead's code's national rates. Under the code's own rates P(LR ≥ k) ≤ 1/k
+    (Markov) whatever the counts: an LR of 1/FAC_P tests the recoding. Pneumoconiosis in two-year-olds has the
+    asthma's ages, not the miners' (S5.1). Both are rates on the place's own population: against the code's national
+    profile instead, a real outbreak in an old or a young town carried the town's ages like its siblings and read as
+    recoded. Each rate is shrunk to its national counterpart by half an event per group; None without groups."""
+    if ev.y_g is None or ev.siblings_g is None or ev.pop_g is None or ev.y_g.shape[-1] < 2:
         return None
     w = ev.y_g[rows][:, win].sum((0, 1))
     if w.sum() <= 0:
         return None
-    own = ev.y_g.sum((0, 1)) + 0.5
-    sib_nat = ev.siblings_g.sum((0, 1)) + 0.5
-    sib = ev.siblings_g[rows][:, base].sum((0, 1)) + 0.5 * len(w) * sib_nat / sib_nat.sum()
-    return float(np.sum(w * (np.log(sib / sib.sum()) - np.log(own / own.sum()))) / np.log(10))
+    n_win = ev.pop_g[rows][:, win].sum((0, 1))
+    n_base = ev.pop_g[rows][:, base].sum((0, 1))
+    n_nat = np.maximum(ev.pop_g.sum((0, 1)), 1e-9)
+    own_rate = (ev.y_g.sum((0, 1)) + 0.5) / n_nat
+    sib_nat = (ev.siblings_g.sum((0, 1)) + 0.5) / n_nat
+    sib_rate = (ev.siblings_g[rows][:, base].sum((0, 1)) + 0.5 * sib_nat * n_base / max(float(n_base.sum()), 1e-9)
+                * len(w)) / np.maximum(n_base, 1e-9)
+    own, sib = own_rate * n_win, sib_rate * n_win
+    keep = n_win > 0
+    if not keep.any() or w[~keep].sum() > 0:
+        return None
+    own, sib, w = own[keep] / own[keep].sum(), sib[keep] / sib[keep].sum(), w[keep]
+    return float(np.sum(w * (np.log(sib) - np.log(own))) / np.log(10))
 
 
 def facility_read(t: FacilityTally, win: np.ndarray, base: np.ndarray, direction: int) -> dict:
