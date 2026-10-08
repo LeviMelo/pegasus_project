@@ -73,5 +73,10 @@ The test that does separate them: **the events carry the age–sex profile of th
 
 **Link runs (S2.2)** (`pegasus-core links plans/default.yml`, `data/probes/s2_2/`).
 - `sih_deaths_to_sim` failed on every year before 2014. pegasus_data's role table asked for all of a role's additional columns (SIH's DIAGSEC1–9), which those years lack. Fixed in pegasus_data 9160d53: it asks only for the columns a year may carry.
+- The same defect stopped `sinan_dengue_deaths_to_sim` on SIM's 2010 files, which lack SEMAGESTAC, a role's own column. pegasus_data 8afada1: a column the period lacks makes its role absent (nulls, named) instead of failing the table.
 - Run times are about 5 min a year: 2014 gave 404,653 pairs, 2015 429,306.
+- `sinan_dengue_deaths_to_sim` 2015 is **not viable**, by the engine's own test (972 deaths, 165,342 candidates; the date-shifted controls reach 39 % of the real pairs in the 23–26-bit bins).
+  - It is not a defect of either side's keys: both are complete.
+  - Without a birth date (SINAN lost it to the LGPD), death day, residence, sex and age do not single out a person in the large cities where 2015's deaths were.
+  - Such a year stays unlinked, and corroboration names it untested, with the reason. S2.2's "no year unlinked" holds only where a link is viable.
 

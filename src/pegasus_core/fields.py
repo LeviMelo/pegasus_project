@@ -367,17 +367,21 @@ def declared_flows(dataset: str) -> list[Declared]:
     res = next((r for r in rows if r["column"] == gateway._strata(dataset)["residence"]), None)
     if res is None or not res.get("codelists"):
         return []
-    system = res["codelists"][0]
+    width = gateway.PLACE_PREFIX.get(res["codelists"][0])
     out = []
     for r in rows:
+        w = gateway.PLACE_PREFIX.get((r.get("codelists") or [None])[0])
         if not (r["kind"] == "place" and r["column"] != res["column"] and r.get("reviewed", True)
-                and (r.get("codelists") or [None])[0] == system):
+                and w is not None and width is not None and w <= width):
             continue
+        if r["entity"] == res["entity"] and r["role"].split(".", 1)[-1].startswith(res["role"].split(".", 1)[-1]):
+            continue                         # the residence itself at a coarser level (a residence state)
+        level = "" if w == width else f"@{w}"
         if r["entity"] != res["entity"]:
-            out.append(Declared(dataset, f"away:{r['column']}", r["role"], f"events away from residence ({r['role']})", "away"))
+            out.append(Declared(dataset, f"away:{r['column']}{level}", r["role"], f"events away from residence ({r['role']})", "away"))
         else:
-            out.append(Declared(dataset, f"origin:{r['column']}", r["role"],
-                                f"events of persons whose {r['role']} is not their residence municipality", "origin"))
+            out.append(Declared(dataset, f"origin:{r['column']}{level}", r["role"],
+                                f"events of persons whose {r['role']} is not their residence's", "origin"))
     return out
 
 
@@ -388,7 +392,9 @@ def flow_source(dataset: str, event: str, column: str) -> dict:
 
     et = gateway.event_type(dataset, event)
     primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
-    return {"source": "away", "place": column.split(":", 1)[1], **({"classifier": primary} if primary else {})}
+    place, _, width = column.split(":", 1)[1].partition("@")
+    return {"source": "away", "place": place, **({"width": int(width)} if width else {}),
+            **({"classifier": primary} if primary else {})}
 
 
 def declared_mentions(dataset: str) -> list[Declared]:
@@ -560,7 +566,7 @@ def coverage(dataset: str, event: str) -> list[dict]:
         for c in cols:
             add(c, f"mentions:{role}")
     for d in declared_flows(dataset):
-        add(d.column.split(":", 1)[1], "care flow" if d.kind == "away" else "a person's place")
+        add(d.column.split(":", 1)[1].partition("@")[0], "care flow" if d.kind == "away" else "a person's place")
     for d in declared_codes(dataset):
         if d.reason:
             reasons[d.column.removeprefix("codes:")] = d.reason

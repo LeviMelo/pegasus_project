@@ -891,14 +891,21 @@ def share_moments(dataset: str, event: str, year: int, indicator: str, success: 
     return EventCounts(counts, comp.unallocated, {**comp.key, "what": "share_moments", "success": list(success)})
 
 
+#: IBGE's place codes nest by prefix: the digits of a residence municipality's code (6) each code system's codes are,
+#: so a place in a coarser system is compared with the residence at that level (a state of birth with the state)
+PLACE_PREFIX = {"BR_MUNICIPALFA": 6, "UF_BR": 2}
+
+
 def away_counts(dataset: str, event: str, year: int, place: str, classifier: str | None = None,
-                places: pa.Array | None = None) -> EventCounts:
-    """Care flows as a share per (u, year, sex, age, code), u the residence: n events with ``place`` recorded (a
-    municipality where the event happened: the hospital, the place of death or birth, the place of infection) and k of
-    them away from the residence municipality. A place not recorded is unallocated ('place not recorded')."""
+                places: pa.Array | None = None, width: int = 6) -> EventCounts:
+    """Place fields as a share per (u, year, sex, age, code), u the residence: n events with ``place`` recorded (a
+    municipality where the event happened: the hospital, the place of death or birth, the place of infection; or a
+    place of the person) and k of them away from the residence, compared at the place's level (``width``: the digits
+    of the residence's code it holds, `PLACE_PREFIX`). A place not recorded is unallocated ('place not recorded')."""
     strata = _strata(dataset)
     key = {"what": "away_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
-           "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year)}
+           "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
+           **({"width": width} if width != 6 else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -911,15 +918,17 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    div = 10 ** (6 - width)
+    w_sql = _residence_sql(place) if width == 6 else f'TRY_CAST(left(CAST("{place}" AS VARCHAR), {width}) AS INTEGER)'
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            {_residence_sql(place)} AS w FROM r""")
-    reason = """CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
+            {w_sql} AS w FROM r""")
+    reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN code IS NULL OR code = '' THEN 'code'
-                     WHEN w IS NULL OR w NOT IN (SELECT u FROM v) THEN 'place not recorded' END"""
+                     WHEN w IS NULL OR w NOT IN (SELECT DISTINCT u // {div} FROM v) THEN 'place not recorded' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
             CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
-            CAST(sum(CASE WHEN w <> u THEN 1 ELSE 0 END) AS INTEGER) AS k
+            CAST(sum(CASE WHEN w <> u // {div} THEN 1 ELSE 0 END) AS INTEGER) AS k
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()

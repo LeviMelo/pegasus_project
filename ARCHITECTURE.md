@@ -167,7 +167,7 @@ Field
 | codes | a code-tree column no group reads (`codes:<column>`; the requested procedure, a newborn's anomalies) | its codelist's tree; a column pegasus_data declares to pack several codes a cell is read code by code (`gateway.token_rule`); read only where its role's years hold the plan's, and an assembly in which some year has no event coded in its tree, while others do, raises: the column is not filled that year, and a count would read it as every code collapsing (presence is not fill) |
 | mentions | a linkage role of type `codes` (the certificate's lines) | events mentioning each group |
 | care flow | residence and a recording place | the share of a place's events recorded away from it |
-| origin | residence and a place of the person (a birthplace, `origin:<column>`) | the share of a place's events of persons from elsewhere: the care flow's reader, the person's place in the event's |
+| origin | residence and a place of the person (a birthplace, `origin:<column>`) | the share of a place's events of persons from elsewhere: the care flow's reader, the person's place in the event's. Both compare a place at its own level (`@2`: a state, IBGE's codes nesting by prefix, `gateway.PLACE_PREFIX`); the residence itself at a coarser level is no field. Births of 2020: 15.4 % to mothers born in another state, 48.8 % in another municipality |
 
 **Block.** A subtree of a classifier structure fitted together: an ICD-10 chapter, a SIGTAP group.
 
