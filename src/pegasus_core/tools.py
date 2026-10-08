@@ -582,8 +582,11 @@ class Session:
                 and json.dumps(x.provenance.get("source") or {}, sort_keys=True, default=list) == own]
         if stale:
             mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.rules()]
-        if self.source.get("source") == "mark":
+        family = {"mark": "measure", "share": "share", "linked": "share", "away": "share"}.get(self.source.get("source"), "count")
+        if family == "measure":
             return self._triage_marks(mine, write, log)
+        if family == "share":
+            return self._triage_shares(mine, write, log)
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
         for x in mine:
             by_node.setdefault((x.fields[0].split(":")[-1], x.train_last or 0, x.tier if x.train_last else ""), []).append(x)
@@ -648,6 +651,46 @@ class Session:
             self.register.add(mine)
         return mine
 
+    def _triage_shares(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
+        """Stage E for a share's answers (S4.3): the field's own numerator and denominator at the lead's places
+        (`explain.share_triage`), never the numerator read as counts."""
+        reg = self.expectations.registry
+        by_block: dict[str, list[leads.Lead]] = {}
+        for x in mine:
+            by_block.setdefault(reg.chapter(x.fields[0].split(":")[-1]), []).append(x)
+        for block, group in sorted(by_block.items()):
+            d = self._data(block)
+            periods = np.asarray(d.periods())
+            U, T, per_year = len(d.places), len(periods), 12 if getattr(d, "grain", "year") == "month" else 1
+            index = {int(pl): j for j, pl in enumerate(d.places)}
+            pos = {c: j for j, c in enumerate(d.leaves)}
+            batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
+            for x in group:
+                node = x.fields[0].split(":")[-1]
+                m = np.isin(d.e, [pos[c] for c in reg.leaves(node) if c in pos])
+                K = np.bincount(d.u[m] * T + d.t[m], weights=d.l2[m], minlength=U * T).reshape(U, T)
+                N = np.bincount(d.u[m] * T + d.t[m], weights=d.n[m], minlength=U * T).reshape(U, T)
+                rows = np.array([index[int(pl)] for pl in x.locus.get("places", []) if int(pl) in index], dtype=int)
+                span, _ = replication.span_direction(x)
+
+                def run(x=x, K=K, N=N, rows=rows, span=span, periods=periods, per_year=per_year):
+                    run.verdict = explain.share_triage(K, N, rows, span, x.estimand, periods, per_year)
+                    return {"tested": False, "reason": f"{run.verdict.cls}: {run.verdict.reason}"}
+
+                self._ledgered("triage", x, run, batch=batch)
+                v = run.verdict
+                old = x.robustness.get("triage")
+                x.robustness = {**x.robustness, "triage": {"class": v.cls, "reason": v.reason, "grade": v.grade or None,
+                                                           "bound": v.bound, "rules": explain.rules(), **v.evidence,
+                                                           **({"superseded": old} if old else {})}}
+                if x.status == "explained":
+                    x.status = "open"          # only a tested substitution or system explanation closes; none here does
+            self._ledger_close(batch)
+            log(f"{block}: {len(group)} share answers triaged")
+        if write:
+            self.register.add(mine)
+        return mine
+
     def _triage_marks(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
         """Stage E for a measure's answers (S4.3): the lead's admissions (its node's categories, its places, its window)
         by recording facility (`marks.triage_lead`). One institution's when at most FAC_K facilities carry FAC_SHARE of
@@ -669,7 +712,7 @@ class Session:
                 window = x.locus.get("years") or [self.years[0], self.years[-1]]
 
                 def run(x=x, node=node, places=places, window=window, model=model):
-                    res = marks.triage_lead(model, self.source["mark"], list(self.years), places, window,
+                    res = marks.triage_lead(model, self.source, list(self.years), places, window,
                                             self.source.get("facility_effects"), names, codes=list(reg.leaves(node)))
                     if res["admissions"] < explain.FAC_CATCH:
                         # too few admissions for the facilities to say anything: not noise (the location's own test

@@ -146,4 +146,9 @@ The dossier's top 40 under the reading order:
 - No second route yet: the newborn-admission link is not stored in this root. `persons: true` in a plan makes `update` compute every person link (nine).
 - PegaSUS's own pair sampling is gone; Rubin is pegasus_data's `combine`.
 - Found on the way: SIH-SIM 2010 is not viable in this root. SIH's 2008–2010 sex labels were never materialised there, so blocking found 0 candidates (pegasus_data OPEN_QUESTIONS 73).
+- **Routing by field family** (later, the same day). Triage now sends each answer to its family's rules:
+  - counts to the count rules;
+  - measures and intervals to the facility rule, by the field's own reader (an interval's anchor date included);
+  - shares to `explain.share_triage`: noise, and the denominator carrying the change, against the nation's course. The birth-cohort field's 25 answers are noise there: deficits of 4–7 infant deaths, under the 10 events the count rules also ask.
+  - Two share rules are named in each verdict as not read: the 'not recorded' level, and one institution on the numerator.
 

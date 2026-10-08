@@ -37,8 +37,8 @@ def rules() -> str:
     from .. import config
 
     # the rules and the evidence they read, named so that this module imports nothing above it
-    return config.code_key(triage, institution_triage, "pegasus_core.tools:Session._evidence",
-                           "pegasus_core.tools:Session._triage_marks")[:12]
+    return config.code_key(triage, institution_triage, share_triage, "pegasus_core.tools:Session._evidence",
+                           "pegasus_core.tools:Session._triage_marks", "pegasus_core.tools:Session._triage_shares")[:12]
 
 
 def deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -388,6 +388,40 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     if fac is not None and fac["facility"]:
         return Triage(FACILITY, fac["reason"], info, TESTED)
     return Triage(SIGNAL, "no recording or denominator explanation found in the data", info)
+
+
+def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int] | None, estimand: str,
+                 years: np.ndarray, per_year: int = 1) -> Triage:
+    """A share's answer read on its own field (S4.3): ``K`` the numerator and ``N`` the denominator by [place, period].
+    The share's change at the lead's places, window against base, is the numerator's change less the denominator's
+    (on the log scale). Noise when the numerator departs from the base share's expectation by fewer than MIN_EXCESS
+    events (tested). The denominator when it carries ABSORB of the share's change, moving the share's way, beyond its
+    year-to-year noise (SIGNIFICANT) and beyond the nation's own course (bound: the data cannot tell a recording loss
+    of the denominator from a real one). Not yet read: a 'not recorded' level moving opposite, one institution on the
+    numerator; the reason says so."""
+    win, base = _window(years, span, estimand, per_year)
+    kw, kb = _contrast(K, rows, win, base)
+    nw, nb = _contrast(N, rows, win, base)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lk, ln = np.log((kw + 0.5) / (kb + 0.5)), np.log((nw + 0.5) / (nb + 0.5))
+        nat_w, nat_b = _contrast(N, np.arange(N.shape[0]), win, base)
+        ln_nat = np.log((nat_w + 0.5) / (nat_b + 0.5))
+    ls = lk - ln
+    expected = kb / max(nb, 1e-9) * nw
+    info = {"numerator_window": round(kw, 2), "numerator_base": round(kb, 2), "denominator_window": round(nw, 2),
+            "denominator_base": round(nb, 2), "log_share_change": round(float(ls), 3),
+            "log_denominator_change": round(float(ln), 3), "log_denominator_national": round(float(ln_nat), 3),
+            "not_read": ["a 'not recorded' level moving opposite", "one institution on the numerator"]}
+    if abs(kw - expected) * max(win.sum(), 1) < MIN_EXCESS:
+        return Triage(NOISE, f"small count: {abs(kw - expected) * max(win.sum(), 1):.0f} numerator events from the base "
+                             "share's expectation", info, TESTED)
+    _, z_n = _moves(N, rows, win, base)
+    own = ln - ln_nat
+    if ls * -own > 0 and abs(own) >= ABSORB * abs(ls) and abs(z_n) >= SIGNIFICANT:
+        return Triage(SYSTEM, "the denominator moved: it carries most of the share's change, beyond the nation's course",
+                      info, BOUND, float(min(1.0, abs(own) / max(abs(ls), 1e-9))))
+    return Triage(SIGNAL, "no denominator or count explanation found; not read: a 'not recorded' level, one institution",
+                  info)
 
 
 def recoded_profile(ev: Evidence, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> float | None:

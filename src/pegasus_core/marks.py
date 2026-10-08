@@ -159,18 +159,20 @@ FAC_K = 3          # a mark lead is one institution's when at most this many fac
 FAC_SHARE = 0.7    # ... this share of its excess (the thresholds of the count triage, scans.explain), and without them it is gone
 
 
-def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: np.ndarray, window: list[int],
+def triage_lead(model: monolith.MarkModel, reader: dict, years: list[int], places: np.ndarray, window: list[int],
                 facility_effects: str | None, names: dict | None = None, codes: list[str] | None = None) -> dict:
     """Is a mark lead one institution's? (ADR-0014 for marks; ARCHITECTURE §7.7.) The lead's admissions (the residents of its
     places in its window) summed by recording facility: residual ``sr`` from the fitted location, admissions ``n``. The smallest
     set of at most FAC_K facilities carrying FAC_SHARE of the lead's excess (the sum of its residuals, in the lead's direction);
     ``facility`` is true when such a set exists and the lead's mean residual without it is within the minimum effect. The
     facility's municipality (of the record) is read from the facility cube, and named with ``names``. ``codes`` (the lead's
-    node's categories) confine the admissions to the lead's own field: the whole block's were summed before (S4.3)."""
+    node's categories) confine the admissions to the lead's own field: the whole block's were summed before (S4.3).
+    ``reader`` is the field's own (`fields.measure_source`, `fields.interval_source`: a measure or the days between two
+    dates), so every measure-like field is read by its declaration, not by a measure's lookup."""
     from . import facility as fac_mod
     from .scans import lenses
 
-    sp = spec(model.data.dataset, model.data.event, name)
+    sp = reader
     d = model.data
     edges = gateway.age_edges(d.population)
     use = [i for i, y in enumerate(years) if window[0] <= y <= window[1]]
@@ -178,7 +180,8 @@ def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: 
     # cells), then the lead's places and codes
     parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu_table(model, i),
                                            edges, classifier=sp.get("classifier"), casemix=sp.get("casemix"),
-                                           facility_effects=facility_effects, missing=sp.get("missing", ()), cells=True)
+                                           facility_effects=facility_effects, missing=sp.get("missing", ()), cells=True,
+                                           anchor=sp.get("anchor"), sign=int(sp.get("sign", 1)))
              for i in use]
     tab = pa.concat_tables(parts)
     sel = pc.is_in(tab.column("u"), value_set=pa.array(places.astype(np.int64)).cast(tab.column("u").type))

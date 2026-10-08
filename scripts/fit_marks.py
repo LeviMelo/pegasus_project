@@ -86,7 +86,7 @@ def read(mark: str, block: str, first: int, last: int) -> None:
         desc = {"lens": lens, "places": [place_name(names, p) for p in places[:4]] + ([f"+{len(places) - 4}"] if len(places) > 4 else []),
                 "years": f.locus["years"], "effect": float(f.effect), "p": float(f.p), "direction": f.locus.get("direction")}
         if "casemix" in marks.spec(DATASET, EVENT, mark):
-            desc["triage"] = marks.triage_lead(model, mark, years, np.array(places), f.locus["years"], fx, names)
+            desc["triage"] = marks.triage_lead(model, marks.spec(DATASET, EVENT, mark), years, np.array(places), f.locus["years"], fx, names)
         out["leads"].append(desc)
         print("LEAD", json.dumps(desc, default=float, ensure_ascii=False), flush=True)
     Path(marks.HOME, f"{tag(mark, block)}_read.json").write_text(json.dumps(out, indent=1, default=float, ensure_ascii=False), encoding="utf-8")
