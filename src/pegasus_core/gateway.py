@@ -1470,18 +1470,19 @@ def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
     reading reports. `update` computes the runs a plan reads as a declared step (S2.2)."""
     import pegasus_data as pg
     from pegasus_data.linkage import store as link_store
-    from pegasus_data.linkage.engine import stored_key
+    from pegasus_data.linkage.engine import link_method, stored_key
 
+    method = link_method(link)                 # probabilistic where declared; deterministic keys only otherwise
     settings = pg.load_settings(root=config.data_root())
-    hit = link_store.load(settings, stored_key(link, "probabilistic", year, "BR"))
+    hit = link_store.load(settings, stored_key(link, method, year, "BR"))
     if hit is not None:
         return hit[0]
     if not (COMPUTE_LINKS if compute is None else compute):
         raise LinkNotStored(f"{link} {year}: no stored run (set PEGASUS_COMPUTE_LINKS=1, or `pegasus-data link "
-                            f"{link} --period {year} --geo BR --method probabilistic`)")
+                            f"{link} --period {year} --geo BR --method {method}`)")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return pg.link(link, period=year, geography="BR", method="probabilistic", root=config.data_root()).pairs
+        return pg.link(link, period=year, geography="BR", method=method, root=config.data_root()).pairs
 
 
 def covering_runs(link: str, side: str, year: int) -> list[int]:

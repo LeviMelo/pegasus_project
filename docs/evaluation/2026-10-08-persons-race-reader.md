@@ -151,4 +151,5 @@ The dossier's top 40 under the reading order:
   - measures and intervals to the facility rule, by the field's own reader (an interval's anchor date included);
   - shares to `explain.share_triage`: noise, and the denominator carrying the change, against the nation's course. The birth-cohort field's 25 answers are noise there: deficits of 4–7 infant deaths, under the 10 events the count rules also ask.
   - Two share rules are named in each verdict as not read: the 'not recorded' level, and one institution on the numerator.
+- **Each link by its own method.** The person links' step asked every link for a probabilistic run. The women's deaths → their births as mothers declare keys only, so it failed. Runs are now read and merged by the method each link declares (pegasus_data `link_method`). That link's stored runs are from an older spec (mothers' births 2012–Y) and are orphaned by the current one; the field that would read it is refused (a grouped side with a filter).
 
