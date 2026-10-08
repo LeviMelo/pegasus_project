@@ -1617,10 +1617,11 @@ def _group_columns(dataset: str, sd) -> list[str]:
 
 def _rep_sql(group: list[str]) -> str:
     """A record's identity as its link pairs it: its own, or its group's (the smallest identity of the group, the
-    engine's representative; null keys partition together, as in the engine)."""
+    engine's representative); a record missing any key is its own group, as in the engine (pegasus_data `_prepare`)."""
     if not group:
         return '"_rid"'
-    keys = ", ".join(f'"{c}"' for c in group)
+    anynull = " OR ".join(f'"{c}" IS NULL' for c in group)
+    keys = f'CASE WHEN {anynull} THEN "_rid" END, ' + ", ".join(f'"{c}"' for c in group)
     return f'min("_rid") OVER (PARTITION BY {keys})'
 
 

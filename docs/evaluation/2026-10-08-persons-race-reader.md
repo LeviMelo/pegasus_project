@@ -156,4 +156,9 @@ The dossier's top 40 under the reading order:
   - 128 answers: 59 noise, 45 signals, 23 one institution's (a maternity opened, closed or recoded, its other residents stepping alike), 1 denominator.
   - Every share rule was read on them: the not-recorded level from `composition_counts`'s per-cell count, one institution from `composition_facility`.
   - S4.3's condition is met, and its §13.2 departure is closed.
+- **A grouping defect in the births-to-delivery link** (its stored reports).
+  - The link groups births into deliveries (mother's birth date, facility, day), and the engine partitioned null keys together.
+  - The mother's birth date is filled for 75,922 of 2,861,868 births in 2010 and 1,669,603 of 2,913,160 in 2011, and 116 k are missing in 2012. The 2010 and 2011 runs saw 870 k and 2.0 M "deliveries", and paired every member of a false group to one admission: births credited to other mothers' deliveries, in a run the placebo called viable.
+  - A record missing a key is now its own group (pegasus_data, and PegaSUS's mirror of the rule in `gateway._rep_sql`).
+  - The stored runs of 2011–2023 are recomputed (`data/probes/s2_4/relink_delivery.py`). 2010 is not viable for another reason (pegasus_data OPEN_QUESTIONS 73).
 
