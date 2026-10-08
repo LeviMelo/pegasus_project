@@ -2,7 +2,7 @@
 and which dispersion centre BP's predictive, by rolling origins.
 
 Usage: python scripts/measure_bp_level.py annual|dengue [origin ...]     (origins: the last training year)
-Fits are those of `scripts/fit_blocks.py` (SIM.DO death, blocks IX X I XVIII; SINAN-DENG monthly) for each origin.
+Fits are those of `pegasus-core fit` (SIM.DO death, blocks IX X I XVIII; SINAN-DENG monthly) for each origin.
 Writes data/logs/bp_level_<kind>.json: per (node, origin, variant) the PIT's KS overall and in the worst
 macro-region, and the held-out log score (the NB mixture's, every cell with an expectation, test periods within
 five years of the origin), with the PITs for pooling across origins (`scripts/bp_level_table.py`)."""

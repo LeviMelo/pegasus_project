@@ -28,23 +28,66 @@ def _session(dataset: str, event: str, years: str, graph: str, grain: str = "yea
 
 @app.command()
 def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
-        device: str = "cpu") -> None:
-    """Fit monolith blocks (chapters) and store them."""
-    from . import update
+        device: str = "cpu",
+        source: str = typer.Option(None, help="a non-default reader as JSON, e.g. a declared field's "
+                                               "(`fields.measure_source`); block * is the event type without its tree"),
+        cold: bool = typer.Option(False, help="start from nothing, not from the best related stored fit")) -> None:
+    """Fit monolith blocks (chapters) and store them with their robust refit, under the machine's job slot (`jobs`);
+    one ``BLOCK <name> <summary>`` line each, and a failed block is reported and the next one fitted."""
+    import time
 
-    for block in blocks:
-        model = update.fit_block(dataset, event, block, _years(years), graph, device, log=console.print)
-        console.print_json(json.dumps(model.summary(), default=float))
+    from . import jobs, update
+
+    with jobs.slot(f"fit {dataset} {' '.join(blocks)}", gpu=device != "cpu"):
+        jobs.threads()
+        failed = 0
+        for block in blocks:
+            start = time.time()
+            try:
+                model = update.fit_block(dataset, event, block, _years(years), graph, device,
+                                         source=json.loads(source) if source else None,
+                                         warm=None if cold else "auto", log=console.print)
+            except Exception as exc:  # noqa: BLE001 - one block's failure is reported, the next one is fitted
+                console.print(f"BLOCK {block} FAILED {type(exc).__name__}: {exc}")
+                failed += 1
+                continue
+            print(f"BLOCK {block} {json.dumps(model.summary(), default=float)} {time.time() - start:.0f}s", flush=True)
+    raise typer.Exit(1 if failed else 0)
 
 
 @app.command("update")
 def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
                  force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:
-    """Bring the persistent state (fits, register, report) up to a plan, redoing only what changed (`update`)."""
-    from . import update
+    """Bring the persistent state (fits, register, report) up to a plan, redoing only what changed (`update`), under
+    the machine's job slot and the GPU slot (`jobs`)."""
+    from . import jobs, update
 
-    out = update.run(update.Plan.load(plan), force=force, log=console.print)
+    with jobs.slot(f"update {plan}", gpu=True):
+        jobs.threads()
+        out = update.run(update.Plan.load(plan), force=force, log=console.print)
     console.print_json(json.dumps(out, default=str))
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def run(ctx: typer.Context, gpu: bool = typer.Option(False, help="also take the GPU slot"),
+        threads: int = typer.Option(0, help="threads for the commands (default: half the logical cores)"),
+        log: list[str] = typer.Option(None, help="one log per command, in order (default: this output)")) -> None:
+    """Run heavy commands under the machine's job slot, one after another: `pegasus-core run [--gpu] [--log a.log
+    --log b.log] -- python scripts/x.py ARGS :: python scripts/y.py ARGS` (`jobs.run`; "python" is this interpreter)."""
+    from . import jobs
+
+    args = [a for a in ctx.args if a != "--"]
+    commands, cur = [], []
+    for a in args:
+        if a == "::":
+            commands.append(cur)
+            cur = []
+        else:
+            cur.append(a)
+    commands += [cur] if cur else []
+    if log and len(log) != len(commands):
+        raise typer.BadParameter(f"{len(log)} logs for {len(commands)} commands")
+    raise typer.Exit(jobs.run(commands, logs=log, gpu=gpu, n_threads=threads or None))
 
 
 @app.command()

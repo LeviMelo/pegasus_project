@@ -537,7 +537,7 @@ Over 2,000 draws on IX, the variance of random projections equals the exact aᵀ
 - GPU work chunked to 4 GB;
 - the non-empty cells stream in batches from Parquet.
 
-**Jobs** (`scripts/heavy.py`). A heavy job gets the machine's cores and states its share (`--threads`, set for its BLAS, OpenMP and numba); a GPU job takes the single GPU slot (`--gpu`). Few fat jobs are preferred to many thin ones: six fits of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone (2026-10-06). Surveys have their own pool. A chain of jobs runs through `data/chain.py`, never `bash`, which on this machine resolves to WSL's and cannot see the C: paths.
+**Jobs** (`jobs`, work plan S0.3). A heavy computation takes a machine-wide slot (OS file locks through pegasus_data's admission; `PEGASUS_HEAVY_SLOTS`, default one: few fat jobs, six of 2–4 threads competing for 2 GB of free memory each ran several times slower than alone, 2026-10-06) and, on the GPU, the single GPU slot; it states its threads (BLAS, OpenMP, numba, torch). `pegasus-core fit` and `update` hold them themselves; any other heavy command runs through `pegasus-core run`, alone or as a sequence under one slot, never through `bash` (WSL's, which cannot see the C: paths). `update` stores each field's answers as it goes (`answers`, keyed by the fit, the reader, the questions and the code), so a run killed mid-chapter resumes at the next field.
 
 ### 5.8 Speed targets and the benchmark
 
@@ -999,7 +999,7 @@ Lead
 | `confirm(claim)` | one run on the reserved period (§8.3), ledgered, under LOND |
 | `train(t)`, `temporal_confirm(t)`, `spatial_confirm(leads)`, `corroborate(leads)`, `honest_sizes()`, `retier(leads, selected)` | the independent-unit tests, sizes after selection, the tier (§8.3) |
 
-**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method. **The design (revision 4, `docs/plans/2026-10-07-work-plan.md` §2):** the state is a set of objects (assembled blocks, fits, noise, surprises, the spatial basis, answers, leads, verdicts, readings), each computed once, keyed by its inputs and the source of the code it runs, and stored; one orchestrator (`update`) computes the objects a plan needs in dependency order, resumes at the next missing object, and schedules them on the machine's CPU, GPU and memory. Steps are keyed by content since S0.1; `update` still recomputes shared objects per method and per reader (survey 3); S0.2–S0.3 build the rest of the design.
+**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method. **The design (revision 4, `docs/plans/2026-10-07-work-plan.md` §2):** the state is a set of objects (assembled blocks, fits, noise, surprises, the spatial basis, answers, leads, verdicts, readings), each computed once, keyed by its inputs and the source of the code it runs, and stored; one orchestrator (`update`) computes the objects a plan needs in dependency order, resumes at the next missing object, and schedules them on the machine's CPU, GPU and memory. Built 2026-10-07 (S0.1–S0.3): steps keyed by content, shared objects once, one job runner (`jobs`), each field's answers stored as it goes, the all-events fit and the robust refits declared steps of the plan.
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 
@@ -1172,7 +1172,8 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
-| `cli` | the `pegasus-core` command | tools |
+| `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`) | gateway |
+| `cli` | the `pegasus-core` command | tools, jobs |
 
 **Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it. **Departures (survey 2026-10-07):** `tools` and `update`, and `tools` and `report`, import each other (inside functions); `scans.map_inputs` imports `tools`; `departures` and `marks` import `scans.lenses`.
 
@@ -1274,7 +1275,7 @@ A solver change is measured on the benchmark before it is adopted.
 | corroboration, later years, other jurisdictions | 8.3 | v0 built and ledgered (S4): sources from declarations; open: shaped on documented events, any of an unbounded set of sources, a year without a stored link read as unlinked | S4 |
 | persons: cohorts, linked shares | 7.8 | v0 built (S2); links from stored runs only (2021–2022); not run | S2 |
 | the reader: dossier, verdicts | 9 | v0 built (S5), unused; an `artefact` verdict removes a lead (a defect, P14) | S5 |
-| use: plans, `update` | 9.3 | v0: every field, question and method; steps keyed by content (S0.1); shared objects recomputed, no resume within a step, several job runners | S0.2–S0.3 |
+| use: plans, `update` | 9.3 | v1 of the orchestration: steps keyed by content (S0.1), shared objects once (S0.2), one job runner, each field's answers stored and a killed run resumed at the next field, the national fit and robust refits declared steps (S0.3) | S0.7 (first-computation speed) |
 
 ### 13.2 Departures
 

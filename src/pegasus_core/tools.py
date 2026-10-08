@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import json
+import pickle
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -418,22 +419,44 @@ class Session:
                    f"|link:{src['link']}:{src['side']}" if src.get("link") else
                    f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else
                    f"|away:{src['place']}" if src.get("place") else "")   # its own family
+        code = config.code_key(qs.ask)
         for block in blocks or self._blocks():
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
                     continue
-                self._local.memo = {}           # a field's surprises computed once for all its questions
-                for qn in names:
-                    try:
-                        answers = self.ask(qn, f.node, q=q)
-                        k = getattr(answers, "k", len(qs.QUESTIONS[qn].methods))
-                    except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
-                        log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
-                        continue
+                # each field's answers are an object of the state (work plan §2): stored when every question was
+                # answered, keyed by the fit, the reader, the questions and the code, so a run killed mid-chapter
+                # resumes at the next field and a rerun recomputes only what changed
+                m = self.expectations.model(block)
+                fit = store.manifest("monolith", m.key()) or {}
+                key = {"what": "field_answers", "field": f.id, "source": json.loads(json.dumps(src, default=str)),
+                       "questions": list(names), "q": q, "years": list(self.years), "graph": self.graph,
+                       "fit": m.key(), "fitted": fit.get("written"), "code": code}
+                hit = store.get_arrays("answers", key)
+                if hit is not None:
+                    rows = pickle.loads(hit["rows"].tobytes())
+                    log(f"{f.id}: answers stored")
+                else:
+                    self._local.memo = {}           # a field's surprises computed once for all its questions
+                    rows, failed = [], False
+                    for qn in names:
+                        try:
+                            answers = self.ask(qn, f.node, q=q)
+                            k = getattr(answers, "k", len(qs.QUESTIONS[qn].methods))
+                        except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
+                            log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
+                            failed = True
+                            continue
+                        failed = failed or any(m != "*" for m in getattr(answers, "failed", {}))  # "*": no method reads it
+                        rows.append((qn, list(answers), k))
+                        log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
+                            f"{len(getattr(answers, 'other_shape', []))} of another shape")
+                    self._local.memo = None
+                    if not failed:                  # a failure is retried by the next run, never stored
+                        store.put_arrays("answers", key, {"rows": np.frombuffer(pickle.dumps(rows), dtype=np.uint8)})
+                for qn, answers, k in rows:
                     for a in answers:
                         found.setdefault(f"{qn}|{block}{measure}", []).append((f.id, a, min(1.0, a.p * k)))
-                    log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
-                        f"{len(getattr(answers, 'other_shape', []))} of another shape")
         self._local.memo = None
         families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
         rejected = control.bogomolov(families, q)
@@ -629,17 +652,17 @@ class Session:
 
     def _expected_total(self) -> np.ndarray:
         """[U, T] the expected events of the whole event type (stage B1), on the evidence grid: a share's denominator.
-        One fit of the all-events field (block ``*``, fitted once where missing), not a sum over every chapter's fit
-        (twenty robust fits on SIH-RD, hours, and 13 GB held at once, 2026-10-07)."""
+        One fit of the all-events field (block ``*``), not a sum over every chapter's fit (twenty robust fits on
+        SIH-RD, hours, and 13 GB held at once, 2026-10-07). The fit is an object of the state, made by `update` (or
+        `pegasus-core fit DATASET EVENT '*'`), never inside a reading: missing, it raises."""
         if getattr(self, "_mu_total", None) is None and self.expectations.registry.classifier != "*":
-            from . import update
-
             self._prepare_grid()
             try:
                 m = self.expectations.model("*")
-            except LookupError:
-                update.fit_block(self.dataset, self.event, "*", list(self.years), self.graph, source=self.source or None)
-                m = self.expectations.model("*")
+            except LookupError as exc:
+                raise LookupError(f"{self.dataset}: the all-events fit (block *) a share reads is not stored; "
+                                  f"`pegasus-core update` fits it with the plan, or `pegasus-core fit "
+                                  f"{self.dataset} {self.event} '*'`") from exc
             mu = m.expected(np.arange(len(m.data.leaves)))[0]
             index = {int(p): i for i, p in enumerate(m.data.places)}
             rows = np.array([index.get(int(p), -1) for p in self._grid_places])

@@ -214,7 +214,7 @@ Also silent in §13 and ranked below these: the imports of `pegasus_data` outsid
 | 5.3 check against exact MCMC or INLA | NB | OQ-2 "measuring" | §13 row 5.3 |
 | 5.3 posterior predictive moment matching | BM | `E:laplace-uncertainty`, `E:bp-level` | none |
 | 5.4 top model of all chapters with shared terms | NB | no code | **not in §13** (gap 5) |
-| 5.4 block models in parallel, top-level offset | P | `scripts/fit_blocks.py`, detached jobs | no shared offset or hyperpriors |
+| 5.4 block models in parallel, top-level offset | P | `fit_blocks.py` (now `pegasus-core fit`), detached jobs | no shared offset or hyperpriors |
 | 5.4 model choice by held-out deviance: rank, graph, pooling | P | `monolith.heldout`, `scripts/measure_heldout.py`; IX graph in `E:sinasc-lenses-optimiser` | rank n/a; pooling per chapter never measured; no loop selects anything |
 | 5.5 stack, GPU, numba | BM | ADR-0003, `E:fit-throughput` | none |
 | 5.5 numerics: seeded draws | BM | `surprise.randomised_pit` | the fit is float64 throughout (document says float32 on GPU) |

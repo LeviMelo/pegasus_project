@@ -3,7 +3,7 @@
 Inputs are local: data/agent_context/prep.npz (counts, populations and census context per municipality, built
 once by data/agent_context/prep.py from the gateway). Nothing is read from the national tables here.
 
-    python scripts/heavy.py --label gate_eb -- python scripts/gate_eb.py [draws] [reps]
+    pegasus-core run -- python scripts/gate_eb.py [draws] [reps]
 """
 
 from __future__ import annotations

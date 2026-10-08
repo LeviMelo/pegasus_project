@@ -82,7 +82,7 @@ class Plan:
 
 def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
               device: str = "cpu", source: dict | None = None, warm: str | None = "auto", log=print):
-    """Assemble one block, fit its model and store it: the one fitting path (`fit`, `update`, scripts/fit_blocks.py).
+    """Assemble one block, fit its model and store it: the one fitting path (`pegasus-core fit`, `update`).
     ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
     ``warm`` starts from the best related stored fit ("auto") or from nothing (None)."""
     from . import graphs, monolith
@@ -94,6 +94,10 @@ def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str
     model = monolith.model_class(source)(data, graphs.graph(data.places, graph), graph, device=device)
     model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
     model.save()
+    if type(model) is monolith.Monolith:
+        # the robust refit every count reading uses (`surprise.Expectations.model`): part of fitting the block,
+        # never left to the first reading (15 min a chapter on SIH, inside a question pass, 2026-10-07)
+        model.robust_stored(log=lambda line: log(f"{dataset} {block} {line}"))
     return model
 
 
@@ -182,6 +186,21 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     return {"selected": len(selected), "answers standing on the later years": stood}
 
 
+def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
+    """The all-events fit (block ``*``) a count reader's share question reads as its denominator
+    (`tools.Session._expected_total`), fitted as a declared step of the plan."""
+    if (plan.questions and "share" not in plan.questions) or s.expectations.registry.classifier == "*"             or any(s.source.get(k) for k in ("mark", "indicator", "link", "place")):
+        return
+    try:
+        s.expectations.model("*")
+    except LookupError:
+        try:
+            fit_block(s.dataset, s.event, "*", list(s.years), s.graph, source=s.source or None, log=log)
+            out[f"fit {label} * (share denominator)"] = "fitted"
+        except (ValueError, LookupError) as exc:
+            out[f"fit {label} * (share denominator)"] = f"failed: {exc}"
+
+
 def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     """Every stage of ``plan`` (module docstring); returns what each step did or why it was skipped."""
     from . import report, tools
@@ -210,6 +229,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     continue
                 _mark(key, {})
                 out[f"fit {sys_.dataset} {block}"] = "fitted"
+        _ensure_total(s, plan, f"{sys_.dataset}", out, log)
         key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                    blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years)
         if force or not _done(key):
@@ -247,6 +267,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                         log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
                         out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
+            _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                        blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years)
             if force or not _done(key):

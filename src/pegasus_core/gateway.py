@@ -12,6 +12,7 @@ POPSVS writes 7, whose last digit is the check digit and is removed).
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import os
 import warnings
@@ -1506,3 +1507,33 @@ def cohort_records(dataset: str, event: str, year: int, link: str, side: str, co
         warnings.simplefilter("ignore")
         pairs = stored_pairs(link, year)
     return t, t.column("rid"), pairs
+
+
+@contextlib.contextmanager
+def machine_slot(pool: str, slots: int, label: str):
+    """One of ``slots`` machine-wide slots of ``pool`` (OS file locks under the temporary directory), entered when one
+    is free and memory allows: pegasus_data's decode admission (`pegasus_data.decode.admission.admitted`) on its own
+    slot directory, so job slots and decode slots are separate pools. The environment it reads is restored as soon as
+    the slot is held, so this process's own decodes keep their pool (`jobs.slot`)."""
+    import tempfile
+
+    from pegasus_data.decode.admission import admitted
+
+    names = ("PEGASUS_DECODE_SLOT_DIR", "PEGASUS_DECODE_SLOTS", "PEGASUS_MIN_FREE_GB", "PEGASUS_ADMISSION_WAIT")
+    saved = {k: os.environ.get(k) for k in names}
+    os.environ.update(PEGASUS_DECODE_SLOT_DIR=os.path.join(tempfile.gettempdir(), pool), PEGASUS_DECODE_SLOTS=str(slots),
+                      PEGASUS_MIN_FREE_GB=os.environ.get("PEGASUS_HEAVY_MIN_FREE_GB", "4"),
+                      PEGASUS_ADMISSION_WAIT=os.environ.get("PEGASUS_HEAVY_WAIT", "86400"))
+    held = admitted(label)
+    try:
+        held.__enter__()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    try:
+        yield
+    finally:
+        held.__exit__(None, None, None)

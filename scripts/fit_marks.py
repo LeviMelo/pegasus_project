@@ -3,7 +3,7 @@
     python scripts/fit_marks.py fit  MARK BLOCK FIRST LAST     fit one mark of one chapter (stores the model, the facility effects)
     python scripts/fit_marks.py read MARK BLOCK FIRST LAST     calibration of the tiers, the lenses, negatives, top leads with their triage
 
-Run under scripts/heavy.py. Records go to data/marks/<mark>_<block>.json (gitignored).
+Run under `pegasus-core run`. Records go to data/marks/<mark>_<block>.json (gitignored).
 """
 
 from __future__ import annotations

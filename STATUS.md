@@ -1,6 +1,6 @@
 # Status
 
-**2026-10-07, evening.** Roadmap revision 4 (ARCHITECTURE §12, ADR-0030): packages S0–S7, each end to end before the next, toward the goals of ARCHITECTURE §1.2. A survey of the day's drift and the cost of readings (`docs/discussion/2026-10-07-survey.md`) found the documents behind the code and the work unplanned. **Work now proceeds by the units of `docs/plans/2026-10-07-work-plan.md`, one at a time, each with its contract and definition of done.** Done: S0.1 (content keys), S0.2 (shared objects once). In progress: **S0.3 one orchestrator.**
+**2026-10-07, evening.** Roadmap revision 4 (ARCHITECTURE §12, ADR-0030): packages S0–S7, each end to end before the next, toward the goals of ARCHITECTURE §1.2. A survey of the day's drift and the cost of readings (`docs/discussion/2026-10-07-survey.md`) found the documents behind the code and the work unplanned. **Work now proceeds by the units of `docs/plans/2026-10-07-work-plan.md`, one at a time, each with its contract and definition of done.** Done: S0.1 (content keys), S0.2 (shared objects once), S0.3 (one orchestrator). In progress: **S0.4 questions restored.**
 
 Words used below: **built** (the code exists), **checked** (what ran, named), **done** (the package's acceptance is met).
 

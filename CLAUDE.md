@@ -86,7 +86,7 @@ The bench (planted signals in refitted worlds, null worlds, SBC) characterises B
 
 9. **Locate it.** Name the ARCHITECTURE section the change touches. A new or changed mechanism, object, field kind, plan key, default or constant is written into that section (or §13.2 as a departure) **in the same commit**. Documentation that tracks the code is part of the change, not a later chore.
 10. **Read before asserting.** Describe a subsystem only after reading its code, its ADRs and its evaluations (race, on 2026-10-07, was summarised from memory and misstated).
-11. **Check at the smallest scale that settles it.** One field, one year, one chapter. A national run is a reading, made when a unit's purpose is the reading, never to confirm what the code and an inspection settle. Heavy jobs go through the one job runner (today `scripts/heavy.py` and `data/chain.py`; the orchestrator after S0.3), never another queue.
+11. **Check at the smallest scale that settles it.** One field, one year, one chapter. A national run is a reading, made when a unit's purpose is the reading, never to confirm what the code and an inspection settle. Heavy jobs go through the one job runner (`jobs`: `pegasus-core update`, `fit`, `run`), never another queue.
 12. **Nothing computed inside a reader.** A national linkage, a refit of other blocks, a re-decode is an object of the state, computed by the orchestrator as a declared step, never silently inside a function that reads.
 13. **Constants are debts.** A constant that decides what is reported (a minimum effect, a list, a threshold) is recorded in §13.2 with how it will be measured (P7), never left as a silent gate.
 14. **Say what was checked.** "Built" means the code exists; "checked on X" names what ran; "done" means the acceptance criterion is met. Never commit unverified work described as working.
@@ -146,7 +146,7 @@ $PY scripts/check_docs.py
 - **Homes.**
   - PegaSUS writes only under `PEGASUS_HOME` (default `pegasus_home/`, gitignored).
   - It reads pegasus_data's home through pegasus_data, never directly.
-- **Long runs detach.** The Bash tool caps background work at ten minutes, so start longer jobs with PowerShell `Start-Process` running `scripts/heavy.py` (§4), logging beside them. Check that the process started, and watch it with a filter that catches failure as well as success.
+- **Long runs detach.** The Bash tool caps background work at ten minutes, so start longer jobs with PowerShell `Start-Process` running `pegasus-core update`, `fit` or `run` (§4), logging beside them. Check that the process started, and watch it with a filter that catches failure as well as success.
 
 ---
 
@@ -168,7 +168,7 @@ $PY scripts/check_docs.py
 - **Never lose a question** (author, 2026-10-06). A method is retired only when its successor answers every question it answered (retrospective and prospective, every support, every shape), measured on the grid. Until then both run, and the docs say "takes over question X", never "replaces" or "drops". A method that answers wrongly is fixed or kept with its record; a question is never withdrawn because a method for it failed.
 - **Carry the whole request.** Each instruction is done, or reported as not done with the reason.
 - **Never idle on a wait; work fronts in parallel** (author, 2026-10-03, repeated 2026-10-06). While a fit, a scan or an agent runs, advance a task that does not depend on it: other code, documentation of finished work, analysis of results at hand. Launching a job and then waiting on it is the failure this rule names.
-  - **Parallel is my work, not the heavy jobs.** Heavy fits run one at a time through `scripts/heavy.py` (a sequence through `data/chain.py` under one slot), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
+  - **Parallel is my work, not the heavy jobs.** Heavy computations run one at a time under the machine's job slot (`jobs`: `pegasus-core update`, `fit`, `run`), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
   - Launch detached, check it started, set a watcher that catches completion and failure, then turn to the next front at once.
 - **Subagents** (author, 2026-10-07): none for development; core work stays in the main session. Read-only audits and surveys only, on Sonnet, few (one to three at once), each with one bounded deliverable written to a file, no polling in the brief.
 - **Keep pegasus_data and pegasus_view working.**
