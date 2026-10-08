@@ -174,16 +174,17 @@ def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: 
     d = model.data
     edges = gateway.age_edges(d.population)
     use = [i for i, y in enumerate(years) if window[0] <= y <= window[1]]
-    def nu(i: int) -> pa.Table:
-        tab = nu_table(model, i)
-        return tab.filter(pc.is_in(tab.column("code3"), value_set=pa.array(sorted(codes)))) if codes else tab
-
-    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu(i),
+    # each year's residuals by facility, residence and category, read once for every lead (`mark_facility_moments`
+    # cells), then the lead's places and codes
+    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu_table(model, i),
                                            edges, classifier=sp.get("classifier"), casemix=sp.get("casemix"),
-                                           facility_effects=facility_effects, places=pa.array(places.astype(np.int32)),
-                                           missing=sp.get("missing", ()))
+                                           facility_effects=facility_effects, missing=sp.get("missing", ()), cells=True)
              for i in use]
-    df = pa.concat_tables(parts).to_pandas().groupby("facility", as_index=False)[["n", "sr"]].sum()
+    tab = pa.concat_tables(parts)
+    sel = pc.is_in(tab.column("u"), value_set=pa.array(places.astype(np.int64)).cast(tab.column("u").type))
+    if codes:
+        sel = pc.and_(sel, pc.is_in(tab.column("code3"), value_set=pa.array(sorted(codes))))
+    df = tab.filter(sel).to_pandas().groupby("facility", as_index=False)[["n", "sr"]].sum()
     n_all, sr_all = float(df.n.sum()), float(df.sr.sum())
     direction = 1.0 if sr_all >= 0 else -1.0
     out: dict = {"admissions": int(n_all), "mean_residual": sr_all / max(n_all, 1.0), "facilities": int((df.facility != "").sum()),

@@ -651,8 +651,8 @@ class Session:
     def _triage_marks(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
         """Stage E for a measure's answers (S4.3): the lead's admissions (its node's categories, its places, its window)
         by recording facility (`marks.triage_lead`). One institution's when at most FAC_K facilities carry FAC_SHARE of
-        the departure and the rest is within the minimum effect (tested); noise under FAC_CATCH admissions; else a
-        signal. The count field's evidence is not this field's (the 646 length-of-stay answers were read on it)."""
+        the departure and the rest is within the minimum effect (tested); else a signal, said unread under FAC_CATCH
+        admissions (the location's own test weighed its count). The count field's evidence is not this field's (the 646 length-of-stay answers were read on it)."""
         from . import marks
 
         names = gateway.municipality_names()
@@ -672,7 +672,10 @@ class Session:
                     res = marks.triage_lead(model, self.source["mark"], list(self.years), places, window,
                                             self.source.get("facility_effects"), names, codes=list(reg.leaves(node)))
                     if res["admissions"] < explain.FAC_CATCH:
-                        run.verdict = explain.Triage(explain.NOISE, f"few admissions: {res['admissions']}", res, explain.TESTED)
+                        # too few admissions for the facilities to say anything: not noise (the location's own test
+                        # weighed its count), only unread by this rule
+                        run.verdict = explain.Triage(explain.SIGNAL, f"{res['admissions']} admissions: too few for the "
+                                                     "recording facilities to say whether one carries it", res)
                     elif res.get("facility"):
                         tops = ", ".join(f"{t['facility']} ({t['n_share']:.0%} of admissions)" for t in res["top"])
                         run.verdict = explain.Triage(explain.FACILITY, f"one institution's: {tops} carry "

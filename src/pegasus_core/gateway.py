@@ -951,10 +951,13 @@ def store_facility_effects(table: pa.Table) -> str:
 def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], nu: pa.Table,
                           edges: list[int], classifier: str | None = None, casemix: str | None = None,
                           facility_effects: str | None = None, places: pa.Array | None = None,
-                          missing: tuple[str, ...] | list = (), anchor: str | None = None, sign: int = 1) -> pa.Table:
+                          missing: tuple[str, ...] | list = (), anchor: str | None = None, sign: int = 1,
+                          cells: bool = False) -> pa.Table:
     """A year's residuals of the admissions' adjusted log mark from a fitted location, summed by recording facility:
     (facility, year, n, sr, sr2) with r = lm − ν, ν looked up by (category, residence, sex, age band) in ``nu``
-    (columns code3, u, sex, band, nu), the fitted model's cells. Admissions in a cell the fit has none of are left out."""
+    (columns code3, u, sex, band, nu), the fitted model's cells. Admissions in a cell the fit has none of are left out.
+    ``cells`` keeps the residence and the category too (facility, u, code3, ...): one read of the year serves every
+    lead's places and codes (a read per lead and year took hours for 646 leads, S4.3)."""
     import hashlib
 
     digest = hashlib.sha256(np.ascontiguousarray(nu.column("nu").to_numpy()).tobytes()
@@ -962,7 +965,7 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     key = {"what": "mark_facility_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "mark": mark, "bounds": list(bounds), "classifier": classifier, "casemix": casemix, "shrink": MARK_SHRINK,
            "facility_effects": facility_effects, "nu": digest, "edges": list(edges), "data": config.data_version(), "code": config.code_key(mark_facility_moments),
-           **_df_key(dataset, year), **({"anchor": anchor, "sign": sign} if anchor else {})}
+           **_df_key(dataset, year), **({"anchor": anchor, "sign": sign} if anchor else {}), **({"cells": 1} if cells else {})}
     hit = store.get_table("gateway", key)
     if hit is not None:
         return hit
@@ -973,11 +976,13 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     con.register("ab", pa.table({"age": pa.array(range(MAX_AGE + 1), pa.int16()),
                                  "band": pa.array([int(np.searchsorted(edges, a, side="right") - 1) for a in range(MAX_AGE + 1)],
                                                   pa.int16())}))
-    out = con.execute(f"""SELECT fac AS facility, CAST({year} AS SMALLINT) AS year, CAST(count(*) AS INTEGER) AS n,
+    by = "fac, u, code3" if cells else "fac"
+    keep = ", u, code3" if cells else ""
+    out = con.execute(f"""SELECT fac AS facility{keep}, CAST({year} AS SMALLINT) AS year, CAST(count(*) AS INTEGER) AS n,
             sum(r) AS sr, sum(r * r) AS sr2
-        FROM (SELECT adj.fac, adj.lm - nu.nu AS r FROM adj JOIN ab ON ab.age = adj.age
+        FROM (SELECT adj.fac, adj.u, nu.code3, adj.lm - nu.nu AS r FROM adj JOIN ab ON ab.age = adj.age
               JOIN nu ON nu.code3 = left(adj.code, 3) AND nu.u = adj.u AND nu.sex = adj.sex AND nu.band = ab.band)
-        GROUP BY fac""").fetch_arrow_table()
+        GROUP BY {by}""").fetch_arrow_table()
     store.put_table("gateway", key, out, {"source": f"residuals of {mark} by facility"})
     return out
 

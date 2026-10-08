@@ -93,7 +93,7 @@ The test that does separate them: **the events carry the age–sex profile of th
 - Run times are about 5 min a year: 2014 gave 404,653 pairs, 2015 429,306.
 - `sinan_dengue_deaths_to_sim` 2015 is **not viable**, by the engine's own test (972 deaths, 165,342 candidates; the date-shifted controls reach 39 % of the real pairs in the 23–26-bit bins).
   - It is not a defect of either side's keys: both are complete.
-  - Without a birth date (SINAN lost it to the LGPD), death day, residence, sex and age do not single out a person in the large cities where 2015's deaths were.
+  - SINAN's public files withhold the birth date: the form collects it, the files republished after the LGPD keep the birth year only (pegasus_data DATA_SOURCES, "SINAN birth dates after the LGPD", measured 2026-09-28). Without it, death day, residence, sex and age do not single out a person in the large cities where 2015's deaths were.
   - Such a year stays unlinked, and corroboration names it untested, with the reason. S2.2's "no year unlinked" holds only where a link is viable.
 
 **The profile test on local person-years, and the second dossier** (`data/probes/s5_1/retriage3.log`, `reports/dossier.html`).
@@ -128,4 +128,9 @@ The dossier's top 40 under the reading order:
 - The reason is measured. Boa Vista's births rose 27 % from 2017 to 2019 (7,043 → 8,936). The population series (POPSVS) already carried part of the arrivals: women of 15–49 rose 9.5 % (100,293 → 109,833).
 - The rate rose 11–16 % (70.2 → 78.1 → 81.4 per 1,000 women, back to 72.1 in 2020): about 1,000 births above the rate's course over two years. That is under the count lenses' minimum relevant effect, a rate ratio of 1.2.
 - A ratio threshold treats a capital's 1,000 extra births like a village's handful. Relevance stated as a ratio alone is a debt (ARCHITECTURE §13.2, the minimum relevant effect).
+
+**S4.3, a measure's answers triaged on their own admissions** (`data/probes/s4_3/triage_measures.py`, its logs). SIH's 646 length-of-stay answers by recording facility, confined to the lead's node.
+- One residual cube per year (by facility, residence and category) serves every lead. A national read per lead and year took hours; this took 19 min.
+- 11 are one institution's (tested); 635 are signals.
+- A first version called the leads under 30 admissions noise (394). They are signals that the facility rule cannot read: the location's own test weighed their count.
 
