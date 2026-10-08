@@ -274,7 +274,7 @@ def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
             for rec in result.get("records", []):
                 for m, v in (rec.get("methods") or {}).items():
                     if "found" in v and written >= events.get((m, rec["name"]), ("",))[0]:
-                        events[(m, rec["name"])] = (written, bool(v["found"]))
+                        events[(m, rec["name"])] = (written, bool(v["found"]), rec.get("expect", "found"))
         else:
             by_lens: dict[str, list] = {}
             for row in result.get("false", []):
@@ -287,8 +287,12 @@ def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
                     grids[(lens, result.get("field"))] = (written, rows)
                     planted_rows[(lens, result.get("field"))] = planted.get(lens, [])
     out: dict[str, dict[str, Any]] = {}
-    for (m, _), (_, found) in events.items():
+    for (m, _), (_, found, expect) in events.items():
         r = out.setdefault(m, {})
+        if expect == "absent":              # a declared negative control: a finding there is a false one
+            r["controls_scored"] = r.get("controls_scored", 0) + 1
+            r["controls_with_findings"] = r.get("controls_with_findings", 0) + found
+            continue
         r["events_scored"] = r.get("events_scored", 0) + 1
         r["events_found"] = r.get("events_found", 0) + found
     for (m, fid), (_, rows) in grids.items():

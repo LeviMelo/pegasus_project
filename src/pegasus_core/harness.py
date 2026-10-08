@@ -58,6 +58,8 @@ class Positive:
     note: str = ""
     source: tuple = ()              # the field's reader beyond counts (`tools.Session.source`), as sorted items
     selected_by: tuple = ()         # methods whose findings selected it (a person's confirmed answer): not scored on it
+    direction: str = ""             # "up" or "down": a finding must take it (a location's question is two-sided)
+    expect: str = "found"           # "absent": a declared negative control, where a finding is a false one
 
     @property
     def question(self) -> str:
@@ -74,6 +76,21 @@ LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "
 
 
 POSITIVES: tuple[Positive, ...] = (
+    # S1.2 (work plan), declared 2026-10-07 before their first run: the Fundão tailings dam broke in Mariana (MG) on
+    # 5 November 2015; newborns exposed in utero in the directly affected municipalities were born 1.86 days earlier
+    # and 2.6 percentage points more often preterm, with no effect on birth weight (Mrejen, Perelman & Machado 2020,
+    # Social Science & Medicine 250:112868, difference in differences on the birth records by the mother's
+    # municipality). The locus is the mud's first reach, named by every source (Mariana, Barra Longa, Rio Doce, Santa
+    # Cruz do Escalvado); the window the births of 2016, exposed in utero. A measure, a composition and a control
+    Positive("Shorter gestation after the Fundão dam break, Mariana 2016", "SINASC-DN", "birth", "*", "excess", "B1",
+             "mun:314000,310570,315500,315740", (2016, 2016), criterion=EVENT_CRITERION, direction="down",
+             source=(('bounds', (1.0, 50.0)), ('mark', 'SEMAGESTAC'), ('missing', ()), ('source', 'mark')), note="SEMAGESTAC, the weeks of gestation: 1.86 days shorter"),
+    Positive("Preterm births (32-36 weeks) after the Fundão dam break, Mariana 2016", "SINASC-DN", "birth", "*",
+             "excess", "B1", "mun:314000,310570,315500,315740", (2016, 2016), criterion=EVENT_CRITERION,
+             direction="up", source=(('indicator', 'GESTACAO'), ('missing', ('0', '9')), ('source', 'share'), ('success', ('4',))), note="GESTACAO 4 (32-36 weeks): preterm +2.6 points"),
+    Positive("Birth weight after the Fundão dam break (negative control), Mariana 2016", "SINASC-DN", "birth", "*",
+             "excess", "B1", "mun:314000,310570,315500,315740", (2016, 2016), criterion=EVENT_CRITERION,
+             source=(('bounds', (1.0, 8999.0)), ('mark', 'PESO'), ('missing', ()), ('source', 'mark')), expect="absent", note="no birth-weight effect in the same study"),
     # declared 2026-10-07 before their first run (data/real_events.py; evaluation 2026-10-07, real events), each by the
     # question it is a positive for
     Positive("Yellow fever deaths, the 2017–18 sylvatic outbreak", "SIM.DO", "death", "A95", "excess", "B1",
@@ -914,6 +931,7 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
     out = []
     for p in positives:
         rec: dict[str, Any] = {"name": p.name, "question": p.question, "dataset": p.dataset, "node": p.node,
+                               "expect": p.expect,
                                "places": p.places, "years": list(p.years)}
         out.append(rec)
         qn = questions.QUESTIONS.get(p.question)
@@ -961,6 +979,8 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
                     f.stats["shape"] = questions._shape(s, p.node, f, f.tier)
                 shape = f.stats["shape"].get("shape", "unattributed")
                 if qn.shapes and shape not in qn.shapes and shape != "unattributed":
+                    continue
+                if p.direction and f.locus.get("direction", "up") != p.direction:
                     continue
                 if best is None or f.p < best.p:
                     best = f

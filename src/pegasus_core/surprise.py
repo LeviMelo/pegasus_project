@@ -538,7 +538,7 @@ def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np
         w = np.where(has, 1.0 / np.where(has, var, 1.0), 0.0)
         return Surprise(f, tier, m.data.places, m.data.years, np.where(has, y, np.nan), np.where(has, mu, np.nan),
                         np.full(y.shape, np.nan), u, z, w, flags.astype(np.int8), cal, extras,
-                        noise=gaussian_noise(z, has))
+                        noise=location_noise(z, has))
     extra_var = 0.0
     for source in ("model", "field"):
         sdv = np.sqrt(np.where(has, var + extra_var, 1.0))
@@ -556,7 +556,7 @@ def _mark_surprise(f: fields.Field, tier: str, m: monolith.MarkModel, leaves: np
         flags |= CALIBRATION
     w = np.where(has, 1.0 / np.where(has, var + extra_var, 1.0), 0.0)
     return Surprise(f, tier, m.data.places, m.data.years, np.where(has, y, np.nan), np.where(has, mu, np.nan),
-                    np.full(y.shape, np.nan), u, z, w, flags, cal, extras, noise=gaussian_noise(z, has))
+                    np.full(y.shape, np.nan), u, z, w, flags, cal, extras, noise=location_noise(z, has))
 
 
 #: a location's minimum relevant effect, in units of its events' own spread on the field's scale (a standardised mean
@@ -590,14 +590,16 @@ def location_rate_ratio(s: Surprise) -> float | None:
     return float(np.exp(LOCATION_EFFECT * s.extras["unit_sd"]))
 
 
-def gaussian_noise(z: np.ndarray, has: np.ndarray) -> Noise:
-    """N1 of a mark field (a Gaussian location per place-period): the lag-1 correlation of its standardised residuals,
-    pooled over every place's consecutive periods with information, as an AR(1)."""
-    a, b = z[:, :-1], z[:, 1:]
-    both = has[:, :-1] & has[:, 1:]
-    den = np.sqrt((a[both] ** 2).sum() * (b[both] ** 2).sum())
-    rho = float(np.clip((a[both] * b[both]).sum() / den, -0.95, 0.95)) if den > 0 else 0.0
-    return Noise(rho=rho)
+def location_noise(z: np.ndarray, has: np.ndarray, lags: int = 4) -> Noise:
+    """N1 of a location field (a measure's mean, a share's logit, per place-period): the counts' estimator
+    (`_lag_fit`) on its standardised scores, the places informative in every period, so one noise structure serves
+    every field kind (work plan S1.1; it replaced a pooled AR(1) of the raw scores, neither detrended nor winsorised)."""
+    T = z.shape[1]
+    keep = has.all(1)
+    if T < 5 or keep.sum() < 10:
+        return Noise()
+    rh, dc = _lag_fit(z[keep], 0.0, float(keep.sum()), lags)
+    return Noise(rho=round(rh, 4), decay=round(dc, 4))
 
 
 def gaussian(s: Surprise) -> bool:
@@ -760,7 +762,6 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     P, F = float(p_u.sum()), float(f_u.sum())
     if F <= 0:
         return Noise()
-    M = _detrend_projection(T)
     # Winsorised normal scores: the randomised PIT under the marginal (the copula's own scale), clipped at the universal
     # threshold Φ⁻¹(1 − 1/2N) over the N cells (≈ √(2 log N); Donoho & Johnstone 1994), past which a null field holds
     # less than one cell. An epidemic's cells enter at a bounded size; null cells are untouched.
@@ -771,6 +772,19 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     #   universal threshold, as unclipped; measles ρ 0.54 at it, unclipped 0.30 (2026-10-07,
     #   data/probes/noise_clip_bound.json)
     _, zs = randomised_pit(y[keep], m, ph / kap, seed=0)
+    rh, dc = _lag_fit(zs, P, F, lags)
+    return Noise(round(kap, 4), round(rh, 4), decay=round(dc, 4))
+
+
+def _lag_fit(zs: np.ndarray, P: float, F: float, lags: int = 4) -> tuple[float, float]:
+    """N1's correlation over periods from a field's normal scores ``zs`` [places, T] (`noise_structure`): each place's
+    scores lose their level and trend (M), are winsorised at the universal threshold, and their pooled lag 0..K sums
+    are matched by Σ_u M (p_u I + κ f_u R) M, R the ARMA(1,1) correlation c_k = ρ δ^(k−1); ``P`` and ``F`` are the
+    sums over places of the independent and the correlated shares of each cell's variance (a count's Poisson and
+    frailty parts; a location's sampling error and its cell-level component, whose split the scores do not need: for
+    a location P = 0, F = places, and ρ is the correlation of the whole standardised score). Returns (ρ, δ)."""
+    T = zs.shape[1]
+    M = _detrend_projection(T)
     bound = float(stats.norm.isf(1.0 / (2 * zs.size)))
     e = np.clip(np.nan_to_num(zs, nan=0.0), -bound, bound) @ M
     K = min(lags, T - 3)
@@ -800,7 +814,7 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     fit = optimize.least_squares(lambda par: (expected(par) - obs) / scale, x0=[1.0, 0.2, 0.2],
                                  bounds=([1e-3, -0.5, 0.0], [1e4, 0.95, 0.95]))
     _, rh, dc = (float(x) for x in fit.x)
-    return Noise(round(kap, 4), round(rh, 4), decay=round(dc, 4))
+    return rh, dc
 
 
 def _central_kappa(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.5, seed: int = 0) -> float:

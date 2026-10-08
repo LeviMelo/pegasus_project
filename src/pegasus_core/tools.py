@@ -17,6 +17,7 @@ ledger. The event sides survive for sizes only: `honest_sizes`.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import gc
 import inspect
 import json
@@ -54,6 +55,8 @@ LENS_TIERS = {"institution_step": "B1", "share_excess": "B1", "cell_excess": "B1
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
 PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
+# the methods that read a location field in one direction only: asked of both (`Session.scan`)
+TWO_SIDED = ("cell_excess", "excess", "excess_step", "excess_trend", "excess_level")
 SCALE = {"institution_step": "rate_ratio", "share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
          "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
          "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
@@ -325,6 +328,25 @@ class Session:
         s = self.surprise(node, tier, train_last)
         if "rate_ratio" not in kw and (rr := surprise.location_rate_ratio(s)) is not None:
             kw["rate_ratio"] = rr                     # a location's relevance is on its own scale, not the counts'
+        if surprise.gaussian(s) and lens in TWO_SIDED and not kw.pop("one_side", False):
+            # a location departs either way (a shorter gestation matters as much as a longer one): each side at q/2,
+            # the fall read as the rise of the mirrored field μ − (y − μ), whose predictive is the same
+            q = kw.pop("q", 0.05)
+            up = self.scan(node, lens, tier, None, train_last, q=q / 2, one_side=True, **kw)
+            memo = getattr(self._local, "memo", None)
+            mirror = dataclasses.replace(s, y=2 * s.mu - s.y, z=-s.z, u=1 - s.u)
+            mirror.__dict__["_memo"] = s.__dict__.setdefault("_memo", {})
+            self._local.memo = {**(memo or {}), (node, tier or lens_tier(lens, train_last is not None), train_last): mirror}
+            try:
+                down = self.scan(node, lens, tier, None, train_last, q=q / 2, one_side=True, **kw)
+            finally:
+                self._local.memo = memo
+            for f in up:
+                f.locus["direction"] = "up"
+            for f in down:
+                f.locus["direction"] = "down"
+                f.effect = 1.0 / f.effect if f.effect else f.effect
+            return up + down
         if lens in ("cell_excess", "step") and "scales" not in kw:
             kw["scales"] = self.scales()              # the departure models run over the ladder of supports
         if lens == "cell_excess":                     # a departure model (stage C, O6)
