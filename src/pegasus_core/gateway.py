@@ -1655,26 +1655,58 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 
 
 
-def cohort_records(dataset: str, event: str, year: int, link: str, side: str, columns: list[str]
-                   ) -> tuple[pa.Table, pa.Array, pa.Table]:
-    """One side of a declared link as persons (`tools.cohort`): its records of ``year`` on the lattice (u, sex, age
-    class) with ``columns`` raw-coded and each record's identity (a grouped side's: its group's, as in
-    `linked_counts`), and the link's stored pairs."""
-
-    spec = link_specs()[link]
-    sd = spec.left if side == "left" else spec.right
-    if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
-        raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
-    group = _group_columns(dataset, sd)
+def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> tuple[pa.Table, pa.Array]:
+    """One event type's records of ``year`` as persons (`tools.cohort`): on the lattice (u, sex, age class) with
+    ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name)."""
     strata = _strata(dataset)
-    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns + group
+    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
     con.register("r", raw)
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
-    t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep},
-            {_rep_sql(group)} AS rid FROM r""").fetch_arrow_table()
-    return t, t.column("rid"), side_pairs(link, side, year)
+    t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep}, {_rep_sql([])} AS rid FROM r""").fetch_arrow_table()
+    return t, t.column("rid")
+
+
+def data_code(dataset: str) -> str:
+    """pegasus_data's code of a dataset as its links and persons name it (SIM.DO -> SIM-DO)."""
+    return dataset.upper().replace(".", "-")
+
+
+def persons(year: int, draw: int | None = None):
+    """The persons of one scope: every viable stored national run of ``year`` merged (pegasus_data `build_entities`,
+    strongest evidence first, under a person's constraints); ``draw`` merges one plausible link set (each edge kept
+    with its p_match). PegaSUS reads persons, not one link's pairs (S2.4)."""
+    import pegasus_data as pg
+    from pegasus_data.linkage.entities import build_entities
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw)
+
+
+def person_records(entities, kind: tuple[str, str], other: tuple[str, str]) -> set[str]:
+    """The records of ``kind`` (pegasus_data dataset code, person role) whose person also has a record of ``other``."""
+    from pegasus_data.linkage.entities import person_pairs
+
+    return set(person_pairs(entities, kind, other).column("l").to_pylist())
+
+
+def person_scopes(kind: tuple[str, str], year: int) -> list[int]:
+    """The scopes whose runs hold ``kind``'s records of ``year``: every declared link with a person of that kind on a
+    side, over the runs that cover the side's year (`covering_runs`: a birth's infant death is in its year's run or
+    the next)."""
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    raw = read_yaml(links_file()).get("links") or {}
+    out: set[int] = set()
+    for name, spec in link_specs().items():
+        person = list((raw.get(name) or {}).get("person") or [])
+        for k, (side, sd) in enumerate((("left", spec.left), ("right", spec.right))):
+            if len(person) > k and (sd.dataset, person[k]) == kind:
+                out.update(covering_runs(name, side, year))
+    return sorted(out)
 
 
 @contextlib.contextmanager

@@ -330,14 +330,19 @@ def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = ty
 
 
 @app.command()
-def cohort(dataset: str, event: str, link: str, side: str, year: int, draws: int = 20, q: float = 0.05) -> None:
-    """The cohort scan on one side of a declared link: every declared attribute against having a partner (§7.8)."""
+def cohort(dataset: str, event: str, role: str, year: int,
+           outcome: list[str] = typer.Option(..., help="an outcome kind, DATASET:ROLE (pegasus_data codes), repeatable"),
+           draws: int = 10, q: float = 0.05) -> None:
+    """The cohort scan on persons: every declared attribute against each outcome a person reaches (§7.8), e.g.
+    `cohort SINASC-DN birth baby 2021 --outcome SIM-DO:deceased --outcome SIH-RD:patient`."""
     from . import tools
 
-    found = tools.cohort(dataset, event, link, side, year, draws=draws, q=q, log=console.print)
-    t = Table("attribute", "level", "reference", "RR", "95 %", "q")
+    found = tools.cohort(dataset, event, role, [tuple(o.split(":", 1)) for o in outcome], year, draws=draws, q=q,
+                         log=console.print)
+    t = Table("outcome", "attribute", "level", "reference", "RR", "95 %", "q")
     for x in sorted(found, key=lambda x: x.q)[:40]:
-        t.add_row(x.locus["attribute"], x.locus["level"], x.locus["reference"], f"{x.effect:.2f}",
+        t.add_row(x.fields[1].removeprefix("person:"), x.locus["attribute"], x.locus["level"], x.locus["reference"],
+                  f"{x.effect:.2f}",
                   f"{x.interval[0]:.2f}–{x.interval[1]:.2f}", f"{x.q:.1e}")
     console.print(t)
 

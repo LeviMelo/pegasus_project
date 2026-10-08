@@ -11,6 +11,7 @@ by the data and code versions and its inputs in the store. A plan:
       - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group],
          measures: all, compositions: all, intervals: all, links: all, classifiers: all, codes: all}   # from declarations
     corroborators: [[SINAN-DENG, probable_case]]    # served systems read as independent fields, not modelled
+    persons: true             # the plan reads persons (cohorts): every link that declares a person is computed
     confirm_last: 2019        # stage E's later years: select on the years up to it, test on the years after
     prospective: 2021         # the prospective questions: the years after it against fits on the years up to it
     relations: true
@@ -51,7 +52,7 @@ class System:
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
 #: later years (select on the years up to it, test on the years after); the prospective questions' training years
-EXTRA = {"corroborators", "contexts", "confirm_last", "prospective"}
+EXTRA = {"corroborators", "contexts", "confirm_last", "prospective", "persons"}
 
 
 @dataclass
@@ -257,6 +258,15 @@ def plan_links(plan: Plan) -> list[tuple[str, str]]:
     if plan.triage:
         served = [(x.dataset, x.event) for x in plan.systems] + [tuple(c) for c in plan.extra.get("corroborators") or ()]
         out += [src.link for s in plan.systems for src in corroborate.sources(s.dataset, served) if src.link]
+    if plan.extra.get("persons"):
+        # a plan that reads persons (S2.4) needs every link that declares one: persons are merged from all of a scope's
+        # runs, and a route through another link finds what the direct one missed
+        from pegasus_data.linkage.engine import links_file
+        from pegasus_data.semantics.curation import read_yaml
+
+        raw = read_yaml(links_file()).get("links") or {}
+        out += [(name, side) for name in gateway.link_specs() if (raw.get(name) or {}).get("person")
+                for side in ("left", "right")]
     return list(dict.fromkeys(out))
 
 

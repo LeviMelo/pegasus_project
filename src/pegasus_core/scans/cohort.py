@@ -149,10 +149,13 @@ def scan(table: pa.Table, attributes: list[str], outcomes: list[str], ledger: co
             ests.append(b)
             vars_.append(s ** 2)
             y_tot, t_tot = y.sum(), t_cells.sum()
-        est = np.mean(ests, axis=0)
-        within = np.mean(vars_, axis=0)
-        between = np.var(ests, axis=0, ddof=1) if len(ests) > 1 else 0.0
-        sd = np.sqrt(within + (1 + 1 / len(ests)) * between)
+        # Rubin's rules over the link draws: pegasus_data's (`linkage.uncertainty.combine`), one contrast at a time
+        from pegasus_data.linkage.uncertainty import combine
+
+        E, V = np.asarray(ests), np.asarray(vars_)
+        comb = [combine(list(E[:, j]), list(V[:, j])) for j in range(E.shape[1])]
+        est = np.array([c.estimate for c in comb])
+        sd = np.array([c.standard_error for c in comb])
         z = (np.abs(est) - np.log(delta_rr)) / np.maximum(sd, 1e-12)
         p = special.ndtr(-z)
         others = [lv for lv in levels if lv != ref]

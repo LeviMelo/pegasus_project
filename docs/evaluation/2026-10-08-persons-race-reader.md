@@ -140,3 +140,10 @@ The dossier's top 40 under the reading order:
 - The earlier answers keep their verdicts, and a verdict is never retired by a pass.
 - The pass still wrote the field's answers under the counts' id: `Session.fields` walked the registry without the reader's tag. It now tags every field (`Expectations.tag`).
 
+**S2.4, the cohort on persons (built; first test)** (`pegasus-core cohort SINASC-DN birth baby 2021 --outcome SIM-DO:deceased --draws 2`, `data/probes/s2_4/`).
+- The persons of 2021 from PegaSUS's stored runs: 2.32 M persons from three links in 60 s, no refusals. pegasus_data's `build_entities` now skips runs stored as not viable (dengue 2021), and draws edges by p_match (pegasus_data, this commit).
+- 25,912 and 25,900 births followed by an infant death in two draws, over the persons of 2021 and 2022. The contrasts are those of the pair-based reading (an anomaly not recorded 2.20, a home birth 1.91).
+- No second route yet: the newborn-admission link is not stored in this root. `persons: true` in a plan makes `update` compute every person link (nine).
+- PegaSUS's own pair sampling is gone; Rubin is pegasus_data's `combine`.
+- Found on the way: SIH-SIM 2010 is not viable in this root. SIH's 2008–2010 sex labels were never materialised there, so blocking found 0 candidates (pegasus_data OPEN_QUESTIONS 73).
+
