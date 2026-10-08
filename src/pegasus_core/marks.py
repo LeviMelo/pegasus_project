@@ -160,12 +160,13 @@ FAC_SHARE = 0.7    # ... this share of its excess (the thresholds of the count t
 
 
 def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: np.ndarray, window: list[int],
-                facility_effects: str | None, names: dict | None = None) -> dict:
+                facility_effects: str | None, names: dict | None = None, codes: list[str] | None = None) -> dict:
     """Is a mark lead one institution's? (ADR-0014 for marks; ARCHITECTURE §7.7.) The lead's admissions (the residents of its
     places in its window) summed by recording facility: residual ``sr`` from the fitted location, admissions ``n``. The smallest
     set of at most FAC_K facilities carrying FAC_SHARE of the lead's excess (the sum of its residuals, in the lead's direction);
     ``facility`` is true when such a set exists and the lead's mean residual without it is within the minimum effect. The
-    facility's municipality (of the record) is read from the facility cube, and named with ``names``."""
+    facility's municipality (of the record) is read from the facility cube, and named with ``names``. ``codes`` (the lead's
+    node's categories) confine the admissions to the lead's own field: the whole block's were summed before (S4.3)."""
     from . import facility as fac_mod
     from .scans import lenses
 
@@ -173,7 +174,11 @@ def triage_lead(model: monolith.MarkModel, name: str, years: list[int], places: 
     d = model.data
     edges = gateway.age_edges(d.population)
     use = [i for i, y in enumerate(years) if window[0] <= y <= window[1]]
-    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu_table(model, i),
+    def nu(i: int) -> pa.Table:
+        tab = nu_table(model, i)
+        return tab.filter(pc.is_in(tab.column("code3"), value_set=pa.array(sorted(codes)))) if codes else tab
+
+    parts = [gateway.mark_facility_moments(d.dataset, d.event, int(years[i]), sp["mark"], tuple(sp["bounds"]), nu(i),
                                            edges, classifier=sp.get("classifier"), casemix=sp.get("casemix"),
                                            facility_effects=facility_effects, places=pa.array(places.astype(np.int32)),
                                            missing=sp.get("missing", ()))

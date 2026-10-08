@@ -1498,6 +1498,68 @@ def side_pairs(link: str, side: str, year: int, compute: bool | None = None) -> 
     return pa.concat_tables(parts, promote_options="default") if len(parts) > 1 else parts[0]
 
 
+def link_sensitivity(link: str, year: int) -> pa.Table:
+    """(u, n, k) for one stored run of ``link``: the records of its declared sensitivity side (`sensitivity`: every one
+    should find a partner, as every infant death has its birth) by residence, and the expected number paired
+    (pegasus_data `side_counts`). k/n is the link's sensitivity there; a run not stored raises `LinkNotStored`."""
+    from pegasus_data.linkage.engine import side_counts
+
+    spec = link_specs()[link]
+    side = getattr(spec, "sensitivity", "")
+    if not side:
+        raise ValueError(f"{link} declares no sensitivity side")
+    sd = spec.left if side == "left" else spec.right
+    res_col = _strata(sd.dataset)["residence"]
+    role = next(r["role"] for r in roles(sd.dataset) if r["column"] == res_col)
+    key = {"what": "link_sensitivity", "link": link, "year": year, "data": config.data_version(),
+           "code": config.code_key(link_sensitivity)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    stored_pairs(link, year)                      # raises LinkNotStored when the run is absent
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = side_counts(link, period=year, side=side, by=role, root=config.data_root())
+    con = duckdb.connect()
+    con.register("r", raw)
+    out = con.execute(f"""SELECT {_residence_sql("unit")} AS u, CAST(sum(n) AS DOUBLE) AS n, sum(k) AS k
+        FROM r GROUP BY 1 HAVING u IS NOT NULL ORDER BY 1""").fetch_arrow_table()
+    store.put_table("gateway", key, out, {"source": f"pegasus_data side_counts({link}, {side})"})
+    return out
+
+
+def link_completeness(link: str, side: str, year: int) -> dict[int, float]:
+    """The link's sensitivity for ``side``'s records of ``year`` by residence: the sensitivity side's records over the
+    runs that hold them (`covering_runs`: a birth's infant death falls in its year or the next), shrunk to its state's
+    by an empirical-Bayes beta (method of moments over the state's municipalities). A share of births followed by an
+    infant death is the death rate times this: 20 of its first 23 departures were the link's holes (S2.3)."""
+    parts = [link_sensitivity(link, z) for z in covering_runs(link, side, year)]
+    con = duckdb.connect()
+    for i, prt in enumerate(parts):
+        con.register(f"p{i}", prt)
+    tab = con.execute("SELECT u, sum(n) AS n, sum(k) AS k FROM (" + " UNION ALL ".join(f"SELECT * FROM p{i}" for i in range(len(parts)))
+                      + ") GROUP BY u").fetch_arrow_table()
+    u = tab.column("u").to_numpy().astype(np.int64)
+    n = tab.column("n").to_numpy().astype(float)
+    k = np.minimum(tab.column("k").to_numpy().astype(float), n)
+    uf = u // 10000
+    out: dict[int, float] = {}
+    for s in np.unique(uf):
+        m = uf == s
+        cbar = float(k[m].sum() / max(n[m].sum(), 1e-9))
+        c = k[m] / np.maximum(n[m], 1e-9)
+        # between-place variance of the sensitivity beyond the binomial's (method of moments), so θ = c̄(1 − c̄)/τ² − 1
+        w = n[m] / max(n[m].sum(), 1e-9)
+        total = float(np.sum(w * (c - cbar) ** 2))
+        binom = float(np.sum(w * cbar * (1 - cbar) / np.maximum(n[m], 1.0)))
+        tau2 = max(total - binom, 1e-6)
+        theta = max(cbar * (1 - cbar) / tau2 - 1.0, 0.0)
+        for uu, kk, nn in zip(u[m], k[m], n[m], strict=True):
+            out[int(uu)] = float((kk + theta * cbar) / (nn + theta)) if nn + theta > 0 else cbar
+        out[-int(s)] = cbar                       # a place without records: its state's
+    return out
+
+
 def _group_columns(dataset: str, sd) -> list[str]:
     """The columns of a link side's ``group`` roles (pegasus_data's roles), or [] for an ungrouped side."""
     if not sd.group:
@@ -1570,7 +1632,18 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
-    store.put_table("gateway", key, counts, {"source": f"pegasus_data.link({link}): {side} side of {dataset}",
+    sens = getattr(spec, "sensitivity", "")
+    if sens and sens != side:
+        # the other side's records should all find a partner: its linked share by residence is the link's sensitivity,
+        # and this side's share (births followed by an infant death) is the outcome times it. The trials become the
+        # records the link would have seen an outcome for, n × sensitivity (S2.3, OPEN_QUESTIONS 11)
+        comp = link_completeness(link, side, year)
+        uu = counts.column("u").to_numpy().astype(np.int64)
+        c = np.array([comp.get(int(x), comp.get(-(int(x) // 10000), 1.0)) for x in uu])
+        counts = counts.set_column(counts.schema.get_field_index("n"), "n",
+                                   pa.array(counts.column("n").to_numpy().astype(float) * c))
+    store.put_table("gateway", key, counts, {"source": f"pegasus_data.link({link}): {side} side of {dataset}"
+                                                       + (" (trials × the link's sensitivity)" if sens and sens != side else ""),
                                             "pairs": pairs.num_rows})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)

@@ -123,3 +123,9 @@ The dossier's top 40 under the reading order:
 - The field shared its id with the births' count field (`SINASC-DN:birth:*:*`). A field's id now names its reader, `dataset:event:classifier[reader]:node`.
 - Triage reads only leads of its session's reader. SIH's 646 length-of-stay answers had been triaged on the count field's evidence, 47 of them *explained* by it. They are open and untriaged again: a measure's triage (`marks.triage_lead`) is not wired.
 
+**S1.5, the fifth round** (`data/probes/s1_5/roraima.py`, declared in cc7a9fd before the run). The Venezuelan arrivals were scored in two systems at the municipality.
+- Missed by every method: births at Boa Vista and at Pacaraima in 2018–2019, and SIH's delivery admissions at Boa Vista. The Macapá control is clean.
+- The reason is measured. Boa Vista's births rose 27 % from 2017 to 2019 (7,043 → 8,936). The population series (POPSVS) already carried part of the arrivals: women of 15–49 rose 9.5 % (100,293 → 109,833).
+- The rate rose 11–16 % (70.2 → 78.1 → 81.4 per 1,000 women, back to 72.1 in 2020): about 1,000 births above the rate's course over two years. That is under the count lenses' minimum relevant effect, a rate ratio of 1.2.
+- A ratio threshold treats a capital's 1,000 extra births like a village's handful. Relevance stated as a ratio alone is a debt (ARCHITECTURE §13.2, the minimum relevant effect).
+

@@ -21,6 +21,7 @@ by the data and code versions and its inputs in the store. A plan:
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -426,7 +427,15 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
                        leads=sorted(x.id for x in answers), served=sorted(served))
             if answers and (force or not _done(key)):
-                done = s.triage(register=answers, log=log)
+                # each reader's answers by its own session (S4.3): a measure's are read on its admissions, not on counts
+                by_reader: dict[str, list] = {}
+                for x in answers:
+                    by_reader.setdefault(json.dumps(x.provenance.get("source") or {}, sort_keys=True, default=list), []).append(x)
+                done = []
+                for src_key, group in sorted(by_reader.items()):
+                    src = json.loads(src_key)
+                    rs = s if not src else tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=src)
+                    done += rs.triage(register=group, log=log)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
                 corr = s.corroborate(done, served=served, log=log)
                 s.register.add(corr)

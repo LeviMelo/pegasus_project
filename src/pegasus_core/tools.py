@@ -582,6 +582,8 @@ class Session:
                 and json.dumps(x.provenance.get("source") or {}, sort_keys=True, default=list) == own]
         if stale:
             mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.rules()]
+        if self.source.get("source") == "mark":
+            return self._triage_marks(mine, write, log)
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
         for x in mine:
             by_node.setdefault((x.fields[0].split(":")[-1], x.train_last or 0, x.tier if x.train_last else ""), []).append(x)
@@ -642,6 +644,53 @@ class Session:
                     x.replication = control.replication_tier(kinds_of(x))
             self._ledger_close(batch)
             log(f"{i + 1}/{len(by_node)} {node}{f' ({tier} fit to {train_last})' if train_last else ''}: {len(group)} leads")
+        if write:
+            self.register.add(mine)
+        return mine
+
+    def _triage_marks(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
+        """Stage E for a measure's answers (S4.3): the lead's admissions (its node's categories, its places, its window)
+        by recording facility (`marks.triage_lead`). One institution's when at most FAC_K facilities carry FAC_SHARE of
+        the departure and the rest is within the minimum effect (tested); noise under FAC_CATCH admissions; else a
+        signal. The count field's evidence is not this field's (the 646 length-of-stay answers were read on it)."""
+        from . import marks
+
+        names = gateway.municipality_names()
+        reg = self.expectations.registry
+        by_block: dict[str, list[leads.Lead]] = {}
+        for x in mine:
+            by_block.setdefault(reg.chapter(x.fields[0].split(":")[-1]), []).append(x)
+        for block, group in sorted(by_block.items()):
+            model = self.expectations.model(block)
+            batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
+            for x in group:
+                node = x.fields[0].split(":")[-1]
+                places = np.asarray(x.locus.get("places", []), dtype=np.int64)
+                window = x.locus.get("years") or [self.years[0], self.years[-1]]
+
+                def run(x=x, node=node, places=places, window=window, model=model):
+                    res = marks.triage_lead(model, self.source["mark"], list(self.years), places, window,
+                                            self.source.get("facility_effects"), names, codes=list(reg.leaves(node)))
+                    if res["admissions"] < explain.FAC_CATCH:
+                        run.verdict = explain.Triage(explain.NOISE, f"few admissions: {res['admissions']}", res, explain.TESTED)
+                    elif res.get("facility"):
+                        tops = ", ".join(f"{t['facility']} ({t['n_share']:.0%} of admissions)" for t in res["top"])
+                        run.verdict = explain.Triage(explain.FACILITY, f"one institution's: {tops} carry "
+                                                     f"{res['share_of_excess']:.0%} of the departure, the rest within the minimum effect",
+                                                     res, explain.TESTED)
+                    else:
+                        run.verdict = explain.Triage(explain.SIGNAL, "carried by more than one institution" if res.get("spread")
+                                                     else "no recording explanation found in the admissions", res)
+                    return {"tested": False, "reason": f"{run.verdict.cls}: {run.verdict.reason}"}
+
+                self._ledgered("triage", x, run, batch=batch)
+                v = run.verdict
+                old = x.robustness.get("triage")
+                x.robustness = {**x.robustness, "triage": {"class": v.cls, "reason": v.reason, "grade": v.grade or None,
+                                                           "rules": explain.rules(), **v.evidence,
+                                                           **({"superseded": old} if old else {})}}
+            self._ledger_close(batch)
+            log(f"{block}: {len(group)} measure leads triaged")
         if write:
             self.register.add(mine)
         return mine

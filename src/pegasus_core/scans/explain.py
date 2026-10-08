@@ -37,7 +37,8 @@ def rules() -> str:
     from .. import config
 
     # the rules and the evidence they read, named so that this module imports nothing above it
-    return config.code_key(triage, institution_triage, "pegasus_core.tools:Session._evidence")[:12]
+    return config.code_key(triage, institution_triage, "pegasus_core.tools:Session._evidence",
+                           "pegasus_core.tools:Session._triage_marks")[:12]
 
 
 def deviance(y: np.ndarray, mu: np.ndarray) -> float:
