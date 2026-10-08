@@ -1,6 +1,6 @@
 # Status
 
-**2026-10-07, evening.** Roadmap revision 4 (ARCHITECTURE §12, ADR-0030): packages S0–S7, each end to end before the next, toward the goals of ARCHITECTURE §1.2. A survey of the day's drift and the cost of readings (`docs/discussion/2026-10-07-survey.md`) found the documents behind the code and the work unplanned. **Work now proceeds by the units of `docs/plans/2026-10-07-work-plan.md`, one at a time, each with its contract and definition of done.** Done: S0.1–S0.6. In progress: **S0.7 a field under the target**, then S1.
+**2026-10-07, evening.** Roadmap revision 4 (ARCHITECTURE §12, ADR-0030): packages S0–S7, each end to end before the next, toward the goals of ARCHITECTURE §1.2. A survey of the day's drift and the cost of readings (`docs/discussion/2026-10-07-survey.md`) found the documents behind the code and the work unplanned. **Work now proceeds by the units of `docs/plans/2026-10-07-work-plan.md`, one at a time, each with its contract and definition of done.** Done: S0.1–S0.6; S0.7 stopped short of its target (191–231 s a field, evaluation 2026-10-07-question-pass-speed). In progress: **S1.1 one noise structure**.
 
 Words used below: **built** (the code exists), **checked** (what ran, named), **done** (the package's acceptance is met).
 
@@ -18,7 +18,7 @@ Words used below: **built** (the code exists), **checked** (what ran, named), **
 | **S7 surveillance, serving** | not started; agents and MCP stay here (the author, 2026-10-07) | — |
 | **D depth on demand** | the top model, N2, BYM2, interaction patterns, exact reference fit | when a reading needs one |
 
-**Speed (P13, ARCHITECTURE §5.8):** a chapter survey's target is under 2 min; one SIH field's question pass measured 923 s, and 154 s after S0.2 (evaluation 2026-10-07-question-pass-speed); S0.7 takes it under the target. Most of the time was repeated work (survey 3), removed by S0.2; S0.3 brings one orchestrator, S0.7 the first computation of each object.
+**Speed (P13, ARCHITECTURE §5.8):** a chapter survey's target is under 2 min; one SIH field's question pass measured 923 s for seven questions; 191–231 s for eight after S0.2 and S0.7 (evaluation 2026-10-07-question-pass-speed); the target is not met. Most of the time was repeated work (survey 3), removed by S0.2; S0.3 brings one orchestrator, S0.7 the first computation of each object.
 
 **Built and unwired** (scripts/codehealth.py, 2026-10-07; each waits for the package that reads it): `relations.spectral_factor_model` (the joint factor model's first form, D), `patterns.temporal_stability` and `spatial_stability` (§7.4), `utilization.parallel_analysis` and `rank1_share` (the care-use factors' choice), `surveillance.expected_false_alarms` (S7), `fields.common_support` (fields lifted to a common support), `harness.recovery` and `group_world`.
 

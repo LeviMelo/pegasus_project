@@ -398,7 +398,7 @@ def _alternate(scanner: Scanner, Y, M):
 
 
 def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int, seed: int,
-                    chunk: int = 8, noise=None) -> np.ndarray:
+                    chunk: int = 32, noise=None) -> np.ndarray:
     """The null's maxima: replicates drawn on the device (gamma–Poisson for counts, Gaussian for
     marks; with a ``noise`` structure the Poisson–lognormal frailty of `surprise.replicate_correlated`) and
     searched in batches by `_alternate`, float32."""

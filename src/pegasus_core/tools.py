@@ -638,6 +638,14 @@ class Session:
         if self.source.get("grain", "year") == "year" and self.expectations.registry.classifier != "*":
             import pyarrow.compute as pc
 
+            # an object of the state: the event type's totals per place-year, read once (14 s a process on SIH)
+            key = {"what": "evidence_grid", "dataset": self.dataset, "event": self.event, "years": list(self.years),
+                   "data": config.data_version(), "code": config.code_key("pegasus_core.tools:Session._prepare_grid")}
+            hit = store.get_arrays("tools", key)
+            if hit is not None:
+                self._grid_places, self._grid_years, self._per_year = hit["places"], hit["years"], 1
+                self._total, self._ill, self._pop = hit["total"], hit["ill"], hit["pop"]
+                return
             pop_t = gateway.population(list(self.years)).group_by(["u", "year"]).aggregate([("n", "sum")])
             places = np.unique(pop_t.column("u").to_numpy())
             years = np.asarray(self.years)
@@ -660,6 +668,7 @@ class Session:
                 ill[:, j] += np.bincount(u[total_ill], weights=y[total_ill], minlength=len(places))
             self._grid_places, self._grid_years, self._per_year = places, years, 1
             self._total, self._ill, self._pop = total, ill, pop
+            store.put_arrays("tools", key, {"places": places, "years": years, "total": total, "ill": ill, "pop": pop})
             return
         blocks = self._blocks()
         total = ill = pop = None

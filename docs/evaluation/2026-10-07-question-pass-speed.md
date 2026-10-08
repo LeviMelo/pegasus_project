@@ -23,3 +23,11 @@
   - variances, lag covariances, spatial roots and replicate fields kept per surprise.
 - Excess, trend and cluster each moved by one answer. All three shapes now read one set of replicate fields per field and tier, drawn from a seed without the shape: another Monte Carlo draw of the same null.
 - **Not met:** §5.8's target of under 2 min. The remaining time is computed once per field: the surprise's noise fit (`place_year_phi`, nbinom cdf 21 s), the peaks' GPU passes (37 s for 4 calls) and the institution pairs (14 s). This is unit S0.7 of the work plan.
+
+**S0.7 (same day, after S0.4 added the divergence question and the space–time scan to excess):** eight questions, 213 → 191 s with warm caches (231 s on a slower run of the same code: on this laptop identical code varied by 20 % within the hour). Answers unchanged across the runs (excess 215, step 23, trend 27, cluster 28, share 1048, institution 1500, group 799, divergence 182). What changed:
+- the dispersion's per-group fits and the κ grid run over threads (`jobs.parallel_map`); the surprise is bitwise equal (B1 20.0 → 13.7 s);
+- the frailty's gamma quantile compiled (`surprise.gamma_quantile_at_normal`): exact to 1e-14 against mpmath, where scipy's loses up to 4e-8 in the upper tail; 2.5 M cells 2.5 → 1.1 s;
+- the scan nulls' replicates batched 32 at a time on the GPU (was 8);
+- the event type's evidence grid stored (14–20 s a process).
+
+Threads scale about threefold on this machine (the quantile kernel: 3.08 s on one thread, 1.11 s on four, 1.24 s on twenty). **Not met:** the 2-minute target. The rest is computed once per field: stage B's dispersion and κ (about 40 s for three tiers), the two v0 scans' Monte Carlo nulls (about 40 s) and the multiscale peaks (about 40 s). Storing each surprise would remove stage B from later passes, but at about 3.6 MB per field and tier it does not fit the 50 GB of free disk without a pruning rule.

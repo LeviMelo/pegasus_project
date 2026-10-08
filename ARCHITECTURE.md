@@ -553,7 +553,7 @@ The measurements, the design of every fast path and the order of work are in `do
 | SIH-RD X 2010–2023 annual | about 1 h | 2 min / 30 s |
 | SINAN-DENG 2010–2023 monthly | 145–160 s per outer (SIH X monthly, comparable) | 2 min / 30 s |
 | all 19 SIM chapters; all 20 SIH chapters | hours | 10 min; 30 min |
-| survey of one chapter | 65 s (III, 21 fields) to hours; one SIH X field's seven questions 923 s, 154 s after S0.2 (evaluation 2026-10-07, question pass) | < 2 min |
+| survey of one chapter | 65 s (III, 21 fields) to hours; one SIH X field's seven questions 923 s; eight in 191–231 s after S0.2 and S0.7 (evaluation 2026-10-07, question pass) | < 2 min |
 
 **The targets are properties the code must have** (§1.2). A target missed is a defect of the code or its orchestration, found by profiling and fixed by structure or by computing an object once; it never bounds what a reading computes.
 
@@ -1172,7 +1172,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
-| `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`) | gateway |
+| `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`); elementwise evaluations and independent fits over threads (`elementwise`, `parallel_map`) | gateway |
 | `cli` | the `pegasus-core` command | tools, jobs |
 
 **Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it. Checked by `scripts/codehealth.py`, which counts imports inside functions too: none since S0.6 (2026-10-07). `departures` and `marks` read `scans.lenses`' finding type and minimum effects, which import neither.

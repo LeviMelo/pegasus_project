@@ -34,7 +34,7 @@ import scipy.sparse as sp
 import torch
 from scipy import optimize, special, stats
 
-from . import config, control, gateway, store, structures
+from . import config, control, gateway, jobs, store, structures
 
 AGE_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]  # 18 bands; last is 80+
 N_BANDS = len(AGE_EDGES)
@@ -2431,13 +2431,10 @@ def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np
     cur = np.full(U, top)
     for lab in levels:
         new = cur.copy()
-        found = []
-        for g in np.unique(lab):
-            rows = lab == g
-            sel = ok & rows[:, None]
-            if sel.sum() >= MIN_DISPERSION_CELLS:
-                est, info = fit(sel)
-                found.append((rows, est - cur[rows][0], 1.0 / info))
+        groups = [(rows, ok & rows[:, None]) for rows in (lab == g for g in np.unique(lab))]
+        groups = [(rows, sel) for rows, sel in groups if sel.sum() >= MIN_DISPERSION_CELLS]
+        fits = jobs.parallel_map(lambda g: fit(g[1]), groups)          # each group's own fit: independent
+        found = [(rows, est - cur[rows][0], 1.0 / info) for (rows, _), (est, info) in zip(groups, fits, strict=True)]
         if found:
             d = np.array([f[1] for f in found])
             v = np.array([f[2] for f in found])

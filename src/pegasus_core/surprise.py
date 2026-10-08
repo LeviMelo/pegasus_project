@@ -13,13 +13,14 @@ parameters on demand and caches it only when asked (scanned fields).
 from __future__ import annotations
 
 import dataclasses
+import functools
 from dataclasses import dataclass, field
 
 import numpy as np
 import pyarrow as pa
 from scipy import optimize, special, stats
 
-from . import config, facility, fields, gateway, laplace, monolith, store
+from . import config, facility, fields, gateway, jobs, laplace, monolith, store
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP", "BPA")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True, "BPA": True}
@@ -361,7 +362,9 @@ class Expectations:
         m = self.model(f.block)
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        key = {**m.key(), "field": f.id, "tier": tier, "surprise": 12}   # 12: N1 lags on normal scores, universal clip, 2026-10-07
+        fitted = (store.manifest("monolith", m.key()) or {}).get("written")
+        key = {**m.key(), "fitted": fitted, "field": f.id, "tier": tier,
+               "code": config.code_key("pegasus_core.surprise:Expectations.surprise")}   # the code that builds it
         if cache:
             hit = store.get_table("surprise", key)
             if hit is not None:
@@ -372,7 +375,7 @@ class Expectations:
         if isinstance(m, monolith.MarkModel):
             out = _mark_surprise(f, tier, m, leaves, self.macroregions(m.data.places))
             if cache:
-                store.put_table("surprise", key, out.table(), {"calibration": out.calibration})
+                store.put_table("surprise", key, out.table(), {"noise": dataclasses.asdict(out.noise), "calibration": out.calibration})
             return out
         mu, mu2 = m.expected(leaves, spatial=SPATIAL[tier])
         mu_first = mu
@@ -421,7 +424,7 @@ class Expectations:
                                                                  config.seed(f.id, tier, "pit", m.key()))
         out.extras = extras
         if cache:
-            store.put_table("surprise", key, out.table(), {"calibration": out.calibration,
+            store.put_table("surprise", key, out.table(), {"noise": dataclasses.asdict(out.noise), "calibration": out.calibration,
                                                             **{k: v.tolist() for k, v in extras.items()}})
         return out
 
@@ -819,7 +822,7 @@ def _central_kappa(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected:
         return float(np.sum((np.quantile(z, [0.25, 0.5, 0.75]) - target) ** 2))
 
     grid = np.linspace(np.log(0.05), np.log(1e3), 41)
-    vals = [gap(g) for g in grid]
+    vals = jobs.parallel_map(gap, grid)        # independent evaluations: over the threads, the same values
     i = int(np.argmin(vals))
     lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
     res = optimize.minimize_scalar(gap, bounds=(lo, hi), method="bounded", options={"xatol": 1e-3})
@@ -963,8 +966,93 @@ def gamma_frailty(eps: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
     out = np.ones(eps.shape)
     pos = s2 > 0
     shape = 1.0 / s2[pos]
-    out[pos] = stats.gamma.ppf(special.ndtr(eps[pos]), shape, scale=1.0 / shape)
+    out[pos] = gamma_quantile_at_normal(eps[pos], shape) / shape
     return out
+
+
+def gamma_quantile_at_normal(eps: np.ndarray, shape: np.ndarray) -> np.ndarray:
+    """G⁻¹(Φ(ε); a), the unit-scale gamma quantile at a standard normal's probability, elementwise: a compiled
+    Wilson–Hilferty start refined by Halley steps on the regularised incomplete gamma (series below a + 1, Lentz's
+    continued fraction above; Press et al., Numerical Recipes §6.2), each tail solved where it has its precision.
+    Agrees with the exact quantile (mpmath) to about 1e-14 relative, where scipy's ``gamma.ppf(ndtr(ε))`` loses up to
+    4e-8 in the upper tail through Φ(ε) near 1 (checked 2026-10-07), and runs over every core: the copula's frailties
+    took 20 s of one SIH field's question pass in scipy."""
+    e = np.ascontiguousarray(np.broadcast_to(eps, np.broadcast(eps, shape).shape), dtype=np.float64).ravel()
+    a = np.ascontiguousarray(np.broadcast_to(shape, e.shape if np.ndim(eps) == 0 else np.shape(eps)),
+                             dtype=np.float64).ravel()
+    return _gamma_quantile_kernel()(e, a).reshape(np.shape(eps))
+
+
+@functools.cache
+def _gamma_quantile_kernel():
+    import math
+
+    from numba import njit, prange
+
+    @njit(cache=True)
+    def lower_upper(a, x):
+        """(P(a, x), Q(a, x)), the regularised incomplete gamma and its complement."""
+        if x <= 0.0:
+            return 0.0, 1.0
+        lg = a * math.log(x) - x - math.lgamma(a)
+        if x < a + 1.0:                                   # the series
+            ap, s, d = a, 1.0 / a, 1.0 / a
+            for _ in range(1000):
+                ap += 1.0
+                d *= x / ap
+                s += d
+                if abs(d) < abs(s) * 1e-16:
+                    break
+            p = s * math.exp(lg)
+            return p, 1.0 - p
+        b, c, d = x + 1.0 - a, 1.0 / 1e-300, 1.0 / (x + 1.0 - a)      # Lentz's continued fraction for Q
+        h = d
+        for i in range(1, 1000):
+            an = -i * (i - a)
+            b += 2.0
+            d = an * d + b
+            if abs(d) < 1e-300:
+                d = 1e-300
+            c = b + an / c
+            if abs(c) < 1e-300:
+                c = 1e-300
+            d = 1.0 / d
+            dl = d * c
+            h *= dl
+            if abs(dl - 1.0) < 1e-16:
+                break
+        q = math.exp(lg) * h
+        return 1.0 - q, q
+
+    @njit(parallel=True, cache=True)
+    def kernel(eps, a):
+        out = np.empty(eps.shape[0])
+        for i in prange(eps.shape[0]):
+            e, k = eps[i], a[i]
+            p = 0.5 * math.erfc(-e / math.sqrt(2.0))           # Φ(ε), and 1 − Φ(ε) below, each to full precision
+            q = 0.5 * math.erfc(e / math.sqrt(2.0))
+            c = 1.0 / (9.0 * k)
+            x = k * (1.0 - c + e * math.sqrt(c)) ** 3
+            if not x > 0.0:
+                x = math.exp((math.log(p) + math.log(k) + math.lgamma(k)) / k)   # the lower tail's leading term
+            lgk = math.lgamma(k)
+            for _ in range(50):
+                pl, qu = lower_upper(k, x)
+                f = pl - p if e <= 0.0 else q - qu
+                logpdf = (k - 1.0) * math.log(x) - x - lgk
+                d = f / math.exp(logpdf)                         # Newton's step, then Halley's correction
+                hal = d / (1.0 - 0.5 * d * ((k - 1.0) / x - 1.0)) if abs(d) < 0.5 * x else d
+                xn = x - hal
+                if xn <= 0.0:
+                    xn = 0.5 * x
+                if abs(xn - x) <= 1e-14 * x:
+                    x = xn
+                    break
+                x = xn
+            out[i] = x
+        return out
+
+    return kernel
 
 
 def frailty(phi: np.ndarray, noise: Noise, rng: np.random.Generator, root: np.ndarray | None = None) -> np.ndarray:
@@ -1120,7 +1208,7 @@ def _from_table(f: fields.Field, tier: str, t: pa.Table, meta: dict | None) -> S
     extras = {k: np.asarray(meta[k]) for k in ("alpha", "beta", "alpha_sd", "beta_sd", "tau") if k in meta}
     return Surprise(f, tier, places, years, col("y"), col("mu"), col("phi"), col("pit"), col("z"), col("w"),
                     col("flags"), meta.get("calibration", {}), extras,
-                    noise=Noise(**meta.get("calibration", {}).get("noise", {})))
+                    noise=Noise(**(meta.get("noise") or meta.get("calibration", {}).get("noise", {}))))
 
 
 # ---------------------------------------------------------------------- the prospective tier's predictive (§6.1)
