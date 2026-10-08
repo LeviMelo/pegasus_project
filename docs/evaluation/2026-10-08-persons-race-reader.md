@@ -112,4 +112,4 @@ The dossier's top 40 under the reading order:
   - Juru/PB, Vitor Meireles/SC, Miguel Alves/PI, Igrapiúna/BA *unknown*: a coding habit or a real exposure or wave, which the records do not settle.
 - The capacity and single-institution verdicts rest on stage E's reading, stated in each note; only the six place signals and the first eight were read against records.
 - Every verdict carries its evidence. S5.1's condition, a dossier whose top leads have verdicts, is met.
-
+- A re-triage that loaded the register at 09:25 wrote back, at 09:34, the verdict a person had changed at 09:25:57 (Piên's correction). The register now keeps a lead's newest verdict on record whatever state is written (`Register.add`), and reads one lead without parsing the rest: 8 s → 0.6 s.

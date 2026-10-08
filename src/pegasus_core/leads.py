@@ -103,14 +103,36 @@ class Register:
         self.path.mkdir(parents=True, exist_ok=True)
 
     def add(self, leads: list[Lead]) -> None:
+        """New states of ``leads``. A verdict is a person's, not the writer's: a lead's newest verdict on record is kept
+        when the state written carries an older one (a re-triage loaded at 09:25 wrote back the verdict a person had
+        changed at 09:25:57, 2026-10-08)."""
         if not leads:
             return
+        stored = self._latest_verdicts({x.id for x in leads})
+        for x in leads:
+            v, mine = stored.get(x.id), x.robustness.get("verdict")
+            if v and (not mine or v.get("at", "") > mine.get("at", "")):
+                x.robustness = {**x.robustness, "verdict": v}
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         rows = [{"id": x.id, "at": now, "rank": x.rank, "status": x.status, "kind": x.kind, "family": x.family,
                  "q": x.q, "effect": x.effect, "replication": x.replication,
                  "calibrated": bool(x.method.get("calibrated", True)), "body": json.dumps(asdict(x), default=_json)}
                 for x in leads]
         pq.write_table(pa.Table.from_pylist(rows), self.path / f"part-{now.replace(':', '')}-{uuid.uuid4().hex[:8]}.parquet")
+
+    def _latest_verdicts(self, ids: set[str]) -> dict[str, dict]:
+        """The newest verdict on record for each of ``ids`` (only their rows are parsed)."""
+        import pyarrow.compute as pc
+
+        out: dict[str, dict] = {}
+        want = pa.array(sorted(ids))
+        for f in sorted(self.path.glob("part-*.parquet")):
+            tab = pq.read_table(f, columns=["id", "body"])
+            for r in tab.filter(pc.is_in(tab.column("id"), value_set=want)).to_pylist():
+                v = (json.loads(r["body"]).get("robustness") or {}).get("verdict")
+                if v and v.get("at", "") > out.get(r["id"], {}).get("at", ""):
+                    out[r["id"]] = v
+        return out
 
     def current(self) -> list[Lead]:
         """The latest state of every lead, best rank first."""
@@ -125,10 +147,16 @@ class Register:
         return sorted(out, key=reading_order)
 
     def get(self, lead_id: str) -> Lead:
-        for x in self.current():
-            if x.id == lead_id:
-                return x
-        raise KeyError(lead_id)
+        """One lead's latest state: only its own rows are parsed (the whole register's bodies took 10 s a lead)."""
+        import pyarrow.compute as pc
+
+        rows = []
+        for f in sorted(self.path.glob("part-*.parquet")):
+            tab = pq.read_table(f, columns=["id", "at", "body"])
+            rows += tab.filter(pc.equal(tab.column("id"), lead_id)).to_pylist()
+        if not rows:
+            raise KeyError(lead_id)
+        return Lead(**_body(json.loads(max(rows, key=lambda r: r["at"])["body"])))
 
     def update(self, lead: Lead, **changes: Any) -> Lead:
         for k, v in changes.items():
