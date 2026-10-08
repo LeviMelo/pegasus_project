@@ -37,6 +37,7 @@ class EventCounts:
     counts: pa.Table        # u:int32, year:int16, sex:int8, age:int16, code:string, y:int32
     unallocated: pa.Table   # year, reason, code, y
     key: dict
+    missing: pa.Table | None = None   # a composition's records whose value is not recorded, by cell (u, year, sex, age, code, m)
 
 
 ACCOUNT = ("population_account", "population-account-2")   # the modelled product and its pinned version
@@ -844,15 +845,17 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
                        classifier: str | None = None, places: pa.Array | None = None) -> EventCounts:
     """A category column's composition per (u, year, sex, age, code, value): the events carrying each value. A value
     among the column's declared ``missing`` codes (pegasus_data roles) is unallocated as 'value not recorded', a blank
-    one as 'value missing'. One read serves every share of the column (`share_moments`)."""
+    one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
+    stage E, S4.3). One read serves every share of the column (`share_moments`)."""
     strata = _strata(dataset)
     key = {"what": "composition_counts", **_places_key(places, year), "dataset": dataset, "event": event,
            "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
            "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
-    if cached is not None and cached_un is not None:
-        return EventCounts(cached, cached_un, key)
+    cached_m = store.get_table("gateway", {**key, "part": "missing"})
+    if cached is not None and cached_un is not None and cached_m is not None:
+        return EventCounts(cached, cached_un, key, cached_m)
     cols = [strata["residence"], strata["age"], column] + ([strata["sex"]] if strata["sex"] else []) +         ([classifier] if classifier else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
@@ -872,9 +875,13 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+    missing_cells = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS m
+        FROM e WHERE ({reason}) IN ('value missing', 'value not recorded') GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): composition of {column}"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
-    return EventCounts(counts, unallocated, key)
+    store.put_table("gateway", {**key, "part": "missing"}, missing_cells)
+    return EventCounts(counts, unallocated, key, missing_cells)
 
 
 def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...], classifier: str | None = None,

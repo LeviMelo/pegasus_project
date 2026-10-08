@@ -664,6 +664,7 @@ class Session:
             U, T, per_year = len(d.places), len(periods), 12 if getattr(d, "grain", "year") == "month" else 1
             index = {int(pl): j for j, pl in enumerate(d.places)}
             pos = {c: j for j, c in enumerate(d.leaves)}
+            missing = self._share_missing(block, d) if self.source.get("indicator") else None
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
                 node = x.fields[0].split(":")[-1]
@@ -672,9 +673,15 @@ class Session:
                 N = np.bincount(d.u[m] * T + d.t[m], weights=d.n[m], minlength=U * T).reshape(U, T)
                 rows = np.array([index[int(pl)] for pl in x.locus.get("places", []) if int(pl) in index], dtype=int)
                 span, _ = replication.span_direction(x)
+                M = None
+                if missing is not None:
+                    leaves = set(reg.leaves(node)) if block != "*" else None
+                    sel = [i for i, c in enumerate(missing["code"]) if leaves is None or c in leaves]
+                    M = np.bincount(missing["u"][sel] * T + missing["t"][sel], weights=missing["m"][sel],
+                                    minlength=U * T).reshape(U, T)
 
-                def run(x=x, K=K, N=N, rows=rows, span=span, periods=periods, per_year=per_year):
-                    run.verdict = explain.share_triage(K, N, rows, span, x.estimand, periods, per_year)
+                def run(x=x, K=K, N=N, M=M, rows=rows, span=span, periods=periods, per_year=per_year):
+                    run.verdict = explain.share_triage(K, N, rows, span, x.estimand, periods, per_year, M=M)
                     return {"tested": False, "reason": f"{run.verdict.cls}: {run.verdict.reason}"}
 
                 self._ledgered("triage", x, run, batch=batch)
@@ -690,6 +697,29 @@ class Session:
         if write:
             self.register.add(mine)
         return mine
+
+    def _share_missing(self, block: str, d) -> dict[str, np.ndarray]:
+        """A composition share's records whose value is not recorded, by place, period and category (the reader's own
+        `composition_counts`, its ``missing`` part), on the block's places and periods."""
+        src = self.source
+        index = {int(pl): j for j, pl in enumerate(d.places)}
+        tpos = {int(y): j for j, y in enumerate(d.years)}
+        out: dict[str, list] = {"u": [], "t": [], "code": [], "m": []}
+        for y in d.years:
+            ec = gateway.composition_counts(self.dataset, self.event, int(y), src["indicator"],
+                                            tuple(src.get("missing") or ()), src.get("classifier"))
+            mt = ec.missing
+            if mt is None or mt.num_rows == 0:
+                continue
+            for u, c, m in zip(mt.column("u").to_pylist(), mt.column("code").to_pylist(), mt.column("m").to_pylist(),
+                               strict=True):
+                if int(u) in index:
+                    out["u"].append(index[int(u)])
+                    out["t"].append(tpos[int(y)])
+                    out["code"].append(str(c)[:3] if block != "*" else "*")
+                    out["m"].append(float(m))
+        return {"u": np.asarray(out["u"], dtype=np.int64), "t": np.asarray(out["t"], dtype=np.int64),
+                "code": out["code"], "m": np.asarray(out["m"], dtype=float)}
 
     def _triage_marks(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
         """Stage E for a measure's answers (S4.3): the lead's admissions (its node's categories, its places, its window)
