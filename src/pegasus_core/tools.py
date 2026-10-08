@@ -107,7 +107,7 @@ class Session:
             idx = [leaf[c] for c in reg.leaves(node) if c in leaf]
             return bool(idx) and events[idx].sum() > 0
 
-        return reg.walk(block, has_events)
+        return [self.expectations.tag(f) for f in reg.walk(block, has_events)]
 
     def surprise(self, node: str, tier: str = "B1", train_last: int | None = None) -> surprise.Surprise:
         """The field's expectation at ``tier``; the prospective tiers (BP the expectation, BPA the alarm baseline,

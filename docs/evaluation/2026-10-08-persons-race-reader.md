@@ -134,3 +134,9 @@ The dossier's top 40 under the reading order:
 - 11 are one institution's (tested); 635 are signals.
 - A first version called the leads under 30 admissions noise (394). They are signals that the facility rule cannot read: the location's own test weighed their count.
 
+**S2.3, the field read through the link's sensitivity** (`plans/s2_infant_cohorts.yml` re-run, `data/probes/s2_3/`). The pass selects 4 answers where it selected 23.
+- 19 of the 20 linkage holes are gone. The one left, Sidrolândia/MS 2010 (2 deaths, none linked), has its sensitivity shrunk to its state's, having two deaths to show.
+- Osório/RS 2011, Taquara/RS 2015 and Campo Verde/MT 2022 are places where SIM records no infant death that year, among 500–700 births. The field now reads deaths.
+- The earlier answers keep their verdicts, and a verdict is never retired by a pass.
+- The pass still wrote the field's answers under the counts' id: `Session.fields` walked the registry without the reader's tag. It now tags every field (`Expectations.tag`).
+

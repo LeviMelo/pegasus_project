@@ -192,9 +192,12 @@ class Expectations:
     def field(self, node: str) -> fields.Field:
         """The field of ``node`` under this reader: its id names the reader (`fields.reader_tag`) in the classifier's
         place, dataset:event:classifier[reader]:node, so a measure, a share or a linked share of a node is not its count."""
-        f = self.registry.field(node)
+        return self.tag(self.registry.field(node))
+
+    def tag(self, f: fields.Field) -> fields.Field:
+        """``f`` with its id naming this reader (`fields.reader_tag`); the counts' fields unchanged."""
         tag = fields.reader_tag(self.source)
-        if not tag:
+        if not tag or "[" in f.id:
             return f
         ds, ev, cls, nd = f.id.split(":", 3)
         return dataclasses.replace(f, id=f"{ds}:{ev}:{cls}[{tag}]:{nd}")
