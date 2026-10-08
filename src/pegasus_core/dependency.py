@@ -76,7 +76,7 @@ def _readers(dataset: str, event: str) -> list[dict]:
     from . import tools
 
     out: list[dict] = [{}]
-    for k in tools.fitted(dataset, event, years=tools.FIT_YEARS):
+    for k in tools.fitted(dataset, event, years=config.FIT_YEARS):
         key = k["key"]
         if key.get("source") in (None, "events") or key.get("race") or key.get("grain"):
             continue
@@ -141,7 +141,7 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
     for dataset, event, blocks in systems:
         kinds[dataset] = gateway.event_type(dataset, event).get("kind") or ""
         for reader in _readers(dataset, event):
-            s = tools.Session(dataset, event, tools.FIT_YEARS, source=reader)
+            s = tools.Session(dataset, event, config.FIT_YEARS, source=reader)
             tag = "" if not reader else "|" + ":".join(str(reader.get(f)) for f in ("source", "mark", "indicator",
                                                                                    "link", "classifier") if reader.get(f))
             for block in (blocks if not reader else s._blocks()):
@@ -245,7 +245,7 @@ def dependency_map(systems: list[tuple[str, str, list[str]]], contexts: list | t
     # dispersion the place effects' Poisson sd leans on) never enters a pair scan; the fits are the production ones
     calibration = {}
     for dataset, event, _ in systems:
-        session = tools.Session(dataset, event, tools.FIT_YEARS)
+        session = tools.Session(dataset, event, config.FIT_YEARS)
         for name in inp.names:
             if name.startswith(dataset + ":") and "|" not in name:      # a count field (its twin shares its fit)
                 calibration[name] = session.calibration_of(name.split(":", 1)[1], "B1")

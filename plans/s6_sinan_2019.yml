@@ -1,0 +1,8 @@
+# S6: congenital and gestational toxoplasmosis, published from 2019
+years: 2019-2023
+systems:
+  - {dataset: SINAN-TOXC, event: notification, blocks: [all]}
+  - {dataset: SINAN-TOXG, event: notification, blocks: [all]}
+relations: false
+triage: true
+report: reports/s6_sinan_2019.md

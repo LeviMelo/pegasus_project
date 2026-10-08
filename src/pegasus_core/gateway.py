@@ -1169,19 +1169,36 @@ def proximity_graph(kind: str) -> pa.Table:
     return table
 
 
+_REGIONS: dict = {}
+
+
 def regions(places, classification: str) -> np.ndarray:
     """The unit of ``classification`` (``ibge_immediate_region``, ``health_region``, ``uf``,
     ``ibge_macroregion``…) each place belongs to, as strings in the given order; a place
-    without one raises (never guessed)."""
+    without one raises (never guessed). Kept per place set (in the process and the store): one
+    lookup per municipality took 20 s of a field's question pass (2026-10-08)."""
+    import hashlib
+
     import pegasus_data as pg
 
-    out = []
-    for c in places:
-        m = pg.memberships(str(int(c))).get(classification)
-        if m is None:
-            raise LookupError(f"municipality {int(c)} has no {classification} membership in pegasus_data")
-        out.append(m.member_code)
-    return np.array(out)
+    codes = np.asarray([int(c) for c in places], dtype=np.int64)
+    digest = hashlib.sha256(codes.tobytes()).hexdigest()[:16]
+    mem = (classification, digest)
+    if mem not in _REGIONS:
+        key = {"what": "regions", "classification": classification, "places": digest, "data": config.data_version(),
+               "code": config.code_key(regions)}
+        cached = store.get_table("gateway", key)
+        if cached is None:
+            out = []
+            for c in codes:
+                m = pg.memberships(str(int(c))).get(classification)
+                if m is None:
+                    raise LookupError(f"municipality {int(c)} has no {classification} membership in pegasus_data")
+                out.append(m.member_code)
+            cached = pa.table({"u": codes, "unit": pa.array(out, pa.string())})
+            store.put_table("gateway", key, cached, {"source": f"pegasus_data.memberships: {classification}"})
+        _REGIONS[mem] = np.asarray(cached.column("unit").to_pylist())
+    return _REGIONS[mem].copy()
 
 
 def field_overlap(dataset: str, event: str, a: dict[str, list[str]], b: dict[str, list[str]],

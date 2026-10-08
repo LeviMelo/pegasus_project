@@ -317,14 +317,18 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
         s_w, s_b = _contrast(ev.siblings, rows, win, base)
         d_sib, z_sib = _moves(ev.siblings, rows, win, base)
         info.update(sibling_window=round(s_w, 2), sibling_base=round(s_b, 2))
-        if d_node * d_sib < 0 and abs(d_sib) >= ABSORB * abs(d_node) and abs(z_sib) >= SIGNIFICANT:
-            share = min(1.0, abs(d_sib) / abs(d_node))
-            lr = recoded_profile(ev, rows, win, base) if direction > 0 else None
-            if lr is not None:
-                info["profile_log10_lr"] = round(lr, 1)
-                if lr >= -np.log10(FAC_P):
-                    return Triage(SUBSTITUTION, "recoded: the siblings fell, and the lead's events carry their age-sex "
-                                  "profile, not their own code's", info, TESTED, share)
+        absorbed = d_node * d_sib < 0 and abs(d_sib) >= ABSORB * abs(d_node) and abs(z_sib) >= SIGNIFICANT
+        share = min(1.0, abs(d_sib) / abs(d_node)) if d_node * d_sib < 0 else None
+        # the events' age-sex profile tests a recoding by itself: a facility's volume swings from year to year, so its
+        # other codes need not fall against the median year (Manicoré's siblings 112 against 116 while its viral
+        # pneumonias became lung abscesses in children; S5.1)
+        lr = recoded_profile(ev, rows, win, base) if direction > 0 else None
+        if lr is not None:
+            info["profile_log10_lr"] = round(lr, 1)
+            if lr >= -np.log10(FAC_P):
+                return Triage(SUBSTITUTION, "recoded: the lead's events carry the age-sex profile of its siblings, not "
+                              "their own code's", info, TESTED, share)
+        if absorbed:
             return Triage(SUBSTITUTION, "siblings move opposite and absorb most of the change", info, BOUND, share)
 
     # 3. certification: the ill-defined chapter

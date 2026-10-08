@@ -996,21 +996,22 @@ def gamma_frailty(eps: np.ndarray, phi: np.ndarray, noise: Noise) -> np.ndarray:
     out = np.ones(eps.shape)
     pos = s2 > 0
     shape = 1.0 / s2[pos]
-    out[pos] = gamma_quantile_at_normal(eps[pos], shape) / shape
+    out[pos] = gamma_quantile_at_normal(eps[pos], shape, tol=1e-8) / shape     # a draw: Monte Carlo error dwarfs 1e-8
     return out
 
 
-def gamma_quantile_at_normal(eps: np.ndarray, shape: np.ndarray) -> np.ndarray:
+def gamma_quantile_at_normal(eps: np.ndarray, shape: np.ndarray, tol: float = 1e-14) -> np.ndarray:
     """G⁻¹(Φ(ε); a), the unit-scale gamma quantile at a standard normal's probability, elementwise: a compiled
     Wilson–Hilferty start refined by Halley steps on the regularised incomplete gamma (series below a + 1, Lentz's
     continued fraction above; Press et al., Numerical Recipes §6.2), each tail solved where it has its precision.
     Agrees with the exact quantile (mpmath) to about 1e-14 relative, where scipy's ``gamma.ppf(ndtr(ε))`` loses up to
     4e-8 in the upper tail through Φ(ε) near 1 (checked 2026-10-07), and runs over every core: the copula's frailties
-    took 20 s of one SIH field's question pass in scipy."""
+    took 20 s of one SIH field's question pass in scipy. ``tol`` is the Halley steps' relative stop: a random draw
+    needs 1e-8, whose single step from the start costs a third of the exact quantile's (`gamma_frailty`)."""
     e = np.ascontiguousarray(np.broadcast_to(eps, np.broadcast(eps, shape).shape), dtype=np.float64).ravel()
     a = np.ascontiguousarray(np.broadcast_to(shape, e.shape if np.ndim(eps) == 0 else np.shape(eps)),
                              dtype=np.float64).ravel()
-    return _gamma_quantile_kernel()(e, a).reshape(np.shape(eps))
+    return _gamma_quantile_kernel()(e, a, float(tol)).reshape(np.shape(eps))
 
 
 @functools.cache
@@ -1055,7 +1056,7 @@ def _gamma_quantile_kernel():
         return 1.0 - q, q
 
     @njit(parallel=True, cache=True)
-    def kernel(eps, a):
+    def kernel(eps, a, tol):
         out = np.empty(eps.shape[0])
         for i in prange(eps.shape[0]):
             e, k = eps[i], a[i]
@@ -1075,7 +1076,7 @@ def _gamma_quantile_kernel():
                 xn = x - hal
                 if xn <= 0.0:
                     xn = 0.5 * x
-                if abs(xn - x) <= 1e-14 * x:
+                if abs(xn - x) <= tol * x:
                     x = xn
                     break
                 x = xn

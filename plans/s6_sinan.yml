@@ -1,0 +1,58 @@
+# S6: every SINAN agravo published in all of 2010-2023 (pegasus_data's catalog, 2026-10-08), its notifications
+# by place and year. SDTA lacks one year: its fit fails and is recorded. The agravos published later have plans of
+# their own years (s6_sinan_2013, _2015, _2019); LER, published for 2019 alone, carries no expectation
+years: 2010-2023
+systems:
+  - {dataset: SINAN-ACBI, event: notification, blocks: [all]}
+  - {dataset: SINAN-ACGR, event: notification, blocks: [all]}
+  - {dataset: SINAN-AIDA, event: notification, blocks: [all]}
+  - {dataset: SINAN-AIDC, event: notification, blocks: [all]}
+  - {dataset: SINAN-ANIM, event: notification, blocks: [all]}
+  - {dataset: SINAN-ANTR, event: notification, blocks: [all]}
+  - {dataset: SINAN-BOTU, event: notification, blocks: [all]}
+  - {dataset: SINAN-CANC, event: notification, blocks: [all]}
+  - {dataset: SINAN-CHAG, event: notification, blocks: [all]}
+  - {dataset: SINAN-COLE, event: notification, blocks: [all]}
+  - {dataset: SINAN-COQU, event: notification, blocks: [all]}
+  - {dataset: SINAN-DCRJ, event: notification, blocks: [all]}
+  - {dataset: SINAN-DENG, event: notification, blocks: [all]}
+  - {dataset: SINAN-DERM, event: notification, blocks: [all]}
+  - {dataset: SINAN-DIFT, event: notification, blocks: [all]}
+  - {dataset: SINAN-ESQU, event: notification, blocks: [all]}
+  - {dataset: SINAN-EXAN, event: notification, blocks: [all]}
+  - {dataset: SINAN-FMAC, event: notification, blocks: [all]}
+  - {dataset: SINAN-FTIF, event: notification, blocks: [all]}
+  - {dataset: SINAN-HANS, event: notification, blocks: [all]}
+  - {dataset: SINAN-HANT, event: notification, blocks: [all]}
+  - {dataset: SINAN-HEPA, event: notification, blocks: [all]}
+  - {dataset: SINAN-HIVA, event: notification, blocks: [all]}
+  - {dataset: SINAN-HIVC, event: notification, blocks: [all]}
+  - {dataset: SINAN-HIVG, event: notification, blocks: [all]}
+  - {dataset: SINAN-IEXO, event: notification, blocks: [all]}
+  - {dataset: SINAN-LEIV, event: notification, blocks: [all]}
+  - {dataset: SINAN-LEPT, event: notification, blocks: [all]}
+  - {dataset: SINAN-LERD, event: notification, blocks: [all]}
+  - {dataset: SINAN-LTAN, event: notification, blocks: [all]}
+  - {dataset: SINAN-MALA, event: notification, blocks: [all]}
+  - {dataset: SINAN-MENI, event: notification, blocks: [all]}
+  - {dataset: SINAN-MENT, event: notification, blocks: [all]}
+  - {dataset: SINAN-NTRA, event: notification, blocks: [all]}
+  - {dataset: SINAN-PAIR, event: notification, blocks: [all]}
+  - {dataset: SINAN-PEST, event: notification, blocks: [all]}
+  - {dataset: SINAN-PFAN, event: notification, blocks: [all]}
+  - {dataset: SINAN-PNEU, event: notification, blocks: [all]}
+  - {dataset: SINAN-RAIV, event: notification, blocks: [all]}
+  - {dataset: SINAN-ROTA, event: notification, blocks: [all]}
+  - {dataset: SINAN-SDTA, event: notification, blocks: [all]}
+  - {dataset: SINAN-SIFA, event: notification, blocks: [all]}
+  - {dataset: SINAN-SIFC, event: notification, blocks: [all]}
+  - {dataset: SINAN-SIFG, event: notification, blocks: [all]}
+  - {dataset: SINAN-SRC, event: notification, blocks: [all]}
+  - {dataset: SINAN-TETA, event: notification, blocks: [all]}
+  - {dataset: SINAN-TRAC, event: notification, blocks: [all]}
+  - {dataset: SINAN-TUBE, event: notification, blocks: [all]}
+  - {dataset: SINAN-VARC, event: notification, blocks: [all]}
+  - {dataset: SINAN-VIOL, event: notification, blocks: [all]}
+relations: false
+triage: true
+report: reports/s6_sinan.md

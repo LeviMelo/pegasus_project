@@ -350,7 +350,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         S = None if S is None else np.repeat(S, 12, axis=1)
     T = N.shape[1]
 
-    parts, unallocated = [], {}
+    parts, unallocated, in_tree = [], {}, []
     for year in years:
         ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args)
         tab = ec.counts
@@ -371,6 +371,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                 tab.column(weight).to_numpy()[bad].sum())
         absent = "code not in ICD-10 tree" if structure == "ICD10" else f"code not in the {structure} tree"
         unallocated[absent] = unallocated.get(absent, 0) + int(tab.column(weight).to_numpy()[other].sum())
+        in_tree.append(float(tab.column(weight).to_numpy()[~other].sum()))
         for r in ec.unallocated.to_pylist():
             if block == "*" or _chapter(str(r["code"] or "")[:width], parent_of) == block:
                 unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
@@ -390,6 +391,14 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
                        + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64),
                       *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
+    filled = np.asarray(in_tree)
+    if block != "*" and filled.max() > 0 and (filled == 0).any():
+        # a year in which no event carries a code of the tree, where other years do: the column is not filled that
+        # year (SIH's CID_MORTE all 0000 from 2015, SIM's CB_PRE empty before 2010), and a count would read it as a
+        # collapse of every code. A missing column raises (pegasus_data's open question 71: presence is not fill)
+        raise ValueError(f"{dataset} {event}: no event carries a code of the {structure} tree in "
+                         f"{[int(y) for y, f in zip(years, filled, strict=True) if f == 0]}: the column is not filled "
+                         "those years; restrict the plan's years or the role's")
     e, u, t, g, *vals = (np.concatenate(z) for z in zip(*parts, strict=True))
     if len(e) == 0:
         raise LookupError(f"{dataset} {event}: block {block} has no events in {years[0]}–{years[-1]} "

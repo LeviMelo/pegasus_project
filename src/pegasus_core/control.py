@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from . import config
@@ -74,7 +75,31 @@ class Ledger:
         for f in files:
             if f not in _PARTS:
                 _PARTS[f] = pq.read_table(f)
-        return pa.concat_tables([_PARTS[f] for f in files]) if files else pa.table({})
+        if not files:
+            return pa.table({})
+        t = pa.concat_tables([_PARTS[f] for f in files])
+        # a row is unique by (id, kind): a part merged by `compact` and not yet removed is read once
+        key = pc.binary_join_element_wise(t.column("id"), t.column("kind"), "|").to_numpy(zero_copy_only=False)
+        _, first = np.unique(key, return_index=True)
+        return t if len(first) == t.num_rows else t.take(np.sort(first))
+
+    def compact(self) -> int:
+        """Merge the part files into one (the rows unchanged): stage E writes a part per batch, and a field's triage
+        left tens of thousands of small files whose full read took minutes (89,361 parts, 2026-10-08). A part that
+        cannot be removed (open elsewhere) stays, and `table` reads its rows once. Returns the parts merged."""
+        files = sorted(self.path.glob("part-*.parquet"))
+        if len(files) < 2:
+            return 0
+        merged = pa.concat_tables([_PARTS.get(f) or pq.read_table(f) for f in files])
+        name = self.path / f"part-{time.strftime('%Y%m%d%H%M%S')}-compact-{uuid.uuid4().hex[:8]}.parquet"
+        tmp = name.with_suffix(".tmp")
+        pq.write_table(merged, tmp)
+        tmp.replace(name)
+        for f in files:
+            _PARTS.pop(f, None)
+            with contextlib.suppress(OSError):
+                f.unlink()
+        return len(files)
 
     def family(self, family: str) -> list[dict[str, Any]]:
         """Registered tests of a family with their results (a test without a result counts as p = 1)."""

@@ -1,0 +1,10 @@
+# S6: the SINAN agravos published from 2014-2015 (chikungunya, neonatal tetanus, HIV in pregnancy, Zika)
+years: 2015-2023
+systems:
+  - {dataset: SINAN-CHIK, event: notification, blocks: [all]}
+  - {dataset: SINAN-TETN, event: notification, blocks: [all]}
+  - {dataset: SINAN-HIVE, event: notification, blocks: [all]}
+  - {dataset: SINAN-ZIKA, event: notification, blocks: [all]}
+relations: false
+triage: true
+report: reports/s6_sinan_2015.md

@@ -164,9 +164,10 @@ Field
 | interval | two declared dates of one record | the time between them, as a measure |
 | linked share | a declared link (`same_event` stated) | the share of one side's records found on the other: k = Σ p_match, with the linkage's own variance Σ p(1 − p) added to the share's (S2.1) |
 | other classifier | a second code structure of the event type | its tree at each canonical level |
-| codes | a code-tree column no group reads (`codes:<column>`; the requested procedure, a newborn's anomalies) | its codelist's tree; a column pegasus_data declares to pack several codes a cell is read code by code (`gateway.token_rule`); read only where its role's years hold the plan's |
+| codes | a code-tree column no group reads (`codes:<column>`; the requested procedure, a newborn's anomalies) | its codelist's tree; a column pegasus_data declares to pack several codes a cell is read code by code (`gateway.token_rule`); read only where its role's years hold the plan's, and an assembly in which some year has no event coded in its tree, while others do, raises: the column is not filled that year, and a count would read it as every code collapsing (presence is not fill) |
 | mentions | a linkage role of type `codes` (the certificate's lines) | events mentioning each group |
 | care flow | residence and a recording place | the share of a place's events recorded away from it |
+| origin | residence and a place of the person (a birthplace, `origin:<column>`) | the share of a place's events of persons from elsewhere: the care flow's reader, the person's place in the event's |
 
 **Block.** A subtree of a classifier structure fitted together: an ICD-10 chapter, a SIGTAP group.
 
@@ -838,7 +839,7 @@ D'_S is the same with the augmented μ'.
 
 **Triage (`explain.triage`, `Session.triage`).** A lead is read against what the data at hand can say about it, in order. The first rule that fires gives its class (`lead.robustness["triage"]`):
 - *system*: the denominator broke; the code's national level moved; the ill-defined chapter moved opposite; a residual category trending.
-- *substitution*: siblings under the same parent undo the change (an outermost group's siblings are the rest of its chapter). It is *tested* when the lead's events also carry the siblings' age–sex profile rather than their own code's: the likelihood ratio of the two profiles, whose tail under the code's own profile is bounded by Markov's inequality (P(LR ≥ k) ≤ 1/k), reaches 1/FAC_P (`explain.recoded_profile`). The first dossier opened on single-provider recodings that read as signals: pneumoconiosis and ARDS in children, carrying the asthma and pneumonia they replaced (S5.1, 2026-10-08).
+- *substitution*: siblings under the same parent undo the change (an outermost group's siblings are the rest of its chapter). It is *tested*, whether or not the siblings fell, when the lead's events carry the siblings' age–sex profile rather than their own code's (a facility's volume swings from year to year, so its other codes need not fall against the median year): the likelihood ratio of the two profiles, whose tail under the code's own profile is bounded by Markov's inequality (P(LR ≥ k) ≤ 1/k), reaches 1/FAC_P (`explain.recoded_profile`). The first dossier opened on single-provider recodings that read as signals: pneumoconiosis and ARDS in children, carrying the asthma and pneumonia they replaced (S5.1, 2026-10-08).
 - *noise*: too few events, or too small an effect.
 - *facility*.
 - otherwise *signal*, which means **unexplained by the data at hand, not confirmed**.

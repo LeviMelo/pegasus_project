@@ -107,13 +107,13 @@ VERDICTS = ("confirmed", "artefact", "unknown")
 
 def _session(lead: register_mod.Lead, cache: dict):
     """The session a lead's field was read in (None when the lead has no places or its field no session)."""
-    from . import graphs, tools
+    from . import config, graphs, tools
 
     if "source" not in lead.provenance or not lead.locus.get("places") or lead.fields[0].count(":") < 3:
         return None
     ds, ev, *_ = lead.fields[0].split(":")
     pv = lead.provenance
-    key = (ds, ev, tuple(pv.get("years") or tools.FIT_YEARS), pv.get("graph") or graphs.DEFAULT,
+    key = (ds, ev, tuple(pv.get("years") or config.FIT_YEARS), pv.get("graph") or graphs.DEFAULT,
            repr(sorted((pv.get("source") or {}).items())))
     if key not in cache:
         cache[key] = tools.Session(ds, ev, list(key[2]), key[3], source=pv.get("source") or {})

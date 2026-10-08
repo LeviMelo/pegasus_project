@@ -17,7 +17,7 @@ from functools import cache
 
 import numpy as np
 
-from . import gateway
+from . import config, gateway
 
 # supports, finest first; a field's support is where its law is exact
 SUPPORTS = ("municipality", "ibge_immediate_region", "health_region", "ibge_intermediate_region", "uf",
@@ -307,6 +307,10 @@ def declared(dataset: str) -> list[Declared]:
         base = {"dataset": dataset, "column": r["column"], "role": r["role"], "name": r.get("name") or ""}
         if not r.get("reviewed", True):
             out.append(Declared(**base, kind="", reason="role is a draft"))
+        elif r.get("last_year") and r["last_year"] < config.FIT_YEARS[0]:
+            # an older form's column (dengue's 2000-2006 signs): no reading reaches its years
+            out.append(Declared(**base, kind="", reason=f"its years ({r.get('first_year')}–{r['last_year']}) end before "
+                                                       f"the readings' ({config.FIT_YEARS[0]})"))
         elif r["kind"] == "number":
             if not r.get("measure"):
                 out.append(Declared(**base, kind="", reason="a number that is not a measurement"))
@@ -352,10 +356,11 @@ def measure_source(dataset: str, event: str, column: str) -> dict:
 
 
 def declared_flows(dataset: str) -> list[Declared]:
-    """The care-flow fields of ``dataset``: every place column in the residence's own code system (its first declared
-    codelist) that is not an attribute of the person (its entity is not the residence's: a birthplace is the person's,
-    a hospital or a place of death is the event's) is a field ``away:<column>``, the share of events that happened away
-    from the residence municipality (`gateway.away_counts`)."""
+    """The place fields of ``dataset``: every place column in the residence's own code system (its first declared
+    codelist) against the residence municipality (`gateway.away_counts`). A place of the event (a hospital, a place of
+    death: its entity is not the residence's) is a care flow ``away:<column>``, the share of events that happened away
+    from the residence; a place of the person (a birthplace: the residence's entity) is an origin ``origin:<column>``,
+    the share of events of persons from elsewhere. One reader, two meanings."""
     from . import gateway
 
     rows = gateway.roles(dataset)
@@ -363,14 +368,22 @@ def declared_flows(dataset: str) -> list[Declared]:
     if res is None or not res.get("codelists"):
         return []
     system = res["codelists"][0]
-    return [Declared(dataset, f"away:{r['column']}", r["role"], f"events away from residence ({r['role']})", "away")
-            for r in rows if r["kind"] == "place" and r["column"] != res["column"] and r.get("reviewed", True)
-            and (r.get("codelists") or [None])[0] == system and r["entity"] != res["entity"]]
+    out = []
+    for r in rows:
+        if not (r["kind"] == "place" and r["column"] != res["column"] and r.get("reviewed", True)
+                and (r.get("codelists") or [None])[0] == system):
+            continue
+        if r["entity"] != res["entity"]:
+            out.append(Declared(dataset, f"away:{r['column']}", r["role"], f"events away from residence ({r['role']})", "away"))
+        else:
+            out.append(Declared(dataset, f"origin:{r['column']}", r["role"],
+                                f"events of persons whose {r['role']} is not their residence municipality", "origin"))
+    return out
 
 
 def flow_source(dataset: str, event: str, column: str) -> dict:
-    """The reader of a care-flow field (`declared_flows`): its place against the residence, on the event type's primary
-    classifier."""
+    """The reader of a place field (`declared_flows`: a care flow or an origin): its place against the residence, on the
+    event type's primary classifier."""
     from . import gateway
 
     et = gateway.event_type(dataset, event)
@@ -547,7 +560,7 @@ def coverage(dataset: str, event: str) -> list[dict]:
         for c in cols:
             add(c, f"mentions:{role}")
     for d in declared_flows(dataset):
-        add(d.column.removeprefix("away:"), "care flow")
+        add(d.column.split(":", 1)[1], "care flow" if d.kind == "away" else "a person's place")
     for d in declared_codes(dataset):
         if d.reason:
             reasons[d.column.removeprefix("codes:")] = d.reason

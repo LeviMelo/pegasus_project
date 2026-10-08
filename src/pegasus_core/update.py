@@ -28,7 +28,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from . import config, fields, gateway, store
+from . import config, control, fields, gateway, store
 
 
 @dataclass
@@ -441,4 +441,6 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"later years {sys_.dataset}"] = _later_years(plan, sys_, s, answers, int(last), force, log)
     if plan.report:
         out["report"] = str(report.write(plan.report))
+    merged = control.Ledger().compact()          # stage E writes a part per batch: one file again, rows unchanged
+    out["ledger"] = f"{merged} parts merged"
     return out

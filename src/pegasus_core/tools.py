@@ -71,7 +71,6 @@ def lens_tier(lens: str, prospective: bool = False) -> str:
     return PROSPECTIVE_TIERS[lens]
 
 
-FIT_YEARS = list(range(2010, 2024))      # the years of the production fits (the dependency map reads their calibration)
 
 
 @dataclass
@@ -576,7 +575,7 @@ class Session:
         was made by other rules (or none); a lead a superseded rule had explained is open again unless the new verdict
         explains it, and the old verdict is kept beside the new one."""
         mine = [x for x in (register if register is not None else self.register.current())
-                if x.fields and x.fields[0].startswith(f"{self.dataset}:")]
+                if x.fields and x.fields[0].startswith(f"{self.dataset}:") and x.status != "retired"]
         if stale:
             mine = [x for x in mine if x.robustness.get("triage", {}).get("rules") != explain.rules()]
         by_node: dict[tuple[str, int, str], list[leads.Lead]] = {}      # a prospective lead is read at its own fit and tier
@@ -596,6 +595,7 @@ class Session:
             index = {int(p): j for j, p in enumerate(self._grid_places)}
             s = (self.surprise(node, tier, train_last) if train_last else self.surprise(node, "B1")) if replicate else None
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
+            batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
                 rows = np.array([index[int(p)] for p in x.locus.get("places", []) if int(p) in index], dtype=int)
                 span, direction = replication.span_direction(x)
@@ -622,7 +622,7 @@ class Session:
                     return {"tested": pv is not None, "p": 1.0 if pv is None else float(pv),
                             "reason": f"{v.cls} ({v.grade or 'ungraded'}): {v.reason}"}
 
-                self._ledgered("triage", x, run, rules=explain.rules())
+                self._ledgered("triage", x, run, batch=batch)
                 verdict = run.verdict
                 old = x.robustness.get("triage")
                 x.robustness = {**x.robustness, "triage": {"class": verdict.cls, "reason": verdict.reason,
@@ -636,6 +636,7 @@ class Session:
                 if replicate:
                     x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
                     x.replication = control.replication_tier(kinds_of(x))
+            self._ledger_close(batch)
             log(f"{i + 1}/{len(by_node)} {node}{f' ({tier} fit to {train_last})' if train_last else ''}: {len(group)} leads")
         if write:
             self.register.add(mine)
@@ -921,15 +922,32 @@ class Session:
         t.register.add(selected)
         return selected
 
-    def _ledgered(self, kind: str, x: leads.Lead, run, **spec) -> dict[str, Any]:
+    def _ledger_open(self, kind: str, items: list[tuple[leads.Lead, dict[str, Any]]]) -> dict[str, Any]:
+        """A batch of stage-E tests, (lead, spec) each, written to the ledger before any of them runs (§9.2), in one
+        part; they run in this order (`_ledgered`). A test per part left tens of thousands of files
+        (`control.Ledger.compact`)."""
+        ids = self.ledger.register_many([control.Hypothesis(f"{kind}|{self.dataset}", "scan", {
+            "lead": x.id, "fields": x.fields, "locus": x.locus, "estimand": x.estimand, **spec}) for x, spec in items])
+        return {"ids": ids, "leads": [x.id for x, _ in items], "done": []}
+
+    def _ledger_close(self, batch: dict[str, Any]) -> None:
+        self.ledger.complete_many(batch["done"])
+
+    def _ledgered(self, kind: str, x: leads.Lead, run, batch: dict[str, Any] | None = None, **spec) -> dict[str, Any]:
         """One stage-E test of a lead, written to the ledger before it runs and completed with its p (§9.2): ``run``
-        returns the test's record (``tested``, ``p``, ``effect`` or a ``reason``)."""
-        tid = self.ledger.register(control.Hypothesis(f"{kind}|{self.dataset}", "scan", {
-            "lead": x.id, "fields": x.fields, "locus": x.locus, "estimand": x.estimand, **spec}))
+        returns the test's record (``tested``, ``p``, ``effect`` or a ``reason``). In a ``batch`` (`_ledger_open`) it
+        was registered with its batch, and its result is written when the batch closes."""
+        own = batch is None
+        batch = batch or self._ledger_open(kind, [(x, spec)])
+        k = len(batch["done"])
+        if batch["leads"][k] != x.id:
+            raise RuntimeError(f"{kind}: test {k} of the batch was registered for {batch['leads'][k]}, run for {x.id}")
         r = run()
-        self.ledger.complete(tid, float(r.get("p", 1.0)) if r.get("tested") else 1.0,
-                             r.get("effect") if r.get("tested") else None,
-                             {"tested": bool(r.get("tested")), **({"reason": r["reason"]} if r.get("reason") else {})})
+        batch["done"].append((batch["ids"][k], float(r.get("p", 1.0)) if r.get("tested") else 1.0,
+                              r.get("effect") if r.get("tested") else None,
+                              {"tested": bool(r.get("tested")), **({"reason": r["reason"]} if r.get("reason") else {})}))
+        if own:
+            self._ledger_close(batch)
         return r
 
     def strata(self, source: str = "popsvs") -> replication.Strata:
@@ -1040,9 +1058,9 @@ class Session:
                 continue
             seen.append(x)
             cats = corroborate.categories_of(reg, node)
-            for src in fields_:
-                if not grid.holds(src, cats):
-                    continue
+            held = [src for src in fields_ if grid.holds(src, cats)]
+            batch = self._ledger_open("corroboration", [(x, {"source": src.label}) for src in held])
+            for src in held:
                 def run(x=x, src=src, cats=cats, rows=rows, span=span, direction=direction):
                     c = corroborate.corroborate(grid, src, cats, rows, span, direction, f"corroborate|{x.id}|{src.label}",
                                                 replicates)
@@ -1054,8 +1072,9 @@ class Session:
                     run.result = c
                     return {"tested": c.tested, "p": c.p, "effect": c.observed, "reason": (c.detail or {}).get("reason")}
 
-                self._ledgered("corroboration", x, run, source=src.label)
+                self._ledgered("corroboration", x, run, batch=batch)
                 tests.append((x, run.result))
+            self._ledger_close(batch)
             if len(seen) % 200 == 0:
                 log(f"corroborated {len(seen)}")
         # one family (S4.1): each lead's corroboration p is its smallest source p times the number of its sources

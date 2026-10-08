@@ -1,0 +1,7 @@
+# S6: sporotrichosis (SINAN-ESPO), published 2013-2022
+years: 2013-2022
+systems:
+  - {dataset: SINAN-ESPO, event: notification, blocks: [all]}
+relations: false
+triage: true
+report: reports/s6_sinan_2013.md

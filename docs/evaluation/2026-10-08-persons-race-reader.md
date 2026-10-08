@@ -61,3 +61,17 @@ The test that does separate them: **the events carry the age–sex profile of th
 - A tested explanation now orders a lead after the open ones, in the register, the report and the dossier (`leads.reading_order`).
 - Each dossier carries the codes table it was read from.
 
+**The first re-triage** (`pegasus-core triage SIH-RD hospitalisation --stale`, `data/probes/s5_1/retriage_sih.log`; the rules of cc7a9fd).
+- The profile test graded 507 SIH leads a tested substitution.
+- It graded none of the dossier's seven, because it was asked only where the siblings had absorbed the change. They had not: Manicoré's siblings were 112 against 116, and Igarapé Grande's and Fortaleza dos Nogueiras' rose. A facility's whole volume swings from year to year, so its other codes need not fall against the median year.
+- The profile test now stands alone. Under the code's own profile its error is bounded by Markov whatever the siblings did.
+- The run re-triaged 43,168 leads, retired ones among them; it now reads only the leads not retired.
+
+**The ledger** held 93,272 part files: stage E wrote two per test.
+- Merged into one in 196 s (`control.Ledger.compact`, now `update`'s last step).
+- Stage E's tests are now registered and completed by batch: a node's leads in triage, a lead's sources in corroboration.
+
+**Link runs (S2.2)** (`pegasus-core links plans/default.yml`, `data/probes/s2_2/`).
+- `sih_deaths_to_sim` failed on every year before 2014. pegasus_data's role table asked for all of a role's additional columns (SIH's DIAGSEC1–9), which those years lack. Fixed in pegasus_data 9160d53: it asks only for the columns a year may carry.
+- Run times are about 5 min a year: 2014 gave 404,653 pairs, 2015 429,306.
+

@@ -17,6 +17,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 
+#: the years of the production fits and readings (the dependency map reads their calibration; a declared column whose
+#: years end before them is read by none)
+FIT_YEARS = list(range(2010, 2024))
+
 def home() -> Path:
     path = Path(os.environ.get("PEGASUS_HOME", REPO / "pegasus_home"))
     path.mkdir(parents=True, exist_ok=True)
