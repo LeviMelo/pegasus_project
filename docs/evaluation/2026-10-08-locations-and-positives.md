@@ -41,3 +41,18 @@ The reasons that are gaps:
 - missing codes not declared: 116 dengue columns. A five-year proposal was written, then reverted, because its codes are labelled in some years' codelists and not in others (2021: 7 unsupported codes; 2023: 49).
 - code-tree marks no field reads (the cause on an admission, the requested procedure).
 - a person's own places (birthplace) that no field reads.
+
+**S1.5, the second and third declarations** (`harness.event_record`; each committed before its run: db4c984, 1321b85). All but one missed by both location methods:
+
+| declaration | field at the locus | reading against B1 |
+|---|---|---|
+| Manaus's home share of deaths, 2020 | logit −1.34 against −1.41 expected | z 0.26 |
+| São Paulo's stays up, 2020 | 3.82 days (geometric) against 3.79 | z 0.1 |
+| Brasília's stays down, 2020 | 3.61 against 4.03 | z −1.4, but −0.9 in 2019 and −1.7 in 2021: a level, not a 2020 event |
+| Rio de Janeiro's stays (control) | 4.51 against 4.58 | clean |
+| São Paulo's vaginal share down, law of 2019–20 | state-pooled logit +0.04 to +0.05 in 2018–2020 (z 3–4) | no dip |
+
+- The vaginal share was matched by the letter of the criterion: one municipality in 2020 at 0.23 of its expectation. The documented shift is −0.06 on the logit, state-wide, and the reading does not show it. The criterion lets one place stand for a state, so future declarations state the scale a finding must cover.
+- The documented shift is also below the relevance threshold (`LOCATION_EFFECT`: 0.2 on a share's logit).
+- **Why the declarations miss.** The Manaus surge lasted weeks; the year dilutes it, and Brazil's own home share rose. The stays studies measured change against each city's own past, which includes Brazil's course; the questions ask about departure from that course. The Fundão and caesarean studies used the right estimand (difference in differences), but their effects are a few hundredths on the scale B1 reads, under a search over 5,570 places.
+- **S1's acceptance as written ("documented positives found") is not met.** The next attempt is a positive control within the data: one quantity recorded in two systems (SINASC's caesarean share and SIH's caesarean deliveries by place and year), where a departure in one should appear in the other.

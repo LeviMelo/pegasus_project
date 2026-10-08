@@ -67,6 +67,11 @@ class Registry:
         self.children: dict[str | None, list[str]] = {}
         for c, p in self.parent.items():
             self.children.setdefault(p, []).append(c)
+        # every event of the type, whatever its code: one field of its own block "*" (a share's denominator, a measure
+        # over every admission), outside the tree, so no walk of the tree meets it
+        self.parent.setdefault("*", None)
+        self.level.setdefault("*", "category")
+        self.label.setdefault("*", event)
         # fields that cross the tree (ARCHITECTURE §3.3): chapter XX's categories by intent and by mechanism (NCHS's
         # External Cause of Injury Mortality Matrix, pegasus_data `code_attributes`), where a category carries one value
         # (firearm deaths span W32-W34, X72-X74, X93-X95 and Y22-Y24). Each is a node under XX with its members listed,

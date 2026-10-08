@@ -76,6 +76,13 @@ LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "
 
 
 POSITIVES: tuple[Positive, ...] = (
+    # S1.5, declared 2026-10-08 before its first run: São Paulo's Law 17,137/2019 let women choose a caesarean in public
+    # facilities from 23 August 2019 until its revocation in July 2020; against the other 26 units the state's
+    # caesarean rate rose 1.43 points over all hospitals, 3.31 in public ones (difference in differences on SINASC,
+    # Callaway & Sant'Anna; PMC13135077). The share field is the vaginal one (the caesarean is the column's reference)
+    Positive("Fewer vaginal births under São Paulo's elective-caesarean law, 2019-20", "SINASC-DN", "birth", "*",
+             "excess", "B1", "uf:35", (2019, 2020), criterion=EVENT_CRITERION, direction="down", source=(('indicator', 'PARTO'), ('missing', ('0', '3', '4', '5', '6', '7', '8', '9')), ('source', 'share'), ('success', ('1',))),
+             note="PARTO 1 (vaginal) share down while the law stood"),
     # S1.5 (work plan), declared 2026-10-08 before their first run. Deaths at home in Manaus rose far faster than all
     # deaths in the 2020 collapse: home or street deaths 7.8 times 2019's in epidemiological week 17, all deaths 4.6
     # (Orellana et al. 2020, Cadernos de Saúde Pública 36(7):e00120020). Length of stay of SUS admissions, March to
