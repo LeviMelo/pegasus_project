@@ -76,6 +76,21 @@ LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "
 
 
 POSITIVES: tuple[Positive, ...] = (
+    # S1.5 (work plan), declared 2026-10-08 before their first run. Deaths at home in Manaus rose far faster than all
+    # deaths in the 2020 collapse: home or street deaths 7.8 times 2019's in epidemiological week 17, all deaths 4.6
+    # (Orellana et al. 2020, Cadernos de Saúde Pública 36(7):e00120020). Length of stay of SUS admissions, March to
+    # September 2020 against the year before (SIH; BMC Health Services Research 2021, PMC8445784): São Paulo 5.8 → 6.7
+    # days, Brasília 7.1 → 6.3, Rio de Janeiro 9.0 → 8.9. Each a capital against Brazil's own course of that year
+    Positive("Deaths at home, Manaus 2020", "SIM.DO", "death", "*", "excess", "B1", "mun:130260", (2020, 2020),
+             criterion=EVENT_CRITERION, direction="up", source=(('classifier', 'CAUSABAS'), ('indicator', 'LOCOCOR'), ('missing', ('0', '7', '8', '9')), ('source', 'share'), ('success', ('3',))),
+             note="LOCOCOR 3 (domicílio): the home share of all deaths"),
+    Positive("Longer stays, São Paulo 2020", "SIH-RD", "hospitalisation", "*", "excess", "B1", "mun:355030",
+             (2020, 2020), criterion=EVENT_CRITERION, direction="up", source=(('bounds', (1e-09, 1e+300)), ('casemix', 'PROC_REA'), ('classifier', 'DIAG_PRINC'), ('mark', 'DIAS_PERM'), ('missing', ()), ('source', 'mark')), note="DIAS_PERM: 5.8 → 6.7 days"),
+    Positive("Shorter stays, Brasília 2020", "SIH-RD", "hospitalisation", "*", "excess", "B1", "mun:530010",
+             (2020, 2020), criterion=EVENT_CRITERION, direction="down", source=(('bounds', (1e-09, 1e+300)), ('casemix', 'PROC_REA'), ('classifier', 'DIAG_PRINC'), ('mark', 'DIAS_PERM'), ('missing', ()), ('source', 'mark')), note="DIAS_PERM: 7.1 → 6.3 days"),
+    Positive("Stays in Rio de Janeiro 2020 (negative control)", "SIH-RD", "hospitalisation", "*", "excess", "B1",
+             "mun:330455", (2020, 2020), criterion=EVENT_CRITERION, direction="up", source=(('bounds', (1e-09, 1e+300)), ('casemix', 'PROC_REA'), ('classifier', 'DIAG_PRINC'), ('mark', 'DIAS_PERM'), ('missing', ()), ('source', 'mark')), expect="absent",
+             note="DIAS_PERM: 9.0 → 8.9 days, no rise"),
     # S1.2 (work plan), declared 2026-10-07 before their first run: the Fundão tailings dam broke in Mariana (MG) on
     # 5 November 2015; newborns exposed in utero in the directly affected municipalities were born 1.86 days earlier
     # and 2.6 percentage points more often preterm, with no effect on birth weight (Mrejen, Perelman & Machado 2020,
