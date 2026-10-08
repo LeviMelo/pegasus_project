@@ -391,7 +391,8 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
 
 
 def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int] | None, estimand: str,
-                 years: np.ndarray, per_year: int = 1, M: np.ndarray | None = None) -> Triage:
+                 years: np.ndarray, per_year: int = 1, M: np.ndarray | None = None,
+                 facilities: FacilityTally | None = None, direction: int = 0) -> Triage:
     """A share's answer read on its own field (S4.3): ``K`` the numerator and ``N`` the denominator by [place, period].
     The share's change at the lead's places, window against base, is the numerator's change less the denominator's
     (on the log scale). Noise when the numerator departs from the base share's expectation by fewer than MIN_EXCESS
@@ -399,7 +400,9 @@ def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int]
     year-to-year noise (SIGNIFICANT) and beyond the nation's own course (bound: the data cannot tell a recording loss
     of the denominator from a real one). The 'not recorded' level (``M``, the records whose value is not recorded) when
     it moves opposite the numerator and takes ABSORB of its change beyond its noise: records changed category, not
-    events (bound). Not yet read: one institution on the numerator; the reason says so."""
+    events (bound). One institution on the numerator (``facilities``: the share's numerator and denominator by
+    recording facility, read by the count rules' own `facility_read`): tested. A rule without its data is named as not
+    read in the verdict."""
     win, base = _window(years, span, estimand, per_year)
     kw, kb = _contrast(K, rows, win, base)
     nw, nb = _contrast(N, rows, win, base)
@@ -412,7 +415,8 @@ def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int]
     info = {"numerator_window": round(kw, 2), "numerator_base": round(kb, 2), "denominator_window": round(nw, 2),
             "denominator_base": round(nb, 2), "log_share_change": round(float(ls), 3),
             "log_denominator_change": round(float(ln), 3), "log_denominator_national": round(float(ln_nat), 3),
-            "not_read": (["a 'not recorded' level moving opposite"] if M is None else []) + ["one institution on the numerator"]}
+            "not_read": (["a 'not recorded' level moving opposite"] if M is None else [])
+            + (["one institution on the numerator"] if facilities is None or not direction else [])}
     if abs(kw - expected) * max(win.sum(), 1) < MIN_EXCESS:
         return Triage(NOISE, f"small count: {abs(kw - expected) * max(win.sum(), 1):.0f} numerator events from the base "
                              "share's expectation", info, TESTED)
@@ -429,8 +433,13 @@ def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int]
     if ls * -own > 0 and abs(own) >= ABSORB * abs(ls) and abs(z_n) >= SIGNIFICANT:
         return Triage(SYSTEM, "the denominator moved: it carries most of the share's change, beyond the nation's course",
                       info, BOUND, float(min(1.0, abs(own) / max(abs(ls), 1e-9))))
-    return Triage(SIGNAL, "no denominator, recording or count explanation found; not read: "
-                  + ", ".join(info["not_read"]), info)
+    if facilities is not None and direction:
+        fac = facility_read(facilities, win, base, direction)
+        info["facility"] = {**fac["evidence"], "one_institution": fac["facility"]}
+        if fac["facility"]:
+            return Triage(FACILITY, fac["reason"], info, TESTED)
+    return Triage(SIGNAL, "no denominator, recording, institution or count explanation found"
+                  + (f"; not read: {', '.join(info['not_read'])}" if info["not_read"] else ""), info)
 
 
 def recoded_profile(ev: Evidence, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> float | None:

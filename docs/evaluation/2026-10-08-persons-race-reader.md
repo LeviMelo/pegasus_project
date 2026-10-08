@@ -152,4 +152,8 @@ The dossier's top 40 under the reading order:
   - shares to `explain.share_triage`: noise, and the denominator carrying the change, against the nation's course. The birth-cohort field's 25 answers are noise there: deficits of 4–7 infant deaths, under the 10 events the count rules also ask.
   - Two share rules are named in each verdict as not read: the 'not recorded' level, and one institution on the numerator.
 - **Each link by its own method.** The person links' step asked every link for a probabilistic run. The women's deaths → their births as mothers declare keys only, so it failed. Runs are now read and merged by the method each link declares (pegasus_data `link_method`). That link's stored runs are from an older spec (mothers' births 2012–Y) and are orphaned by the current one; the field that would read it is refused (a grouped side with a filter).
+- **A share's rules complete** (`data/probes/s4_3/share_check.py`, its log). SINASC's vaginal-birth share (PARTO 1), asked the excess question and triaged:
+  - 128 answers: 59 noise, 45 signals, 23 one institution's (a maternity opened, closed or recoded, its other residents stepping alike), 1 denominator.
+  - Every share rule was read on them: the not-recorded level from `composition_counts`'s per-cell count, one institution from `composition_facility`.
+  - S4.3's condition is met, and its §13.2 departure is closed.
 

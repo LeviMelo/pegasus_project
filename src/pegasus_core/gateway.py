@@ -884,6 +884,35 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     return EventCounts(counts, unallocated, key, missing_cells)
 
 
+def composition_facility(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...],
+                         missing: tuple[str, ...] | list = (), classifier: str | None = None) -> pa.Table:
+    """A share's records of ``year`` by recording facility, residence and category: (facility, u, code, n, k), n the
+    records with ``indicator`` recorded and k those with a value among ``success``; a record naming no facility is
+    ''. One read of the year serves every lead's facility reading in stage E (S4.3)."""
+    strata = _strata(dataset)
+    fac = facility_column(dataset)[0]
+    key = {"what": "composition_facility", "dataset": dataset, "event": event, "year": year, "indicator": indicator,
+           "success": sorted(success), "missing": sorted(missing), "classifier": classifier, "data": config.data_version(),
+           "code": config.code_key(composition_facility), **_df_key(dataset, year)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    cols = [strata["residence"], indicator, fac] + ([classifier] if classifier else [])
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
+    con = duckdb.connect()
+    con.register("r", raw)
+    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
+    yes = ", ".join("'" + str(s).replace("'", "''") + "'" for s in success)
+    out = con.execute(f"""SELECT coalesce(trim(CAST("{fac}" AS VARCHAR)), '') AS facility,
+            {_residence_sql(strata["residence"])} AS u, {code} AS code,
+            CAST(count(*) AS INTEGER) AS n, CAST(sum(CASE WHEN x IN ({yes}) THEN 1 ELSE 0 END) AS INTEGER) AS k
+        FROM (SELECT *, trim(CAST("{indicator}" AS VARCHAR)) AS x FROM r)
+        WHERE x IS NOT NULL AND x <> '' AND x NOT IN ({miss}) GROUP BY ALL HAVING u IS NOT NULL""").fetch_arrow_table()
+    store.put_table("gateway", key, out, {"source": f"pegasus_data.query({dataset}): {indicator} by {fac}"})
+    return out
+
+
 def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...], classifier: str | None = None,
                   places: pa.Array | None = None, missing: tuple[str, ...] | list = ()) -> EventCounts:
     """A share's states per (u, year, sex, age, code): n events with ``indicator`` recorded and k of them with a value

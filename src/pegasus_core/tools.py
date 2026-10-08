@@ -665,6 +665,7 @@ class Session:
             index = {int(pl): j for j, pl in enumerate(d.places)}
             pos = {c: j for j, c in enumerate(d.leaves)}
             missing = self._share_missing(block, d) if self.source.get("indicator") else None
+            cube = self._share_facilities(d) if self.source.get("indicator") else None
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
                 node = x.fields[0].split(":")[-1]
@@ -680,8 +681,15 @@ class Session:
                     M = np.bincount(missing["u"][sel] * T + missing["t"][sel], weights=missing["m"][sel],
                                     minlength=U * T).reshape(U, T)
 
-                def run(x=x, K=K, N=N, M=M, rows=rows, span=span, periods=periods, per_year=per_year):
-                    run.verdict = explain.share_triage(K, N, rows, span, x.estimand, periods, per_year, M=M)
+                span_d, direction = replication.span_direction(x)
+                tally = None
+                if cube is not None:
+                    tally = self._share_tally(cube, d, rows, set(reg.leaves(node)) if block != "*" else None)
+
+                def run(x=x, K=K, N=N, M=M, rows=rows, span=span, periods=periods, per_year=per_year, tally=tally,
+                        direction=direction):
+                    run.verdict = explain.share_triage(K, N, rows, span, x.estimand, periods, per_year, M=M,
+                                                       facilities=tally, direction=direction)
                     return {"tested": False, "reason": f"{run.verdict.cls}: {run.verdict.reason}"}
 
                 self._ledgered("triage", x, run, batch=batch)
@@ -697,6 +705,53 @@ class Session:
         if write:
             self.register.add(mine)
         return mine
+
+    def _share_facilities(self, d):
+        """A composition share's records by facility, residence, category and year (`gateway.composition_facility`, one
+        read a year), as a frame on the block's periods."""
+        import pandas as pd
+
+        src = self.source
+        parts = []
+        for j, y in enumerate(d.years):
+            t = gateway.composition_facility(self.dataset, self.event, int(y), src["indicator"], tuple(src["success"]),
+                                             tuple(src.get("missing") or ()), src.get("classifier")).to_pandas()
+            parts.append(t.assign(t=j))
+        cube = pd.concat(parts, ignore_index=True)
+        cube["code3"] = cube["code"].astype(str).str[:3]
+        return cube
+
+    def _share_tally(self, cube, d, rows: np.ndarray, leaves: set[str] | None) -> explain.FacilityTally | None:
+        """The lead's share by recording facility (`explain.FacilityTally`): numerator as the lead's events, denominator
+        as its block's, for the residents of its places; ``outside`` the same facilities' residents of other places."""
+        T = len(d.years)
+        places = np.asarray(d.places).astype(np.int64)
+        mine = set(places[rows].tolist())
+        c = cube if leaves is None else cube[cube.code3.isin(leaves)]
+        inside = c[c.u.isin(mine)]
+        if inside.empty:
+            return None
+        names = np.array(sorted(inside.facility.unique()))
+        pos = {f: i for i, f in enumerate(names)}
+        F = len(names)
+
+        def fold(frame, col):
+            out = np.zeros((F, T))
+            np.add.at(out, (frame.facility.map(pos).to_numpy(), frame.t.to_numpy()), frame[col].to_numpy().astype(float))
+            return out
+
+        lead, blk = fold(inside, "k"), fold(inside, "n")
+        other = c[~c.u.isin(mine) & c.facility.isin(set(names))]
+
+        def outside(top: np.ndarray):
+            lo, bl = np.zeros((len(top), T)), np.zeros((len(top), T))
+            for j, i in enumerate(top):
+                g = other[other.facility == names[i]]
+                np.add.at(lo[j], g.t.to_numpy(), g.k.to_numpy().astype(float))
+                np.add.at(bl[j], g.t.to_numpy(), g.n.to_numpy().astype(float))
+            return lo, bl
+
+        return explain.FacilityTally(names, lead, blk, blk.copy(), outside)
 
     def _share_missing(self, block: str, d) -> dict[str, np.ndarray]:
         """A composition share's records whose value is not recorded, by place, period and category (the reader's own
