@@ -9,7 +9,7 @@ by the data and code versions and its inputs in the store. A plan:
     years: 2010-2023
     systems:
       - {dataset: SIM.DO, event: death, blocks: [I, IX, X, XX], levels: [group],
-         measures: all, compositions: all, intervals: all, links: all, classifiers: all}   # fields from declarations
+         measures: all, compositions: all, intervals: all, links: all, classifiers: all, codes: all}   # from declarations
     corroborators: [[SINAN-DENG, probable_case]]    # served systems read as independent fields, not modelled
     confirm_last: 2019        # stage E's later years: select on the years up to it, test on the years after
     prospective: 2021         # the prospective questions: the years after it against fits on the years up to it
@@ -44,6 +44,7 @@ class System:
     classifiers: list[str] | str | None = None   # "all", or alternative classifier columns: counts by their own tree
     mentions: list[str] | str | None = None      # "all", or `fields.declared_mentions` fields: every code a record carries
     flows: list[str] | str | None = None         # "all", or `fields.declared_flows` fields: events away from residence
+    codes: list[str] | str | None = None         # "all", or `fields.declared_codes` fields: a code column's own tree
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
 
 
@@ -202,6 +203,31 @@ def monolith_class_load(s, block: str, years: list[int]):
     return monolith.model_class(s.source).load(s.dataset, s.event, block, years, s.graph, **s.expectations._reader())
 
 
+def _codes_readers(sys_: System, plan: Plan, out: dict) -> list[tuple[str, dict, list[str]]]:
+    """The code-column fields a system's plan reads (`fields.declared_codes`), each on every chapter of its tree, and
+    only where its role's years hold the plan's: a column that stopped being filled would read as a collapse
+    (SIH's cause of death in hospital ends in 2014, pegasus_data a033d19)."""
+    if not sys_.codes:
+        return []
+    roles = {r["column"]: r for r in gateway.roles(sys_.dataset)}
+    found = []
+    for d in fields.declared_codes(sys_.dataset):
+        col = d.column.split(":", 1)[1]
+        if sys_.codes != "all" and col not in sys_.codes:
+            continue
+        r = roles[col]
+        first, last = r.get("first_year") or plan.years[0], r.get("last_year") or plan.years[-1]
+        if d.reason or first > plan.years[0] or last < plan.years[-1]:
+            out[f"codes {sys_.dataset} {col}"] = f"not read: {d.reason or f'filled {first}-{last} only'}"
+            continue
+        source = fields.codes_source(sys_.dataset, d.column)
+        tree = gateway.code_tree(source["structure"])
+        roots = sorted(c for c, lv in zip(tree.column("code").to_pylist(), tree.column("level").to_pylist(), strict=True)
+                       if lv == "chapter")
+        found.append((d.column, source, roots))
+    return found
+
+
 def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
     """The all-events fit (block ``*``) a count reader's share question reads as its denominator
     (`tools.Session._expected_total`), fitted as a declared step of the plan."""
@@ -271,6 +297,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         # another classifier's counts: the same events by its own tree, every chapter of it
         readers += [(name, source, roots) for name, source, roots in fields.classifier_sources(sys_.dataset, sys_.event)
                     if sys_.classifiers == "all" or name.split(":", 1)[1] in (sys_.classifiers or [])]
+        readers += _codes_readers(sys_, plan, out)
         for column, source, blocks in readers:
             ms = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=source)
             for block in blocks:

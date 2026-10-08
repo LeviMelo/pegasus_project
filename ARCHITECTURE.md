@@ -164,6 +164,7 @@ Field
 | interval | two declared dates of one record | the time between them, as a measure |
 | linked share | a declared link (`same_event` stated) | the share of one side's records found on the other |
 | other classifier | a second code structure of the event type | its tree at each canonical level |
+| codes | a code-tree column no group reads (`codes:<column>`; the requested procedure, a newborn's anomalies) | its codelist's tree; a column pegasus_data declares to pack several codes a cell is read code by code (`gateway.token_rule`); read only where its role's years hold the plan's |
 | mentions | a linkage role of type `codes` (the certificate's lines) | events mentioning each group |
 | care flow | residence and a recording place | the share of a place's events recorded away from it |
 
@@ -999,7 +1000,7 @@ Lead
 | `confirm(claim)` | one run on the reserved period (§8.3), ledgered, under LOND |
 | `train(t)`, `temporal_confirm(t)`, `spatial_confirm(leads)`, `corroborate(leads)`, `honest_sizes()`, `retier(leads, selected)` | the independent-unit tests, sizes after selection, the tier (§8.3) |
 
-**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method. **The design (revision 4, `docs/plans/2026-10-07-work-plan.md` §2):** the state is a set of objects (assembled blocks, fits, noise, surprises, the spatial basis, answers, leads, verdicts, readings), each computed once, keyed by its inputs and the source of the code it runs, and stored; one orchestrator (`update`) computes the objects a plan needs in dependency order, resumes at the next missing object, and schedules them on the machine's CPU, GPU and memory. Built 2026-10-07 (S0.1–S0.3): steps keyed by content, shared objects once, one job runner (`jobs`), each field's answers stored as it goes, the all-events fit and the robust refits declared steps of the plan.
+**As built (revision 4):** `pegasus-core update <plan>` brings the state to a declared plan (`plans/*.yml`: systems with `blocks` (`all` for every chapter), `levels`, the declared readers `intervals`, `classifiers`, `mentions`, `flows`, `codes`; `questions`; `corroborators`; `contexts`; `confirm_last`). Every field is asked every question by every method. **The design (revision 4, `docs/plans/2026-10-07-work-plan.md` §2):** the state is a set of objects (assembled blocks, fits, noise, surprises, the spatial basis, answers, leads, verdicts, readings), each computed once, keyed by its inputs and the source of the code it runs, and stored; one orchestrator (`update`) computes the objects a plan needs in dependency order, resumes at the next missing object, and schedules them on the machine's CPU, GPU and memory. Built 2026-10-07 (S0.1–S0.3): steps keyed by content, shared objects once, one job runner (`jobs`), each field's answers stored as it goes, the all-events fit and the robust refits declared steps of the plan.
 
 **Agents** (an LLM in a single loop, with these tools and an objective) see the exploration half only, except through `confirm`. The tool layer is exposed over MCP in phase 3.
 

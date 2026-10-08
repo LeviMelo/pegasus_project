@@ -1045,6 +1045,37 @@ def category_width(name: str) -> int:
     return int(code_tree(name).schema.metadata[b"width"])
 
 
+@functools.cache
+def token_rule(dataset: str, column: str) -> dict | None:
+    """How a column packs several codes into a cell, from pegasus_data's curation (`describe`: ``multi_valued``,
+    ``token_rule``), None for a column of one code a cell."""
+    import re
+
+    import pegasus_data as pg
+
+    parts = re.split(r"[-.]", dataset, maxsplit=1)          # "SIH-RD" -> SIH, RD; "SIM.DO" -> SIM, DO
+    system, series = parts[0], (parts[1] if len(parts) > 1 else None)
+    for args in ((system, series), (system, None)):
+        try:
+            d = pg.describe(*args, field=column)
+        except Exception:  # noqa: BLE001 - a spelling the catalog does not know: try the next
+            continue
+        return dict(d.token_rule) if d.multi_valued and d.token_rule else None
+    raise LookupError(f"{dataset}.{column}: pegasus_data describes no such field")
+
+
+def has_code_structure(name: str) -> bool:
+    """Whether pegasus_data serves a code tree of this name (`_TREES`)."""
+    return name in _TREES
+
+
+def event_types(dataset: str) -> list[dict]:
+    """The event types pegasus_data declares for ``dataset``."""
+    import pegasus_data as pg
+
+    return list(pg.event_types(dataset))
+
+
 def code_structure(name: str) -> pa.Table:
     """A code structure as served by pegasus_data (a tree's parent table or a list's memberships)."""
     import pegasus_data as pg

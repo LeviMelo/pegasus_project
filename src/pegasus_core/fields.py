@@ -392,6 +392,39 @@ def mentions_source(dataset: str, column: str) -> dict:
     return {"source": "code_list", "column": cols, "classifier": column}
 
 
+def declared_codes(dataset: str) -> list[Declared]:
+    """The code-tree columns of ``dataset`` that no group reads (`declared_mentions`): each a field ``codes:<column>``,
+    the events counted under each node of the tree its codelist names (an admission's cause of death, the procedure
+    requested, a newborn's anomalies), or the reason it cannot be: a codelist with no code tree."""
+    from . import gateway
+
+    grouped = {c for cols in gateway.code_groups(dataset).values() for c in cols}
+    primary = {c["column"] for e in gateway.event_types(dataset) for c in e.get("classifiers") or []}
+    out = []
+    for r in gateway.roles(dataset):
+        if r["kind"] != "code_tree" or r.get("model") != "mark" or r["column"] in grouped | primary:
+            continue
+        structure = (r.get("codelists") or [None])[0]
+        reason = "" if structure and gateway.has_code_structure(structure) else             f"its codelist {structure} has no code tree"
+        out.append(Declared(dataset, f"codes:{r['column']}", r["role"], r.get("name") or "", "codes", reason=reason))
+    return out
+
+
+def codes_source(dataset: str, column: str) -> dict:
+    """The reader of a code-tree column (`declared_codes`) on the tree its codelist names: a column pegasus_data
+    declares to pack several codes a cell (`gateway.token_rule`: SINASC's anomalies) by the code-list reader, every
+    code counted; a column of one code a cell as another classifier of the same events (SIGTAP's numeric codes are no
+    ICD-10 shape, which the code-list reader extracts)."""
+    from . import gateway
+
+    col = column.split(":", 1)[1]
+    r = next(x for x in gateway.roles(dataset) if x["column"] == col)
+    structure = r["codelists"][0]
+    if gateway.token_rule(dataset, col):
+        return {"source": "code_list", "column": [col], "classifier": column, "structure": structure}
+    return {"classifier": col, "structure": structure}
+
+
 def interval_source(dataset: str, event: str, column: str, probe_year: int) -> dict:
     """The reader of an interval field (`declared`, ``interval:<date column>``): the days from the event's own date to
     the column's, plus one, as a positive measure (`gateway.mark_moments` with ``anchor``); its sign, which of the two
@@ -510,6 +543,11 @@ def coverage(dataset: str, event: str) -> list[dict]:
             add(c, f"mentions:{role}")
     for d in declared_flows(dataset):
         add(d.column.removeprefix("away:"), "care flow")
+    for d in declared_codes(dataset):
+        if d.reason:
+            reasons[d.column.removeprefix("codes:")] = d.reason
+        else:
+            add(d.column.removeprefix("codes:"), "codes")
     strata = gateway._strata(dataset)
     for k in ("residence", "age", "sex", "race"):
         if strata.get(k):
