@@ -1,0 +1,11 @@
+# S3.2 (work plan): race disparities of births and of perinatal deaths, through the race path of ARCHITECTURE §3.4.
+# Births: the mother's declared race over the account's women (no confusion). Deaths of chapter XVI (conditions of the
+# perinatal period, almost all infant deaths): the recorded race through the infants' measured confusion.
+years: 2010-2023
+systems:
+  - {dataset: SINASC-DN, event: birth, blocks: ['*'], disparities: ['*']}
+  - {dataset: SIM.DO, event: death, blocks: [XVI], disparities: [XVI]}
+questions: []
+relations: false
+triage: false
+report: null

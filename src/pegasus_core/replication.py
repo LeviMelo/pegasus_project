@@ -261,6 +261,34 @@ def test_prospective(sp: surprise.Surprise, estimand: str, locus: dict[str, Any]
 PASSING = ("spike", "transient")       # the courses of `departures.attribute` that do not persist
 
 
+#: stage E's independent tests (ARCHITECTURE §8.3) and the replication key each one writes
+INDEPENDENT = (("later years", "prospective"), ("other jurisdictions", "spatial"), ("another system", "corroboration"))
+
+
+def account(x: leads.Lead) -> dict[str, str]:
+    """Each independent test of a lead (`INDEPENDENT`): its result, or why there is none (work plan S4.2): a passing
+    course cannot recur, a lead of its kind has no such test yet, a deficit is not corroborated, or the plan did not
+    ask. Every reported lead carries the three."""
+    out = {}
+    places = x.kind in ("answer", "subset", "residual")
+    for name, key in INDEPENDENT:
+        r = x.replications.get(key)
+        if isinstance(r, dict) and r.get("tested", True) and ("ok" in r or "p" in r or "q" in r):
+            q = r.get("q", r.get("p"))
+            out[name] = ("holds" if r.get("ok") else "does not hold") + (f" (q {q:.2g})" if isinstance(q, float) else "")
+        elif isinstance(r, dict) and r.get("reason"):
+            out[name] = f"not tested: {r['reason']}"
+        elif not places:
+            out[name] = f"no {name} test for a {x.kind} lead yet"
+        elif name == "later years" and not lasting(x):
+            out[name] = "a passing course (a spike or a transient) does not recur: another system is its test"
+        elif name == "another system" and span_direction(x)[1] <= 0:
+            out[name] = "a deficit is not corroborated by another system's count"
+        else:
+            out[name] = "not asked by the plan that made it"
+    return out
+
+
 def lasting(x: leads.Lead) -> bool:
     """Whether a lead's departure can recur in later years: an answer is passing when every method's attributed
     course is a spike or a transient; a lead with no attributed course is taken as lasting (tested)."""

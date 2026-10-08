@@ -78,6 +78,7 @@ class BlockData:
     key: dict = field(default_factory=dict)
     n: np.ndarray | None = None       # marks: events per cell (y is then the mean of log m)
     l2: np.ndarray | None = None      # marks: Σ (log m)² per cell
+    kv: np.ndarray | None = None      # linked shares: the variance of the linked count per cell, Σ p(1 − p)
     grain: str = "year"               # "year" | "month": the time axis t indexes years or months
     month_of_year: np.ndarray | None = None   # monthly grain: t -> 0..11
     S: np.ndarray | None = None       # [U, T, G] sd of log N where the population carries uncertainty (the account)
@@ -94,7 +95,7 @@ class BlockData:
 
 
 # the readers of marks: each cell's accumulator states, the one whose mean is y, and (last) the second moment kept in l2
-CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k"), "linked": ("n", "k"),
+CELL_VALUES = {"mark": ("n", "l1", "l2"), "count": ("n", "s1", "s2"), "share": ("n", "k"), "linked": ("n", "k", "kv"),
                "away": ("n", "k")}
 CELL_MEAN = {"mark": "l1", "count": "s1", "share": "k", "linked": "k", "away": "k"}
 ASSEMBLY = 1    # bumped when what `_assemble` returns for the same inputs changes in a way the source hash cannot see
@@ -199,6 +200,8 @@ def _blockdata_to(d: BlockData) -> tuple[dict[str, np.ndarray], dict]:
         arrays["S"] = d.S[:, ::12] if month else d.S
     if d.n is not None:
         arrays["n"], arrays["l2"] = d.n, d.l2
+        if d.kv is not None:
+            arrays["kv"] = d.kv
     if d.group_cells is not None:
         arrays["group_cells"] = d.group_cells
     if d.group_outer is not None:
@@ -220,6 +223,7 @@ def _blockdata_from(a: dict[str, np.ndarray], m: dict) -> BlockData:
                   a["g"].astype(np.int64), a["y"], m["unallocated"], m["data_key"], S=S, population=m["population"])
     if "n" in a:
         d.n, d.l2 = a["n"], a["l2"]
+        d.kv = a.get("kv")
     if "group_cells" in a:
         d.group_cells = a["group_cells"].astype(bool)
     if "group_outer" in a:
@@ -445,7 +449,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                      S=S, population=population, group_cells=None if group_cells.all() else group_cells,
                      group_outer=group_outer, outer_groups=outer_groups)
     if source in CELL_VALUES:
-        data.n, data.l2 = sums["n"], sums[CELL_VALUES[source][-1]]   # share: l2 is k, the successes (y is k/n)
+        data.n, data.l2 = sums["n"], sums["k" if "k" in sums else CELL_VALUES[source][-1]]   # share: l2 is k (y is k/n)
+        if "kv" in sums:
+            data.kv = sums["kv"]          # a linked share: the variance of k from the linkage, Σ p(1 − p)
     if grain == "month":
         data.grain = "month"
         data.month_of_year = np.tile(np.arange(12), len(years))
@@ -2285,6 +2291,8 @@ class ShareModel(_CellMark):
             p = torch.sigmoid(self.eta_nnz(self.effects(), spatial)).cpu().numpy()
         n = d.n
         N, K, V = self._sums(leaves, n, n * p, n * p * (1 - p) * (1 + (n - 1) * self.disp))
+        if d.kv is not None:
+            V = V + self._sums(leaves, d.kv)[0]       # the linkage's own uncertainty of the linked count (S2.1)
         with np.errstate(divide="ignore", invalid="ignore"):
             mean = np.log((K + 0.5) / (N - K + 0.5))
             var = V * (1.0 / (K + 0.5) + 1.0 / (N - K + 0.5)) ** 2

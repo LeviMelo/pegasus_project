@@ -89,6 +89,14 @@ class Lead:
         return float(-np.log10(max(self.q, 1e-300)) * size * (1 + tier))
 
 
+def reading_order(x: Lead) -> tuple:
+    """The order a reader meets leads in (the register, the report, the dossier): leads of an uncalibrated method after
+    the others, those a tested explanation accounts for after them, those a person judged an artefact last, and rank
+    within each (S5.1: the first dossier opened on eight recodings, ordered by rank alone)."""
+    return (uncalibrated(x), x.status == "explained", (x.robustness.get("verdict") or {}).get("verdict") == "artefact",
+            -x.rank)
+
+
 class Register:
     def __init__(self, path: Path | None = None):
         self.path = path or config.home() / "leads"
@@ -114,9 +122,7 @@ class Register:
         for r in sorted(rows, key=lambda r: r["at"]):
             latest[r["id"]] = r
         out = [Lead(**_body(json.loads(r["body"]))) for r in latest.values()]
-        # leads of an uncalibrated method after the others, and those a person judged an artefact after them
-        return sorted(out, key=lambda x: (uncalibrated(x),
-                                          (x.robustness.get("verdict") or {}).get("verdict") == "artefact", -x.rank))
+        return sorted(out, key=reading_order)
 
     def get(self, lead_id: str) -> Lead:
         for x in self.current():

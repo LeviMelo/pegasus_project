@@ -94,33 +94,8 @@ def run(commands: list[list[str]], logs: list[str | None] | None = None, gpu: bo
     return worst
 
 
-_POOL = None
 
 
-def elementwise(fn, *arrays, min_size: int = 200_000):
-    """``fn(*arrays)`` for an elementwise function (a scipy.special or scipy.stats evaluation), split over this
-    process's threads: scipy's special functions release the GIL, so the parts run at once; the result equals the
-    single call bit for bit (2.5 to 4 times faster at 800,000 cells, 2026-10-07). Small arrays run in one call."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    import numpy as np
-
-    global _POOL
-    arrays = np.broadcast_arrays(*(np.asarray(a) for a in arrays))
-    n = arrays[0].size
-    parts = default_threads()
-    if n < min_size or parts < 2:
-        return fn(*arrays)
-    if _POOL is None:
-        _POOL = ThreadPoolExecutor(parts)
-    flat = [a.ravel() for a in arrays]
-    out = None
-    pieces = np.array_split(np.arange(n), parts)
-    results = list(_POOL.map(lambda ix: fn(*(a[ix] for a in flat)), pieces))
-    out = np.empty(n, dtype=np.result_type(*results))
-    for ix, r in zip(pieces, results, strict=True):
-        out[ix] = r
-    return out.reshape(arrays[0].shape)
 
 
 _MAP_POOL = None
@@ -129,7 +104,7 @@ _MAP_POOL = None
 def parallel_map(fn, items) -> list:
     """``[fn(x) for x in items]`` over this process's threads, in order: for independent evaluations whose work is in
     numpy and scipy (which release the GIL), such as the per-group fits of a dispersion or the grid of a search. The
-    results equal the sequential ones; a pool of its own, apart from `elementwise`'s, so neither waits on the other."""
+    results equal the sequential ones."""
     from concurrent.futures import ThreadPoolExecutor
 
     global _MAP_POOL

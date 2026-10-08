@@ -231,7 +231,7 @@ def _codes_readers(sys_: System, plan: Plan, out: dict) -> list[tuple[str, dict,
 def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
     """The all-events fit (block ``*``) a count reader's share question reads as its denominator
     (`tools.Session._expected_total`), fitted as a declared step of the plan."""
-    if (plan.questions and "share" not in plan.questions) or s.expectations.registry.classifier == "*"             or any(s.source.get(k) for k in ("mark", "indicator", "link", "place")):
+    if plan.questions == [] or (plan.questions and "share" not in plan.questions) or s.expectations.registry.classifier == "*"             or any(s.source.get(k) for k in ("mark", "indicator", "link", "place")):
         return
     try:
         s.expectations.model("*")
@@ -243,6 +243,51 @@ def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
             out[f"fit {label} * (share denominator)"] = f"failed: {exc}"
 
 
+def plan_links(plan: Plan) -> list[tuple[str, str]]:
+    """The declared links a plan reads, with the side read: its systems' person-level fields, and the links through
+    which its corroborating event types share records with its systems (`corroborate.sources`, which removes them)."""
+    from . import corroborate
+
+    out = []
+    for s in plan.systems:
+        for c in _links(s):
+            src = fields.link_source(s.dataset, s.event, c)
+            out.append((src["link"], src["side"]))
+    if plan.triage:
+        served = [(x.dataset, x.event) for x in plan.systems] + [tuple(c) for c in plan.extra.get("corroborators") or ()]
+        out += [src.link for s in plan.systems for src in corroborate.sources(s.dataset, served) if src.link]
+    return list(dict.fromkeys(out))
+
+
+def _ensure_links(plan: Plan, out: dict, log) -> None:
+    """The stored national runs every link the plan reads needs for its years (S2.2; `gateway.covering_runs`: a padded
+    side's year is read by the runs after it too): a reading never launches one (`gateway.stored_pairs`), so the plan
+    computes them, once, as a step of their own. No run after the plan's last year is computed: the plan's years are
+    its data horizon (a later year's run reads that year's records; SIM 2024 is held out). A year whose covering runs
+    are incomplete, or that cannot be linked, is read as unlinked, and said."""
+    for link, side in plan_links(plan):
+        runs = sorted({z for y in plan.years for z in gateway.covering_runs(link, side, y)})
+        need = [z for z in runs if z <= max(plan.years)]
+        missing = []
+        for z in need:
+            try:
+                gateway.stored_pairs(link, z)
+            except gateway.LinkNotStored:
+                missing.append(z)
+        for z in missing:
+            t0 = time.time()
+            try:
+                pairs = gateway.stored_pairs(link, z, compute=True)
+                log(f"link {link} {z}: {pairs.num_rows} pairs ({time.time() - t0:.0f} s)")
+            except Exception as exc:  # noqa: BLE001 - a year that cannot be linked is read as unlinked, and said
+                log(f"FAIL link {link} {z}: {type(exc).__name__}: {exc}")
+                out[f"link {link} {z}"] = f"failed: {exc}"
+        failed = sum(f"link {link} {z}" in out for z in missing)
+        beyond = [z for z in runs if z > max(plan.years)]
+        out[f"links {link} {side}"] = (f"{len(need) - len(missing)} stored, {len(missing) - failed} computed, {failed} failed"
+                                       + (f"; runs {beyond} after the plan's years not computed" if beyond else ""))
+
+
 def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     """Every stage of ``plan`` (module docstring); returns what each step did or why it was skipped."""
     from . import report, tools
@@ -250,6 +295,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     out: dict[str, Any] = {}
     sessions = {}
     resolved.clear()
+    _ensure_links(plan, out, log)
     for sys_ in plan.systems:
         s = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph)
         sessions[sys_.dataset] = s
@@ -274,7 +320,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         _ensure_total(s, plan, f"{sys_.dataset}", out, log)
         key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                    blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years)
-        if force or not _done(key):
+        if plan.questions == []:                  # an empty list asks none (a plan of disparities, of fits)
+            out[f"questions {sys_.dataset}"] = "none asked"
+        elif force or not _done(key):
             leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                        levels=tuple(sys_.levels) if sys_.levels else None, log=log)
             _mark(key, {"answers": len(leads)})
@@ -313,7 +361,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                        blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years)
-            if force or not _done(key):
+            if plan.questions == []:
+                out[f"questions {sys_.dataset} {column}"] = "none asked"
+            elif force or not _done(key):
                 leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                             levels=tuple(sys_.levels) if sys_.levels else None, log=log)
                 _mark(key, {"answers": len(leads)})

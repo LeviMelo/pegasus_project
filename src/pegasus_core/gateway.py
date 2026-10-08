@@ -50,8 +50,19 @@ _Z80 = 1.2815515655446004    # the 80% interval's half-width in standard deviati
 
 #: Exposure modifiers (ARCHITECTURE §4.1, ADR-0020): ``<base>+kappa`` multiplies N by the system's completeness κ_{UF,t},
 #: ``<base>+sus`` by the share of the population without private coverage; the source string carries them.
+#: The measured confusions of recorded race (pegasus_data's modelled tier; its decisions 0143 and 0149), each where a
+#: declared link reaches a person's own declaration: its product, the sex it reaches (None: both) and the account's age
+#: bands it reaches, each mapped to the product's band, or to a tuple of its bands mixed by the deaths' age mixture
+#: (`_age_mix`). Outside every reach the recorded race is the declared one (ARCHITECTURE §3.4). The women's matrix
+#: (race_confusion_women: mothers' SINASC declaration against their death certificate) is not entered: inverted on
+#: every woman of 15-49 it gives black women 0.71 of white women's death rate and amarela 0.045, against crude
+#: recorded ratios of 1.01 and 0.80 (2022), because its declared axis is the mother's SINASC declaration, not the
+#: census's the account carries (2026-10-08; OPEN_QUESTIONS)
+CONFUSIONS = {
+    "infant": (("race_confusion_infant", "race-confusion-infant-1"), None, {0: ("0-6 d", "7-27 d", "28-364 d")}),
+}
 MODIFIERS = {"kappa": ("system_completeness", "system-completeness-2"), "sus": ("population_without_private_coverage", "sus-dependent-2"),
-             "confusion": ("race_confusion_infant", "race-confusion-infant-1")}
+             "confusion": ("race_confusion", "+".join(v for (_, v), _, _ in CONFUSIONS.values()))}
 RACE = {"1": "branca", "2": "preta", "3": "amarela", "4": "parda", "5": "indigena"}   # RACACOR code -> the account's race
 RATIO_YEARS = list(range(2015, 2024))       # the years the declared-race rate ratios are estimated over
 CONFUSION_YEARS = (2021, 2022)              # the years the infant matrix was measured on (the age mixture is read there)
@@ -324,15 +335,40 @@ def _modified(pop: pa.Table, years: list[int], base: str, mods: tuple[str, ...],
     return table
 
 
-def _confusion() -> pd.DataFrame:
-    """The infant confusion matrix C(recorded k | declared j) by UF and age band at death, with the posterior's relative sd of p
-    (pegasus_data ``race_confusion_infant``; the intervals are 5-95 %)."""
-    raw = _modelled("confusion").to_pandas()
+def _confusion(pop: str) -> pd.DataFrame:
+    """One population's confusion C(recorded k | declared j) by UF and the account's age band it reaches (`CONFUSIONS`),
+    with the posterior's relative sd of p (the product's intervals are 5-95 %); a band the product splits finer is their
+    mixture by the deaths' age mixture (the bands' errors taken as shared: the weighted mean)."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from pegasus_data.modelled import read_modelled
+
+    (name, version), _, bands = CONFUSIONS[pop]
+    raw = read_modelled(name, version, settings=SimpleNamespace(lake_dir=Path(config.data_root()) / "lake"))[0].to_pandas()
     code = {"Branca": "1", "Preta": "2", "Amarela": "3", "Parda": "4", "Indígena": "5"}
     raw = raw[raw.declared.isin(code) & raw.recorded.isin(code)].copy()
     raw["j"], raw["k"] = raw.declared.map(code), raw.recorded.map(code)
     raw["rel"] = (raw.p_hi - raw.p_lo) / (2 * 1.6449) / raw.p.clip(lower=1e-9)
-    return raw[["uf", "age_band", "j", "k", "p", "rel"]]
+    parts = []
+    for age, band in bands.items():
+        if isinstance(band, tuple):
+            w = dict(zip(band, _age_mix(pop), strict=True))
+            c = raw[raw.age_band.isin(band)]
+            c = c.assign(w=c.age_band.map(w))
+            c = c.assign(pw=c.p * c.w, rw=c.rel * c.p * c.w).groupby(["uf", "j", "k"], as_index=False)[["pw", "rw"]].sum()
+            c = c.assign(p=c.pw, rel=c.rw / c.pw.clip(lower=1e-12))
+        else:
+            c = raw[raw.age_band == band]
+        parts.append(c.assign(age=age)[["uf", "age", "j", "k", "p", "rel"]])
+    return pd.concat(parts, ignore_index=True)
+
+
+def _age_mix(pop: str) -> np.ndarray:
+    """The deaths' mixture over a population's finer bands: the infants' perinatal deaths over the three day bands."""
+    if pop == "infant":
+        return _infant_age_mix()
+    raise KeyError(f"no age mixture for {pop!r}")
 
 
 def _infant_age_mix() -> np.ndarray:
@@ -367,53 +403,45 @@ def _infant_age_mix() -> np.ndarray:
     return np.asarray(cached.column("share").to_pylist())
 
 
-def _confusion_mixed() -> pd.DataFrame:
-    """C(k|j) by UF, the three age bands averaged with the perinatal deaths' age mixture (``_infant_age_mix``); ``rel`` the
-    relative sd of the mixed p (the bands' errors taken as shared: the weighted mean)."""
-    c, mix = _confusion(), _infant_age_mix()
-    c["w"] = c.age_band.map({"0-6 d": mix[0], "7-27 d": mix[1], "28-364 d": mix[2]})
-    c["pw"], c["rw"] = c.p * c.w, c.rel * c.p * c.w
-    g = c.groupby(["uf", "j", "k"], as_index=False)[["pw", "rw"]].sum()
-    return g.assign(p=g.pw, rel=g.rw / g.pw.clip(lower=1e-12))[["uf", "j", "k", "p", "rel"]]
-
-
-def declared_ratios(base: str = "account-3") -> dict[str, float]:
-    """Rate ratios of the infant deaths by *declared* race, Branca = 1, the infant matrix inverted on the national
-    UF × year totals: the recorded deaths of race k in UF f year t are Poisson with mean
-    rate_{f,t} · Σ_j C(k|j,f) r_j N_{j,f,t,age 0} (the rate profiled out, r_j by maximum likelihood over ``RATIO_YEARS``,
-    a N(0, 2²) prior on the log ratios). Five numbers from about 1,350 UF-year-race counts; the exposure of a
-    recorded-race group uses them (ARCHITECTURE §4.1)."""
+def declared_ratios(pop: str = "infant", base: str = "account-3") -> dict[str, float]:
+    """Rate ratios of a population's deaths by *declared* race, Branca = 1, its confusion inverted on the national
+    UF × year × age-band totals of its reach: the recorded deaths of race k in UF f, year t, band a are Poisson with
+    mean rate_{f,t,a} · Σ_j C(k|j,f,a) r_j N_{j,f,t,a} (the rates profiled out, r_j by maximum likelihood over
+    ``RATIO_YEARS``, a N(0, 2²) prior on the log ratios). Five numbers per population; its recorded-race exposure uses
+    them (ARCHITECTURE §4.1)."""
     from scipy.optimize import minimize
 
-    key = {"what": "declared_ratios", "base": base, "years": RATIO_YEARS, "confusion": MODIFIERS["confusion"][1], "data": config.data_version(), "code": config.code_key(declared_ratios)}
+    (_, version), sex, bands = CONFUSIONS[pop]
+    key = {"what": "declared_ratios", "pop": pop, "base": base, "years": RATIO_YEARS, "confusion": version,
+           "data": config.data_version(), "code": config.code_key(declared_ratios)}
     cached = store.get_table("gateway", key)
     if cached is None:
-        c = _confusion_mixed()
-        ufs = sorted(c.uf.unique())
-        D = np.zeros((len(ufs), len(RATIO_YEARS), 5))
+        c = _confusion(pop)
+        ufs, ages = sorted(c.uf.unique()), sorted(bands)
+        where = f"age IN ({', '.join(map(str, ages))})" + (f" AND sex = {sex}" if sex else "")
+        D = np.zeros((len(ufs), len(RATIO_YEARS), len(ages), 5))
         for yi, y in enumerate(RATIO_YEARS):
             for ki, k in enumerate(RACE):
-                t = event_counts("SIM.DO", "death", y, race=k).counts
                 con = duckdb.connect()
-                con.register("t", t)
-                for uf, n in con.execute("SELECT u // 10000, sum(y) FROM t WHERE age = 0 GROUP BY 1").fetchall():
-                    D[ufs.index(uf), yi, ki] = n
-        Nj = np.zeros((len(ufs), len(RATIO_YEARS), 5))
+                con.register("t", event_counts("SIM.DO", "death", y, race=k).counts)
+                for uf, a, n in con.execute(f"SELECT u // 10000, age, sum(y) FROM t WHERE {where} GROUP BY 1, 2").fetchall():
+                    D[ufs.index(uf), yi, ages.index(a), ki] = n
+        Nj = np.zeros((len(ufs), len(RATIO_YEARS), len(ages), 5))
         for ji, j in enumerate(RACE):
             con = duckdb.connect()
             con.register("n", _tensor_population(RATIO_YEARS, base, RACE[j]))
-            for uf, yr, n in con.execute("SELECT u // 10000, year, sum(n) FROM n WHERE age = 0 GROUP BY 1, 2").fetchall():
-                Nj[ufs.index(uf), RATIO_YEARS.index(yr), ji] = n
-        Cm = np.zeros((len(ufs), 5, 5))      # [uf, j, k]
+            for uf, yr, a, n in con.execute(f"SELECT u // 10000, year, age, sum(n) FROM n WHERE {where} GROUP BY 1, 2, 3").fetchall():
+                Nj[ufs.index(uf), RATIO_YEARS.index(yr), ages.index(a), ji] = n
+        Cm = np.zeros((len(ufs), len(ages), 5, 5))      # [uf, age, j, k]
         for r in c.itertuples():
-            Cm[ufs.index(r.uf), int(r.j) - 1, int(r.k) - 1] = r.p
-        M = np.einsum("fjk,fyj->fykj", Cm, Nj)            # [f, y, k, j]
+            Cm[ufs.index(r.uf), ages.index(r.age), int(r.j) - 1, int(r.k) - 1] = r.p
+        M = np.einsum("fajk,fyaj->fyakj", Cm, Nj)       # [f, y, a, k, j]
 
         def nll(rho: np.ndarray) -> float:
             lam = np.exp(np.concatenate([[0.0], rho]))
-            base_mean = M @ lam                                           # [f, y, k]
-            rate = D.sum(2) / np.maximum(base_mean.sum(2), 1e-9)          # profiled
-            mean = np.maximum(rate[:, :, None] * base_mean, 1e-9)
+            base_mean = M @ lam                                            # [f, y, a, k]
+            rate = D.sum(3) / np.maximum(base_mean.sum(3), 1e-9)           # profiled per UF, year and band
+            mean = np.maximum(rate[..., None] * base_mean, 1e-9)
             return float((mean - D * np.log(mean)).sum() + 0.5 * (rho ** 2).sum() / 4.0)
 
         fit = minimize(nll, np.zeros(4), method="L-BFGS-B")
@@ -423,35 +451,39 @@ def declared_ratios(base: str = "account-3") -> dict[str, float]:
 
 
 def _recorded_exposure(years: list[int], base: str, k: str) -> pa.Table:
-    """The exposure to being *recorded* as race ``k`` on an infant death certificate (ARCHITECTURE §4.1, groups with race):
-    at age 0, N^{rec}_k = Σ_j C(k|j, UF) · r_j · N_j with C the infant confusion matrix averaged over the perinatal deaths'
-    age mixture, r_j the declared-race rate ratios (``declared_ratios``) and N_j the account's race-j population, so that
-    the expectation of the recorded count is μ^{rec}_k = Σ_j C(k|j) μ_j when the declared races share one shape and differ
-    by the ratios. From age 1 the matrix is not measured and the recorded race is the declared one (N_k). ``s`` is the
-    quadrature of the races' own sd and the matrix's relative sd (independent cells)."""
+    """The exposure to being *recorded* as race ``k`` on a death certificate (ARCHITECTURE §3.4, §4.1): within each
+    measured population's reach (`CONFUSIONS`: infants at age 0, women of 15-49), N^{rec}_k = Σ_j C(k|j, UF, band) ·
+    r_j · N_j with r_j that population's declared-race ratios (`declared_ratios`) and N_j the account's race-j
+    population, so that the recorded count's expectation is μ^{rec}_k = Σ_j C(k|j) μ_j when the declared races share
+    one shape and differ by the ratios; elsewhere the recorded race is the declared one (N_k). ``s`` is the quadrature
+    of the races' own sd and the matrix's relative sd (independent cells)."""
     key = {"what": "recorded_exposure", "base": base, "race": k, "years": years, "confusion": MODIFIERS["confusion"][1],
            "data": config.data_version(), "code": config.code_key(_recorded_exposure)}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
-    r, c = declared_ratios(base), _confusion_mixed()
-    c = c[c.k == k].copy()
-    c["r"] = c.j.map(r)
+    parts = []
+    for pop, (_, sex, _) in CONFUSIONS.items():
+        r, c = declared_ratios(pop, base), _confusion(pop)
+        c = c[c.k == k]
+        c = c.assign(r=c.j.map(r), sex=sex if sex else -1)
+        parts.append(c[["uf", "age", "sex", "j", "p", "rel", "r"]])
     con = duckdb.connect()
-    con.register("c", pa.Table.from_pandas(c[["uf", "j", "p", "rel", "r"]], preserve_index=False))
+    con.register("c", pa.Table.from_pandas(pd.concat(parts, ignore_index=True), preserve_index=False))
     union = " UNION ALL ".join(f"SELECT '{j}' AS j, * FROM n{j}" for j in RACE)
     for j in RACE:
         con.register(f"n{j}", _tensor_population(years, base, RACE[j]))
     con.register("own", _tensor_population(years, base, RACE[k]))
+    reach = "c.age = {t}.age AND (c.sex = -1 OR c.sex = {t}.sex)"
     table = con.execute(f"""
         WITH n AS ({union}),
         z AS (SELECT n.u, n.year, n.sex, n.age, sum(c.p * c.r * n.n) AS m,
                      sqrt(sum(power(c.p * c.r * n.n, 2) * (power(n.s, 2) + power(c.rel, 2)))) AS sd
-              FROM n JOIN c ON c.uf = n.u // 10000 AND c.j = n.j WHERE n.age = 0 GROUP BY ALL)
+              FROM n JOIN c ON c.uf = n.u // 10000 AND c.j = n.j AND {reach.format(t="n")} GROUP BY ALL)
         SELECT CAST(u AS INTEGER) AS u, CAST(year AS SMALLINT) AS year, CAST(sex AS TINYINT) AS sex, CAST(age AS SMALLINT) AS age,
                CAST(m AS DOUBLE) AS n, CAST(CASE WHEN m > 0 THEN sd / m ELSE 0.0 END AS DOUBLE) AS s FROM z
         UNION ALL
-        SELECT u, year, sex, age, n, s FROM own WHERE age > 0
+        SELECT u, year, sex, age, n, s FROM own WHERE NOT EXISTS (SELECT 1 FROM c WHERE {reach.format(t="own")})
         ORDER BY u, year, sex, age""").fetch_arrow_table()
     store.put_table("gateway", key, table, {"source": f"{base} race slices x {MODIFIERS['confusion'][1]}"})
     return table
@@ -1401,9 +1433,10 @@ class LinkNotStored(LookupError):
     """A declared link's run for a year is not in the store, and computing it was not asked for."""
 
 
-def stored_pairs(link: str, year: int) -> pa.Table:
+def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
     """A declared link's national probabilistic pairs for ``year``: the stored run (pegasus_data's link store in
-    PegaSUS's data root), computed only when `COMPUTE_LINKS` allows; else `LinkNotStored`, which a reading reports."""
+    PegaSUS's data root), computed when ``compute`` (by default `COMPUTE_LINKS`) allows; else `LinkNotStored`, which a
+    reading reports. `update` computes the runs a plan reads as a declared step (S2.2)."""
     import pegasus_data as pg
     from pegasus_data.linkage import store as link_store
     from pegasus_data.linkage.engine import stored_key
@@ -1412,12 +1445,31 @@ def stored_pairs(link: str, year: int) -> pa.Table:
     hit = link_store.load(settings, stored_key(link, "probabilistic", year, "BR"))
     if hit is not None:
         return hit[0]
-    if not COMPUTE_LINKS:
+    if not (COMPUTE_LINKS if compute is None else compute):
         raise LinkNotStored(f"{link} {year}: no stored run (set PEGASUS_COMPUTE_LINKS=1, or `pegasus-data link "
                             f"{link} --period {year} --geo BR --method probabilistic`)")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return pg.link(link, period=year, geography="BR", method="probabilistic", root=config.data_root()).pairs
+
+
+def covering_runs(link: str, side: str, year: int) -> list[int]:
+    """The years of the runs whose scope holds ``side``'s records of ``year``: a side padded by (before, after) years
+    is read by run z for its years z − before … z + after, so its records of ``year`` by runs year − after … year +
+    before. A birth of December 2021 whose baby died in January 2022 is paired in run 2022 (S2.1)."""
+    spec = link_specs()[link]
+    before, after = tuple(getattr(spec.left if side == "left" else spec.right, "pad_years", None) or (0, 0))
+    return list(range(year - after, year + before + 1))
+
+
+def side_pairs(link: str, side: str, year: int, compute: bool | None = None) -> pa.Table:
+    """Every pair of ``link`` that can hold ``side``'s records of ``year``: the stored runs `covering_runs` names (one
+    run read alone missed the follow-up that crosses a year). A missing covering run raises `LinkNotStored`: the
+    year's follow-up is incomplete, and a reading says so rather than counting it short."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        parts = [stored_pairs(link, z, compute) for z in covering_runs(link, side, year)]
+    return pa.concat_tables(parts, promote_options="default") if len(parts) > 1 else parts[0]
 
 
 def _group_columns(dataset: str, sd) -> list[str]:
@@ -1444,7 +1496,8 @@ def _rep_sql(group: list[str]) -> str:
 
 def linked_counts(dataset: str, event: str, year: int, link: str, side: str, classifier: str | None = None,
                   places: pa.Array | None = None) -> EventCounts:
-    """The events of one side of a declared link per (u, year, sex, age, code): n, and k the expected number with a
+    """The events of one side of a declared link per (u, year, sex, age, code): n, kv the variance of the linked count
+    (Σ p(1 − p), the linkage's own uncertainty), and k the expected number with a
     partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
     national run). The share k/n is an outcome after the event on a cohort's side (births followed by an infant
     death) and a recording measure on the other (deaths that found their birth). A side filtered by its spec (`where`)
@@ -1461,14 +1514,12 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     strata = _strata(dataset)
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
-           **_df_key(dataset, year)}
+           **_df_key(dataset, year), "code": config.code_key(linked_counts)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        pairs = stored_pairs(link, year)
+    pairs = side_pairs(link, side, year)
     ids = pairs.column("l" if side == "left" else "r")
     p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
     cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + \
@@ -1487,7 +1538,8 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
                      WHEN code IS NULL OR code = '' THEN 'code' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
             CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
-            CAST(sum(coalesce(m.p, 0)) AS DOUBLE) AS k
+            CAST(sum(coalesce(m.p, 0)) AS DOUBLE) AS k,
+            CAST(sum(coalesce(m.p, 0) * (1 - coalesce(m.p, 0))) AS DOUBLE) AS kv
         FROM e LEFT JOIN (SELECT rid, max(p) AS p FROM pm GROUP BY rid) m USING (rid)
         WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
@@ -1518,10 +1570,7 @@ def cohort_records(dataset: str, event: str, year: int, link: str, side: str, co
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
     t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep},
             {_rep_sql(group)} AS rid FROM r""").fetch_arrow_table()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        pairs = stored_pairs(link, year)
-    return t, t.column("rid"), pairs
+    return t, t.column("rid"), side_pairs(link, side, year)
 
 
 @contextlib.contextmanager

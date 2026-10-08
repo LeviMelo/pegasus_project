@@ -162,7 +162,7 @@ Field
 | measure | a column with a measurement domain | the cell's location (§4.4); the count family when the domain admits zero |
 | composition | a categorical column's values | each value's share of the cell's events |
 | interval | two declared dates of one record | the time between them, as a measure |
-| linked share | a declared link (`same_event` stated) | the share of one side's records found on the other |
+| linked share | a declared link (`same_event` stated) | the share of one side's records found on the other: k = Σ p_match, with the linkage's own variance Σ p(1 − p) added to the share's (S2.1) |
 | other classifier | a second code structure of the event type | its tree at each canonical level |
 | codes | a code-tree column no group reads (`codes:<column>`; the requested procedure, a newborn's anomalies) | its codelist's tree; a column pegasus_data declares to pack several codes a cell is read code by code (`gateway.token_rule`); read only where its role's years hold the plan's |
 | mentions | a linkage role of type `codes` (the certificate's lines) | events mentioning each group |
@@ -258,6 +258,14 @@ Field
 - confusion matrices of recorded against declared race: infant deaths, anchored on the mother's declaration at birth (pegasus_data decision 0143); women aged 15–49, measured through their births (pegasus_data decision 0149);
 - the share recorded as unknown, by system, place and year (and by facility for SIH).
 - Other adults' confusion is not measured; §4.1 gives how they are read.
+
+**The race path (S3.1, decided 2026-10-08).** One rule for every system:
+- **Declared race is the estimand's race.** A rate by race divides events by the account's persons of that declared race (the tensor above).
+- **A system's recorded race is read through its confusion with declared race, measured wherever a declared link joins its records to a person's own declaration** (pegasus_data's links: a death to the newborn's or the mother's birth record, whose race the mother declared). A matrix holds for the persons the link reaches, by age and sex class; the infants (pegasus_data decision 0143) and the women aged 15–49 (0149) are where today's links reach, not a choice of who is read. A new link that reaches other persons measures their matrix with no new code.
+- **Where no link reaches, the confusion is the identity with a sensitivity band** from the nearest measured matrix, and the estimand is named *recorded-race rate*.
+- **SINASC is declared on both sides** (the mother's self-declaration over the account's women), so births need no confusion.
+- **Disparity is a question** (`tools.disparity`): each place's race-specific ratio against the reference race's, read against Brazil's (S3.2).
+- **Today's form is race-stratified blocks** (one fit per race, `source={"race": k}`); race as an axis of G inside one fit is depth (D), recorded in §13.2.
 
 ---
 
@@ -830,7 +838,7 @@ D'_S is the same with the augmented μ'.
 
 **Triage (`explain.triage`, `Session.triage`).** A lead is read against what the data at hand can say about it, in order. The first rule that fires gives its class (`lead.robustness["triage"]`):
 - *system*: the denominator broke; the code's national level moved; the ill-defined chapter moved opposite; a residual category trending.
-- *substitution*: siblings under the same parent undo the change.
+- *substitution*: siblings under the same parent undo the change (an outermost group's siblings are the rest of its chapter). It is *tested* when the lead's events also carry the siblings' age–sex profile rather than their own code's: the likelihood ratio of the two profiles, whose tail under the code's own profile is bounded by Markov's inequality (P(LR ≥ k) ≤ 1/k), reaches 1/FAC_P (`explain.recoded_profile`). The first dossier opened on single-provider recodings that read as signals: pneumoconiosis and ARDS in children, carrying the asthma and pneumonia they replaced (S5.1, 2026-10-08).
 - *noise*: too few events, or too small an effect.
 - *facility*.
 - otherwise *signal*, which means **unexplained by the data at hand, not confirmed**.
@@ -1145,7 +1153,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 
 | module | responsibility | may import |
 |---|---|---|
-| `gateway` | the **only** importer of pegasus_data: roles, event types, structures, graphs, population, aggregates, records, declared fields and context values, code trees and groups, link pairs from stored runs only (`stored_pairs`; `PEGASUS_COMPUTE_LINKS=1` to compute); returns Arrow; records data versions | pegasus_data |
+| `gateway` | the **only** importer of pegasus_data: roles, event types, structures, graphs, population, aggregates, records, declared fields and context values, code trees and groups, link pairs from stored runs only (`stored_pairs`; computed by `update` as a declared step, or with `PEGASUS_COMPUTE_LINKS=1`), a side's year read through every run whose padded scope holds it (`side_pairs`, `covering_runs`); returns Arrow; records data versions | pegasus_data |
 | `config` | homes, versions, seeds | — |
 | `fields` | field specs, registry, list and conserved fields, common-support lifting, overlap requests (admission retired, ADR-0028); the fields of every declared kind (§3.2: `declared`, `measure_source`, `share_sources`, `interval_source`, `classifier_sources`, `flow_source`) | gateway |
 | `structures` | GMRF precisions per shape (tree, list, RW1/RW2, cyclic, ICAR/BYM2 scaling), constraints | numpy, scipy |
@@ -1173,7 +1181,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `store` | content-addressed artefacts (§11.3) | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
-| `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`); elementwise evaluations and independent fits over threads (`elementwise`, `parallel_map`) | gateway |
+| `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`); independent fits over threads (`parallel_map`) | gateway |
 | `cli` | the `pegasus-core` command | tools, jobs |
 
 **Dependency direction is downward only:** `tools → leads → scans → surprise → monolith → structures/fields → gateway`. No cycles. The harness sits beside the stack and may import all of it. Checked by `scripts/codehealth.py`, which counts imports inside functions too: none since S0.6 (2026-10-07). `departures` and `marks` read `scans.lenses`' finding type and minimum effects, which import neither.
@@ -1273,9 +1281,9 @@ A solver change is measured on the benchmark before it is adopted.
 | race as an axis, the recording model, disparities | 3.4, 4.1, 4.2 | v0 race-stratified blocks for births and infant deaths, unmeasured; adults, SIH and SINAN read no race | O3 |
 | the ICD ontology | 3.3 | the tree to the category; lists, attributes, ICD-9, relations not used | O4 |
 | top model, model-choice loop | 5.6 | not built | D |
-| corroboration, later years, other jurisdictions | 8.3 | v0 built and ledgered (S4): sources from declarations; open: shaped on documented events, any of an unbounded set of sources, a year without a stored link read as unlinked | S4 |
-| persons: cohorts, linked shares | 7.8 | v0 built (S2); links from stored runs only (2021–2022); not run | S2 |
-| the reader: dossier, verdicts | 9 | v0 built (S5), unused; a verdict annotates and orders a lead, never closes it (S0.5) | S5 |
+| corroboration, later years, other jurisdictions | 8.3 | v1 of the family (S4.1): sources from declarations (event types less their linked records, context fields by their declared correspondence), one statistic for every source (the window's count against the places' own median year), a source whose link is not stored for the window untested, one family (each lead's smallest source p times its sources tested, one BH over the leads); every lead's three independent tests reported with their result or why none exists (`replication.account`, S4.2) | S4 |
+| persons: cohorts, linked shares | 7.8 | v1 (S2.1–S2.2): the cohort scan on covariate cells with a Schur-complement Newton fit (a year of births in minutes); a side's year read through all its covering runs (a birth's follow-up crosses the year); linked shares carry the linkage variance Σp(1−p); `update` computes the runs a plan reads, never after its last year | S2 |
+| the reader: dossier, verdicts | 9 | v1 (S5.1): one reading order for register, report and dossier (uncalibrated, then explained, then artefact verdicts after the rest, rank within); each dossier carries its places' block by code and year around the window and the facilities that carry it; the first dossier read and its top leads given verdicts; a verdict annotates and orders a lead, never closes it (S0.5) | S5 |
 | use: plans, `update` | 9.3 | v1 of the orchestration: steps keyed by content (S0.1), shared objects once (S0.2), one job runner, each field's answers stored and a killed run resumed at the next field, the national fit and robust refits declared steps (S0.3) | S0.7 (first-computation speed) |
 
 ### 13.2 Departures
@@ -1307,5 +1315,4 @@ A solver change is measured on the benchmark before it is adopted.
 | 8.3 | a departure's persistence is tested on later years | `replication.PASSING = ("spike", "transient")`: the courses of `departures.attribute` that are not tested on later years, left to corroboration | by definition of a passing course; the attribution's own error is not carried |
 | 7.6 | contexts enter the map with their uncertainty | `dependency.CONTEXT_SD = 0.05` for every context's normal score; `CARE_KINDS = ("hospitalisation", "authorisation")` names the event kinds read as care | hand-set; the kinds should come from a declaration |
 | 3.1 | dates come from pegasus_data's roles | the alarm's entry date is the first of `gateway.ENTRY_PROPERTIES = ("entry_date", "registration_date", "processing_month")` a type declares | an ordered list of property names; to become a declared role |
-| 2 | every input comes through the gateway, which computes nothing expensive by surprise | links are computed only with `PEGASUS_COMPUTE_LINKS=1`; otherwise read from stored runs, and a year without one is reported (`LinkNotStored`) | a national linkage run is hours; corroboration and cohorts on unlinked years are open (survey §2) |
 | 4.1 | κ and N^{(SUS)} are factors of μ; groups g = age × sex × race | κ and the SUS share are exposure modifiers of the source string (`popsvs+kappa`, `+sus`), opt-in; race groups are race-stratified blocks (own θ, f, g, h per race), not a race axis of G; infant deaths by recorded race use the exposure Σ_j C(k\|j) r_j N_j with r_j fitted on the recorded counts, valid when declared races share one shape; SUS before 2021 is the 2021-23 cell mean with a measured random-walk σ | η's age-sex profile is a random walk over G and is another front's ground; a race axis needs it; the SUS product holds 2021-23 only (ADR-0020) |

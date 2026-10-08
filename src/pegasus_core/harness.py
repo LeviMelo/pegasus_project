@@ -76,6 +76,22 @@ LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "
 
 
 POSITIVES: tuple[Positive, ...] = (
+    # S1.5 (work plan), declared 2026-10-08 before their first run: one event in two systems, at the municipality.
+    # Venezuelan migration through Pacaraima from 2016: Boa Vista's maternity recorded 288 births of Venezuelan babies
+    # in 2016, 566 in 2017 and 571 in the first half of 2018 (SESAU-RR, reported by AFP/PRI 2018-08-22); in 2023 mothers
+    # of another nationality bore 43.4 % of Pacaraima's births and 27.6 % of Boa Vista's (SESAU-RR, ASIS 2023). The
+    # population estimates the expectation reads did not carry the arrivals, so births by residence rise against it,
+    # in SINASC (the birth declaration) and in SIH (the delivery admission), each its own system. Macapá, a northern
+    # capital with no such arrival, is the negative control
+    Positive("Births up, Boa Vista 2018-2019", "SINASC-DN", "birth", "*", "excess", "B1", "mun:140010", (2018, 2019),
+             criterion=EVENT_CRITERION, direction="up", note="Venezuelan mothers: 288 (2016) -> 566 (2017) -> 571 (H1 2018)"),
+    Positive("Births up, Pacaraima 2018-2019", "SINASC-DN", "birth", "*", "excess", "B1", "mun:140045", (2018, 2019),
+             criterion=EVENT_CRITERION, direction="up", note="43.4 % of births to foreign mothers in 2023"),
+    Positive("Delivery admissions up, Boa Vista 2018-2019", "SIH-RD", "hospitalisation", "O80-O84", "excess", "B1",
+             "mun:140010", (2018, 2019), criterion=EVENT_CRITERION, direction="up",
+             note="the same births in the second system: SUS delivery admissions by residence"),
+    Positive("Births, Macapá 2018-2019 (negative control)", "SINASC-DN", "birth", "*", "excess", "B1", "mun:160030",
+             (2018, 2019), criterion=EVENT_CRITERION, direction="up", expect="absent", note="no arrival of that size"),
     # S1.5, declared 2026-10-08 before its first run: São Paulo's Law 17,137/2019 let women choose a caesarean in public
     # facilities from 23 August 2019 until its revocation in July 2020; against the other 26 units the state's
     # caesarean rate rose 1.43 points over all hospitals, 3.31 in public ones (difference in differences on SINASC,

@@ -337,38 +337,40 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
     rng = np.random.default_rng(config.seed(seed_text))
     detail: dict[str, Any] = {}
 
+    # one statistic for every kind of source (S4.1): the window's count at the places against their own median year,
+    # on the log scale; a context field counts what it declares (its people harmed, or its events). The harm count
+    # summed alone, chosen on the landslides it was first read on, was a statistic of its own (survey 2026-10-07)
     if source.kind == "field":
-        m = fields.field(source, typologies_for(source, categories))
-        obs = float(m[rows][:, cols].sum())        # people the registry reports harmed at the places in the window
-
-        def null_of(sets: np.ndarray) -> np.ndarray:
-            return m[sets][:, :, cols].sum((1, 2)).astype(float)
-
-        detail["unit"] = ("people the registry reports harmed" if source.harm else "registered events") +             " at the places in the window"
+        y = fields.field(source, typologies_for(source, categories))
+        detail["counted"] = "people the registry reports harmed" if source.harm else "registered events"
     else:
+        unlinked = sorted(set(fields._cache.get(("unlinked_years", source)) or []) & set(range(years[0], years[-1] + 1)))
+        if source.link and unlinked:
+            # a year with no stored link keeps the records the two systems share: the lead would corroborate itself
+            return Corroboration(False, sid, source.label, detail={
+                "reason": f"no stored link for {unlinked}: the shared records cannot be removed", "unlinked": unlinked})
         y, linked = fields.events(source, categories)
         tot = float(y[rows][:, cols].sum() + linked[rows][:, cols].sum())
         if source.link:
             detail["overlap"] = float(linked[rows][:, cols].sum() / tot) if tot > 0 else 0.0
-            if fields._cache.get(("unlinked_years", source)):
-                detail["years_without_stored_link"] = fields._cache[("unlinked_years", source)]
-        base = np.median(y[:, other], axis=1) if other.any() else np.zeros(len(y))
+        detail["counted"] = "events"
+    base = np.median(y[:, other], axis=1) if other.any() else np.zeros(len(y))
 
-        def ratio(r: np.ndarray) -> np.ndarray:
-            observed = y[r][..., cols].sum((-1, -2))
-            expected = base[r].sum(-1) * cols.sum()
-            return np.log((observed + 0.5) / (expected + 0.5))
+    def ratio(r: np.ndarray) -> np.ndarray:
+        observed = y[r][..., cols].sum((-1, -2))
+        expected = base[r].sum(-1) * cols.sum()
+        return np.log((observed + 0.5) / (expected + 0.5))
 
-        obs = float(ratio(rows))
-        null_of = ratio
-        detail["unit"] = "log (window count + ½) / (the places' median year × years + ½)"
-        detail["observed_count"] = float(y[rows][:, cols].sum())
+    obs = float(ratio(rows))
+    null_of = ratio
+    detail["unit"] = "log (window count + ½) / (the places' median year × years + ½)"
+    detail["observed_count"] = float(y[rows][:, cols].sum())
     chunk = max(1, min(replicates, int(2e7 // max(len(rows) * int(cols.sum()), 1))))      # bounded memory at any replicate count
     null = np.concatenate([null_of(_null_sets(fields, rows, rng, min(chunk, replicates - i), connected))
                            for i in range(0, replicates, chunk)])
     p = float((1 + np.sum(null >= obs)) / (1 + len(null)))
-    if source.kind == "field" and obs == 0:
-        p = 1.0
+    if detail["observed_count"] == 0:
+        p = 1.0                                   # nothing at the places in the window corroborates nothing
     detail["replicates"] = replicates
     return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
 

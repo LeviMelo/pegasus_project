@@ -1,0 +1,9 @@
+# S2.1-S2.2 (work plan): births followed by an infant death, the first outcome-after-event field. Each year's births
+# are paired by the runs of that year and the next (`gateway.covering_runs`), so the field ends in 2022: the 2023
+# births' follow-up needs SIM 2024, held out. The update computes the runs it needs (2010-2023) as a declared step.
+years: 2010-2022
+systems:
+  - {dataset: SINASC-DN, event: birth, blocks: ['*'], links: ['link:sim_infant_deaths_to_sinasc:right']}
+relations: false
+triage: false
+report: reports/s2_infant_cohorts.md

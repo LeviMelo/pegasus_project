@@ -140,8 +140,10 @@ class Answer:
         return {m: f.stats.get("shape", {}).get("shape", "unattributed") for m, f in self.findings.items()}
 
 
-def _years(f) -> tuple[int, int]:
-    y = f.locus.get("years") or [-10 ** 9, 10 ** 9]
+def _years(f, years) -> tuple[int, int]:
+    """A finding's window; one that names none (a pattern over the whole period) spans the session's years (an
+    unbounded sentinel reached the register and the reader, 2026-10-08)."""
+    y = f.locus.get("years") or [min(years), max(years)]
     return int(y[0]), int(y[-1])
 
 
@@ -154,7 +156,7 @@ def _shape(session, node: str, f, tier: str, train_last: int | None = None) -> d
     w = np.isin(np.asarray(s.places).astype(int), [int(p) for p in f.locus.get("places", [])]).astype(float)
     if not w.any():
         return {"shape": "unattributed"}
-    y0, y1 = _years(f)
+    y0, y1 = _years(f, session.years)
     yrs = np.asarray(s.years)
     inside = np.flatnonzero((yrs >= y0) & (yrs <= y1))
     window = (int(inside[0]), int(inside[-1]) + 1) if inside.size else None
@@ -192,7 +194,7 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
         for f in found:
             if "shape" not in f.stats:
                 f.stats["shape"] = _shape(session, node, f, f.tier, kw.get("train_last"))
-            pl, (y0, y1) = {int(p) for p in f.locus.get("places", [])}, _years(f)
+            pl, (y0, y1) = {int(p) for p in f.locus.get("places", [])}, _years(f, session.years)
             home = None
             for a in answers:
                 if a.places & pl and a.years[0] <= y1 and y0 <= a.years[1]:

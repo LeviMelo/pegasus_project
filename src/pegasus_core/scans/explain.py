@@ -36,7 +36,8 @@ from scipy import special, stats
 def rules() -> str:
     from .. import config
 
-    return config.code_key(triage, institution_triage)[:12]
+    # the rules and the evidence they read, named so that this module imports nothing above it
+    return config.code_key(triage, institution_triage, "pegasus_core.tools:Session._evidence")[:12]
 
 
 def deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -186,6 +187,8 @@ class Evidence:
     group_spread: tuple[float, str] | None = None   # sd of the groups' log SIR and the groups furthest from the mean
     facility: FacilityTally | None = None           # the lead's events by the institution that recorded them
     per_year: int = 1               # periods in a year on the grid: 1 (annual), 12 (``years`` are YYYYMM)
+    y_g: np.ndarray | None = None   # the lead's field by age-sex group [places, years, groups]
+    siblings_g: np.ndarray | None = None   # the siblings by age-sex group
 
 
 @dataclass
@@ -315,7 +318,14 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
         d_sib, z_sib = _moves(ev.siblings, rows, win, base)
         info.update(sibling_window=round(s_w, 2), sibling_base=round(s_b, 2))
         if d_node * d_sib < 0 and abs(d_sib) >= ABSORB * abs(d_node) and abs(z_sib) >= SIGNIFICANT:
-            return Triage(SUBSTITUTION, "siblings move opposite and absorb most of the change", info, BOUND, min(1.0, abs(d_sib) / abs(d_node)))
+            share = min(1.0, abs(d_sib) / abs(d_node))
+            lr = recoded_profile(ev, rows, win, base) if direction > 0 else None
+            if lr is not None:
+                info["profile_log10_lr"] = round(lr, 1)
+                if lr >= -np.log10(FAC_P):
+                    return Triage(SUBSTITUTION, "recoded: the siblings fell, and the lead's events carry their age-sex "
+                                  "profile, not their own code's", info, TESTED, share)
+            return Triage(SUBSTITUTION, "siblings move opposite and absorb most of the change", info, BOUND, share)
 
     # 3. certification: the ill-defined chapter
     if ev.chapter == "XVIII":
@@ -372,6 +382,23 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     if fac is not None and fac["facility"]:
         return Triage(FACILITY, fac["reason"], info, TESTED)
     return Triage(SIGNAL, "no recording or denominator explanation found in the data", info)
+
+
+def recoded_profile(ev: Evidence, rows: np.ndarray, win: np.ndarray, base: np.ndarray) -> float | None:
+    """log10 of the likelihood ratio of the window's events at the lead's places by age-sex group: under the profile of
+    the siblings there in the base years (the patients whose codes fell) against the lead's own code's national
+    profile. Two simple hypotheses, so under the code's own profile P(LR ≥ k) ≤ 1/k (Markov) whatever the counts: an
+    LR of 1/FAC_P tests the recoding. Pneumoconiosis in two-year-olds has the asthma's ages, not the miners' (S5.1).
+    The siblings' profile is shrunk to their national one by half an event per group; None without groups."""
+    if ev.y_g is None or ev.siblings_g is None or ev.y_g.shape[-1] < 2:
+        return None
+    w = ev.y_g[rows][:, win].sum((0, 1))
+    if w.sum() <= 0:
+        return None
+    own = ev.y_g.sum((0, 1)) + 0.5
+    sib_nat = ev.siblings_g.sum((0, 1)) + 0.5
+    sib = ev.siblings_g[rows][:, base].sum((0, 1)) + 0.5 * len(w) * sib_nat / sib_nat.sum()
+    return float(np.sum(w * (np.log(sib / sib.sum()) - np.log(own / own.sum()))) / np.log(10))
 
 
 def facility_read(t: FacilityTally, win: np.ndarray, base: np.ndarray, direction: int) -> dict:

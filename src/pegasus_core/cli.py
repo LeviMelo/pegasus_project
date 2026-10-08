@@ -72,6 +72,18 @@ def coverage(dataset: str, event: str, gaps: bool = typer.Option(False, help="on
                   f"{sum(not r['read_by'] and not r['reason'] for r in rows)} with neither")
 
 
+@app.command("links")
+def plan_links(plan: str = typer.Argument(..., help="a plan file (YAML)")) -> None:
+    """Compute the stored link runs a plan reads for its years (`update`'s first step, alone), under the job slot."""
+    from . import jobs, update
+
+    with jobs.slot(f"links {plan}"):
+        out: dict = {}
+        update._ensure_links(update.Plan.load(plan), out, log=console.print)
+    for k, v in out.items():
+        console.print(f"{k}: {v}")
+
+
 @app.command("update")
 def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
                  force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:

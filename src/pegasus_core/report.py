@@ -12,6 +12,7 @@ import collections
 from pathlib import Path
 
 from . import leads as register_mod
+from . import replication
 
 
 def _names() -> dict:
@@ -52,14 +53,14 @@ def report(leads: list[register_mod.Lead] | None = None, limit: int = 25, title:
         if ld.kind == "answer" and ld.status != "retired":
             answers[ld.family].append(ld)
     for fam in sorted(answers):
-        group = sorted(answers[fam], key=lambda x: -x.rank)   # §9.1: evidence × effect × replication
+        group = sorted(answers[fam], key=register_mod.reading_order)   # §9.1: evidence × effect × replication
         explained = sum(x.status == "explained" for x in group)
         out += [f"## {fam}: {len(group)} answers{f', {explained} explained by triage' if explained else ''}", "",
                 "| field | years | places | effect | methods | shapes | triage | tier | q |",
                 "|---|---|---|---|---|---|---|---|---|"]
         out += [_answer_row(x, names) for x in group[:limit]]
         out.append("")
-    rel = sorted((x for x in leads if x.kind == "relation" and x.status != "retired"), key=lambda x: -x.rank)
+    rel = sorted((x for x in leads if x.kind == "relation" and x.status != "retired"), key=register_mod.reading_order)
     if rel:
         out += [f"## Relations: {len(rel)}", "", "| band | field | leader | lag | ρ | direct | q |", "|---|---|---|---|---|---|---|"]
         out += [f"| {x.locus.get('band')} | {x.fields[0]} | {x.fields[1]} | {x.locus.get('lag')} | {x.effect:+.3f} | "
@@ -68,6 +69,26 @@ def report(leads: list[register_mod.Lead] | None = None, limit: int = 25, title:
         unanswered = sorted({u for x in rel for u in x.provenance.get("unanswered", [])})
         if unanswered:
             out += ["", "**Scales left unanswered:**", *[f"- {u}" for u in unanswered]]
+        out.append("")
+    # race disparities (§3.4, S3.2): a place's race-j ratio over the reference race's, against Brazil's
+    disp = sorted((x for x in leads if x.estimand == "race_disparity" and x.status != "retired"), key=register_mod.reading_order)
+    if disp:
+        out += [f"## Race disparities: {len(disp)}", "",
+                "| field | place | race / reference | years | disparity | Brazil's | events | q |",
+                "|---|---|---|---|---|---|---|---|"]
+        out += [f"| {x.fields[0]} | {_place(x.locus['places'][0], names)} | {x.locus.get('race')} / "
+                f"{x.locus.get('reference')} | {x.locus['years'][0]}–{x.locus['years'][-1]} | {x.effect:.2f} | "
+                f"{x.provenance.get('national_disparity', 0):.2f} | {x.provenance.get('events', 0):.0f} / "
+                f"{x.provenance.get('events_reference', 0):.0f} | {x.q:.1e} |" for x in disp[:limit]]
+        out.append("")
+    # cohorts (§7.8, S2.1): an attribute's level against its reference, for an outcome after the event
+    coh = sorted((x for x in leads if x.kind == "cohort" and x.status != "retired"), key=register_mod.reading_order)
+    if coh:
+        out += [f"## Cohorts: {len(coh)}", "", "| persons | outcome | attribute: level / reference | rate ratio | q |",
+                "|---|---|---|---|---|"]
+        out += [f"| {x.fields[0]} | {x.fields[1] if len(x.fields) > 1 else ''} | {x.locus.get('attribute')}: "
+                f"{x.locus.get('level')} / {x.locus.get('reference')} | {x.effect:.2f} | {x.q:.1e} |"
+                for x in coh[:limit]]
         out.append("")
     return "\n".join(out)
 
@@ -84,9 +105,54 @@ def write(path: str | Path, **kw) -> Path:
 VERDICTS = ("confirmed", "artefact", "unknown")
 
 
-def _series_svg(lead: register_mod.Lead) -> str:
+def _session(lead: register_mod.Lead, cache: dict):
+    """The session a lead's field was read in (None when the lead has no places or its field no session)."""
+    from . import graphs, tools
+
+    if "source" not in lead.provenance or not lead.locus.get("places") or lead.fields[0].count(":") < 3:
+        return None
+    ds, ev, *_ = lead.fields[0].split(":")
+    pv = lead.provenance
+    key = (ds, ev, tuple(pv.get("years") or tools.FIT_YEARS), pv.get("graph") or graphs.DEFAULT,
+           repr(sorted((pv.get("source") or {}).items())))
+    if key not in cache:
+        cache[key] = tools.Session(ds, ev, list(key[2]), key[3], source=pv.get("source") or {})
+    return cache[key]
+
+
+def _codes_table(lead: register_mod.Lead, sess) -> str:
+    """The lead's places' block by code and year around its window, the codes that move most first, the lead's own in
+    bold: what a recoding or an event looks like in the counts (every verdict of the first dossier was read from it)."""
+    import html
+
+    import numpy as np
+
+    node = lead.fields[0].split(":")[-1]
+    try:
+        d = sess._data(sess.expectations.registry.chapter(node))
+        mine = {d.leaves[j] for j in sess._leaves(node)[1]}
+    except Exception:  # noqa: BLE001 - a dossier without its table says so
+        return "<p><i>codes not available</i></p>"
+    if d.n is not None:                      # a measure's cells hold means, not counts
+        return ""
+    sel = np.isin(np.asarray(d.places).astype(int)[d.u], [int(p) for p in lead.locus["places"]])
+    yrs = np.asarray(d.periods())
+    w = lead.locus.get("years") or [int(yrs[0]), int(yrs[-1])]
+    show = np.flatnonzero((yrs >= w[0] - 2) & (yrs <= w[-1] + 2))
+    counts = np.zeros((len(d.leaves), len(yrs)))
+    np.add.at(counts, (d.e[sel], d.t[sel]), d.y[sel])
+    sub = counts[:, show]
+    order = [i for i in np.argsort(-(sub.max(1) - sub.min(1)))[:8] if sub[i].max() > 0]
+    head = "".join(f"<th>{int(yrs[j])}</th>" for j in show)
+    rows = "".join(f"<tr><td>{'<b>' + html.escape(d.leaves[i]) + '</b>' if d.leaves[i] in mine else html.escape(d.leaves[i])}"
+                   f"</td>" + "".join(f"<td>{sub[i, k]:.0f}</td>" for k in range(len(show))) + "</tr>" for i in order)
+    total = "".join(f"<td>{v:.0f}</td>" for v in sub.sum(0))
+    return (f"<table><tr><th>{html.escape(d.block)}</th>{head}</tr>{rows}<tr><td><i>all codes</i></td>{total}</tr></table>")
+
+
+def _series_svg(lead: register_mod.Lead, sess) -> str:
     """The lead's locus summed over its places: observed against expected by period, as inline SVG (its field's B1
-    surprise; empty when the lead has no places or its field cannot be read)."""
+    surprise; empty when the lead has no session)."""
     import io
 
     import matplotlib
@@ -95,17 +161,11 @@ def _series_svg(lead: register_mod.Lead) -> str:
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from . import graphs, tools
-
-    places = lead.locus.get("places") or []
-    if "source" not in lead.provenance or not places or lead.fields[0].count(":") < 3:
+    if sess is None:
         return ""
-    ds, ev, *_ = lead.fields[0].split(":")
-    node = lead.fields[0].split(":")[-1]
-    pv = lead.provenance
+    places = lead.locus["places"]
     try:
-        s = tools.Session(ds, ev, pv.get("years") or tools.FIT_YEARS, pv.get("graph") or graphs.DEFAULT,
-                          source=pv.get("source") or {}).surprise(node, "B1")
+        s = sess.surprise(lead.fields[0].split(":")[-1], "B1")
     except Exception:  # noqa: BLE001 - a dossier without its figure says so
         return "<p><i>series not available</i></p>"
     sel = np.isin(np.asarray(s.places).astype(int), [int(p) for p in places])
@@ -146,8 +206,9 @@ def dossier(path: str | Path, limit: int = 30, kinds: tuple[str, ...] = ("answer
     import html
 
     names = _names()
+    sessions: dict = {}
     leads = [x for x in register_mod.Register().current() if x.kind in kinds and x.status != "retired"]
-    leads = sorted(leads, key=lambda x: -x.rank)[:limit]
+    leads = sorted(leads, key=register_mod.reading_order)[:limit]
     parts = ["<!doctype html><meta charset='utf-8'><title>PegaSUS dossiers</title>",
              "<style>body{font:14px/1.45 system-ui,sans-serif;max-width:860px;margin:2em auto;padding:0 16px;color:#222}"
              "section{border-top:1px solid #ddd;padding:1em 0}h2{font-size:16px;margin:.2em 0}"
@@ -160,16 +221,24 @@ def dossier(path: str | Path, limit: int = 30, kinds: tuple[str, ...] = ("answer
         tri = ld.robustness.get("triage", {})
         corr = ld.replications.get("corroboration", {})
         verdict = ld.robustness.get("verdict")
+        fac = tri.get("facility") or {}
         rows = [("lead", f"{ld.id} ({ld.kind}, rank {ld.rank:.1f})"),
                 ("methods", ", ".join(ld.provenance.get("methods", [])) or "—"),
                 ("triage", f"{tri.get('class', '—')} ({tri.get('grade') or 'ungraded'}): {tri.get('reason', '')}"),
+                ("facilities", f"{', '.join(fac.get('top', []))} carry {fac.get('share', 0):.0%} of the change"
+                               f"{'; the place’s sole provider' if fac.get('sole_provider') else ''}; the codes' share "
+                               f"inside them {fac.get('mix_inside', ['', ''])[0]} → {fac.get('mix_inside', ['', ''])[-1]}"
+                               if fac.get("top") else "—"),
                 ("replication", ld.replication),
+                *((f"independent: {k}", v) for k, v in replication.account(ld).items()),
                 ("corroboration", f"{corr.get('label', '—')}: {'yes' if corr.get('ok') else 'no'}"
                                   f" (p {corr.get('p', float('nan')):.2g})" if corr else "—"),
                 ("method record", "; ".join(f"{m}: {r.get('calibrated')}" for m, r in (ld.method or {}).items()
                                             if isinstance(r, dict)) or "—"),
                 ("verdict", f"{verdict['verdict']} — {verdict.get('note', '')}" if verdict else "none recorded")]
-        parts.append("<section><h2>" + html.escape(_claim(ld, names)) + "</h2>" + _series_svg(ld) + "<table>" +
+        sess = _session(ld, sessions)
+        parts.append("<section><h2>" + html.escape(_claim(ld, names)) + "</h2>" + _series_svg(ld, sess) +
+                     (_codes_table(ld, sess) if sess is not None else "") + "<table>" +
                      "".join(f"<tr><td class=k>{k}</td><td>{html.escape(str(v))}</td></tr>" for k, v in rows) +
                      "</table></section>")
     p = Path(path)

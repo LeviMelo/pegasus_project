@@ -775,13 +775,19 @@ class Session:
         d, leaves = self._leaves(node)
         y = self._counts(d, leaves)
         fam = leads.family(node)
+        # the siblings: the family's other leaves (the family is the outermost group, `leads.family`); an outermost
+        # group's are the rest of its chapter. Without them a group under the chapter had none, and a facility that
+        # recoded its asthma and pneumonia as pneumoconiosis read as a signal (Mundo Novo/GO, J64, 2012; S5.1)
+        parent = fam if fam != node else reg.chapter(node)
         sib = None
-        if reg.level.get(node) != "chapter" and fam != node and fam in reg.children:
-            # the siblings: the family's other leaves (the family is the outermost group, `leads.family`)
-            sl = np.setdiff1d(self._leaves(fam)[1], leaves)
+        if reg.level.get(node) != "chapter" and parent != node and parent in reg.children:
+            sl = np.setdiff1d(self._leaves(parent)[1], leaves)
             sib = self._counts(d, sl) if sl.size else None
+        by_g = sib is not None and d.N.shape[-1] > 1
         return explain.Evidence(self._grid_years, y, sib, self._ill, self._total, self._pop, chapter=reg.chapter(node),
-                                residual=explain.residual_label(reg.label.get(node, "")), per_year=self._per_year)
+                                residual=explain.residual_label(reg.label.get(node, "")), per_year=self._per_year,
+                                y_g=self._counts(d, leaves, by_group=True) if by_g else None,
+                                siblings_g=self._counts(d, sl, by_group=True) if by_g else None)
 
     def _by_group_cells(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         d, leaves = self._leaves(node)
@@ -1052,19 +1058,26 @@ class Session:
                 tests.append((x, run.result))
             if len(seen) % 200 == 0:
                 log(f"corroborated {len(seen)}")
-        verdicts: dict[str, list[dict]] = {}
-        for source in {c.source for _, c in tests if c.tested}:
-            group = [(x, c) for x, c in tests if c.tested and c.source == source]
-            ps = np.array([c.p for _, c in group])
-            mask, qv = control.bh(ps, q), control.adjusted(ps)
-            for (x, c), hit, qq in zip(group, mask, qv, strict=True):
-                verdicts.setdefault(x.id, []).append({**c.asdict(), "q": float(qq), "ok": bool(hit)})
+        # one family (S4.1): each lead's corroboration p is its smallest source p times the number of its sources
+        # tested (Bonferroni: a lead is corroborated by any of k sources only at q/k each), and one Benjamini-Hochberg
+        # over every lead. "Any source rejects at q" over unbounded sources inflated a lead's error by its source count
+        by_lead: dict[str, list] = {}
         for x, c in tests:
-            if not c.tested:
-                verdicts.setdefault(x.id, []).append({**c.asdict(), "ok": False})
+            by_lead.setdefault(x.id, []).append(c)
+        tested = [x for x in seen if any(c.tested for c in by_lead.get(x.id, []))]
+        lead_p = np.array([min(1.0, min(c.p for c in by_lead[x.id] if c.tested)
+                               * sum(c.tested for c in by_lead[x.id])) for x in tested])
+        mask, qv = (control.bh(lead_p, q), control.adjusted(lead_p)) if len(lead_p) else (np.zeros(0, bool), np.zeros(0))
+        verdict = {x.id: (bool(hit), float(qq), float(pp)) for x, hit, qq, pp in zip(tested, mask, qv, lead_p, strict=True)}
         for x in seen:
-            got = verdicts.get(x.id) or [{"tested": False, "reason": "no independent field holds its codes", "ok": False}]
-            best = min(got, key=lambda v: (not v["ok"], v.get("q", v.get("p", 1.0))))
+            got = [{**c.asdict(), "ok": False} for c in by_lead.get(x.id, [])] or \
+                [{"tested": False, "reason": "no independent field holds its codes", "ok": False}]
+            if x.id in verdict:
+                hit, qq, pp = verdict[x.id]
+                best = dict(min((g for g in got if g.get("tested")), key=lambda g: g.get("p", 1.0)))
+                best.update({"ok": hit, "q": qq, "p_lead": pp, "sources_tested": sum(bool(g.get("tested")) for g in got)})
+            else:
+                best = got[0]
             x.replications = {**x.replications, "corroboration": {**best, "sources": got}}
             x.replication = control.replication_tier(kinds_of(x))
         return seen
@@ -1437,11 +1450,13 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
     the population account, and for recorded race the exposure through the measured confusion, `gateway.population`),
     so a place's standardised ratio O_j/E_j is the race's rate there against the race's national rate. A place's
     disparity is its race-j ratio over the ``reference`` race's; given the two races' events there, race j's count is
-    binomial with probability E_j·θ/(E_j·θ + E_ref), θ the national disparity, so the test (two-sided) reports places
+    beta-binomial with mean E_j·θ/(E_j·θ + E_ref), θ the national disparity, and the places' own spread of disparities by central
+    matching (`departures.betabinom_central`), so the test (two-sided) reports places
     whose disparity departs from Brazil's, pooled over ``years``. One BH at q over races and places; the leads carry
     the place's disparity against the national one. Each race's block must be fitted (`update` fits them as a declared
     step of a plan's ``disparities``); a missing one raises."""
-    from scipy import stats as st
+
+    from . import departures
 
     races = races or tuple(k for k in gateway.RACE if k != reference)
     out_rows = []
@@ -1464,10 +1479,13 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
         theta = (o.sum() / max(e.sum(), 1e-12)) / max(o_ref.sum() / max(e_ref.sum(), 1e-12), 1e-12)
         n = o + o_ref
         use = (n > 0) & (e > 0) & (e_ref > 0)
-        p0 = e * theta / (e * theta + e_ref)
-        lower = st.binom.cdf(o, n, np.clip(p0, 1e-12, 1 - 1e-12))
-        upper = st.binom.sf(o - 1, n, np.clip(p0, 1e-12, 1 - 1e-12))
-        pv = np.where(use, np.minimum(1.0, 2 * np.minimum(lower, upper)), 1.0)
+        p0 = np.clip(e * theta / (e * theta + e_ref), 1e-9, 1 - 1e-9)
+        # beta-binomial with the places' own spread of disparities (central matching): places differ in a disparity
+        # as they differ in every rate, and a binomial at a birth's counts called half of them departures
+        pv = np.ones(len(o))
+        if use.sum() >= 20:
+            conc, below, at, upper = departures.betabinom_central(o[use], n[use], p0[use], ("disparity", dataset, node, k))
+            pv[use] = np.minimum(1.0, 2 * np.minimum(below + at, upper))
         for i in np.flatnonzero(use):
             rr = (o[i] / e[i]) / max(o_ref[i] / e_ref[i], 1e-12) if o_ref[i] > 0 else np.inf
             out_rows.append((k, int(s.places[i]), float(rr), float(theta), float(pv[i]), float(o[i]), float(o_ref[i])))
@@ -1481,9 +1499,16 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
     admitted = [leads.Lead(kind="residual", estimand="race_disparity", tier="B0", fields=[field_id],
                            locus={"places": [u], "years": [years[0], years[-1]], "race": k, "reference": reference},
                            effect=rr if np.isfinite(rr) else 1e6, scale="rate_ratio", interval=None, p=p, q=float(qq),
-                           family=f"disparity|{field_id}", null="the national disparity (conditional binomial)",
+                           family=f"disparity|{field_id}", null="the national disparity (beta-binomial, central matching)",
                            calibrated=False, provenance={"national_disparity": theta, "events": o_k, "events_reference": o_r})
                 for (k, u, rr, theta, p, o_k, o_r), kp, qq in zip(out_rows, keep, qv, strict=True) if kp]
-    leads.Register().add(admitted)
-    log(f"disparity {field_id}: {len(admitted)} places depart from the national disparity, of {len(out_rows)}")
+    reg = leads.Register()
+    new = {x.id for x in admitted}
+    stale = [x for x in reg.current() if x.family == f"disparity|{field_id}" and x.id not in new
+             and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
+    for x in stale:                        # an earlier reading this one no longer selects
+        x.status, x.note = "retired", f"not selected by the disparity reading of {time.strftime('%Y-%m-%d')}"
+    reg.add(stale + admitted)
+    log(f"disparity {field_id}: {len(admitted)} places depart from the national disparity, of {len(out_rows)}"
+        + (f"; {len(stale)} earlier readings retired" if stale else ""))
     return admitted
