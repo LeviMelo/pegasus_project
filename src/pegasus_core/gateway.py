@@ -79,10 +79,14 @@ def split_source(source: str) -> tuple[str, tuple[str, ...]]:
     return base, tuple(sorted(mods))
 
 
-def age_edges(source: str | None = None) -> list[int]:
-    """The lower edges of the age bands a population source supports (the last band is open)."""
+def age_edges(source: str | None = None, dataset: str | None = None) -> list[int]:
+    """The lower edges of the age bands a population source supports (the last band is open); with ``dataset``, only
+    the edges its events' ages also have: an event counted by age band (SINAN-SDTA's grid: 0, 1, 5, 10, 20, 50) is
+    read on the coarsest bands both share, never split across the population's."""
     # account-3/4 hold single ages and are summed onto POPSVS's 18 bands
-    return list(ACCOUNT_EDGES if split_source(source or config.population_source())[0] in ("account-2", "popsvs-5y") else POPSVS_EDGES)
+    edges = list(ACCOUNT_EDGES if split_source(source or config.population_source())[0] in ("account-2", "popsvs-5y") else POPSVS_EDGES)
+    bands = _strata(dataset).get("age_bands") if dataset else None
+    return [e for e in edges if e in bands] if bands else edges
 
 
 def population_key(source: str | None = None) -> dict:
@@ -561,7 +565,14 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
             age, code, CAST(sum(y) AS INTEGER) AS y FROM e WHERE ({reason}) IS NULL{" AND race = " + str(int(race)) if race else ""}
             GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(sum(y) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL{race_mine} GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(y) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL AND y > 0{race_mine} GROUP BY ALL""").fetch_arrow_table()
+    if "unquantified" in raw.column_names:
+        # a weight grid's rows with neither grid nor total: groups whose people were not counted, never zero people;
+        # the reason names its unit (rows, not events)
+        uncounted = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, 'groups not counted (rows, not events)' AS reason,
+                {code} AS code, CAST(sum(unquantified) AS INTEGER) AS y FROM r WHERE unquantified > 0 GROUP BY ALL
+                HAVING count(*) > 0""").fetch_arrow_table()
+        unallocated = pa.concat_tables([unallocated, uncounted.cast(unallocated.schema)])
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.count_events({dataset}, {event})", "by": by})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
@@ -573,8 +584,8 @@ def _per_record(dataset: str, event: str, what: str) -> None:
     import pegasus_data as pg
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
-    if spec.get("weight"):
-        raise ValueError(f"{dataset} {event}: a row stands for {spec['weight']} events; {what} is per record")
+    if spec.get("weight") or spec.get("grid"):
+        raise ValueError(f"{dataset} {event}: a row stands for {spec['weight'] or 'a grid of'} events; {what} is per record")
 
 
 def _residence_sql(column: str) -> str:
@@ -600,6 +611,8 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     import pyarrow.compute as pc
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    if spec.get("grid"):
+        raise ValueError(f"{dataset} {event}: a row is a grid of events by sex and age band, not a record of one")
     status = spec.get("status") or {}
     weight = [spec["weight"]] if spec.get("weight") else []
     wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else []) + weight))
@@ -729,6 +742,8 @@ def _sex_sql(strata: dict, dataset: str, table: pa.Table) -> str:
     labelled neither (ignored, blank, undecoded) is unallocated."""
     if strata["sex"] is None:
         return str(strata["implied_sex"])
+    if strata.get("sex_canonical"):     # a weight grid's sex: 1 male, 2 female, null unknown (pegasus_data GRID_SEX)
+        return f'CASE WHEN "{strata["sex"]}" IN (1, 2) THEN CAST("{strata["sex"]}" AS INTEGER) END'
     codes = sorted({str(c) for c in pc.unique(table.column(strata["sex"])).to_pylist() if c is not None})
     mapping = _sex_codes(dataset, strata["sex"], tuple(codes))
     col = f'CAST("{strata["sex"]}" AS VARCHAR)'
@@ -1112,8 +1127,21 @@ def _strata(dataset: str) -> dict:
     race stratum, the mother's on a birth, None where none is declared)."""
     import pegasus_data as pg
 
-    rows = [r for r in pg.roles(dataset) if r.get("model") == "stratum"]
+    rs = pg.roles(dataset)
+    rows = [r for r in rs if r.get("model") == "stratum"]
     by_prop = {r["property"]: r for r in rows}
+    grid = next((e["grid"] for e in pg.event_types(dataset) if e.get("grid")), None) if _has_events(dataset) else None
+    if grid:
+        # a row counts a group of people by sex and age band (pegasus_data's weight grid, SINAN-SDTA's outbreak): the
+        # grid's own columns are the strata, its bands the ages, and the place is the municipality of the entity its
+        # cells count (the outbreak's, where the group fell ill; not the notification's), since a group has no residence
+        entity = {r["column"]: r["entity"] for r in rs}.get(grid["cells"][0]["column"])
+        where = [r for r in rs if r.get("model") == "where" and r.get("property") == "municipality" and r["entity"] == entity]
+        if len(where) != 1:
+            raise LookupError(f"{dataset}: a grid event needs one municipality of its entity {entity!r}, has {len(where)}")
+        return {"residence": where[0]["column"], "place": "event", "age": grid["age"], "age_missing": (),
+                "age_bands": tuple(grid["bands"]), "sex": grid["sex"], "sex_canonical": True, "implied_sex": None,
+                "entity": where[0]["entity"], "race": None}
     if "residence" not in by_prop:
         raise LookupError(f"{dataset}: no residence stratum in pegasus_data's roles")
     age = by_prop.get("age_years") or by_prop.get("age")
@@ -1123,9 +1151,20 @@ def _strata(dataset: str) -> dict:
     implied = {"mother": 2}.get(entity)
     if "sex" not in by_prop and implied is None:
         raise LookupError(f"{dataset}: no sex stratum, and entity {entity!r} implies none")
-    return {"residence": by_prop["residence"]["column"], "age": age["column"], "age_missing": tuple(age.get("missing") or ()),
+    return {"residence": by_prop["residence"]["column"], "place": "residence", "age": age["column"],
+            "age_missing": tuple(age.get("missing") or ()),
             "sex": by_prop["sex"]["column"] if "sex" in by_prop else None, "implied_sex": implied, "entity": entity,
             "race": by_prop["race"]["column"] if "race" in by_prop else None}
+
+
+def _has_events(dataset: str) -> bool:
+    import pegasus_data as pg
+
+    try:
+        pg.event_types(dataset)
+    except KeyError:
+        return False
+    return True
 
 
 CANONICAL_LEVELS = ("chapter", "group", "category", "subcategory")

@@ -95,3 +95,18 @@ runs 2014–2022 (42,373 to 67,625 pairs a year, about 14 minutes each).
   in 2012), matches by chance at 92 %, as the race bridge found outside municipalities under 2,000 mothers.
 - **Running:** the CIHA links, which failed on a name resolution fixed in pegasus_data f8c4a88.
 
+
+**OQ 13: SIM IX's large places above their expectation, and the robust refit (ADR-0033).** Probes:
+`data/probes/recoding_pool.py`, with logs `recoding_pool_block.log` and `recoding_pool_v11.log`. Readings are on SIM IX
+2010–2023 under B1, with O/E taken over 2010–2019 by quantile of place size.
+- **The baseline (v9).** O/E is 0.998 below the median and 1.028 at the 90th–99th percentiles, 1.018 overall. The PIT
+  KS by size quintile runs from 0.012 to 0.085.
+- **The cause: recodings flagged and removed.**
+  - The robust refit flagged persistent recodings and imputed them away: Fortaleza's I10 at about 5× its expectation
+    every year, Belo Horizonte's I11, Brasília's I51, and I42 in Nova Iguaçu and Duque de Caxias.
+  - The same place's other leaves showed the matching deficit for 55 % of the top decile's flagged excess, against
+    21 % below the median.
+- **Moving the excess back to the deficits (v10, v11).** With the leaf's group as the pool:
+  - IX calibrates: KS 0.006–0.055, whole O/E 1.010.
+  - With the block as the pool, KS is 0.007–0.018 and whole O/E 1.001, so the block was kept.
+  - O/E still runs from 0.979 below the median to 1.010 in the top 1 %, inside the noise, and OQ 13 stays open on it.

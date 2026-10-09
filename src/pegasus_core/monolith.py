@@ -264,7 +264,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     years = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, years.tolist(), source, structure=structure, **source_args)
-    edges = gateway.age_edges(population)   # the population source fixes the age bands (never padded or split)
+    edges = gateway.age_edges(population, dataset)   # the population source and the events fix the bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
@@ -1830,7 +1830,7 @@ class Monolith:
                              "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
                 log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
                     f"({obs[flag].sum():.0f} events against {mu[flag].sum():.0f} expected)")
-                m = self.refit(m._impute(d, flag), hc=None)
+                m = self.refit(m._impute(d, flag, obs, mu), hc=None)
                 continue
             if r == 0:
                 y_new = d.y.astype(float)
@@ -1848,7 +1848,7 @@ class Monolith:
                 p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
                 flag = (p < trim) & (obs > mu)
                 cells = int(flag.sum())
-                dw = m._impute(d, flag)
+                dw = m._impute(d, flag, obs, mu)
                 info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()), "by_cell": cells,
                              "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
                 log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
@@ -1971,10 +1971,20 @@ class Monolith:
         log(f"category courses: τ {tau:.3g}, max |h| {info['max_abs']}")
         return info
 
-    def _impute(self, d: BlockData, flag: np.ndarray) -> BlockData:
+    def _impute(self, d: BlockData, flag: np.ndarray, obs: np.ndarray | None = None,
+                mu: np.ndarray | None = None) -> BlockData:
         """The block's counts with every flagged leaf × place × period replaced by its expectation over its sex-age
         groups (EM for missing cells), zero counts included: scaling only the non-empty entries left a flagged
-        region's empty cells at zero, below their expectation, and pulled the background down."""
+        region's empty cells at zero, below their expectation, and pulled the background down.
+
+        **A recoding is moved, not removed** (OPEN_QUESTIONS 13, given ``obs`` and ``mu`` [E, U, T]). A place that
+        certifies a group's deaths under one code (Fortaleza's hypertension as I10, about five times its expectation
+        every year 2010-2014) flags that leaf, and imputing it alone removed deaths the place really had: SIM IX's
+        large places sat 2-3 % above their expectation, small ones on it, because a large place's level is its own
+        data. A recoding leaves the matching deficit among the block's other leaves in the same place and period; an
+        epidemic adds deaths and leaves none. So the flagged excess that the unflagged leaves' deficit accounts for is
+        added back to them, in proportion to their deficits and, within a leaf, to its expectation over its sex-age
+        groups; only the rest is removed as a departure (ADR-0033)."""
         import dataclasses
 
         f = flag[d.e, d.u, d.t]
@@ -1989,13 +1999,38 @@ class Monolith:
             parts_t.append(tt[ii].astype(d.t.dtype))
             parts_g.append(gg.astype(d.g.dtype))
             parts_y.append(mg[ii, gg])
-        return dataclasses.replace(d, e=np.concatenate(parts_e), u=np.concatenate(parts_u), t=np.concatenate(parts_t),
-                                   g=np.concatenate(parts_g), y=np.concatenate(parts_y))
+        if obs is not None and mu is not None:
+            # the pool is the block's unflagged leaves in the same place and period: a recoding crosses groups (Fortaleza's
+            # I10 against I50; the group's leaves alone left the largest places' PIT KS at 0.055, the block's at 0.018)
+            excess = np.where(flag, np.maximum(obs - mu, 0.0), 0.0).sum(0)        # [U, T]
+            deficit = np.where(flag, 0.0, np.maximum(mu - obs, 0.0))              # [E, U, T]
+            pool = deficit.sum(0)
+            moved = np.minimum(excess, pool)                                      # what a recoding accounts for
+            add = deficit * np.divide(moved, pool, out=np.zeros_like(pool), where=pool > 0)   # back to the siblings
+            self.recoded = float(moved.sum())
+            for e in np.unique(np.nonzero(add > 1e-9)[0]):
+                uu, tt = np.nonzero(add[e] > 1e-9)
+                mg = self.expected_by_group(np.array([e]))[uu, tt]
+                w = np.divide(mg, mg.sum(1, keepdims=True), out=np.zeros_like(mg), where=mg.sum(1, keepdims=True) > 0)
+                ii, gg = np.nonzero(w > 0)
+                parts_e.append(np.full(len(ii), e, dtype=d.e.dtype))
+                parts_u.append(uu[ii].astype(d.u.dtype))
+                parts_t.append(tt[ii].astype(d.t.dtype))
+                parts_g.append(gg.astype(d.g.dtype))
+                parts_y.append(add[e][uu, tt][ii] * w[ii, gg])
+        e_, u_, t_, g_, y_ = (np.concatenate(x) for x in (parts_e, parts_u, parts_t, parts_g, parts_y))
+        # one entry per cell: a sibling's added counts join its observed ones
+        key = ((e_.astype(np.int64) * d.N.shape[0] + u_) * d.N.shape[1] + t_) * d.N.shape[2] + g_
+        uniq, inv = np.unique(key, return_inverse=True)
+        y_sum = np.bincount(inv, weights=y_, minlength=len(uniq))
+        first = np.zeros(len(uniq), dtype=np.int64)
+        first[inv[::-1]] = np.arange(len(inv))[::-1]
+        return dataclasses.replace(d, e=e_[first], u=u_[first], t=t_[first], g=g_[first], y=y_sum)
 
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
         else made and stored."""
-        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 9, "courses": False}   # v9: trimming only
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 11, "courses": False}   # v11: recodings moved within the block
         key = {**self.key(), "robust": tag}
         arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
         if arrays is not None and meta is not None:

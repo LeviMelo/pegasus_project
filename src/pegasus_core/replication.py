@@ -393,7 +393,7 @@ class Strata:
 
         from . import gateway
 
-        edges = np.array(gateway.age_edges(source))
+        edges = np.array(gateway.age_edges(source, dataset))
         rows = []
         for y in years:
             con = duckdb.connect()
