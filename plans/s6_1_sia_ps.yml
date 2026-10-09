@@ -1,0 +1,9 @@
+# S6.1 (work plan): SIA's psychosocial care (RAAS PS), each row weighted by its approved quantity (pegasus_data
+# decision 0155), every SIGTAP chapter by group. BI (BPA-I, 186 GB compressed) is beyond this machine's disk; PA's
+# consolidated rows have no residence
+years: 2013-2023
+systems:
+  - {dataset: SIASUS-PS, event: procedure, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_1_sia_ps.md

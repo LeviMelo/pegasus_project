@@ -27,3 +27,19 @@ Evaluation 2026-10-09-weighted-events-and-absent-ages, S1.6 section.
   noise (6.3 %). The binding constraint is now the expectation and its noise, not relevance.
 - Capitals' departures become relevant at smaller ratios, so the volume of leads from large places grows. Ranking
   them is stage F's question, not a threshold's (§8.4, revision 3).
+
+## Amendment (same day): locations, and the event criterion
+
+- **Locations count their events too.** A location cell's weight is the inverse variance of a mean over its n events,
+  so w̄/w = n̄/n. A shift is relevant when it clears δ0, or when the shift times the events it applies to clears δ0 at
+  the field's mean cell: δ0' = δ0·min(1, w̄/w) (`lenses.burden_shift`). That is a share's events moved between levels,
+  or a measure's events-worth of change. It applies in the cell excess, the peaks (through their kernel and contrast)
+  and the step.
+- **A match must cover the event's burden.** Re-scored with it, São Paulo's caesarean law was "found" by the
+  multiscale excess. The match was two villages: Sagres and Murutinga do Sul, about 40 births a year each, vaginal
+  share ×0.11 and ×0.13 in 2019, nothing like the law's +1.4 points statewide. Half a finding's places inside the area
+  let one village stand for a state. The event criterion (`harness.EVENT_CRITERION`) now also requires the finding to
+  cover half the area's expected events over the event's years. Under it, the caesarean law, Manaus's home deaths and
+  the Fundão measure and composition are all missed, and the Fundão control is clean. Earlier rounds scored "found"
+  are re-read under the amended criterion by `data/probes/event_record_all.py`, after the S6.0 surveys.
+

@@ -1,0 +1,7 @@
+# S6.1 (work plan): SIA's home care (RAAS SAD, published 2012-2018), weighted by approved quantity, every SIGTAP chapter
+years: 2013-2018
+systems:
+  - {dataset: SIASUS-SAD, event: procedure, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_1_sia_sad.md

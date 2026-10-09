@@ -251,6 +251,14 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     # the same contrast of a field whose every cell expects the field's mean: the peak's "average place" reference
     burden = not gauss and mean_cell is not None and mean_cell > 0 and rate_ratio > 1.0
     CB = (torch.as_tensor(np.where(ok, mean_cell, 0.0), dtype=torch.float32, device=dev) @ Ct) if burden else None
+    # a location's events are its weight: the peak's weight per cell against the field's mean (ADR-0031 amendment)
+    wloc = np.where(ok, s.w, 0.0) if gauss else None
+    shift_burden = gauss and rate_ratio > 1.0 and wloc is not None and (wloc > 0).any()
+    if shift_burden:
+        Ca = torch.as_tensor(np.abs(C), dtype=torch.float32, device=dev)
+        CWn = torch.as_tensor(wloc, dtype=torch.float32, device=dev) @ Ca
+        CWb = torch.as_tensor(np.where(wloc > 0, float(wloc[wloc > 0].mean()), 0.0), dtype=torch.float32,
+                              device=dev) @ Ca
     W = torch.as_tensor(np.where(ok.all(1, keepdims=True), contrast_variance(s, C), 0.0), dtype=torch.float32,
                         device=dev)                                                         # [U, m]
     rng = np.random.default_rng(seed)
@@ -330,6 +338,7 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
         KW = (K * K) @ W
         KC, KM = K @ (D + CM), K @ CM
         KB = K @ CB if burden else None
+        KWratio = (K @ CWb) / torch.clamp(K @ CWn, min=1e-30) if shift_burden else None
         null[places[k]] = float(rpeak[k].sum()) / replicates
         for j in range(m):
             null_heights = torch.sort(Sr_all[k][:, :, j][rpeak[k][:, :, j]]).values
@@ -341,7 +350,9 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
             if gauss:                # exp of the mean log difference; relevance against log θ0 per unit of contrast
                 kd = KC[cs, j] - KM[cs, j]
                 rr = torch.exp(kd / torch.clamp(KM[cs, j], min=1e-12))
-                zrel = (kd - float(np.log(rate_ratio)) * KM[cs, j]) / torch_sqrt(KW[cs, j])
+                shift = (float(np.log(rate_ratio)) * torch.clamp(KWratio[cs, j], max=1.0) if shift_burden
+                         else float(np.log(rate_ratio)))
+                zrel = (kd - shift * KM[cs, j]) / torch_sqrt(KW[cs, j])
             else:
                 rr = KC[cs, j] / torch.clamp(KM[cs, j], min=1e-12)
                 floor = (torch.clamp(1.0 + (rate_ratio - 1.0) * KB[cs, j] / torch.clamp(KM[cs, j], min=1e-12),

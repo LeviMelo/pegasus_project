@@ -132,8 +132,10 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
         if s.extras.get("kind") == "mark":
             # a measurement on the log scale: P(N(μ + log θ0, var) ≥ y), var the cell mean's (1/w)
             sd = np.sqrt(np.where(sk.w > 0, 1.0 / np.where(sk.w > 0, sk.w, 1.0), np.inf))
-            rel.append(stats.norm.sf((sk.y - sk.mu - np.log(rr)) / sd).ravel())
-            floors.append(np.full(sk.y.size, rr))
+            # the minimum relevant shift, or the burden it means at the field's mean cell (ADR-0031 amendment)
+            shift = lenses.burden_shift(float(np.log(rr)), sk.w, float(sk.w[sk.w > 0].mean()) if (sk.w > 0).any() else 0.0)
+            rel.append(stats.norm.sf((sk.y - sk.mu - shift) / sd).ravel())
+            floors.append(np.ravel(np.exp(shift)))
         else:
             # P(Y ≥ y | rate θ0'·μ), θ0' the cell's minimum relevant ratio: θ0, or the burden θ0 means (S1.6)
             floor = lenses.burden_ratio(rr, sk.mu, lenses.mean_cell(sk.mu, ok))
@@ -425,8 +427,11 @@ def _step_posteriors(s: surprise.Surprise, rr: float, min_years: int, min_past: 
     k = post[:, 1:].argmax(1)
     d, sd = deltas[np.arange(len(rows)), k], dsd[np.arange(len(rows)), k]
     # each unit's minimum relevant step: θ0, or the burden θ0 means at the support's mean cell (S1.6)
-    floor = (np.full(len(rows), rr) if surprise.gaussian(s) or s.extras.get("kind") == "mark"
-             else lenses.burden_ratio(rr, mu.mean(1), float(mu.mean())))
+    if surprise.gaussian(s) or s.extras.get("kind") == "mark":   # a location: its events are its weight (ADR-0031)
+        wu = np.asarray(s.w[rows] if np.ndim(s.w) else np.full((len(rows), T), s.w), dtype=float).sum(1)
+        floor = np.exp(lenses.burden_shift(float(np.log(rr)), wu, float(wu[wu > 0].mean()) if (wu > 0).any() else 0.0))
+    else:
+        floor = lenses.burden_ratio(rr, mu.mean(1), float(mu.mean()))
     p_relevant = special.ndtr((d - np.log(floor)) / np.maximum(sd, 1e-12))
     return {"rows": rows, "p_null": p_null, "eligible": (p_relevant >= 0.5) & (d > 0), "k": k, "starts": starts,
             "d": d, "sd": sd, "p_relevant": p_relevant, "floor": floor}

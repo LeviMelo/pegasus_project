@@ -40,7 +40,8 @@ from .scans import maps, pairs, subset
 Q = 0.05
 
 
-EVENT_CRITERION = "a finding whose years overlap the event's, with half its places or more in its area, of the question's shape"
+EVENT_CRITERION = ("a finding whose years overlap the event's, with half its places or more in its area and half or more of "
+                   "the area's expected events over the event's years, of the question's shape")
 
 
 @dataclass(frozen=True)
@@ -998,7 +999,16 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
             log(f"{p.name}: {rec['status']}")
             continue
         rec["methods"] = {}
-        kind = s.surprise(p.node, "B1").extras.get("kind", "count")
+        sb = s.surprise(p.node, "B1")
+        kind = sb.extras.get("kind", "count")
+        # the area's expected events over the event's years (a location's: its events): a finding must cover half of
+        # them, so one village cannot stand for a state (São Paulo's caesarean law, 2026-10-09: Sagres and Murutinga do
+        # Sul, about 40 births a year each, matched a statewide law by places alone)
+        ev = np.asarray(sb.extras["events"] if kind == "mark" else sb.mu, dtype=float)
+        in_years = np.array([p.years[0] <= int(y) <= p.years[1] for y in sb.years])
+        place_events = {int(u): float(np.nansum(ev[i, in_years])) for i, u in enumerate(sb.places)}
+        in_area = area(list(place_events))
+        area_events = float(sum(e for (u, e), a in zip(place_events.items(), in_area, strict=True) if a))
         for m in qn.methods:
             if kind not in m.kinds:            # a method that does not read this field's kind is not scored on it
                 rec["methods"][m.id] = {"not_read": kind}
@@ -1017,6 +1027,9 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
                 pl = f.locus.get("places", [])
                 if not pl or yrs[0] > p.years[1] or yrs[-1] < p.years[0] or area(pl).mean() < 0.5:
                     continue
+                covered = sum(place_events.get(int(u), 0.0) for u, a in zip(pl, area(pl), strict=True) if a)
+                if area_events > 0 and covered < 0.5 * area_events:
+                    continue
                 if "shape" not in f.stats:
                     f.stats["shape"] = questions._shape(s, p.node, f, f.tier)
                 shape = f.stats["shape"].get("shape", "unattributed")
@@ -1029,6 +1042,9 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
             rec["methods"][m.id] = {"found": best is not None, "findings": len(found),
                                     "match": None if best is None else {
                                         "years": best.locus.get("years"), "places": len(best.locus.get("places", [])),
+                                        "events_covered": round(sum(place_events.get(int(u), 0.0)
+                                                                    for u in best.locus.get("places", [])) / area_events, 3)
+                                        if area_events > 0 else None,
                                         "effect": round(float(best.effect), 2), "p": float(f"{best.p:.3g}"),
                                         "shape": best.stats.get("shape", {}).get("shape")}}
         rec["status"] = "scored"

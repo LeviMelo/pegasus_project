@@ -456,6 +456,19 @@ def burden_ratio(rate_ratio: float, m, mean: float):
     return out if m.ndim else float(out)
 
 
+def burden_shift(shift: float, w, mean_w: float):
+    """A location field's minimum relevant shift on its log (or logit) scale at a cell of weight ``w`` (ADR-0031
+    amendment): δ0·min(1, w̄/w). A cell's weight is the inverse variance of a mean over its n events, so w̄/w is n̄/n: a
+    shift is relevant when it clears δ0, or when the shift times the events it applies to clears δ0 at the field's
+    mean cell (a share's events moved from one level to another; a measure's events-worth of change, bed-days of a
+    stay). A cell of average weight or less keeps δ0."""
+    w = np.maximum(np.asarray(w, dtype=float), 1e-300)
+    if shift <= 0 or mean_w <= 0:
+        return np.full(w.shape, float(shift)) if w.ndim else float(shift)
+    out = shift * np.minimum(1.0, mean_w / w)
+    return out if w.ndim else float(out)
+
+
 def _rr(observed: float, expected: float) -> float:
     """A rate ratio with a continuity correction, (y + ½)/(μ + ½): a zero count against a large
     expectation is a strong deficit, not an infinite one (ranking used log 0, survey of IX)."""

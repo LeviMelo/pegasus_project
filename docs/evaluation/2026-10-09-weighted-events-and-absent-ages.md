@@ -52,3 +52,9 @@ followed.
   `side_counts(persons=)`). In 2021 this adds nothing yet (25,592.5 of 31,674): the newborn-admission runs, the
   other route, are being computed (`pegasus-core links plans/s2_infant_cohorts.yml`, from 2026-10-09).
 
+**The location rounds under the amendment** (`data/probes/s1_5/locations_burden.py`, `.json`, `.log`; SINASC's and
+SIM's stored share and mark fits). First pass, with the burden shift: São Paulo's caesarean law matched by the excess
+at one municipality (Sagres, effect 0.108, p 2.4·10⁻⁵; Murutinga do Sul 0.131), and the other four rounds missed. Second
+pass, with the event criterion amended (ADR-0031 amendment): all five missed, the Fundão birth-weight control clean.
+The criterion's change applies to every positive; the earlier rounds are re-read after S6.0.
+
