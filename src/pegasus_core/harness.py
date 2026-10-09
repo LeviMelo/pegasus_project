@@ -811,10 +811,10 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
             for method, theta0, tier, wt in runs:
                 # a method runs its lens with its settings (divergence_neighbours and _national: trend_divergence read two
                 # ways); the grid passed the method's name as the lens, and both divergences were never scored
-                m = methods.get(method)
-                lens = (m.lens or m.id) if m else method
+                meth = methods.get(method)                  # not `m`: that is the world's fitted model
+                lens = (meth.lens or meth.id) if meth else method
                 kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster") else {}
-                kw.update(dict(m.settings) if m else {})
+                kw.update(dict(meth.settings) if meth else {})
                 if theta0 is not None:
                     kw[MINIMUM_EFFECT_ARG[lens]] = theta0
                 if tier is not None:
