@@ -74,6 +74,7 @@ Each row: what a measurement showed, and where it now lives (the register the au
 | SIM race ≠ declared race; the infant matrix does not transport | race is a modelled confusion per population; adults stay "recorded race" | pegasus_data decisions 0143, 0149 |
 | the raw 2022 Census undercounts; POPSVS is IBGE's corrected projection | coverage is latent per census; POPSVS is modelled | census-coverage evaluation |
 | an SIA row is a quantity of procedures (PA's consolidated BPA: up to 95,404 on a row) | an event type may weigh its rows; counts sum the weight, per-record computations refuse it | pegasus_data decision 0155, evaluation 2026-10-09 |
+| the place-year noise shrinks with size (births P ≈ 1.6), the model's φ is size-free | the dispersion becomes NB-P, learned per block, before the next national reading (unit B3) | OPEN_QUESTIONS 12 |
 | exposure variance double-counts φ | no exposure-variance term by default | ADR-0010 |
 | SIH leads are dominated by one hospital's coding | a facility triage class now; the institution lattice is raised in priority | facility triage (running) |
 | surveys ran on one core for hours | threaded surveys, a single model load | bef4b70 |

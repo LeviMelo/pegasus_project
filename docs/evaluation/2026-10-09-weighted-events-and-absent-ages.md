@@ -58,3 +58,15 @@ at one municipality (Sagres, effect 0.108, p 2.4·10⁻⁵; Murutinga do Sul 0.1
 pass, with the event criterion amended (ADR-0031 amendment): all five missed, the Fundão birth-weight control clean.
 The criterion's change applies to every positive; the earlier rounds are re-read after S6.0.
 
+**Noise by size (OPEN_QUESTIONS 12, ADR-0032).** `data/probes/dispersion_by_size.py`, `nbp_test.py`, `nbp_check.py`
+(births `*` and SIM IX, B1, 2010–2023, stored fits). Excess relative variance by μ decile against the assumed 1/φ:
+births 0.016 → 0.0027 against 0.0037 flat; SIM IX about 0.02 → 0.009 against 0.010–0.014. Fitted alone on the cells, NB-P
+beats NB2 by 1,413 nats (births, P 1.58) and 305 (IX, P 1.69).
+
+Through the surprise's own path (the old values read from the cache under the old code):
+- births: not calibrated, KS by quintile 0.029, 0.032, 0.028, 0.029, 0.057 → calibrated, 0.020, 0.020, 0.016, 0.024,
+  0.018 (P 1.626);
+- IX: 0.011, 0.026, 0.041, 0.048, 0.089 → 0.012, 0.026, 0.041, 0.048, 0.085 (P 1.672).
+
+Roraima re-scored under it (`roraima_nbp.json`): still missed. Boa Vista 2019 z 1.92 → 2.83, 860th of 77,980 cells.
+

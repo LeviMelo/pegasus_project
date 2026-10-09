@@ -2375,7 +2375,8 @@ MIN_DISPERSION_CELLS = 200
 
 
 def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels: np.ndarray, trim: float = 0.005,
-                   rounds: int = 3) -> float | np.ndarray:
+                   rounds: int = 3, power: bool = False, report: dict | None = None,
+                   start: np.ndarray | None = None) -> float | np.ndarray:
     """The field's place-year variance component, by maximum likelihood on its aggregate cells:
     Var(Y) = μ + μ²/φ_cells + μ²/φ_extra, i.e. NB with 1/φ = 1/φ_cells + 1/φ_extra. Cells
     within a place-year share variation the expectation does not model; summing them adds it
@@ -2394,10 +2395,18 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
     with no departure present; the bounds start from the block's dispersion (``phi_cells``, which the field's own
     departures did not inflate) and are recomputed over ``rounds``. Fitted on every cell, the yellow-fever outbreak of
     2017-18 (SIM A95: 195 and 257 deaths against 0-8 in other years) set φ ≈ 0.14, under which 180 deaths against
-    16 expected in the four states were no surprise and every stage-C method but two missed it (2026-10-07)."""
+    16 expected in the four states were no surprise and every stage-C method but two missed it (2026-10-07).
+
+    **With ``power`` (NB-P, ADR-0032; Greene 2008):** the component scales with the cell's size,
+    κ_cell = κ·(μ/μ_ref)^(P−2), Var(Y) = μ + μ²/φ_cells + κ μ_ref^(2−P) μ^P, with P in [1, 2] learned on the field by the
+    same trimmed likelihood (μ_ref its median cell; P = 2 is NB2's constant relative noise). Births' B1 excess relative
+    variance falls from 0.016 under 35 births a cell to 0.0015-0.0027 in the largest decile, where NB2 assumed 0.0037
+    everywhere (P = 1.58, 1,413 nats; SIM IX P = 1.69, 305 nats). Returns φ_extra per cell [U, T]."""
     ok = mu > 1e-9
     inv_c = np.where(np.isfinite(phi_cells), 1.0 / phi_cells, 0.0)
     lo, hi = -np.log(1e7), -np.log(1e-2)         # bounds of log κ, κ = 1/φ_extra
+    mu_ref = float(np.median(mu[ok])) if ok.any() else 1.0
+    size = np.ones(mu.shape)                     # (μ/μ_ref)^(P−2): 1 under NB2, set once P is learned
 
     def bounds(k_cells: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """The integer predictive quantiles at trim and 1 − trim per cell, with 1/φ = 1/φ_cells + k."""
@@ -2405,21 +2414,25 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
         p = phi / (phi + np.maximum(mu, 1e-12))
         return stats.nbinom.ppf(trim, phi, p), stats.nbinom.ppf(1 - trim, phi, p)
 
-    k_ref = np.zeros(mu.shape)
+    # the first trimming bounds from ``start`` (the block's cells) when the fit's own cells carry no dispersion: from
+    # Poisson-tight bounds the first round would drop the large cells whose noise is being estimated
+    k_ref = (np.zeros(mu.shape) if start is None else
+             np.maximum(np.where(np.isfinite(start), 1.0 / np.where(np.isfinite(start), start, 1.0), 0.0) - inv_c, 0.0))
     a_b = bounds(k_ref)
     keep = ok & (y >= a_b[0]) & (y <= a_b[1])
 
-    def fit(sel: np.ndarray) -> tuple[float, float]:
+    def fit(sel: np.ndarray, scale: np.ndarray | None = None) -> tuple[float, float]:
         sel = sel & keep
         yy, mm, ic = y[sel], mu[sel], inv_c[sel]
+        sc = (size if scale is None else scale)[sel]
         aa, bb = a_b[0][sel], a_b[1][sel]
         pos = yy > 0           # a zero count adds only φ log(φ/(φ+μ)): the gamma terms are needed where y > 0 (sparse fields: few)
-        yp, mp, ip = yy[pos], mm[pos], ic[pos]
+        yp, mp, ip, sp_ = yy[pos], mm[pos], ic[pos], sc[pos]
 
         def nll(log_k: float) -> float:
             k = np.exp(log_k)
-            phi = 1.0 / (ic + k)
-            phi_p = 1.0 / (ip + k)
+            phi = 1.0 / (ic + k * sc)
+            phi_p = 1.0 / (ip + k * sp_)
             pr = phi / (phi + mm)
             mass = stats.nbinom.cdf(bb, phi, pr) - stats.nbinom.cdf(aa - 1, phi, pr)      # the truncation
             return -float(np.sum(phi * np.log(phi / (phi + mm)))
@@ -2429,17 +2442,31 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
         res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
         h = 0.25
         info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2     # observed information in log κ
+        fit.last_nll = float(res.fun)
         return float(res.x), max(info, 1e-9)
 
     def to_phi(log_k):
         return np.where(np.asarray(log_k) < lo + 0.01, np.inf, np.exp(-np.asarray(log_k)))
 
+    P = 2.0
     for _ in range(rounds):
+        if power:
+            # P by the profile of the trimmed likelihood over κ (the same cells and bounds as κ's own fit)
+            def profile(pp: float) -> float:
+                fit(ok, np.maximum(mu, 1e-12) ** (pp - 2) / mu_ref ** (pp - 2))
+                return fit.last_nll
+            P = float(optimize.minimize_scalar(profile, bounds=(1.0, 2.0), method="bounded",
+                                               options={"xatol": 0.01}).x)
+            size = np.maximum(mu, 1e-12) ** (P - 2) / mu_ref ** (P - 2)
         top, _ = fit(ok)
         cur = np.full(mu.shape[0], top) if not levels else _shrink_levels(fit, ok, top, levels, mu.shape[0])
-        k_ref = np.broadcast_to(np.exp(cur)[:, None], mu.shape)
+        k_ref = np.exp(cur)[:, None] * size
         a_b = bounds(k_ref)
         keep = ok & (y >= a_b[0]) & (y <= a_b[1])
+    if power:
+        if report is not None:
+            report["power"] = P
+        return np.where(np.asarray(cur)[:, None] < lo + 0.01, np.inf, 1.0 / (np.exp(cur)[:, None] * size))
     return float(to_phi(cur[0])) if not levels else to_phi(cur)
 
 

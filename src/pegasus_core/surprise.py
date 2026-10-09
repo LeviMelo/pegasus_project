@@ -482,14 +482,24 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
     pop = m.data.N.sum(axis=2)
     seed = config.seed(f.id, tier, "pit", m.key())
     cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
-    extra = monolith.place_year_phi(y, mu, cells, *_dispersion_levels(m.data.places, macro))
-    extra_cells = np.asarray(extra)[:, None] if np.ndim(extra) else extra
-    attempts = [("block", phi_block, cells), ("field", extra, 1.0 / (1.0 / cells + 1.0 / extra_cells))]
+    # the field's own dispersion when the block's fails: NB-P on the posterior's cells alone, replacing the block's
+    # size-free φ rather than adding to it (ADR-0032; OPEN_QUESTIONS 12: births' excess relative variance falls from
+    # 0.016 in villages to 0.0027 in cities while the block's φ says 0.0037 everywhere). P = 2 is NB2
+    post = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, float("inf"))
+    nbp: dict = {}
+    extra = monolith.place_year_phi(y, mu, post, *_dispersion_levels(m.data.places, macro), power=True, report=nbp,
+                                    start=cells)
+    inv_post = np.where(np.isfinite(post), 1.0 / np.where(np.isfinite(post), post, 1.0), 0.0)
+    inv_extra = np.where(np.isfinite(extra), 1.0 / np.where(np.isfinite(extra), extra, 1.0), 0.0)
+    field_agg = np.divide(1.0, inv_post + inv_extra, out=np.full(mu.shape, np.inf), where=(inv_post + inv_extra) > 0)
+    attempts = [("block", phi_block, cells), ("field", extra, field_agg)]
     for source, phi, phi_agg in attempts:
         u, z = randomised_pit(y, mu, phi_agg, seed)
         cal = calibration(u, mu, macro)
         cal["phi_source"] = source
         cal["phi"] = float(np.median(phi)) if np.ndim(phi) else float(phi)
+        if source == "field":
+            cal["dispersion_power"] = round(float(nbp.get("power", 2.0)), 3)
         if np.ndim(phi):
             cal["phi_by_macroregion"] = {str(r): float(np.median(phi[macro == r])) for r in np.unique(macro)}
         if cal["calibrated"]:
