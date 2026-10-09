@@ -70,3 +70,28 @@ Through the surprise's own path (the old values read from the cache under the ol
 
 Roraima re-scored under it (`roraima_nbp.json`): still missed. Boa Vista 2019 z 1.92 → 2.83, 860th of 77,980 cells.
 
+**S2.4 done: the 2021 birth cohort through persons, with two outcomes.** `pegasus-core cohort SINASC-DN birth baby 2021
+--outcome SIM-DO:deceased --outcome SIH-RD:patient --draws 10` (`data/probes/s2_4_cohort_2021.log`). It read
+2,677,101 births over the persons of the scopes 2021 and 2022, after `pegasus-core links` stored the newborn-admission
+runs 2014–2022 (42,373 to 67,625 pairs a year, about 14 minutes each).
+
+- **Per draw:** 26,114–26,164 babies with an infant death and 73,173–73,252 with a newborn admission.
+- **Contrasts:** 262 over 24 attributes, with the known gradients on both outcomes: gestation under 22 weeks RR 162
+  for death; prenatal visits; anomalies 22.5; plurality 4.5; Robson groups 10–14; mother's schooling 0.44–0.52 for
+  admission.
+- **What the persons rest on** (logged per scope, carried by each lead):
+
+  | scope | link | edges kept | refused | agreement with other routes |
+  |---|---|---|---|---|
+  | 2021 | newborn admissions | 62,218 | 63 | 2,692 / 2,770 (97.2 %) |
+  | 2021 | infant deaths | 25,195 | 14 | 2,692 / 2,770 (97.2 %) |
+  | 2021 | SIH deaths | 700,193 | 1 | 4,518 / 4,523 |
+  | 2022 | newborn admissions | 65,697 | 68 | 2,715 / 2,809 |
+  | 2022 | infant deaths | 25,211 | 22 | 2,715 / 2,809 |
+
+- **Completeness through any route:** 2021's infant deaths paired 25,766.5 of 31,674, against 25,592.5 for the
+  direct link. 174 deaths are found only through an admission and its certificate.
+- **Not viable nationally, so persons skip it:** the women's-death link, padded four years back (12,961,822 mothers
+  in 2012), matches by chance at 92 %, as the race bridge found outside municipalities under 2,000 mothers.
+- **Running:** the CIHA links, which failed on a name resolution fixed in pegasus_data f8c4a88.
+
