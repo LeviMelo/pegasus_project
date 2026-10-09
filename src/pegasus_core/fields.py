@@ -323,14 +323,14 @@ def declared(dataset: str) -> list[Declared]:
             if not r.get("measure"):
                 out.append(Declared(**base, kind="", reason="a number that is not a measurement"))
             elif r.get("missing") is None:
-                out.append(Declared(**base, kind="measure", reason="missing codes not declared"))
+                out.append(Declared(**base, kind="measure", reason=_undeclared(r)))
             else:
                 dom = r.get("domain")
                 out.append(Declared(**base, kind="measure", missing=tuple(r["missing"]),
                                     domain=tuple(dom) if dom else None))
         elif r["kind"] == "category":
             if r.get("missing") is None:
-                out.append(Declared(**base, kind="composition", reason="missing codes not declared"))
+                out.append(Declared(**base, kind="composition", reason=_undeclared(r)))
             else:
                 out.append(Declared(**base, kind="composition", missing=tuple(r["missing"])))
         elif r["kind"] == "date":
@@ -369,6 +369,14 @@ def measure_source(dataset: str, event: str, column: str) -> dict:
     return {"source": family, "mark": column, "bounds": (lo, hi) if family == "count" else (max(lo, 1e-9), hi),
             "missing": list(d.missing),
             **({"classifier": primary} if primary else {}), **({"casemix": casemix} if casemix else {})}
+
+
+def _undeclared(r: dict) -> str:
+    """Why a column without missing codes is read by nothing: the sources' stated silence (pegasus_data's
+    ``missing_unknown``: a column examined), or no declaration yet (a column waiting, a gap of P1)."""
+    if r.get("missing_unknown"):
+        return f"missing codes unknown: {r['missing_unknown']}"
+    return "missing codes not declared"
 
 
 def declared_flows(dataset: str) -> list[Declared]:
@@ -588,7 +596,7 @@ def coverage(dataset: str, event: str) -> list[dict]:
             reasons[d.column.removeprefix("codes:")] = d.reason
         else:
             add(d.column.removeprefix("codes:"), "codes")
-    strata = gateway._strata(dataset)
+    strata = gateway._strata(dataset, event)
     for k in ("residence", "age", "sex", "race"):
         if strata.get(k):
             add(strata[k], f"axis: {k}")

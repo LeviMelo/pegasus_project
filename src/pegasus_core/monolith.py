@@ -264,7 +264,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     years = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, years.tolist(), source, structure=structure, **source_args)
-    edges = gateway.age_edges(population, dataset)   # the population source and the events fix the bands (never padded or split)
+    edges = gateway.age_edges(population, dataset, event)   # the population source and the events fix the bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
@@ -279,8 +279,14 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         S = np.zeros_like(N)
         S[pu, pt, pg] = pop.column("s").to_numpy()
 
-    strata = gateway._strata(dataset)
-    if strata["sex"] is None:
+    strata = gateway._strata(dataset, event)
+    if strata.get("persons") is False:
+        # a group's events have no sex or age (`gateway._strata`: they stand in sex 1, band 0): the whole population of
+        # the place is exposed in that one cell, every other cell unexposed (fixed at zero, as a mother's male cells)
+        N[:, :, 0] = N.sum(axis=2)
+        N[:, :, 1:] = 0.0
+        S = None
+    elif strata["sex"] is None:
         # the subject has one sex by definition (a mother): the other sex is not exposed
         N[:, :, (2 - strata["implied_sex"]) * nB:(3 - strata["implied_sex"]) * nB] = 0.0
 
@@ -303,7 +309,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     # the restrictions are on the coded person's sex and age: they apply only where the population's strata are that
     # person's. SINASC's strata are the mother's (her sex implied by pegasus_data's roles) while CODANOMAL codes the
     # birth: applied there, male-only anomaly classes had no exposure and the fit's start was NaN (2026-10-06)
-    own_strata = gateway.strata(dataset)["implied_sex"] is None
+    own_strata = gateway.strata(dataset, event)["implied_sex"] is None
     # the age and sex edits are ICD-10's (`code_attributes`): another tree has none declared
     adm, never = ({}, set()) if block == "*" or not own_strata or structure != "ICD10" else _admissible(edges, underlying)
     never = never & set(categories)

@@ -1588,7 +1588,7 @@ def records(dataset: str, event: str, year: int, columns: list[str], places: lis
 
     t = gateway._records(dataset, event, year, columns)
     if places is not None:
-        res = gateway._strata(dataset)["residence"]
+        res = gateway._strata(dataset, event)["residence"]
         code = pc.utf8_slice_codeunits(pc.cast(t[res], pa.string()), 0, 6)
         t = t.filter(pc.is_in(code, value_set=pa.array([str(p) for p in places])))
     return t

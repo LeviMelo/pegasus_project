@@ -80,13 +80,13 @@ def split_source(source: str) -> tuple[str, tuple[str, ...]]:
     return base, tuple(sorted(mods))
 
 
-def age_edges(source: str | None = None, dataset: str | None = None) -> list[int]:
+def age_edges(source: str | None = None, dataset: str | None = None, event: str | None = None) -> list[int]:
     """The lower edges of the age bands a population source supports (the last band is open); with ``dataset``, only
     the edges its events' ages also have: an event counted by age band (SINAN-SDTA's grid: 0, 1, 5, 10, 20, 50) is
     read on the coarsest bands both share, never split across the population's."""
     # account-3/4 hold single ages and are summed onto POPSVS's 18 bands
     edges = list(ACCOUNT_EDGES if split_source(source or config.population_source())[0] in ("account-2", "popsvs-5y") else POPSVS_EDGES)
-    bands = _strata(dataset).get("age_bands") if dataset else None
+    bands = _strata(dataset, event).get("age_bands") if dataset else None
     return [e for e in edges if e in bands] if bands else edges
 
 
@@ -527,7 +527,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
@@ -535,7 +535,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    by = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + ([column] if column else [])
+    by = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + ([column] if column else [])
     if race:
         if not strata.get("race"):
             raise LookupError(f"{dataset}: no race stratum among pegasus_data's roles")
@@ -595,7 +595,7 @@ def _declared_key(dataset: str, event: str) -> dict:
     except KeyError:
         spec = None
     try:
-        strata = _strata(dataset)
+        strata = _strata(dataset, event)
     except LookupError:
         strata = None
     # the roles of the columns that make a row its events (status, weight, a grid's cells and totals): their missing
@@ -725,7 +725,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     unallocated with that reason. ``code_list``: the classifier column holds several codes
     concatenated (SINASC's CODANOMAL, "Q02Q690"); an event counts once under each distinct
     category it carries (as `code_list_counts`), and events carrying none are not counted."""
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     spec_class = classifier
     if spec_class is None:
         import pegasus_data as pg
@@ -741,7 +741,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    cols = [strata["residence"], strata["age"], when] + ([strata["sex"]] if strata["sex"] else []) +         ([spec_class] if spec_class else [])
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), when] + ([strata["sex"]] if strata["sex"] else []) +         ([spec_class] if spec_class else [])
     raw = _records(dataset, event, year, cols)
     con = duckdb.connect()
     con.register("r", raw)
@@ -809,6 +809,8 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
 def _age_sql(strata: dict) -> str:
     """The subject's age in whole years, capped at MAX_AGE; a code the age stratum's roles declare missing (SIA PA's 999
     'idade não exigida', 998 'informada com erro') is no age, never the oldest band."""
+    if strata["age"] is None:           # a group (an outbreak): no age, its events in band 0 (`_strata`)
+        return f"CAST({int(strata.get('implied_age', 0))} AS SMALLINT)"
     x = f'trim(CAST("{strata["age"]}" AS VARCHAR))'
     # DuckDB's least() skips NULLs (least(NULL, 80) is 80): an absent age must stay absent, not become 80+
     years = f"floor(TRY_CAST({x} AS DOUBLE))"
@@ -842,10 +844,10 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     mark is an interval: the days from the anchor to the ``mark`` date times ``sign``, plus one (the calendar days
     spanned, so a same-day date is 1 and the log is defined). Returns the unallocated (year, reason, code, y)."""
 
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     _per_record(dataset, event, "a mark's moments")
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
-    cols = [strata["residence"], strata["age"], mark] + ([anchor] if anchor else []) + \
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), mark] + ([anchor] if anchor else []) + \
         ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else []) + ([casemix] if casemix else []) + ([fcol] if fcol else [])
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
@@ -932,7 +934,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     among the column's declared ``missing`` codes (pegasus_data roles) is unallocated as 'value not recorded', a blank
     one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
     stage E, S4.3). One read serves every share of the column (`share_moments`)."""
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     key = {"what": "composition_counts", "code": config.code_key(composition_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
            "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
            "data": config.data_version(), **_df_key(dataset, year)}
@@ -941,7 +943,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     cached_m = store.get_table("gateway", {**key, "part": "missing"})
     if cached is not None and cached_un is not None and cached_m is not None:
         return EventCounts(cached, cached_un, key, cached_m)
-    cols = [strata["residence"], strata["age"], column] + ([strata["sex"]] if strata["sex"] else []) +         ([classifier] if classifier else [])
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), column] + ([strata["sex"]] if strata["sex"] else []) +         ([classifier] if classifier else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
@@ -974,7 +976,7 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
     """A share's records of ``year`` by recording facility, residence and category: (facility, u, code, n, k), n the
     records with ``indicator`` recorded and k those with a value among ``success``; a record naming no facility is
     ''. One read of the year serves every lead's facility reading in stage E (S4.3)."""
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     fac = facility_column(dataset)[0]
     key = {"what": "composition_facility", "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "indicator": indicator,
            "success": sorted(success), "missing": sorted(missing), "classifier": classifier, "data": config.data_version(),
@@ -1024,7 +1026,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     municipality where the event happened: the hospital, the place of death or birth, the place of infection; or a
     place of the person) and k of them away from the residence, compared at the place's level (``width``: the digits
     of the residence's code it holds, `PLACE_PREFIX`). A place not recorded is unallocated ('place not recorded')."""
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     key = {"what": "away_counts", "code": config.code_key(away_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"width": width} if width != 6 else {})}
@@ -1032,7 +1034,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    cols = [strata["residence"], strata["age"], place] + ([strata["sex"]] if strata["sex"] else []) + \
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), place] + ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else [])
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con = duckdb.connect()
@@ -1117,14 +1119,14 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     category it carries. Events carrying none are the complement, not counted here. ``classifier`` names the field's
     family (a declared group's role) and reads nothing."""
     columns = [column] if isinstance(column, str) else list(column)
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     key = {"what": "code_list_counts", "code": config.code_key(code_list_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "column": column,
            "data": config.data_version()}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
         return EventCounts(cached, cached_un, key)
-    cols = [strata["residence"], strata["age"], *columns] + ([strata["sex"]] if strata["sex"] else [])
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *columns] + ([strata["sex"]] if strata["sex"] else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, cols)
     con.register("r", raw)
@@ -1149,32 +1151,45 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     return EventCounts(counts, unallocated, key)
 
 
-def strata(dataset: str) -> dict:
+def strata(dataset: str, event: str | None = None) -> dict:
     """The subject's residence, sex and age columns, their entity, and the sex implied when the strata are another
     person's (SINASC: the mother's), from pegasus_data's roles."""
-    return _strata(dataset)
+    return _strata(dataset, event)
 
 
-def _strata(dataset: str) -> dict:
+def _strata(dataset: str, event: str | None = None) -> dict:
     """The subject's residence, sex, age and race columns, from pegasus_data's roles (race: the subject's declared
-    race stratum, the mother's on a birth, None where none is declared)."""
+    race stratum, the mother's on a birth, None where none is declared). ``event`` names the event type when its rows
+    are not persons: a grid of people (SINAN-SDTA's ``case``) or a group (its ``outbreak``); without it, a dataset
+    whose events count a grid reads the grid's strata."""
     import pegasus_data as pg
 
     rs = pg.roles(dataset)
     rows = [r for r in rs if r.get("model") == "stratum"]
     by_prop = {r["property"]: r for r in rows}
-    grid = next((e["grid"] for e in pg.event_types(dataset) if e.get("grid")), None) if _has_events(dataset) else None
-    if grid:
-        # a row counts a group of people by sex and age band (pegasus_data's weight grid, SINAN-SDTA's outbreak): the
-        # grid's own columns are the strata, its bands the ages, and the place is the municipality of the entity its
-        # cells count (the outbreak's, where the group fell ill; not the notification's), since a group has no residence
-        entity = {r["column"]: r["entity"] for r in rs}.get(grid["cells"][0]["column"])
+    specs = pg.event_types(dataset) if _has_events(dataset) else []
+    spec = next((e for e in specs if e["name"] == event), None) if event else next((e for e in specs if e.get("grid")), None)
+    grid = (spec or {}).get("grid")
+
+    def place(entity: str | None) -> dict:
+        # a group has no residence: its place is the municipality of the entity it is (the outbreak's, where the group
+        # fell ill; not the notification's)
         where = [r for r in rs if r.get("model") == "where" and r.get("property") == "municipality" and r["entity"] == entity]
         if len(where) != 1:
-            raise LookupError(f"{dataset}: a grid event needs one municipality of its entity {entity!r}, has {len(where)}")
-        return {"residence": where[0]["column"], "place": "event", "age": grid["age"], "age_missing": (),
-                "age_bands": tuple(grid["bands"]), "sex": grid["sex"], "sex_canonical": True, "implied_sex": None,
-                "entity": where[0]["entity"], "race": None}
+            raise LookupError(f"{dataset}: a group event needs one municipality of its entity {entity!r}, has {len(where)}")
+        return {"residence": where[0]["column"], "place": "event", "entity": entity, "race": None}
+
+    if grid:
+        # a row counts a group of people by sex and age band (pegasus_data's weight grid): the grid's own columns are
+        # the strata, its bands the ages, and the place is that of the entity its cells count
+        return {**place({r["column"]: r["entity"] for r in rs}.get(grid["cells"][0]["column"])), "age": grid["age"],
+                "age_missing": (), "age_bands": tuple(grid["bands"]), "sex": grid["sex"], "sex_canonical": True,
+                "implied_sex": None}
+    if spec is not None and spec.get("persons") is False:
+        # a row is a group, not a person (an outbreak, pegasus_data `persons: false`): no sex or age; its events stand in
+        # one cell (sex 1, age 0) and the whole population of the place is exposed there (`monolith._assemble`)
+        return {**place(spec["kind"]), "age": None, "age_missing": (), "sex": None, "implied_sex": 1, "implied_age": 0,
+                "persons": False}
     if "residence" not in by_prop:
         raise LookupError(f"{dataset}: no residence stratum in pegasus_data's roles")
     age = by_prop.get("age_years") or by_prop.get("age")
@@ -1551,7 +1566,7 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     raw = _records(dataset, event, year, [strata["residence"], when, report])
     con = duckdb.connect()
     con.register("r", raw)
@@ -1766,7 +1781,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
     group = _group_columns(dataset, sd)
-    strata = _strata(dataset)
+    strata = _strata(dataset, event)
     _per_record(dataset, event, "a link's pairs")
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
@@ -1778,7 +1793,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     pairs = side_pairs(link, side, year)
     ids = pairs.column("l" if side == "left" else "r")
     p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
-    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + \
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else []) + group
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
@@ -1821,8 +1836,8 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> tuple[pa.Table, pa.Array]:
     """One event type's records of ``year`` as persons (`tools.cohort`): on the lattice (u, sex, age class) with
     ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name)."""
-    strata = _strata(dataset)
-    cols = [strata["residence"], strata["age"]] + ([strata["sex"]] if strata["sex"] else []) + columns
+    strata = _strata(dataset, event)
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + columns
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
     con.register("r", raw)

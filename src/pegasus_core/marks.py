@@ -67,7 +67,7 @@ def facility_residuals(model: monolith.MarkModel, name: str, years: list[int], f
                        places: np.ndarray | None = None) -> pa.Table:
     """(facility, year, n, sr, sr2) over the years: the admissions' residuals from the fitted location, by recording facility."""
     sp = spec(model.data.dataset, model.data.event, name)
-    edges = gateway.age_edges(model.data.population, model.data.dataset)
+    edges = gateway.age_edges(model.data.population, model.data.dataset, model.data.event)
     parts = []
     for i, year in enumerate(years):
         parts.append(gateway.mark_facility_moments(
@@ -174,7 +174,7 @@ def triage_lead(model: monolith.MarkModel, reader: dict, years: list[int], place
 
     sp = reader
     d = model.data
-    edges = gateway.age_edges(d.population, d.dataset)
+    edges = gateway.age_edges(d.population, d.dataset, d.event)
     use = [i for i, y in enumerate(years) if window[0] <= y <= window[1]]
     # each year's residuals by facility, residence and category, read once for every lead (`mark_facility_moments`
     # cells), then the lead's places and codes

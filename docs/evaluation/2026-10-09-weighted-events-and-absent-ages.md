@@ -128,7 +128,9 @@ below the smallest double (about e^−710), and the Halley steps on log x fail i
 
 **SINAN-SDTA through `update` (`plans/s6_sinan_sdta.yml`, 2015–2023, log `data/probes/s6_sinan_sdta.log`).**
 - **The fit.** It converges with φ 0.066 and P 1.67. The robust refit flags nothing.
-- **What the questions find.** Excess, step, trend, cluster and divergence find nothing. The group question finds 15
+- **What the questions find.** Excess, step, trend, cluster and divergence find nothing. *Corrected the same day:* that
+  cluster scan drew NaN frailties (the gamma quantile below), and rerun with the fix it finds 180, 165 of them
+  persistent levels. The group question finds 15
   disparities, single-year spikes in one band and sex at Araguari, Carpina, Osasco and others: one outbreak in one age
   group. Triage reads them as noise.
 - **What this measures.** People counted in clusters are read at a noise that hides departures (OPEN_QUESTIONS 14).
@@ -142,3 +144,12 @@ KeyError, which the grid logged as a lens the field cannot take.
 - A KeyError is raised, never read as "lens does not apply".
 - Both methods run through `scan` on SDTA's ill. `scripts/throughput.py` reads a stamped `update` log into seconds
   per question and fit (S0.8): SDTA's ill take 281 s a field.
+
+**SDTA's outbreaks as the unit (ADR-0034).** Worktree `group-events`, with pegasus_data's branch of the same name; log
+`data/probes/s6_sinan_sdta_groups.log`.
+- **The outbreak field.** One exposed cell holds the place's whole population (Brazil 2019: 207.9 M). It fits with
+  φ 1.045 and P 2.0; the robust refit raises φ to 1.44 and flags 42 place-periods (446 outbreaks against 21 expected).
+- **What it finds.** Excess finds 30 (the ill: 0), cluster 172 (162 persistent levels), divergence 1; group finds none,
+  having no degrees of freedom.
+- **The counts.** 771 outbreaks in 2019 and 1,161 in 2023 (one with no municipality), each in sex 1, band 0.
+

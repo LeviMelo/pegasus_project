@@ -1,7 +1,9 @@
-# S6 / P3: foodborne-outbreak ill (SINAN-SDTA, pegasus_data decision 0156), counted from each outbreak's grid by sex
-# and age band, at the outbreak's municipality. No SDTA file exists for 2014, so the plan runs from 2015
+# S6 / P3: foodborne outbreaks (SINAN-SDTA) at the outbreak's municipality: the outbreaks themselves, the unit their
+# ill arrive in (OPEN_QUESTIONS 14), and their ill counted from each outbreak's grid by sex and age band (pegasus_data
+# decision 0156). No SDTA file exists for 2014, so the plan runs from 2015
 years: 2015-2023
 systems:
+  - {dataset: SINAN-SDTA, event: outbreak, blocks: [all]}
   - {dataset: SINAN-SDTA, event: case, blocks: [all]}
 relations: false
 triage: true

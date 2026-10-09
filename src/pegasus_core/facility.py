@@ -28,7 +28,7 @@ CODE_CHARS = 3     # the classifier's category level; subcodes are not kept (a 4
 def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     """Events of one year by (u residence, facility, code3). ``facility`` is the CNES code as text, '' when the
     record names none; ``fm`` the facility's municipality as the data gives it ('' if the dataset has none)."""
-    strata = gateway._strata(dataset)
+    strata = gateway._strata(dataset, event)
     spec = gateway.event_type(dataset, event)
     classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
     if classifier is None:
