@@ -604,9 +604,11 @@ def _declared_key(dataset: str, event: str) -> dict:
     read = {(spec or {}).get("weight"), ((spec or {}).get("status") or {}).get("column"), grid.get("total"), grid.get("margin"),
             *(c["column"] for c in grid.get("cells") or ())} - {None}
     roles_read = [r for r in pg.roles(dataset) if r["column"] in read] if read else []
-    # the functions that make rows events, not the whole module: an unrelated edit there re-keyed every count
-    work = (data_events.events_of, data_events.event_weights, data_events.grid_events, data_events._integers,
-            data_events.count_events)
+    # the functions that make this event's rows events, not the whole module: an unrelated edit there re-keyed every
+    # count, and a grid's reader re-keyed events that have none
+    work = (data_events.events_of, data_events.count_events,
+            *((data_events.event_weights,) if (spec or {}).get("weight") else ()),
+            *((data_events.grid_events, data_events._integers) if grid else ()))
     body = json.dumps([spec, strata, roles_read], sort_keys=True, default=str) + "".join(inspect.getsource(f) for f in work)
     return {"declared": hashlib.sha256(body.encode()).hexdigest()[:12]}
 
