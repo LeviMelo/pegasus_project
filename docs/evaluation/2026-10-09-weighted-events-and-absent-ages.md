@@ -110,3 +110,10 @@ runs 2014–2022 (42,373 to 67,625 pairs a year, about 14 minutes each).
   - IX calibrates: KS 0.006–0.055, whole O/E 1.010.
   - With the block as the pool, KS is 0.007–0.018 and whole O/E 1.001, so the block was kept.
   - O/E still runs from 0.979 below the median to 1.010 in the top 1 %, inside the noise, and OQ 13 stays open on it.
+
+**Gateway keys carried pegasus_data's package version, not its declarations.** A change to SDTA's grid rule left
+`event_counts` serving the old counts: the key held `config.data_version()`, the package version, which no curation
+or code edit changes.
+- Every gateway artefact read from events (11 keys) now adds `_declared_key`: a hash of the event type's declaration,
+  the strata, the roles of the columns that make rows events, and pegasus_data's `semantics/event_types.py`.
+- Re-read, SDTA 2023 counts 19,879 people (pegasus_data evaluation 2026-10-09-outbreak-grid-and-fill).

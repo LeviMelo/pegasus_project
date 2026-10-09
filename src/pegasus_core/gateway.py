@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import os
 import warnings
 from dataclasses import dataclass
@@ -527,7 +528,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset)
-    key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": column,
+    key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
@@ -576,6 +577,35 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.count_events({dataset}, {event})", "by": by})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
+
+
+@functools.cache
+def _declared_key(dataset: str, event: str) -> dict:
+    """What an artefact read from pegasus_data's events adds to its key: a hash of the event type's declaration, the
+    strata read from the roles, and pegasus_data's code that turns rows into events (`semantics/event_types.py`). The
+    package version alone missed curation and code edits (a weight grid's rule changed, the counts stayed cached)."""
+    import inspect
+    import json
+
+    import pegasus_data as pg
+    from pegasus_data.semantics import event_types as data_events
+
+    try:
+        spec = next((e for e in pg.event_types(dataset) if e["name"] == event), None)
+    except KeyError:
+        spec = None
+    try:
+        strata = _strata(dataset)
+    except LookupError:
+        strata = None
+    # the roles of the columns that make a row its events (status, weight, a grid's cells and totals): their missing
+    # codes decide a count (SDTA's NU_TOT 0 is no total)
+    grid = (spec or {}).get("grid") or {}
+    read = {(spec or {}).get("weight"), ((spec or {}).get("status") or {}).get("column"), grid.get("total"), grid.get("margin"),
+            *(c["column"] for c in grid.get("cells") or ())} - {None}
+    roles_read = [r for r in pg.roles(dataset) if r["column"] in read] if read else []
+    body = json.dumps([spec, strata, roles_read], sort_keys=True, default=str) + inspect.getsource(data_events)
+    return {"declared": hashlib.sha256(body.encode()).hexdigest()[:12]}
 
 
 def _per_record(dataset: str, event: str, what: str) -> None:
@@ -701,7 +731,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
         spec_class = primary[0] if primary else None
     when = _when(dataset)
-    key = {"what": "monthly_counts", "code": config.code_key(monthly_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
+    key = {"what": "monthly_counts", "code": config.code_key(monthly_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": spec_class,
            "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year),
            **({"code_list": True} if code_list else {})}
     cached = store.get_table("gateway", key)
@@ -872,7 +902,7 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     when ``casemix`` (the procedure column) or ``facility_effects`` are given (`_mark_frame`); Σm and Σm² are raw.
     Values outside ``bounds`` (sentinels, impossible values) and missing values are counted
     as unallocated with their reason, never dropped silently."""
-    key = {"what": "mark_moments", "code": config.code_key(mark_moments), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
+    key = {"what": "mark_moments", "code": config.code_key(mark_moments), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "mark": mark,
            "bounds": list(bounds), "missing": list(missing), "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"casemix": casemix, "shrink": MARK_SHRINK, "chars": CASEMIX_CHARS} if casemix else {}),
            **({"facility_effects": facility_effects} if facility_effects else {}),
@@ -900,7 +930,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
     stage E, S4.3). One read serves every share of the column (`share_moments`)."""
     strata = _strata(dataset)
-    key = {"what": "composition_counts", "code": config.code_key(composition_counts), **_places_key(places, year), "dataset": dataset, "event": event,
+    key = {"what": "composition_counts", "code": config.code_key(composition_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
            "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
            "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
@@ -943,7 +973,7 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
     ''. One read of the year serves every lead's facility reading in stage E (S4.3)."""
     strata = _strata(dataset)
     fac = facility_column(dataset)[0]
-    key = {"what": "composition_facility", "dataset": dataset, "event": event, "year": year, "indicator": indicator,
+    key = {"what": "composition_facility", "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "indicator": indicator,
            "success": sorted(success), "missing": sorted(missing), "classifier": classifier, "data": config.data_version(),
            "code": config.code_key(composition_facility), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
@@ -992,7 +1022,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     place of the person) and k of them away from the residence, compared at the place's level (``width``: the digits
     of the residence's code it holds, `PLACE_PREFIX`). A place not recorded is unallocated ('place not recorded')."""
     strata = _strata(dataset)
-    key = {"what": "away_counts", "code": config.code_key(away_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+    key = {"what": "away_counts", "code": config.code_key(away_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"width": width} if width != 6 else {})}
     cached = store.get_table("gateway", key)
@@ -1051,7 +1081,7 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
 
     digest = hashlib.sha256(np.ascontiguousarray(nu.column("nu").to_numpy()).tobytes()
                             + np.ascontiguousarray(nu.column("u").to_numpy()).tobytes()).hexdigest()[:16]
-    key = {"what": "mark_facility_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+    key = {"what": "mark_facility_moments", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "mark": mark, "bounds": list(bounds), "classifier": classifier, "casemix": casemix, "shrink": MARK_SHRINK,
            "facility_effects": facility_effects, "nu": digest, "edges": list(edges), "data": config.data_version(), "code": config.code_key(mark_facility_moments),
            **_df_key(dataset, year), **({"anchor": anchor, "sign": sign} if anchor else {}), **({"cells": 1} if cells else {})}
@@ -1085,7 +1115,7 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     family (a declared group's role) and reads nothing."""
     columns = [column] if isinstance(column, str) else list(column)
     strata = _strata(dataset)
-    key = {"what": "code_list_counts", "code": config.code_key(code_list_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "column": column,
+    key = {"what": "code_list_counts", "code": config.code_key(code_list_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "column": column,
            "data": config.data_version()}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -1340,7 +1370,7 @@ def field_overlap(dataset: str, event: str, a: dict[str, list[str]], b: dict[str
     """Measured share of events two fields have in common (ARCHITECTURE §8.5), from records."""
     import pegasus_data as pg
 
-    key = {"what": "overlap", "dataset": dataset, "event": event, "a": a, "b": b, "period": str(period),
+    key = {"what": "overlap", "dataset": dataset, "event": event, **_declared_key(dataset, event), "a": a, "b": b, "period": str(period),
            "data": config.data_version()}
     cached = store.manifest("gateway", key)
     if cached is not None and "overlap" in cached:
@@ -1513,7 +1543,7 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     date missing or a negative delay are left out and counted in the table's metadata. Columns: u, year, week,
     delay, n."""
     when = onset or _when(dataset)
-    key = {"what": "delay_counts", "code": config.code_key(delay_counts), "dataset": dataset, "event": event, "year": year, "onset": when, "report": report,
+    key = {"what": "delay_counts", "code": config.code_key(delay_counts), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "onset": when, "report": report,
            "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     if cached is not None:
@@ -1735,7 +1765,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     group = _group_columns(dataset, sd)
     strata = _strata(dataset)
     _per_record(dataset, event, "a link's pairs")
-    key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+    key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
            **_df_key(dataset, year), "code": config.code_key(linked_counts)}
     cached = store.get_table("gateway", key)
