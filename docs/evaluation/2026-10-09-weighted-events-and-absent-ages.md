@@ -125,3 +125,12 @@ below the smallest double (about e^−710), and the Halley steps on log x fail i
   Poisson draws, and the scan's assertions fired.
 - **The fix.** The quantile is now 0 wherever the lower-tail term underflows, and any other non-finite value raises.
 - **The check.** The frailty's mean is 0.999, 1.004 and 1.017 at shapes 0.066, 0.005 and 0.001; 1 is right.
+
+**SINAN-SDTA through `update` (`plans/s6_sinan_sdta.yml`, 2015–2023, log `data/probes/s6_sinan_sdta.log`).**
+- **The fit.** It converges with φ 0.066 and P 1.67. The robust refit flags nothing.
+- **What the questions find.** Excess, step, trend, cluster and divergence find nothing. The group question finds 15
+  disparities, single-year spikes in one band and sex at Araguari, Carpina, Osasco and others: one outbreak in one age
+  group. Triage reads them as noise.
+- **What this measures.** People counted in clusters are read at a noise that hides departures (OPEN_QUESTIONS 14).
+- **The grid's lens loop.** It skips a lens the field cannot take when the lens raises LookupError, as it already did
+  for ValueError: births have no classifier, so no facility cube. The B3 grid had stopped on that.

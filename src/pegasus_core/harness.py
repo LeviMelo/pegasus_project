@@ -815,7 +815,8 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                     kw["weighted"] = wt
                 try:
                     found = sess.scan(node, lens, **kw)
-                except (ValueError, NotImplementedError) as err:
+                except (ValueError, NotImplementedError, LookupError) as err:
+                    # a lens the field cannot take (births have no classifier, so no facility cube): skipped, logged
                     log(f"  {lens}: {err}")
                     continue
                 prec, rec, touched = _score(plants, found, places, periods, U)

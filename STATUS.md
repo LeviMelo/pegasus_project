@@ -77,6 +77,7 @@ Each row: what a measurement showed, and where it now lives (the register the au
 | the place-year noise shrinks with size (births P ≈ 1.6), the model's φ is size-free | the dispersion becomes NB-P, learned per block, before the next national reading (unit B3) | OPEN_QUESTIONS 12 |
 | SIM IX's large places sat 2–3 % above their expectation: the robust refit imputed persistent recodings (Fortaleza's I10 ×5) and so removed deaths only large places' levels rest on | a flagged excess that the block's other leaves' deficit accounts for is moved back to them, not removed; IX calibrated by size | ADR-0033, OPEN_QUESTIONS 13 |
 | an outbreak's people are columns by sex and band, not rows | an event's row may be a grid; the block's ages are the bands population and event share, the place its entity's | pegasus_data decision 0156, unit P3 |
+| counted as people, foodborne-outbreak ill fit with φ 0.066: they arrive an outbreak at a time | the unit of detection is the cluster (the outbreak), which has no person strata; the model's groups assume them | OPEN_QUESTIONS 14 |
 | exposure variance double-counts φ | no exposure-variance term by default | ADR-0010 |
 | SIH leads are dominated by one hospital's coding | a facility triage class now; the institution lattice is raised in priority | facility triage (running) |
 | surveys ran on one core for hours | threaded surveys, a single model load | bef4b70 |
