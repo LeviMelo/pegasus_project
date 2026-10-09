@@ -31,3 +31,18 @@ variance of large cells.
   - the monolith's own likelihood is still NB2 at its leaves (unit B3), where SIM IX's large places misfit;
   - the robust refit's flagging and the prospective component keep NB2;
   - the grid's null worlds are re-read with the next method records.
+
+## Amendment (same day): the block's dispersion is NB-P at its leaves (unit B3)
+
+- `Monolith._dispersion_power`: at fixed μ, φ_i = φ0·(μ_i/μ_ref)^(2−P) per leaf cell, P in [1, 2] by the profile of
+  the binned likelihood. μ_ref is the median non-empty cell.
+- `expected()` returns Σ μ_i^P·μ_ref^(2−P) for Σμ², so every aggregate (the predictive, B2's and BP's refits) reads
+  Σ μ_i²/φ_i.
+- The negative binomial mean fit keeps NB2. A fit stored before B3 has its power estimated once on first use, in
+  seconds: 5 s on births, 33 s on IX.
+- Births: P 1.72, φ0 14.8 at μ_ref 16.3, 4,908 nats over NB2. SIM IX: P 1.74, 3,824 nats.
+- The surprise's calibration by size is the same as the field-level form: births calibrated, IX 0.012–0.085, still
+  by the field attempt. IX's largest places misfit in their expectation, not their noise.
+- Remaining for B3's done-when: the grid's null worlds on births (`pegasus-core grid`, queued first in the night's
+  chain).
+

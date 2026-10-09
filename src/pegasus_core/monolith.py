@@ -1011,8 +1011,8 @@ class Monolith:
         # the closing mean to the fit's own tolerance (``mean_tol`` log-likelihood units of predicted decrease): at
         # 0.001 it took 7.4 of IX's 38.6 s for a decrease no figure reads (2026-10-06)
         self._mean(inner, loglik_tol=mean_tol)
-        self.phi = self._dispersion()
-        log(f"φ = {self.phi:.3f}; {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
+        self.phi = self._dispersion_power()
+        log(f"φ = {self.phi:.3f} (P {self.phi_power:.3f}); {time.time() - start:.0f}s; {'converged' if self.converged else 'NOT CONVERGED'}: {self.stop_reason}")
         return self
 
     def _loop(self, outer: int, inner: int, tol: float, log, changes: list[float], mean_tol: float, start: float) -> None:
@@ -1602,14 +1602,59 @@ class Monolith:
         const = float(special.gammaln(y + 1).sum())
         logmu = np.log(mu)
 
-        def nll(log_phi: float) -> float:
+        def nll(log_phi: float, power: float = 2.0, ref: float = 1.0) -> float:
             ph = float(np.exp(log_phi))
-            lpm = np.log(ph + mu)
-            full = (float((cnt * special.gammaln(vals + ph)).sum()) - len(y) * special.gammaln(ph) - const
-                    + float((ph * (np.log(ph) - lpm) + y * (logmu - lpm)).sum()))
-            total = float((n * ph * np.log1p(mbar / ph) - 0.5 * ph / (ph + mbar) ** 2 * spread).sum())
-            return -(full - (total - float((ph * np.log1p(mu / ph)).sum())))
+            if power == 2.0:
+                lpm = np.log(ph + mu)
+                full = (float((cnt * special.gammaln(vals + ph)).sum()) - len(y) * special.gammaln(ph) - const
+                        + float((ph * (np.log(ph) - lpm) + y * (logmu - lpm)).sum()))
+                total = float((n * ph * np.log1p(mbar / ph) - 0.5 * ph / (ph + mbar) ** 2 * spread).sum())
+                return -(full - (total - float((ph * np.log1p(mu / ph)).sum())))
+            # NB-P (ADR-0032, unit B3): φ_i = φ0·(μ_i/μ_ref)^(2−P) per cell, the bin's at its mean (a bin spans 1/8192 of
+            # the log-μ range, so its φ is constant to that precision)
+            pc = ph * (mu / ref) ** (2.0 - power)
+            lpm = np.log(pc + mu)
+            full = (float((special.gammaln(y + pc) - special.gammaln(pc)).sum()) - const
+                    + float((pc * (np.log(pc) - lpm) + y * (logmu - lpm)).sum()))
+            pb = ph * (mbar / ref) ** (2.0 - power)
+            total = float((n * pb * np.log1p(mbar / pb) - 0.5 * pb / (pb + mbar) ** 2 * spread).sum())
+            return -(full - (total - float((pc * np.log1p(mu / pc)).sum())))
+        nll.mu_ref = float(np.median(mu)) if len(mu) else 1.0
         return nll
+
+    def _dispersion_power(self) -> float:
+        """φ0 and P of the block's NB-P dispersion at fixed μ (ADR-0032, unit B3): Var = μ + μ²/φ_i with
+        φ_i = φ0·(μ_i/μ_ref)^(2−P), μ_ref the median non-empty cell, P in [1, 2] by the profile of the binned likelihood
+        (P = 2 is NB2's size-free relative noise). Births' place-year noise falls from 0.016 in villages to 0.0027 in
+        cities where one φ said 0.0037 (OPEN_QUESTIONS 12). Sets ``phi_power`` and ``phi_ref``; returns φ0. The
+        negative binomial mean fit keeps NB2: its weights read one φ."""
+        if self.likelihood != "poisson":
+            self.phi_power, self.phi_ref = 2.0, 1.0
+            return self._dispersion()
+        nll = self._nb_loglik_binned()
+        ref = nll.mu_ref
+
+        def inner(power: float) -> tuple[float, float]:
+            r = optimize.minimize_scalar(lambda lp: nll(lp, power, ref), bounds=(np.log(1e-3), np.log(1e6)),
+                                         method="bounded", options={"xatol": 1e-3})
+            return float(r.fun), float(r.x)
+
+        res = optimize.minimize_scalar(lambda pw: inner(pw)[0], bounds=(1.0, 2.0), method="bounded",
+                                       options={"xatol": 0.005})
+        power = float(res.x)
+        fun, lp = inner(power)
+        fun2, lp2 = inner(2.0)
+        phi = float(np.exp(lp))
+        self.phi_power, self.phi_ref = power, ref
+        self.dispersion_check = {"phi": phi, "power": power, "mu_ref": ref,
+                                 "loglik_gain_over_nb2": float(fun2 - fun),
+                                 "loglik_gain_over_poisson": float(nll(np.log(1e6)) - fun)}
+        return float("inf") if phi > 0.99e6 else phi
+
+    def ensure_power(self) -> None:
+        """A fit stored before B3 carries NB2's φ only: its NB-P dispersion is estimated once, on first use."""
+        if getattr(self, "phi_power", None) is None:
+            self.phi = self._dispersion_power()
 
     def dispersion_by(self, labels: np.ndarray) -> np.ndarray:
         """φ per place when each group of places (``labels``, one per place) has its own, by `_dispersion`."""
@@ -1624,7 +1669,11 @@ class Monolith:
                  x: dict[str, torch.Tensor] | None = None) -> tuple[np.ndarray, np.ndarray]:
         """For a set of leaves (a node of the tree): μ[u,t] summed over the leaves and groups,
         and Σμ²[u,t] over the underlying cells (for the aggregate's dispersion). ``x`` overrides
-        the fitted effects (a forecast, `extrapolate`)."""
+        the fitted effects (a forecast, `extrapolate`). Under NB-P (ADR-0032, unit B3) the second sum is
+        Σ μ_i^P·μ_ref^(2−P), so Σμ²/φ0 is Σ μ_i²/φ_i exactly for every reader of it."""
+        if self.likelihood == "poisson" and np.isfinite(getattr(self, "phi", np.inf)):
+            self.ensure_power()
+        pw = float(getattr(self, "phi_power", None) or 2.0)
         with torch.no_grad():
             x = self.effects() if x is None else x
             lp = self._leaf_place(x, spatial)
@@ -1643,19 +1692,21 @@ class Monolith:
             else:
                 w = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel])[:, :, None]
             mu = (w * pt).sum(0)
-            M2 = torch.einsum("utg,kg->kut", self.N ** 2, self._prof(x, 2.0))
+            M2 = torch.einsum("utg,kg->kut", self.N ** pw, self._prof(x, pw))
             lin = self._time(x)[:, None, :]
             if spatial:
                 lin = lin + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None]
             if ix:
                 w2 = torch.zeros((K, *pt.shape[1:]), dtype=self.dtype, device=self.device).index_add_(
-                    0, self.grp[sel], (lp[sel][:, :, None] * E) ** 2)
+                    0, self.grp[sel], (lp[sel][:, :, None] * E) ** pw)
             else:
-                w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** 2)[:, :, None]
-            mu2 = (w2 * torch.exp(2 * lin) * M2).sum(0)
+                w2 = torch.zeros((K, U), dtype=self.dtype, device=self.device).index_add_(0, self.grp[sel], lp[sel] ** pw)[:, :, None]
+            mu2 = (w2 * torch.exp(pw * lin) * M2).sum(0)
         mu, mu2 = mu.cpu().numpy(), mu2.cpu().numpy()
+        if pw != 2.0:
+            mu2 = mu2 * float(getattr(self, "phi_ref", 1.0)) ** (2.0 - pw)
         if self.supply is not None:
-            mu, mu2 = mu * self.supply, mu2 * self.supply ** 2
+            mu, mu2 = mu * self.supply, mu2 * self.supply ** pw
         return mu, mu2
 
     def expected_by_group(self, leaves: np.ndarray, spatial: bool = True,
@@ -1844,7 +1895,7 @@ class Monolith:
                 log(f"  squarem {sweep}: course moved {moved:.3g}, α {alpha:.2f}, τ {m.category_courses['tau']:.3g}")
                 if moved < sweep_tol:
                     break
-        m.phi = m._dispersion()
+        m.phi = m._dispersion_power()
         m.data = d
         m.robust_info = info
         m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 9, "courses": courses}
@@ -1953,6 +2004,7 @@ class Monolith:
                     if k in self.params:
                         self.params[k].copy_(torch.as_tensor(v))
             self.phi = float(meta["phi"])
+            self.phi_power, self.phi_ref = meta.get("phi_power"), meta.get("phi_ref") or 1.0
             self.robust_info = meta.get("robust_info")
             self.robust_tag = tag
             if "h_cat" in arrays:
@@ -1989,7 +2041,8 @@ class Monolith:
         return {"block": d.block, "dataset": d.dataset, "graph": self.graph_kind, "years": [int(d.years[0]), int(d.years[-1])],
                 "leaves": len(d.leaves), "groups": len(d.groups), "places": len(d.places),
                 "events": float(d.y.sum()), "nonempty_cells": int(len(d.y)), "unallocated": d.unallocated,
-                "phi": self.phi, "dispersion_check": getattr(self, "dispersion_check", None), "taus": {k: c.tau for k, c in self.components.items()}, "spatial_share": bym,
+                "phi": self.phi, "phi_power": getattr(self, "phi_power", None), "phi_ref": getattr(self, "phi_ref", None),
+                "dispersion_check": getattr(self, "dispersion_check", None), "taus": {k: c.tau for k, c in self.components.items()}, "spatial_share": bym,
                 "fit_seconds": self.history[-1]["seconds"] if self.history else None,
                 "outers": len(self.history), "converged": getattr(self, "converged", None),
                 "stop_reason": getattr(self, "stop_reason", None), "rank": self.rank, "centring": CENTRING}
@@ -2038,6 +2091,8 @@ class Monolith:
         for name in HS if prior == "horseshoe" else ():
             model._set_weights(name, arrays[f"hs_{name}"])
         model.phi = float(meta["phi"]) if meta.get("phi") is not None else float("nan")
+        model.phi_power = meta.get("phi_power")          # None: a fit from before B3, estimated on first use
+        model.phi_ref = meta.get("phi_ref") or 1.0
         model._restore(meta)
         model.history = [{"seconds": meta.get("fit_seconds")}]
         return model
