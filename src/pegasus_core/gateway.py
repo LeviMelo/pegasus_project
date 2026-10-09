@@ -551,7 +551,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     con.execute(f"""CREATE TEMP TABLE e AS SELECT
             {_residence_sql(strata['residence'])} AS u,
             {sex} AS sex,
-            CAST(least(floor(TRY_CAST("{strata['age']}" AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age,
+            {_age_sql(strata)} AS age,
             {code} AS code, CAST(events AS INTEGER) AS y{race_col}
         FROM r""")
     reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
@@ -565,6 +565,16 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.count_events({dataset}, {event})", "by": by})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
+
+
+def _per_record(dataset: str, event: str, what: str) -> None:
+    """Refuse a weighted event where the computation is per record: a weighted row is many events (SIA PA's
+    consolidated BPA, up to 95,404 procedures on a row), and its mark (PA_VALAPR) or its link belongs to the row."""
+    import pegasus_data as pg
+
+    spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    if spec.get("weight"):
+        raise ValueError(f"{dataset} {event}: a row stands for {spec['weight']} events; {what} is per record")
 
 
 def _residence_sql(column: str) -> str:
@@ -591,7 +601,8 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
     status = spec.get("status") or {}
-    wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else [])))
+    weight = [spec["weight"]] if spec.get("weight") else []
+    wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else []) + weight))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes",
@@ -607,6 +618,12 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
         col = pc.cast(table[status["column"]], pa.string())
         table = table.filter(pc.invert(pc.fill_null(pc.is_in(col, value_set=pa.array(
             [str(v) for v in status["excluded"]])), False)))
+    if weight:
+        # a row of a weighted event stands for its quantity of events (SIA's production rows, pegasus_data OQ 75)
+        from pegasus_data.semantics.event_types import event_type as data_event_type
+        from pegasus_data.semantics.event_types import event_weights
+
+        table = table.append_column("__w", event_weights(table, data_event_type(dataset, event)))
     return table
 
 
@@ -626,11 +643,11 @@ def entry_date(dataset: str) -> str:
 
 def _when(dataset: str) -> str:
     """The event's date column from the roles: onset where declared (the epidemic curve's time),
-    else the event's own date, start, or birth date."""
+    else the event's own date, start, competence (the month of care SIA's production rows give), or birth date."""
     import pegasus_data as pg
 
     rows = {r["property"]: r["column"] for r in pg.roles(dataset) if r.get("model") == "when" and r.get("kind") == "date"}
-    for prop in ("onset", "date", "start", "birth_date"):
+    for prop in ("onset", "date", "start", "competence", "birth_date"):
         if prop in rows:
             return rows[prop]
     raise LookupError(f"{dataset}: no event date among its roles")
@@ -641,14 +658,17 @@ def _date_sql(column: str) -> str:
     pegasus_data types), eight digits YYYYMMDD (SINAN families left raw) and eight digits DDMMYYYY
     (SINASC DTNASC, SIM DTOBITO). Each eight-digit reading is accepted only when it gives a valid
     date in 1990–2035, which no string satisfies under both readings (one of them puts the year
-    outside the window or the month above 12). Anything else is NULL, and its event unallocated as
-    'date'. Interim: date typing belongs in pegasus_data."""
+    outside the window or the month above 12). Six digits YYYYMM (SIA's competence) are the month's
+    first day: a month, which is all a monthly count reads. Anything else is NULL, and its event
+    unallocated as 'date'. Interim: date typing belongs in pegasus_data."""
     x = f'trim(CAST("{column}" AS VARCHAR))'
     return (f"CASE WHEN regexp_full_match({x}, '[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}') THEN TRY_CAST({x} AS DATE) "
             f"WHEN regexp_full_match({x}, '[0-9]{{8}}') AND TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) "
             f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%Y%m%d') AS DATE) "
             f"WHEN regexp_full_match({x}, '[0-9]{{8}}') AND TRY_CAST(TRY_STRPTIME({x}, '%d%m%Y') AS DATE) "
-            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%d%m%Y') AS DATE) END")
+            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x}, '%d%m%Y') AS DATE) "
+            f"WHEN regexp_full_match({x}, '[0-9]{{6}}') AND TRY_CAST(TRY_STRPTIME({x} || '01', '%Y%m%d') AS DATE) "
+            f"BETWEEN DATE '1990-01-01' AND DATE '2035-12-31' THEN TRY_CAST(TRY_STRPTIME({x} || '01', '%Y%m%d') AS DATE) END")
 
 
 def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
@@ -668,7 +688,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
         spec_class = primary[0] if primary else None
     when = _when(dataset)
-    key = {"what": "monthly_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
+    key = {"what": "monthly_counts", "code": config.code_key(monthly_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "classifier": spec_class,
            "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year),
            **({"code_list": True} if code_list else {})}
     cached = store.get_table("gateway", key)
@@ -694,10 +714,10 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
                      WHEN code IS NULL OR code = '' THEN 'code' WHEN d IS NULL THEN 'date' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST(year(d) AS SMALLINT) AS year,
             CAST(month(d) AS TINYINT) AS month, CAST(sex AS TINYINT) AS sex, age, code,
-            CAST(count(*) AS INTEGER) AS y
+            CAST(sum(wt) AS INTEGER) AS y
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, year, month""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}) by month of {when}"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
@@ -738,10 +758,26 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
     return out
 
 
+def _age_sql(strata: dict) -> str:
+    """The subject's age in whole years, capped at MAX_AGE; a code the age stratum's roles declare missing (SIA PA's 999
+    'idade não exigida', 998 'informada com erro') is no age, never the oldest band."""
+    x = f'trim(CAST("{strata["age"]}" AS VARCHAR))'
+    # DuckDB's least() skips NULLs (least(NULL, 80) is 80): an absent age must stay absent, not become 80+
+    years = f"floor(TRY_CAST({x} AS DOUBLE))"
+    age = f"CAST(CASE WHEN {years} IS NULL THEN NULL ELSE least({years}, {MAX_AGE}) END AS SMALLINT)"
+    missing = strata.get("age_missing") or ()
+    if not missing:
+        return age
+    codes = ", ".join("'" + str(c).replace("'", "''") + "'" for c in missing)
+    return f"CASE WHEN {x} IN ({codes}) THEN NULL ELSE {age} END"
+
+
 def _cells_sql(strata: dict, dataset: str, table: pa.Table) -> str:
+    """A record's cell (u, sex, age) and ``wt``, the events it stands for: its event type's weight (`_records`), else 1."""
+    wt = '"__w"' if "__w" in table.column_names else "1"
     return (f'{_residence_sql(strata["residence"])} AS u, '
             f'{_sex_sql(strata, dataset, table)} AS sex, '
-            f'CAST(least(floor(TRY_CAST(CAST("{strata["age"]}" AS VARCHAR) AS DOUBLE)), {MAX_AGE}) AS SMALLINT) AS age')
+            f'{_age_sql(strata)} AS age, {wt} AS wt')
 
 
 MARK_SHRINK = 10.0   # events: a (diagnosis, procedure group) stratum's case-mix offset is its mean log departure times n/(n + this)
@@ -759,6 +795,7 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     spanned, so a same-day date is 1 and the log is defined). Returns the unallocated (year, reason, code, y)."""
 
     strata = _strata(dataset)
+    _per_record(dataset, event, "a mark's moments")
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
     cols = [strata["residence"], strata["age"], mark] + ([anchor] if anchor else []) + \
         ([strata["sex"]] if strata["sex"] else []) + \
@@ -784,7 +821,7 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
                       WHEN m IS NULL THEN 'mark missing' WHEN m < {bounds[0]} OR m > {bounds[1]} THEN 'mark out of bounds'
                       END"""
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     if facility_effects:
         fx = store.get_table("gateway", {"what": "mark_facility_effects", "id": facility_effects})
         if fx is None:
@@ -820,7 +857,7 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     when ``casemix`` (the procedure column) or ``facility_effects`` are given (`_mark_frame`); Σm and Σm² are raw.
     Values outside ``bounds`` (sentinels, impossible values) and missing values are counted
     as unallocated with their reason, never dropped silently."""
-    key = {"what": "mark_moments", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
+    key = {"what": "mark_moments", "code": config.code_key(mark_moments), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "mark": mark,
            "bounds": list(bounds), "missing": list(missing), "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"casemix": casemix, "shrink": MARK_SHRINK, "chars": CASEMIX_CHARS} if casemix else {}),
            **({"facility_effects": facility_effects} if facility_effects else {}),
@@ -848,7 +885,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
     stage E, S4.3). One read serves every share of the column (`share_moments`)."""
     strata = _strata(dataset)
-    key = {"what": "composition_counts", **_places_key(places, year), "dataset": dataset, "event": event,
+    key = {"what": "composition_counts", "code": config.code_key(composition_counts), **_places_key(places, year), "dataset": dataset, "event": event,
            "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
            "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
@@ -871,12 +908,12 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
                      WHEN code IS NULL OR code = '' THEN 'code' WHEN x IS NULL OR x = '' THEN 'value missing'
                      WHEN x IN ({miss}) THEN 'value not recorded' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
-            CAST(sex AS TINYINT) AS sex, age, code, x AS value, CAST(count(*) AS INTEGER) AS n
+            CAST(sex AS TINYINT) AS sex, age, code, x AS value, CAST(sum(wt) AS INTEGER) AS n
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     missing_cells = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
-            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS m
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(sum(wt) AS INTEGER) AS m
         FROM e WHERE ({reason}) IN ('value missing', 'value not recorded') GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): composition of {column}"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
@@ -904,9 +941,10 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
     yes = ", ".join("'" + str(s).replace("'", "''") + "'" for s in success)
+    wt = '"__w"' if "__w" in raw.column_names else "1"
     out = con.execute(f"""SELECT coalesce(trim(CAST("{fac}" AS VARCHAR)), '') AS facility,
             {_residence_sql(strata["residence"])} AS u, {code} AS code,
-            CAST(count(*) AS INTEGER) AS n, CAST(sum(CASE WHEN x IN ({yes}) THEN 1 ELSE 0 END) AS INTEGER) AS k
+            CAST(sum({wt}) AS INTEGER) AS n, CAST(sum(CASE WHEN x IN ({yes}) THEN {wt} ELSE 0 END) AS INTEGER) AS k
         FROM (SELECT *, trim(CAST("{indicator}" AS VARCHAR)) AS x FROM r)
         WHERE x IS NOT NULL AND x <> '' AND x NOT IN ({miss}) GROUP BY ALL HAVING u IS NOT NULL""").fetch_arrow_table()
     store.put_table("gateway", key, out, {"source": f"pegasus_data.query({dataset}): {indicator} by {fac}"})
@@ -939,7 +977,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     place of the person) and k of them away from the residence, compared at the place's level (``width``: the digits
     of the residence's code it holds, `PLACE_PREFIX`). A place not recorded is unallocated ('place not recorded')."""
     strata = _strata(dataset)
-    key = {"what": "away_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
+    key = {"what": "away_counts", "code": config.code_key(away_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"width": width} if width != 6 else {})}
     cached = store.get_table("gateway", key)
@@ -963,11 +1001,11 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
                      WHEN code IS NULL OR code = '' THEN 'code'
                      WHEN w IS NULL OR w NOT IN (SELECT DISTINCT u // {div} FROM v) THEN 'place not recorded' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
-            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS n,
-            CAST(sum(CASE WHEN w <> u // {div} THEN 1 ELSE 0 END) AS INTEGER) AS k
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(sum(wt) AS INTEGER) AS n,
+            CAST(sum(CASE WHEN w <> u // {div} THEN wt ELSE 0 END) AS INTEGER) AS k
         FROM e WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): {place} against residence"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
@@ -1032,7 +1070,7 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     family (a declared group's role) and reads nothing."""
     columns = [column] if isinstance(column, str) else list(column)
     strata = _strata(dataset)
-    key = {"what": "code_list_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "column": column,
+    key = {"what": "code_list_counts", "code": config.code_key(code_list_counts), **_places_key(places, year), "dataset": dataset, "event": event, "year": year, "column": column,
            "data": config.data_version()}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -1053,11 +1091,11 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN len(codes) = 0 THEN 'code' END"""
     counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
-            CAST(sex AS TINYINT) AS sex, age, code, CAST(count(*) AS INTEGER) AS y
-        FROM (SELECT u, sex, age, unnest(codes) AS code FROM e WHERE ({reason}) IS NULL)
+            CAST(sex AS TINYINT) AS sex, age, code, CAST(sum(wt) AS INTEGER) AS y
+        FROM (SELECT u, sex, age, wt, unnest(codes) AS code FROM e WHERE ({reason}) IS NULL)
         GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, NULL AS code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.query({dataset}): {columns} exploded"})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
     return EventCounts(counts, unallocated, key)
@@ -1085,7 +1123,7 @@ def _strata(dataset: str) -> dict:
     implied = {"mother": 2}.get(entity)
     if "sex" not in by_prop and implied is None:
         raise LookupError(f"{dataset}: no sex stratum, and entity {entity!r} implies none")
-    return {"residence": by_prop["residence"]["column"], "age": age["column"],
+    return {"residence": by_prop["residence"]["column"], "age": age["column"], "age_missing": tuple(age.get("missing") or ()),
             "sex": by_prop["sex"]["column"] if "sex" in by_prop else None, "implied_sex": implied, "entity": entity,
             "race": by_prop["race"]["column"] if "race" in by_prop else None}
 
@@ -1436,7 +1474,7 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     date missing or a negative delay are left out and counted in the table's metadata. Columns: u, year, week,
     delay, n."""
     when = onset or _when(dataset)
-    key = {"what": "delay_counts", "dataset": dataset, "event": event, "year": year, "onset": when, "report": report,
+    key = {"what": "delay_counts", "code": config.code_key(delay_counts), "dataset": dataset, "event": event, "year": year, "onset": when, "report": report,
            "data": config.data_version(), **_df_key(dataset, year)}
     cached = store.get_table("gateway", key)
     if cached is not None:
@@ -1650,6 +1688,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
     group = _group_columns(dataset, sd)
     strata = _strata(dataset)
+    _per_record(dataset, event, "a link's pairs")
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
            **_df_key(dataset, year), "code": config.code_key(linked_counts)}
@@ -1681,7 +1720,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         FROM e LEFT JOIN (SELECT rid, max(p) AS p FROM pm GROUP BY rid) m USING (rid)
         WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
-            CAST(count(*) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
     sens = getattr(spec, "sensitivity", "")
     if sens and sens != side:
         # the other side's records should all find a partner: its linked share by residence is the link's sensitivity,
