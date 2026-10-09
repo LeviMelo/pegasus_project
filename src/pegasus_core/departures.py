@@ -119,7 +119,7 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
     family = f"cell_excess|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "two-group (Efron)", "field": s.field.id,
                                                                     "tier": s.tier}))
-    parts, ps, rel = [], [], []
+    parts, ps, rel, floors = [], [], [], []
     for sk, sc in _ladder(s, scales):
         ok = ((sk.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0) & np.isfinite(sk.z)
         fit = two_group(sk.z[ok])
@@ -133,9 +133,13 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
             # a measurement on the log scale: P(N(μ + log θ0, var) ≥ y), var the cell mean's (1/w)
             sd = np.sqrt(np.where(sk.w > 0, 1.0 / np.where(sk.w > 0, sk.w, 1.0), np.inf))
             rel.append(stats.norm.sf((sk.y - sk.mu - np.log(rr)) / sd).ravel())
+            floors.append(np.full(sk.y.size, rr))
         else:
-            rel.append(lenses._upper_tail(sk.y, rr * sk.mu, sk.phi).ravel())     # P(Y ≥ y | rate θ0·μ)
-    p_all, rel_all = np.concatenate(ps), np.concatenate(rel)
+            # P(Y ≥ y | rate θ0'·μ), θ0' the cell's minimum relevant ratio: θ0, or the burden θ0 means (S1.6)
+            floor = lenses.burden_ratio(rr, sk.mu, lenses.mean_cell(sk.mu, ok))
+            rel.append(lenses._upper_tail(sk.y, floor * sk.mu, sk.phi).ravel())
+            floors.append(np.ravel(floor))
+    p_all, rel_all, floor_all = np.concatenate(ps), np.concatenate(rel), np.concatenate(floors)
     sig = control.bh(p_all, q) & (rel_all <= q)
     out, offset = [], 0
     for sk, sc, fit, lfdr, _ok in parts:
@@ -148,6 +152,7 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
                                       {"support": "municipality" if sc is None else sc.name,
                                        "unit": str(sk.places[i // T]), "observed": float(sk.y.flat[i]),
                                        "expected": float(sk.mu.flat[i]), "lfdr": float(lfdr.flat[i]),
+                                       "relevant_ratio": round(float(floor_all[offset + i]), 4),
                                        "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")}}))
         offset += U * T
     ledger.complete(test, float(p_all.min()) if p_all.size else 1.0, None,
@@ -178,8 +183,10 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
     scales = spectrum.scales(footprints)
     # one set of replicate fields per field and tier, read by every shape (each its own contrasts of them): an equally
     # valid null per shape, drawn once (`multiscale.peaks`)
+    ok = (s.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0
     found, null = multiscale.peaks(s, spectrum, scales, shape=shape, replicates=replicates,
-                                   seed=config.seed("excess", s.field.id, s.tier), rate_ratio=rr)
+                                   seed=config.seed("excess", s.field.id, s.tier), rate_ratio=rr,
+                                   mean_cell=None if s.extras.get("kind") == "mark" else lenses.mean_cell(s.mu, ok))
     if not found:
         ledger.complete(test, 1.0, None, {"peaks": 0, "hits": 0})
         return []
@@ -374,7 +381,7 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
                                        "unit": str(sk.places[f["rows"][i]]), "p_step": float(1 - f["p_null"][i]),
                                        "delta": float(f["d"][i]), "delta_sd": float(f["sd"][i]),
                                        "p_relevant": float(f["p_relevant"][i]), "start": int(sk.years[t0]),
-                                       "shape": shp}))
+                                       "relevant_ratio": round(float(f["floor"][i]), 4), "shape": shp}))
         offset += len(f["rows"])
     ledger.complete(test, float(p_null.min()), None, {"units": len(p_null), "hits": len(out)})
     return out
@@ -417,9 +424,12 @@ def _step_posteriors(s: surprise.Surprise, rr: float, min_years: int, min_past: 
     p_null = post[:, 0]
     k = post[:, 1:].argmax(1)
     d, sd = deltas[np.arange(len(rows)), k], dsd[np.arange(len(rows)), k]
-    p_relevant = special.ndtr((d - np.log(rr)) / np.maximum(sd, 1e-12))
+    # each unit's minimum relevant step: θ0, or the burden θ0 means at the support's mean cell (S1.6)
+    floor = (np.full(len(rows), rr) if surprise.gaussian(s) or s.extras.get("kind") == "mark"
+             else lenses.burden_ratio(rr, mu.mean(1), float(mu.mean())))
+    p_relevant = special.ndtr((d - np.log(floor)) / np.maximum(sd, 1e-12))
     return {"rows": rows, "p_null": p_null, "eligible": (p_relevant >= 0.5) & (d > 0), "k": k, "starts": starts,
-            "d": d, "sd": sd, "p_relevant": p_relevant}
+            "d": d, "sd": sd, "p_relevant": p_relevant, "floor": floor}
 
 
 class _Municipal:

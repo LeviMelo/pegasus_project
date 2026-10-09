@@ -110,11 +110,15 @@ def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years
                  force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:
     """Bring the persistent state (fits, register, report) up to a plan, redoing only what changed (`update`), under
     the machine's job slot and the GPU slot (`jobs`)."""
+    import time
+
     from . import jobs, update
 
     with jobs.slot(f"update {plan}", gpu=True):
         jobs.threads()
-        out = update.run(update.Plan.load(plan), force=force, log=console.print)
+        # each line stamped with the clock: a plan's log is its throughput measurement (S0.8)
+        out = update.run(update.Plan.load(plan), force=force,
+                         log=lambda line: console.print(f"[{time.strftime('%H:%M:%S')}] {line}", markup=False))
     console.print_json(json.dumps(out, default=str))
 
 

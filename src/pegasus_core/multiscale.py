@@ -225,14 +225,17 @@ def _local_maxima(S, rows: np.ndarray, cols: np.ndarray):
 
 
 def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], shape: str = "spike",
-          replicates: int = 40, seed: int = 0, rate_ratio: float = 1.0) -> tuple[list[Peak], dict]:
+          replicates: int = 40, seed: int = 0, rate_ratio: float = 1.0, mean_cell: float | None = None
+          ) -> tuple[list[Peak], dict]:
     """The field's multiscale peaks for a departure ``shape`` (`contrasts`) with their STEM p-values (module
     docstring). At scale s and contrast c the statistic is S = Σ_u K(·, u) cᵀ(y_u − μ_u) / √(Σ_u K(·, u)² cᵀΣ_u c),
     Σ_u the place's covariance over periods under N1 (`contrast_variance`). Each scale's S is calibrated to the
     replicates' by its median and MAD (the empirical null), and the peaks are the joint maxima over place and scale
     (scale-space detection: Lindeberg 1998). A peak's p-value is read against the joint peaks of the same scale and
     contrast in replicate fields drawn from the predictive. Each peak also carries its relevance statistic, the excess
-    over ``rate_ratio`` times the expectation; the returned dict also holds each scale's calibration."""
+    over its minimum relevant ratio times the expectation: ``rate_ratio``, or for a count field with ``mean_cell`` the
+    burden θ0 means at that mean cell through the peak's own kernel and contrast (`lenses.burden_ratio`, S1.6); the
+    returned dict also holds each scale's calibration."""
     torch, dev = _torch()
     U, T = s.y.shape
     gauss = surprise.gaussian(s)    # a Gaussian location (a measure, a share): the standardised excess, log effects
@@ -245,6 +248,9 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     # the contrast's reference: the expectation's (a count's rate ratio), or the contrast's own weight per place (a
     # location's mean log difference)
     CM = torch.as_tensor(np.where(ok, 1.0, 0.0) if gauss else mu0, dtype=torch.float32, device=dev) @ Ct
+    # the same contrast of a field whose every cell expects the field's mean: the peak's "average place" reference
+    burden = not gauss and mean_cell is not None and mean_cell > 0 and rate_ratio > 1.0
+    CB = (torch.as_tensor(np.where(ok, mean_cell, 0.0), dtype=torch.float32, device=dev) @ Ct) if burden else None
     W = torch.as_tensor(np.where(ok.all(1, keepdims=True), contrast_variance(s, C), 0.0), dtype=torch.float32,
                         device=dev)                                                         # [U, m]
     rng = np.random.default_rng(seed)
@@ -323,6 +329,7 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
         K = torch.eye(U, device=dev) if sc == 0 else spectrum.kernel(sc)
         KW = (K * K) @ W
         KC, KM = K @ (D + CM), K @ CM
+        KB = K @ CB if burden else None
         null[places[k]] = float(rpeak[k].sum()) / replicates
         for j in range(m):
             null_heights = torch.sort(Sr_all[k][:, :, j][rpeak[k][:, :, j]]).values
@@ -337,7 +344,9 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
                 zrel = (kd - float(np.log(rate_ratio)) * KM[cs, j]) / torch_sqrt(KW[cs, j])
             else:
                 rr = KC[cs, j] / torch.clamp(KM[cs, j], min=1e-12)
-                zrel = (KC[cs, j] - rate_ratio * KM[cs, j]) / torch_sqrt(KW[cs, j])
+                floor = (torch.clamp(1.0 + (rate_ratio - 1.0) * KB[cs, j] / torch.clamp(KM[cs, j], min=1e-12),
+                                     max=rate_ratio) if burden else rate_ratio)
+                zrel = (KC[cs, j] - floor * KM[cs, j]) / torch_sqrt(KW[cs, j])
             for c, hh, pp, r, zr in zip(cs.tolist(), h.tolist(), p.tolist(), rr.tolist(), zrel.tolist(), strict=True):
                 found.append(Peak(c, windows[j], sc, places[k], hh, r, zr, pp))
         del K, KW, KC, KM

@@ -1,0 +1,8 @@
+# S6.0 (work plan): every chapter of SIH's primary tree (ICD-10 principal diagnosis), by group, fitted and asked; the
+# log, stamped by the clock, is S0.8's measurement of an exhaustive survey's time on this machine
+years: 2010-2023
+systems:
+  - {dataset: SIH-RD, event: hospitalisation, blocks: [all], levels: [group]}
+relations: false
+triage: true
+report: reports/s6_0_sih_all.md

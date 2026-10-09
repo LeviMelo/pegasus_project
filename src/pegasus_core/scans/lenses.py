@@ -115,10 +115,12 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
         y_down = np.where(usable, s.w * (-resid - MARK_LOG), 0.0)
         m = np.where(usable, s.w, 0.0)
     else:
-        # counts: the null's boundary is θ0·μ for an excess and μ/θ0 for a deficit (§8.4)
+        # counts: the null's boundary is θ0'·μ for an excess and μ/θ0' for a deficit (§8.4), θ0' each cell's θ0 or the
+        # burden θ0 means at the field's mean cell (S1.6): a subset of average places keeps θ0
+        floor = burden_ratio(rr, s.mu, mean_cell(s.mu, usable))
         y = np.where(usable, s.y, 0.0)
-        m = np.where(usable, rr * s.mu, 0.0)
-        m_low = np.where(usable, s.mu / rr, 0.0)
+        m = np.where(usable, floor * s.mu, 0.0)
+        m_low = np.where(usable, s.mu / floor, 0.0)
     if not usable.any():
         ledger.complete(test, 1.0, None, {"subsets": 0, "reason": "no usable cell"})
         return []
@@ -183,13 +185,14 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
         excess = np.abs(np.nan_to_num(s.y) - np.nan_to_num(s.mu)) - MARK_LOG
         p = np.minimum(1.0, 2 * special.ndtr(-np.divide(excess, sdv, out=np.zeros_like(excess), where=sdv < np.inf)))
     else:
-        p = _upper_tail(s.y, rr * s.mu, s.phi)
+        floor = burden_ratio(rr, s.mu, mean_cell(s.mu, ok))      # θ0, or the burden θ0 means (S1.6)
+        p = _upper_tail(s.y, floor * s.mu, s.phi)
     flat = np.where(ok, p, 1.0).ravel()
     w = None
     if weighted and s.extras.get("kind") != "mark":
         alt = REFERENCE_EFFECT * s.mu
         phi = np.where(np.isfinite(s.phi), s.phi, np.inf)
-        xi = np.where(ok & (s.mu > 0), (REFERENCE_EFFECT - rr) * s.mu / np.sqrt(alt + alt ** 2 / phi), 0.0).ravel()
+        xi = np.where(ok & (s.mu > 0), (REFERENCE_EFFECT - floor) * s.mu / np.sqrt(alt + alt ** 2 / phi), 0.0).ravel()
         w = control.optimal_weights(xi, q)
     hits = np.nonzero(control.bh(flat, q, weights=w))[0]
     U, T = s.y.shape
@@ -431,6 +434,26 @@ def _bh_by_scale(ps: list[np.ndarray], q: float) -> np.ndarray:
     then at most q (the sum of the scales' shares), and the 27 states are not tested at the price of the 5,570
     municipalities, as one BH over all units would charge them."""
     return np.concatenate([control.bh(p, q / len(ps)) for p in ps])
+
+
+def mean_cell(mu: np.ndarray, ok: np.ndarray) -> float:
+    """The field's mean expectation per cell (``ok`` cells): where θ0 is read as the events it means (`burden_ratio`)."""
+    return float(np.asarray(mu)[ok].mean()) if np.any(ok) else 0.0
+
+
+def burden_ratio(rate_ratio: float, m, mean: float):
+    """The minimum relevant rate ratio of a locus whose expectation per cell is ``m`` (work plan S1.6, ARCHITECTURE
+    §8.4): min(θ0, 1 + (θ0 − 1)·μ̄/m), μ̄ the field's mean expectation per cell at the same support. A departure is
+    relevant when its ratio clears θ0 or its excess clears the events θ0 means at the field's mean cell, (θ0 − 1)·μ̄:
+    one statement of relevance, read as a ratio and as a burden. A place of average size or smaller keeps θ0; a capital
+    is held to the same burden, so Boa Vista's 11-16 % more births (about 1,000 over two years, at some 8,000 a year
+    against a mean of about 470) is relevant where a village's handful is not made so. Aggregates of average places
+    keep θ0, since m is per cell."""
+    m = np.maximum(np.asarray(m, dtype=float), 1e-12)
+    if rate_ratio <= 1.0 or mean <= 0:
+        return np.full(m.shape, float(rate_ratio)) if m.ndim else float(rate_ratio)
+    out = np.minimum(rate_ratio, 1.0 + (rate_ratio - 1.0) * mean / m)
+    return out if m.ndim else float(out)
 
 
 def _rr(observed: float, expected: float) -> float:

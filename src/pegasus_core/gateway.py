@@ -1588,7 +1588,12 @@ def side_pairs(link: str, side: str, year: int, compute: bool | None = None) -> 
 def link_sensitivity(link: str, year: int) -> pa.Table:
     """(u, n, k) for one stored run of ``link``: the records of its declared sensitivity side (`sensitivity`: every one
     should find a partner, as every infant death has its birth) by residence, and the expected number paired
-    (pegasus_data `side_counts`). k/n is the link's sensitivity there; a run not stored raises `LinkNotStored`."""
+    (pegasus_data `side_counts`), a partner found through any route of the scope's persons counting (S2.4(e): an
+    infant death the direct link missed that an admission and its certificate reached). k/n is the link's sensitivity
+    there; a run not stored raises `LinkNotStored`."""
+    import hashlib
+    import inspect
+
     from pegasus_data.linkage.engine import side_counts
 
     spec = link_specs()[link]
@@ -1599,14 +1604,16 @@ def link_sensitivity(link: str, year: int) -> pa.Table:
     res_col = _strata(sd.dataset)["residence"]
     role = next(r["role"] for r in roles(sd.dataset) if r["column"] == res_col)
     key = {"what": "link_sensitivity", "link": link, "year": year, "data": config.data_version(),
-           "code": config.code_key(link_sensitivity)}
+           "code": config.code_key(link_sensitivity), "runs": _scope_runs(year),
+           # pegasus_data's reader is not in PegaSUS's code key: its own source keys what it counts
+           "side_counts": hashlib.sha256(inspect.getsource(side_counts).encode()).hexdigest()[:12]}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
     stored_pairs(link, year)                      # raises LinkNotStored when the run is absent
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        raw = side_counts(link, period=year, side=side, by=role, root=config.data_root())
+        raw = side_counts(link, period=year, side=side, by=role, root=config.data_root(), persons=persons(year))
     con = duckdb.connect()
     con.register("r", raw)
     out = con.execute(f"""SELECT {_residence_sql("unit")} AS u, CAST(sum(n) AS DOUBLE) AS n, sum(k) AS k
@@ -1767,6 +1774,36 @@ def persons(year: int, draw: int | None = None):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw)
+
+
+def _scope_runs(year: int) -> list[str]:
+    """The stored runs of a scope (their report files): a reading over its persons is current while they are."""
+    from pathlib import Path
+
+    return sorted(p.name for p in (Path(config.data_root()) / "lake" / "links").rglob(f"*_BR_{year}*.json"))
+
+
+def person_quality(year: int) -> dict:
+    """What one scope's persons rest on (S2.4(d)): per link, the edges merged, already one person and refused under a
+    person's constraints (pegasus_data `build_entities`), and its triangles, its pairs against the persons the other
+    links make (`entities.triangles`: the same partner or another). A reading over persons carries it."""
+    import json
+
+    import pegasus_data as pg
+    from pegasus_data.linkage.entities import triangles
+
+    key = {"what": "person_quality", "year": year, "data": config.data_version(), "code": config.code_key(person_quality),
+           "runs": _scope_runs(year)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return json.loads(cached.column("json")[0].as_py())
+    ent = persons(year)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        tri = triangles(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()))
+    out = {name: {**stats, "triangles": tri.get(name)} for name, stats in ent.by_spec.items()}
+    store.put_table("gateway", key, pa.table({"json": [json.dumps(out)]}), {"source": "pegasus_data entities, triangles"})
+    return out
 
 
 def person_records(entities, kind: tuple[str, str], other: tuple[str, str]) -> set[str]:

@@ -1625,6 +1625,14 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
         raw = [str(x) if x not in (None, "") else "blank" for x in t[d.column].to_pylist()]
         base[d.column] = pa.array(["not recorded" if x in d.missing else x for x in raw])
     labels = [f"{o[0]}:{o[1]}" for o in outcomes]
+    # what the persons rest on, per scope (S2.4(d)): each link's refusals and its agreement with the other routes
+    quality = {z: gateway.person_quality(z) for z in scopes}
+    for z, links_ in quality.items():
+        log(f"persons {z}: " + "; ".join(
+            f"{name} {st['kept']} kept, {st['refused']} refused"
+            + (f", triangles {st['triangles']['agree']}/{st['triangles']['with_route']}"
+               if st.get("triangles") and st["triangles"]["with_route"] else "")
+            for name, st in links_.items()))
     id_list = ids.to_numpy(zero_copy_only=False)
     tables = []
     for i in range(draws):
@@ -1651,7 +1659,8 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
                            interval=(float(np.exp(r.log_rr - 1.96 * r.sd)), float(np.exp(r.log_rr + 1.96 * r.sd))),
                            p=float(r.p), q=float(qq), family=family,
                            null=f"|log RR| <= log {cohort_mod.DELTA_RR} (minimum effect), Rubin over {draws} link draws",
-                           calibrated=False, provenance={"events": r.events, "persons": r.person_time, "scopes": scopes})
+                           calibrated=False, provenance={"events": r.events, "persons": r.person_time, "scopes": scopes,
+                                                                   "links": quality})
                 for r, qq in zip(res, qv, strict=True) if qq <= q]
     reg = leads.Register()
     new = {x.id for x in admitted}

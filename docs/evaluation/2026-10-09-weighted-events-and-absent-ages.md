@@ -32,3 +32,23 @@ day.
 
 Not run: a national SIA year. PA is about a billion approved procedures in some 400 million rows a year, a
 multi-hour read.
+
+**S1.6, relevance as burden (ADR-0031).** `data/probes/s1_5/roraima.py`, re-run with the burden floor, writes
+`roraima_burden.json` and `.log`; the fits are the stored ones (SINASC-DN `*`, SIH-RD XV), re-assembled once after the
+age fix. Boa Vista is still missed by every method, and so are Pacaraima and the delivery admissions; the Macapá
+control is clean. Read on the B1 cells (field mean 507 births a cell):
+- 2018: 8,163 observed, 7,813 expected, ratio 1.045, floor 1.0065, relevance p 0.27.
+- 2019: 8,936 observed, 7,956 expected, ratio 1.123, floor 1.0064, relevance p 0.035.
+
+Relevance no longer stops it. The excess is 1.9 noise sd (place-year noise 6.3 % of the cell), and 3,460 of 77,980
+cells have z ≥ 1.92. The expectation already carries half the arrivals: POPSVS's population rose, and B1's course
+followed.
+
+**S2.4(d)(e), persons' quality and completeness through any route.**
+- `gateway.person_quality(year)` gives each person link's edges, refusals and triangles (pegasus_data
+  `entities.triangles`). The cohort reading logs it, and each cohort lead carries it in its provenance. 2021: SIH
+  deaths 1,826/1,826 routed pairs agree; maternal deaths 1,826/1,829.
+- `link_sensitivity` counts an infant death found through any route of the scope's persons (pegasus_data
+  `side_counts(persons=)`). In 2021 this adds nothing yet (25,592.5 of 31,674): the newborn-admission runs, the
+  other route, are being computed (`pegasus-core links plans/s2_infant_cohorts.yml`, from 2026-10-09).
+
