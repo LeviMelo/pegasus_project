@@ -153,3 +153,27 @@ KeyError, which the grid logged as a lens the field cannot take.
   having no degrees of freedom.
 - **The counts.** 771 outbreaks in 2019 and 1,161 in 2023 (one with no municipality), each in sex 1, band 0.
 
+
+**One notifying unit behind a state's outbreaks.** SDTA's largest outbreak lead, Maranhão 2023 (217 municipalities,
+ratio 56), is 37 outbreaks in 4 places, against 1–2 a year before. 32 of them were notified by one unit, CNES 9005064
+in municipality 210340.
+- **Why triage missed it.** It had skipped the facility read for every field with no classifier ("no facility
+  classifier"). The facility cube now reads such fields at the code `*`.
+- **What the read can and cannot say.** It records the concentration, but its mechanism tests compare a code's share
+  within its block, and a single-code field has no mix. So it cannot tell one notifier's surge from a real wave
+  handled by one unit. The concentration stays evidence, not a verdict.
+
+**Raw reads in PegaSUS's data root decode the DBC files again in every process.** One CIHA state-month (SP 2013-06,
+689,806 records) takes 30.6 s in a new process, 22.4 s in another and 6.8 s within the same one.
+- **What this costs.** A link year reads 324 such files and takes 33–70 min.
+- **What was started.** A CIHA lake, 2015–2022 without labels, is being built into `pegasus_core_data`. An SIH-RD lake,
+  2010–2023, follows it: the S6.0 SIH survey re-reads every year after today's key changes.
+
+**A column was read over years it did not fill.** `update` offered every modelled measure, composition and interval
+over the plan's years, whatever the column's own span. A later form's column read as a collapse before it existed:
+dengue's 2014 warning signs on a 2010–2023 plan, SIH's VAL_SH_FED and VAL_UCI, SINASC's DTDECLARAC interval.
+- `update._declared` now reads a column only where it fills every year of the plan: its span, less pegasus_data's
+  `unfilled:` years.
+- It names every column it leaves ("not read: filled 2014-2026 only").
+- Dengue on 2010–2023 keeps 33 compositions and leaves 43 from its 2014 form, which a plan on their years reads.
+- `fields.declared` gives a column empty in some of the readings' years its reason.

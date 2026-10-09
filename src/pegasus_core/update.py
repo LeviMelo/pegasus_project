@@ -136,16 +136,30 @@ def _chapters(sys_: System) -> list[str]:
                   if lv == "chapter")
 
 
-def _measures(sys_: System) -> list[str]:
-    return _declared(sys_, "measure", sys_.measures)
+def _measures(sys_: System, plan: Plan, out: dict | None = None) -> list[str]:
+    return _declared(sys_, "measure", sys_.measures, plan, out)
 
 
-def _declared(sys_: System, kind: str, wanted: list[str] | str | None) -> list[str]:
+def _declared(sys_: System, kind: str, wanted: list[str] | str | None, plan: Plan, out: dict | None = None) -> list[str]:
     """The declared fields of ``kind`` a system's plan reads: every modelled one of `fields.declared` ("all"), or the
-    columns listed (each must be modelled)."""
+    columns listed (each must be modelled), and only where the column fills every year of the plan: a column of a later
+    form (dengue's 2014 warning signs) read over 2010-2023 was absent before 2014, which reads as a collapse."""
     if not wanted:
         return []
-    modelled = [d.column for d in fields.declared(sys_.dataset) if d.kind == kind and not d.reason]
+    roles = {r["column"]: r for r in gateway.roles(sys_.dataset)}
+    modelled = []
+    for d in fields.declared(sys_.dataset):
+        if d.kind != kind or d.reason:
+            continue
+        r = roles.get(d.column.split(":", 1)[-1], {})
+        first, last = r.get("first_year") or plan.years[0], r.get("last_year") or plan.years[-1]
+        gap = sorted(set(r.get("unfilled") or ()) & set(plan.years))
+        if first > plan.years[0] or last < plan.years[-1] or gap:
+            if out is not None:
+                out[f"{kind} {sys_.dataset} {d.column}"] = (f"not read: unfilled in {gap}" if gap else
+                                                           f"not read: filled {first}-{last} only")
+            continue
+        modelled.append(d.column)
     if wanted == "all":
         return modelled
     unknown = [c for c in wanted if c not in modelled]
@@ -219,8 +233,9 @@ def _codes_readers(sys_: System, plan: Plan, out: dict) -> list[tuple[str, dict,
             continue
         r = roles[col]
         first, last = r.get("first_year") or plan.years[0], r.get("last_year") or plan.years[-1]
-        if d.reason or first > plan.years[0] or last < plan.years[-1]:
-            out[f"codes {sys_.dataset} {col}"] = f"not read: {d.reason or f'filled {first}-{last} only'}"
+        gap = sorted(set(r.get("unfilled") or ()) & set(plan.years))
+        if d.reason or first > plan.years[0] or last < plan.years[-1] or gap:
+            out[f"codes {sys_.dataset} {col}"] = f"not read: {d.reason or (f'unfilled in {gap}' if gap else f'filled {first}-{last} only')}"
             continue
         source = fields.codes_source(sys_.dataset, d.column)
         tree = gateway.code_tree(source["structure"])
@@ -340,12 +355,12 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             out[f"questions {sys_.dataset}"] = len(leads)
         else:
             out[f"questions {sys_.dataset}"] = "done on these versions"
-        readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_)]
-        readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions)
+        readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_, plan, out)]
+        readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions, plan, out)
                     for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
         readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
         readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
-                    for column in _declared(sys_, "interval", sys_.intervals)]
+                    for column in _declared(sys_, "interval", sys_.intervals, plan, out)]
         wanted = [d.column for d in fields.declared_mentions(sys_.dataset)]
         readers += [(c, fields.mentions_source(sys_.dataset, c)) for c in wanted
                     if sys_.mentions == "all" or c in (sys_.mentions or [])]

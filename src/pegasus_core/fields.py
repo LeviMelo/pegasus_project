@@ -319,6 +319,9 @@ def declared(dataset: str) -> list[Declared]:
             # an older form's column (dengue's 2000-2006 signs): no reading reaches its years
             out.append(Declared(**base, kind="", reason=f"its years ({r.get('first_year')}–{r['last_year']}) end before "
                                                        f"the readings' ({config.FIT_YEARS[0]})"))
+        elif gap := sorted(set(r.get("unfilled") or ()) & set(config.FIT_YEARS)):
+            # present but empty in some of the readings' years (pegasus_data `unfilled`): read there, it is a collapse
+            out.append(Declared(**base, kind="", reason=f"unfilled in {gap[0]}–{gap[-1]} ({len(gap)} of the readings' years)"))
         elif r["kind"] == "number":
             if not r.get("measure"):
                 out.append(Declared(**base, kind="", reason="a number that is not a measurement"))
