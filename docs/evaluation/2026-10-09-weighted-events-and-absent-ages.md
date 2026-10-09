@@ -134,3 +134,11 @@ below the smallest double (about e^−710), and the Halley steps on log x fail i
 - **What this measures.** People counted in clusters are read at a noise that hides departures (OPEN_QUESTIONS 14).
 - **The grid's lens loop.** It skips a lens the field cannot take when the lens raises LookupError, as it already did
   for ValueError: births have no classifier, so no facility cube. The B3 grid had stopped on that.
+
+**The grid never scored the two divergence methods.** The grid passed each method's name to `scan` as a lens.
+`divergence_neighbours` and `divergence_national` both run `trend_divergence` with their own settings, so both raised
+KeyError, which the grid logged as a lens the field cannot take.
+- The grid now runs each method's own lens with its settings, as `questions.py` does, and records rows by method.
+- A KeyError is raised, never read as "lens does not apply".
+- Both methods run through `scan` on SDTA's ill. `scripts/throughput.py` reads a stamped `update` log into seconds
+  per question and fit (S0.8): SDTA's ill take 281 s a field.

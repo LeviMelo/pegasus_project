@@ -766,6 +766,9 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     from . import control, tools
 
     lens_names = tuple(lens_names) if lens_names else question_methods()
+    from . import questions
+
+    methods = {mm.id: mm for qn in questions.QUESTIONS.values() for mm in qn.methods}
     ex = session.expectations
     f = ex.field(node)
     m = ex.model(f.block)
@@ -805,8 +808,13 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                                   "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
             runs = [(x, t, tr, wt) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
                     for tr in (tiers or {}).get(x, (None,)) for wt in (weighted if x == "outbreak" else (False,))]
-            for lens, theta0, tier, wt in runs:
+            for method, theta0, tier, wt in runs:
+                # a method runs its lens with its settings (divergence_neighbours and _national: trend_divergence read two
+                # ways); the grid passed the method's name as the lens, and both divergences were never scored
+                m = methods.get(method)
+                lens = (m.lens or m.id) if m else method
                 kw = {"replicates": replicates} if lens in ("space_time", "spatial_cluster") else {}
+                kw.update(dict(m.settings) if m else {})
                 if theta0 is not None:
                     kw[MINIMUM_EFFECT_ARG[lens]] = theta0
                 if tier is not None:
@@ -816,14 +824,17 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                 try:
                     found = sess.scan(node, lens, **kw)
                 except (ValueError, NotImplementedError, LookupError) as err:
-                    # a lens the field cannot take (births have no classifier, so no facility cube): skipped, logged
-                    log(f"  {lens}: {err}")
+                    # a lens the field cannot take (births have no classifier, so no facility cube): skipped, logged; a
+                    # KeyError is a defect, not a field the lens cannot take
+                    if isinstance(err, KeyError):
+                        raise
+                    log(f"  {method}: {err}")
                     continue
                 prec, rec, touched = _score(plants, found, places, periods, U)
                 for pc, pr_, rc in zip(per_plant, prec, rec, strict=True):
-                    rows.append({"lens": lens, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, **pc,
+                    rows.append({"lens": method, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, **pc,
                                  "detected": bool(pr_ >= 0.5), "precision": round(float(pr_), 3), "recall": round(float(rc), 3)})
-                false_rows.append({"lens": lens, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, "findings": len(found),
+                false_rows.append({"lens": method, "theta0": theta0, "tier": tier, "weighted": wt, "kind": kind, "shape": shape, "world": w, "findings": len(found),
                                    "false": int((~touched).sum())})
             sess.expectations._models, sess._local.memo = {}, None
             gc.collect()
