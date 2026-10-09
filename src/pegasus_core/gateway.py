@@ -582,7 +582,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
 @functools.cache
 def _declared_key(dataset: str, event: str) -> dict:
     """What an artefact read from pegasus_data's events adds to its key: a hash of the event type's declaration, the
-    strata read from the roles, and pegasus_data's code that turns rows into events (`semantics/event_types.py`). The
+    strata read from the roles, and pegasus_data's functions that turn rows into events (`semantics/event_types.py`). The
     package version alone missed curation and code edits (a weight grid's rule changed, the counts stayed cached)."""
     import inspect
     import json
@@ -604,7 +604,10 @@ def _declared_key(dataset: str, event: str) -> dict:
     read = {(spec or {}).get("weight"), ((spec or {}).get("status") or {}).get("column"), grid.get("total"), grid.get("margin"),
             *(c["column"] for c in grid.get("cells") or ())} - {None}
     roles_read = [r for r in pg.roles(dataset) if r["column"] in read] if read else []
-    body = json.dumps([spec, strata, roles_read], sort_keys=True, default=str) + inspect.getsource(data_events)
+    # the functions that make rows events, not the whole module: an unrelated edit there re-keyed every count
+    work = (data_events.events_of, data_events.event_weights, data_events.grid_events, data_events._integers,
+            data_events.count_events)
+    body = json.dumps([spec, strata, roles_read], sort_keys=True, default=str) + "".join(inspect.getsource(f) for f in work)
     return {"declared": hashlib.sha256(body.encode()).hexdigest()[:12]}
 
 
