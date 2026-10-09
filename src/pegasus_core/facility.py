@@ -27,28 +27,29 @@ CODE_CHARS = 3     # the classifier's category level; subcodes are not kept (a 4
 
 def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     """Events of one year by (u residence, facility, code3). ``facility`` is the CNES code as text, '' when the
-    record names none; ``fm`` the facility's municipality as the data gives it ('' if the dataset has none)."""
+    record names none; ``fm`` the facility's municipality as the data gives it ('' if the dataset has none). An event
+    with no classifier (a SINAN agravo, an outbreak, a birth) has the single code ``*``, as its field does: one
+    notifying unit's surge is read there too (SINAN-SDTA, Maranhão 2023: 32 of 37 outbreaks from one municipality)."""
     strata = gateway._strata(dataset, event)
     spec = gateway.event_type(dataset, event)
     classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
-    if classifier is None:
-        raise LookupError(f"{dataset}/{event}: no primary classifier, no facility cube")
     fcol, mcol = gateway.facility_column(dataset)
     key = {"what": "facility_cube", "dataset": dataset, "event": event, "year": year, "classifier": classifier,
            "facility": fcol, "data": config.data_version(), "code": config.code_key(facility_cube), **gateway._df_key(dataset, year)}
     hit = store.get_table("gateway", key)
     if hit is not None:
         return hit
-    by = [strata["residence"], fcol, classifier] + ([mcol] if mcol else [])
+    by = [strata["residence"], fcol] + ([classifier] if classifier else []) + ([mcol] if mcol else [])
     raw = gateway.raw_event_counts(dataset, event, year, by)
     con = duckdb.connect()
     con.register("r", raw)
     fm = f"coalesce(left(trim(CAST(\"{mcol}\" AS VARCHAR)), 6), '')" if mcol else "''"
+    code = f'left(upper(trim(CAST("{classifier}" AS VARCHAR))), {CODE_CHARS})' if classifier else "'*'"
+    named = f'WHERE "{classifier}" IS NOT NULL' if classifier else ""
     out = con.execute(f"""SELECT CAST({gateway._residence_sql(strata['residence'])} AS INTEGER) AS u,
             coalesce(trim(CAST("{fcol}" AS VARCHAR)), '') AS facility, {fm} AS fm,
-            left(upper(trim(CAST("{classifier}" AS VARCHAR))), {CODE_CHARS}) AS code,
-            CAST({year} AS SMALLINT) AS year, CAST(sum(events) AS INTEGER) AS y
-        FROM r WHERE "{classifier}" IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+            {code} AS code, CAST({year} AS SMALLINT) AS year, CAST(sum(events) AS INTEGER) AS y
+        FROM r {named} GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, out, {"source": f"pegasus_data.count_events({dataset}, {event}) by residence, {fcol}, {classifier}"})
     return out
 

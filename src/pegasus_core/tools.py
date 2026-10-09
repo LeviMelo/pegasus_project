@@ -595,7 +595,7 @@ class Session:
         if facility and fac is None:
             self._prepare_grid()
             log("facility read skipped: " + ("the cube is by year, the grain here is monthly" if self._per_year > 1
-                                             else "the event names no facility classifier"))
+                                             else "the dataset names no facility"))
         for i, ((node, train_last, tier), group) in enumerate(sorted(by_node.items())):
             ev = self._evidence(node)
             if fac is not None:
@@ -832,7 +832,7 @@ class Session:
             self._prepare_grid()
             self._fac = None
             if self._per_year == 1:         # the cube is by year: no facility read at the monthly grain (`triage` says so)
-                with contextlib.suppress(LookupError):      # the event names no facility classifier (SINAN): nothing to read
+                with contextlib.suppress(LookupError):      # the dataset names no facility: nothing to read
                     self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
         return self._fac
 
