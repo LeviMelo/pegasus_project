@@ -117,3 +117,11 @@ or code edit changes.
 - Every gateway artefact read from events (11 keys) now adds `_declared_key`: a hash of the event type's declaration,
   the strata, the roles of the columns that make rows events, and pegasus_data's `semantics/event_types.py`.
 - Re-read, SDTA 2023 counts 19,879 people (pegasus_data evaluation 2026-10-09-outbreak-grid-and-fill).
+
+**The gamma quantile at small shapes returned NaN.** `surprise.gamma_quantile_at_normal`, at shape 0.005, returned
+NaN for 7,918 of 2,000,000 normals, all with ε between −1.97 and −1.90. There the quantile, (p·Γ(a+1))^(1/a), falls
+below the smallest double (about e^−710), and the Halley steps on log x fail instead of returning 0.
+- **Where it surfaced.** SINAN-SDTA's people-count field (φ 0.066) drew NaN frailties into the cluster scan's CUDA
+  Poisson draws, and the scan's assertions fired.
+- **The fix.** The quantile is now 0 wherever the lower-tail term underflows, and any other non-finite value raises.
+- **The check.** The frailty's mean is 0.999, 1.004 and 1.017 at shapes 0.066, 0.005 and 0.001; 1 is right.

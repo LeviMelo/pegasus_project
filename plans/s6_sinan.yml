@@ -1,5 +1,5 @@
 # S6: every SINAN agravo published in all of 2010-2023 (pegasus_data's catalog, 2026-10-08), its notifications
-# by place and year. SDTA lacks one year: its fit fails and is recorded. The agravos published later have plans of
+# by place and year. SDTA, an outbreak per row with no 2014 file, has its own plan (s6_sinan_sdta). The agravos published later have plans of
 # their own years (s6_sinan_2013, _2015, _2019); LER, published for 2019 alone, carries no expectation
 years: 2010-2023
 systems:
@@ -43,7 +43,6 @@ systems:
   - {dataset: SINAN-PNEU, event: notification, blocks: [all]}
   - {dataset: SINAN-RAIV, event: notification, blocks: [all]}
   - {dataset: SINAN-ROTA, event: notification, blocks: [all]}
-  - {dataset: SINAN-SDTA, event: notification, blocks: [all]}
   - {dataset: SINAN-SIFA, event: notification, blocks: [all]}
   - {dataset: SINAN-SIFC, event: notification, blocks: [all]}
   - {dataset: SINAN-SIFG, event: notification, blocks: [all]}

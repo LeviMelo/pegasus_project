@@ -1031,7 +1031,19 @@ def gamma_quantile_at_normal(eps: np.ndarray, shape: np.ndarray, tol: float = 1e
     e = np.ascontiguousarray(np.broadcast_to(eps, np.broadcast(eps, shape).shape), dtype=np.float64).ravel()
     a = np.ascontiguousarray(np.broadcast_to(shape, e.shape if np.ndim(eps) == 0 else np.shape(eps)),
                              dtype=np.float64).ravel()
-    return _gamma_quantile_kernel()(e, a, float(tol)).reshape(np.shape(eps))
+    out = _gamma_quantile_kernel()(e, a, float(tol))
+    bad = ~np.isfinite(out)
+    if bad.any():
+        # a small shape's lower tail: G(x; a) ≈ x^a / Γ(a + 1), so the quantile is (p·Γ(a + 1))^(1/a), below the smallest
+        # double where log x < -708 (a = 0.005 at ε ≈ -1.9: e^-710), where Halley's steps on log x failed (NaN) instead
+        # of returning 0 (SINAN-SDTA's frailty, φ 0.066: a CUDA Poisson draw of NaN, 2026-10-09)
+        from scipy.special import gammaln, log_ndtr
+
+        lx = (log_ndtr(e[bad]) + gammaln(a[bad] + 1.0)) / a[bad]
+        if np.any(lx > -700.0):
+            raise FloatingPointError(f"gamma quantile not finite at {int(np.sum(lx > -700.0))} points above the underflow")
+        out[bad] = 0.0
+    return out.reshape(np.shape(eps))
 
 
 @functools.cache
