@@ -135,7 +135,10 @@ Written by the agent on 2026-10-07: the author does not set goals for the develo
 - t, a time (year, or month for dense families);
 - g, a group: age × sex × race (§3.4). Ages are single years 0–19, five-year bands 20–79, and 80+ (33 classes; the tensor carries single ages, and pediatric epidemiology needs them). Race from 2000, the year the population tensor's race begins; race `total` before.
 
-The **population tensor** P = U × T × G holds N_c.
+The **population tensor** P = U × T × G holds N_c. An event whose row is a group, not a person (an outbreak, pegasus_data
+`persons: false`), has no g. Its events stand in one cell, exposed by the whole population of the place (ADR-0034).
+An event counted from a grid of people by sex and age band has the bands that population and grid share
+(`gateway.age_edges(source, dataset, event)`).
 
 **Institution cell.** `c = (f, t)`, f a recording facility (CNES for SIH, CODESTAB for SIM) and t a year, with the facility's **catchment** as exposure: the expected events of a block at f are `m_ft = Σ_u q_uf μ_ut`, the place model's expectation spread by the care-flow kernel q (the share of place u's other-chapter events recorded at f). It is the second lattice, read for the estimand *between institutions* (P4, E_i). Built for SIH at the annual grain, one block at a time (§4.5, ADR-0016).
 
@@ -412,6 +415,14 @@ The ~10¹² implicit cells are never formed. The first term streams the non-empt
 - **A field whose PIT is miscalibrated** (§6.2) with the block's φ gets a field-level place-year component (§6.2), which varies by macro-region.
 - **The search for φ bins the cells once** (`_nb_loglik_binned`): the non-empty cells exactly, the sum over every cell from one pass that bins μ by its log (8,192 bins, count, Σμ, Σμ² with a second-order correction). It agrees with the exact streamed likelihood to 10⁻⁶ log-likelihood units and gives the same φ. On IX it takes about 4 s against 14 (2026-10-06).
 - **The block's own φ stays one value per block.** `nb_loglik` scores any φ (a scalar or one per place) over every cell, and `dispersion_by` fits one per group of places. Per macro-region, held out, it gained 0.009 nats per event on dengue (fit to 2018), 0.0002 on chapter IX and −0.0007 on chapter X (ADR-0006), so it is not adopted.
+
+**The robust expectation** (`Monolith.robust`) refits the block with its outlying leaf × place × period cells
+imputed to their expectation, so a departure does not pull the expectation toward itself.
+- **A recoding is moved, not removed (ADR-0033).** The flagged excess that the block's other leaves' deficit in the
+  same place and period accounts for is added back to them. Removing it took away deaths only large places' levels
+  rest on: Fortaleza certifies its hypertension deaths as I10, and SIM IX's large places sat 2–3 % above expectation.
+- **The dispersion is NB-P (ADR-0032).** Var = μ + αμ^P, P learned per block; the field's own dispersion replaces
+  the block's φ when that fails calibration.
 
 ### 5.3 The mean: structured Newton (v1 for every model since 2026-10-06: counts, the low-rank interaction, marks and shares; v0 retired the same day; evaluation 2026-10-06, solver v1)
 

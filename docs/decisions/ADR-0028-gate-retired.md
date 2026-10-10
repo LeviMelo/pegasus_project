@@ -41,3 +41,13 @@ The outbreak lens's BH is weighted by default (`outbreak(weighted=True)`). Each 
 
 - The weights of §8.4 act in the outbreak lens only. Across fields, and in the other lenses, whose hypotheses are units and windows, they are not applied.
 - The method records hold what the grid has measured: three SIM/SIH fields annual, with SINASC and SINAN running. A lens on a system not yet gridded carries the default record.
+
+## Amendment (2026-10-09): the weights averaged over a range of effects
+
+- **The defect.** At the one reference rate ratio of 1.5, a large place's cell is a sure detection, and
+  Roeder–Wasserman weights give sure hypotheses almost none: Boa Vista's 2019 births cell weighed 0.0005
+  (OPEN_QUESTIONS 15).
+- **The change.** The weights are now averaged over nine reference ratios, log-uniform from 1.05 to 2 (`lenses.REFERENCE_EFFECTS`).
+  Each set averages 1, so their mean does, and the weighted BH keeps FDR ≤ q.
+- **The effect on births.** 75 rejections, against 65 at 1.5× and 81 unweighted. Boa Vista's weight is 1.0, but its cell
+  (p 3.9e-3) stays below any family's threshold.

@@ -107,11 +107,31 @@ def _members(s: surprise.Surprise, sc, k: int) -> list[int]:
     return [int(s.places[k])] if sc is None else [int(x) for x in s.places[sc.members(k)]]
 
 
+#: cells per size class of the separate-class FDR (Efron 2008): enough for each class's own empirical null
+CLASS_CELLS = 5000
+MAX_CLASSES = 10
+
+
+def size_classes(mu: np.ndarray, ok: np.ndarray) -> np.ndarray:
+    """Each cell's size class: equal-count classes of the expected count among the testable cells, about `CLASS_CELLS`
+    each (at most `MAX_CLASSES`); -1 where untestable. The expectation, not the count, sorts them, so the classes are
+    fixed before the test (Efron 2008: a capital's cells and a village's have different nulls and different reachable
+    effects, and one family let the villages' set the capitals' threshold, OPEN_QUESTIONS 15)."""
+    cls = np.full(mu.shape, -1, dtype=int)
+    n = int(ok.sum())
+    k = max(1, min(MAX_CLASSES, n // CLASS_CELLS))
+    if n:
+        edges = np.quantile(mu[ok], np.linspace(0, 1, k + 1)[1:-1]) if k > 1 else np.array([])
+        cls[ok] = np.searchsorted(edges, mu[ok], side="right")
+    return cls
+
+
 def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
                 scales: list | None = None) -> list:
     """Cell excess departures of a field (stage C) over the ladder of supports ``scales`` (None: the municipality):
-    at each support Efron's two-group model on its predictive scores, its empirical-null p-values scaled by its π0;
-    one BH at q over every support's cells; the minimum relevant effect as each reported cell's own test. Returns
+    at each support and size class (`size_classes`, Efron's separate classes) the two-group model on its predictive
+    scores, its empirical-null p-values scaled by its π0; one BH at q per class over every support's cells of that class;
+    the minimum relevant effect as each reported cell's own test. Returns
     `lenses.Finding`s whose ``stats`` carry the support, the lfdr, the empirical null and the effect."""
     from .scans import lenses
 
@@ -119,16 +139,22 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
     family = f"cell_excess|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "two-group (Efron)", "field": s.field.id,
                                                                     "tier": s.tier}))
-    parts, ps, rel, floors = [], [], [], []
+    parts, ps, rel, floors, classes = [], [], [], [], []
     for sk, sc in _ladder(s, scales):
         ok = ((sk.flags & (surprise.DENOMINATOR | surprise.NO_INFORMATION)) == 0) & np.isfinite(sk.z)
-        fit = two_group(sk.z[ok])
+        cls = size_classes(np.asarray(sk.mu, dtype=float), ok)
         lfdr = np.ones(sk.z.shape)
-        lfdr[ok] = fit["lfdr"]
         p = np.ones(sk.z.shape)
-        p[ok] = fit["pi0"] * stats.norm.sf(sk.z[ok], fit["delta0"], fit["sigma0"])
-        parts.append((sk, sc, fit, lfdr, ok))
+        fits = {}
+        for c in np.unique(cls[cls >= 0]):
+            inside = cls == c
+            fit = two_group(sk.z[inside])
+            lfdr[inside] = fit["lfdr"]
+            p[inside] = fit["pi0"] * stats.norm.sf(sk.z[inside], fit["delta0"], fit["sigma0"])
+            fits[int(c)] = fit
+        parts.append((sk, sc, fits, lfdr, ok))
         ps.append(p.ravel())
+        classes.append(cls.ravel())
         if s.extras.get("kind") == "mark":
             # a measurement on the log scale: P(N(μ + log θ0, var) ≥ y), var the cell mean's (1/w)
             sd = np.sqrt(np.where(sk.w > 0, 1.0 / np.where(sk.w > 0, sk.w, 1.0), np.inf))
@@ -142,11 +168,17 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
             rel.append(lenses._upper_tail(sk.y, floor * sk.mu, sk.phi).ravel())
             floors.append(np.ravel(floor))
     p_all, rel_all, floor_all = np.concatenate(ps), np.concatenate(rel), np.concatenate(floors)
-    sig = control.bh(p_all, q) & (rel_all <= q)
+    cls_all = np.concatenate(classes)
+    sig = np.zeros(len(p_all), dtype=bool)
+    for c in np.unique(cls_all[cls_all >= 0]):           # each size class its own family (Efron 2008)
+        inside = cls_all == c
+        sig[inside] = control.bh(p_all[inside], q)
+    sig &= rel_all <= q
     out, offset = [], 0
-    for sk, sc, fit, lfdr, _ok in parts:
+    for sk, sc, fits, lfdr, _ok in parts:
         U, T = sk.y.shape
         for i in np.nonzero(sig[offset:offset + U * T])[0]:
+            fit = fits[int(cls_all[offset + i])]
             out.append(lenses.Finding("cell_excess", s.field.id, s.tier,
                                       {"places": _members(s, sc, i // T), "years": [int(sk.years[i % T])]},
                                       (float(np.exp(sk.y.flat[i] - sk.mu.flat[i])) if s.extras.get("kind") == "mark"
@@ -155,12 +187,14 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
                                        "unit": str(sk.places[i // T]), "observed": float(sk.y.flat[i]),
                                        "expected": float(sk.mu.flat[i]), "lfdr": float(lfdr.flat[i]),
                                        "relevant_ratio": round(float(floor_all[offset + i]), 4),
-                                       "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")}}))
+                                       "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")},
+                                       "size_class": int(cls_all[offset + i])}))
         offset += U * T
     ledger.complete(test, float(p_all.min()) if p_all.size else 1.0, None,
                     {"cells": int(sum(o.sum() for *_, o in parts)), "hits": len(out),
-                     "null": {("municipality" if sc is None else sc.name): {k: round(f[k], 4) for k in ("pi0", "sigma0")}
-                              for _, sc, f, _, _ in parts}})
+                     "null": {("municipality" if sc is None else sc.name): {c: {k: round(f[k], 4) for k in ("pi0", "sigma0")}
+                                                                            for c, f in fits.items()}
+                              for _, sc, fits, _, _ in parts}})
     return out
 
 
