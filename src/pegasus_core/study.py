@@ -453,6 +453,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
                     figs.append(_series_figure(out, sv, f, label, it))
+                    try:
+                        d = s.expectations.model(f.block).data
+                        expo = dict(zip(np.asarray(d.places).tolist(), d.N.sum(axis=(1, 2)).tolist(), strict=True))
+                        figs.append(_map_figure(out, sv, f, label, it, [r for r in rows if r["field"] == f.id], expo))
+                    except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
+                        log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
                     groups.extend(_groups(it, s, f, label, log))
     findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
@@ -737,6 +743,61 @@ def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
     ax.set_title(f"{label} — {it.dataset}", fontsize=10)
     ax.set_ylabel("events")
     ax.legend(fontsize=8, frameon=False)
+    fig.tight_layout()
+    fig.savefig(figs / name)
+    plt.close(fig)
+    return f"figures/{name}"
+
+
+def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict) -> str | None:
+    """Two maps of the field over the study's years: each state's rate (events per exposure: per 100,000 person-years,
+    or per denominator event for a ratio) and each municipality's standardised departure from B1, the places
+    of the field's findings outlined (pegasus_data's IBGE meshes, `pg.mesh`)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+    import pegasus_data as pg
+
+    places = np.asarray(sv.places)
+    obs, mu = sv.y.sum(1), sv.mu.sum(1)
+    ratio = str((it.source or {}).get("population", "")).startswith("events:")
+    n_of = np.array([expo.get(int(p), 0.0) for p in places])
+    states = pg.mesh("state", root=config.data_root())
+    munis = pg.mesh("municipality", root=config.data_root())
+    munis["u"] = munis["code"].str[:6].astype(int)
+    st = places // 10000
+    by_state = {}
+    for k in np.unique(st):
+        sel = st == k
+        e = float(obs[sel].sum())
+        n = float(n_of[sel].sum())
+        by_state[str(int(k))] = (e / n * (1.0 if ratio else 1e5)) if n else np.nan
+    states["rate"] = states["code"].map(by_state)
+    # the standardised departure over the years, (O − E)/sd with the NB variance: a small place's ratio is mostly noise
+    var = (sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)).sum(1)
+    zd = np.where(var > 0, (obs - mu) / np.sqrt(np.maximum(var, 1e-12)), np.nan)
+    munis["z"] = munis["u"].map(dict(zip(places.tolist(), zd.tolist(), strict=True)))
+    flagged = {int(p) for r in findings for p in str(r.get("places") or "").replace(" (+", ",").split(",")
+               if p.strip().isdigit()}
+    figs = out / "figures"
+    figs.mkdir(exist_ok=True)
+    name = f"{_slug(it.dataset + '_' + f.node)}_map.png"
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.6), dpi=110)
+    states.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
+                legend_kwds={"shrink": 0.6, "label": "per denominator event" if ratio else "per 100,000"})
+    a1.set_title(f"{label}: rate by state, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
+    munis.plot(column="z", ax=a2, cmap="RdBu_r", norm=mcolors.TwoSlopeNorm(0.0, -4.0, 4.0), legend=True,
+               missing_kwds={"color": "#eee"}, legend_kwds={"shrink": 0.6, "label": "(observed − expected) / sd",
+                                                            "extend": "both"})
+    outlined = munis[munis["u"].isin(flagged)]
+    if len(outlined):
+        outlined.boundary.plot(ax=a2, color="black", linewidth=0.6)
+    states.boundary.plot(ax=a2, color="#555", linewidth=0.3)
+    a2.set_title(f"departure from expected (B1) by municipality; {len(outlined)} with findings outlined", fontsize=9)
+    for ax in (a1, a2):
+        ax.set_axis_off()
     fig.tight_layout()
     fig.savefig(figs / name)
     plt.close(fig)

@@ -793,8 +793,9 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
     s2 = Noise(kappa=kap).frailty_variance(ph)
     v = m + m ** 2 * s2
-    p_u = (m / v).mean(1)
-    f_u = (m ** 2 * s2 / v).mean(1)                       # the frailty's share of each cell's variance
+    # a cell with no exposure (a ratio's place-year without a denominator event: μ = 0) carries no variance
+    p_u = np.divide(m, v, out=np.zeros_like(m), where=v > 0).mean(1)
+    f_u = np.divide(m ** 2 * s2, v, out=np.zeros_like(m), where=v > 0).mean(1)   # the frailty's share of each cell's variance
     P, F = float(p_u.sum()), float(f_u.sum())
     if F <= 0:
         return Noise()

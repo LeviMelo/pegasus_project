@@ -52,3 +52,7 @@ Piauí's autochthony "not recorded" at 2.9 times. The supports read TOXG at its 
 **Triage by reader.** A system read as a code set had its dataset's chapter answers triaged on the code set's
 session (CIH-CR, CIHA: `StopIteration` and "codes=['P371'] is a field of its own"). Answers are now triaged by
 their own reader and on their own years; `READER_FIELDS` names code sets, quality and supports.
+
+**A ratio's place-years without exposure.** A municipality-year with no denominator event has μ = 0, and the noise
+structure divided 0 by 0 ("Residuals are not finite"): such a cell now carries no variance. The study maps draw a
+municipality's (O − E)/sd rather than O/E, whose small places were mostly noise.

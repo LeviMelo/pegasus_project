@@ -223,5 +223,5 @@ def predictive_phi(mean: np.ndarray, var: np.ndarray, mu2: np.ndarray, phi: floa
     Var y = E[Σμ] + E[Σμ²]/φ + Var(Σμ). The NB(m, φ_eff) with the same mean and variance has
         1/φ_eff = (E[Σμ²]/φ + Var(Σμ)) / m².
     With no parameter uncertainty this is the aggregate dispersion φ μ̂²/Σμ̂² of ``surprise``."""
-    inv = (mu2 / (phi if np.isfinite(phi) else np.inf) + var) / np.maximum(mean, 1e-300) ** 2
+    inv = (mu2 / (phi if np.isfinite(phi) else np.inf) + var) / np.maximum(mean, 1e-150) ** 2   # 1e-300² underflows to 0
     return np.divide(1.0, inv, out=np.full(mean.shape, np.inf), where=inv > 0)
