@@ -1618,6 +1618,30 @@ def code_groups(dataset: str) -> dict[str, list[str]]:
     return {name: [r.column, *r.also] for name, r in spec.roles.items() if getattr(r, "type", "") == "codes"}
 
 
+#: the disk a lake build leaves free at least (GB): the lake is a cache of the published files, never worth the disk
+LAKE_MIN_FREE_GB = 15
+
+
+def ensure_lake(dataset: str, years: list[int], log=print) -> dict:
+    """pegasus_data's lake over ``dataset``'s ``years`` in PegaSUS's data root (`pegasus_data.build_lake`, without
+    labels): every raw read after it is a Parquet scan. Without it each process decoded the DBC files again: a national
+    CIHA year took 30-60 min, from the lake 12 s (2026-10-09). Refused when the disk would fall under
+    `LAKE_MIN_FREE_GB`."""
+    import shutil
+
+    import pegasus_data as pg
+
+    free = shutil.disk_usage(config.data_root()).free / 1024**3
+    if free < LAKE_MIN_FREE_GB:
+        raise OSError(f"{free:.0f} GB free, under the {LAKE_MIN_FREE_GB} GB a lake build leaves")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        counts = pg.build_lake(dataset, years, root=config.data_root())
+    log(f"lake {dataset} {years[0]}-{years[-1]}: {counts.get('files', 0)} files decoded, "
+        f"{counts.get('partitions', 0)} partitions written, {counts.get('partitions_reused', 0)} kept")
+    return counts
+
+
 def link_specs() -> dict:
     """pegasus_data's declared links (`curation/links.yml`): each spec's left and right sides."""
     from pegasus_data.linkage.engine import load_links

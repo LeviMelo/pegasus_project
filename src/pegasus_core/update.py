@@ -285,6 +285,30 @@ def plan_links(plan: Plan) -> list[tuple[str, str]]:
     return list(dict.fromkeys(out))
 
 
+def _ensure_lake(plan: Plan, out: dict, log) -> None:
+    """The lake over every dataset the plan reads, its systems' and its links' sides, for the plan's years (and the
+    year before, which a padded link side reads), as a step of its own: a raw read then scans Parquet instead of
+    decoding the DBC files in every process (`gateway.ensure_lake`)."""
+    specs = gateway.link_specs()
+    datasets = [s.dataset for s in plan.systems]
+    for link, _side in plan_links(plan):
+        spec = specs.get(link)
+        if spec is not None:
+            datasets += [spec.left.dataset, spec.right.dataset]
+    years = list(range(min(plan.years) - 1, max(plan.years) + 1))
+    for dataset in dict.fromkeys(datasets):
+        key = _key("lake", (gateway.ensure_lake,), dataset=dataset, years=years)
+        if _done(key):
+            continue
+        try:
+            counts = gateway.ensure_lake(dataset, years, log=log)
+            _mark(key, {"files": counts.get("files", 0), "partitions": counts.get("partitions", 0)})
+            out[f"lake {dataset}"] = f"{counts.get('partitions', 0)} written, {counts.get('partitions_reused', 0)} kept"
+        except Exception as exc:  # noqa: BLE001 - without a lake the reads decode, slower, never wrong: said, not fatal
+            out[f"lake {dataset}"] = f"not built: {type(exc).__name__}: {exc}"
+            log(f"lake {dataset} not built: {exc}")
+
+
 def _ensure_links(plan: Plan, out: dict, log) -> None:
     """The stored national runs every link the plan reads needs for its years (S2.2; `gateway.covering_runs`: a padded
     side's year is read by the runs after it too): a reading never launches one (`gateway.stored_pairs`), so the plan
@@ -321,6 +345,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     out: dict[str, Any] = {}
     sessions = {}
     resolved.clear()
+    _ensure_lake(plan, out, log)
     _ensure_links(plan, out, log)
     for sys_ in plan.systems:
         s = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph)
