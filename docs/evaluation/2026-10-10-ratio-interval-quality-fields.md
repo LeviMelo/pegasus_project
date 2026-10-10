@@ -40,3 +40,15 @@ declared-missing values (`share_moments(quality=True)`). TOXG has 25 such column
 
 **Roles by year.** `gateway._strata(dataset, event, year)` reads the column a role has in that year's layout. It
 reads the latest layout's column when no year is given, which fixed SIM-DOFET, DOINF and DOEXT's residence.
+
+**Groups and supports (2.4, 2.6).** The group question also runs over each composition column
+(`Session.by_composition`). A value's expectation is each age–sex cell's B0 expectation times Brazil's share of the
+value in that cell, so the national totals are reproduced exactly. TOXG 2019–2024 has 135 departures over 6 columns
+(sex × age: none, as a field of pregnant women should). Examples: Espírito Santo's schooling "0" at 21.7 times;
+Piauí's autochthony "not recorded" at 2.9 times. The supports read TOXG at its place of infection (recorded for
+40,949 of 71,471 cases; São Paulo 1,139, Fortaleza 643, Manaus 482) and at its notifying municipality (Teresina
+1,682 against 737 resident cases).
+
+**Triage by reader.** A system read as a code set had its dataset's chapter answers triaged on the code set's
+session (CIH-CR, CIHA: `StopIteration` and "codes=['P371'] is a field of its own"). Answers are now triaged by
+their own reader and on their own years; `READER_FIELDS` names code sets, quality and supports.

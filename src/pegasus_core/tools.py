@@ -172,6 +172,52 @@ class Session:
         mu = mu * np.divide(tot, mu.sum(0), out=np.ones_like(tot), where=mu.sum(0) > 0)[None]
         return y, mu
 
+    def by_composition(self, node: str, column: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
+        """A composition column as a group dimension (ARCHITECTURE §5.3): observed counts by (place, year, value), the
+        value "not recorded" among them (blank or a declared missing code), and the expected ones: each age–sex cell's
+        B0 expectation (`by_group`, re-levelled to the observed national totals) times the national share of the value
+        in that cell and year. A place's schooling mix is so read against Brazil's at its own age–sex structure, and a
+        place that stops recording schooling departs in "not recorded". Returns (y [U, T, K], μ [U, T, K], values)."""
+        f = self.expectations.field(node)
+        m = self.expectations.model(f.block)
+        d = m.data
+        d_col = next((x for x in fields.declared(self.dataset) if x.column == column), None)
+        if d_col is None or d_col.kind != "composition" or d_col.reason:
+            raise ValueError(f"{self.dataset}.{column} is not a modelled composition")
+        y_g, mu_g = self.by_group(node)
+        leaves = set(self.expectations.registry.leaves(f.node))
+        primary = (self.source or {}).get("classifier") or next(
+            (c["column"] for c in gateway.event_type(self.dataset, self.event).get("classifiers") or [] if c["role"] == "primary"), None)
+        edges = gateway.age_edges(d.population, self.dataset, self.event)
+        nB = d.N.shape[2] // 2
+        index = {int(p_): i for i, p_ in enumerate(d.places)}
+        frames = []
+        for t, year in enumerate(np.asarray(d.years)):
+            c = gateway.composition_counts(self.dataset, self.event, int(year), column, d_col.missing, primary)
+            for tab, value in ((c.counts, None), (c.missing, "not recorded")):
+                if tab is None or tab.num_rows == 0:
+                    continue
+                code = np.asarray(tab.column("code").to_pylist(), dtype=object)
+                keep = np.ones(len(code), bool) if f.node == "*" else np.array([str(x)[:3] in leaves or str(x) in leaves for x in code])
+                u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
+                keep &= u >= 0
+                g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
+                vals = np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None else np.full(len(code), value, object)
+                n = tab.column("n" if value is None else "m").to_numpy().astype(float)
+                frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep]))
+        values = sorted({v for *_, vals, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
+        vi = {v: k for k, v in enumerate(values)}
+        U, T, G, K = len(d.places), len(d.years), d.N.shape[2], len(values)
+        y = np.zeros((U, T, K))
+        cell = np.zeros((T, G, K))
+        for u, t, g, vals, n in frames:
+            k = np.array([vi[v] for v in vals], dtype=np.int64)
+            np.add.at(y, (u, t, k), n)
+            np.add.at(cell, (t, g, k), n)
+        share = np.divide(cell, cell.sum(2, keepdims=True), out=np.zeros_like(cell), where=cell.sum(2, keepdims=True) > 0)
+        mu = np.einsum("utg,tgk->utk", mu_g, share)
+        return y, mu, values
+
     def exposure(self, sources: list[tuple[str, str]], per: float = 1000.0) -> np.ndarray:
         """[U, T] an exposure on this session's places and periods: the events of ``sources`` ((dataset, event) pairs,
         summed: e.g. the three arboviruses' notifications) by residence and period, per ``per`` residents, as
@@ -305,8 +351,20 @@ class Session:
             y_g, mu_g = self.by_group(node)
             places = self.expectations.model(self.expectations.field(node).block).data.places
             phi = float(self.expectations.model(self.expectations.field(node).block).phi)
-            return lenses.group_disparity(y_g, mu_g, places, self.expectations.field(node).id, self.ledger,
-                                          **{"phi": phi, **kw})
+            fid = self.expectations.field(node).id
+            out = lenses.group_disparity(y_g, mu_g, places, fid, self.ledger, **{"phi": phi, **kw})
+            if self.source.get("source", "events") != "events" or str(self.source.get("population", "")).startswith("events:"):
+                return out
+            # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
+            for d_col in fields.declared(self.dataset):
+                if d_col.kind != "composition" or d_col.reason:
+                    continue
+                y_c, mu_c, values = self.by_composition(node, d_col.column)
+                found = lenses.group_disparity(y_c, mu_c, places, f"{fid}|by:{d_col.column}", self.ledger, **{"phi": phi, **kw})
+                for x in found:
+                    x.locus = {**x.locus, "groups_by": d_col.column, "group_value": values[x.locus["groups"][0]]}
+                out.extend(found)
+            return out
         if lens == "institution_step":               # one institution against its catchment (E_i, §4.5)
             from scipy import stats as st
 
@@ -468,10 +526,12 @@ class Session:
         found: dict[str, list] = {}
         src = self.source
         measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
+                   f"|quality:{src['indicator']}" if src.get("quality") else
                    f"|{src['indicator']}={','.join(src['success'])}" if src.get("indicator") else
                    f"|link:{src['link']}:{src['side']}" if src.get("link") else
                    f"|{src.get('classifier') or src['column']}" if src.get("source") == "code_list" else
                    f"|away:{src['place']}" if src.get("place") else
+                   f"|support:{src['support']}" if src.get("support") else
                    f"|classifier:{src['classifier']}" if src.get("classifier") else "")   # its own family
         code = config.code_key(qs.ask)
         suffix = f"|t{train_last}" if train_last else ""
@@ -539,6 +599,10 @@ class Session:
                     locus={"places": sorted(a.places), "years": list(a.years),
                            **({"institutions": inst} if (inst := sorted({i for x in a.findings.values()
                                                                          for i in x.locus.get("institutions", [])}))
+                              else {}),
+                           # a group dimension's departing value (a composition column's, `scan` group_disparity)
+                           **({"groups": grp} if (grp := sorted({f"{x.locus['groups_by']}={x.locus['group_value']}"
+                                                                 for x in a.findings.values() if x.locus.get("groups_by")}))
                               else {})}, effect=float(best.effect),
                     scale=SCALE.get(best.lens, "rate_ratio"), interval=None, p=float(p), q=float(qq), family=fam,
                     null="each method's own (questions.QUESTIONS)",
@@ -692,8 +756,11 @@ class Session:
             U, T, per_year = len(d.places), len(periods), 12 if getattr(d, "grain", "year") == "month" else 1
             index = {int(pl): j for j, pl in enumerate(d.places)}
             pos = {c: j for j, c in enumerate(d.leaves)}
-            missing = self._share_missing(block, d) if self.source.get("indicator") else None
-            cube = self._share_facilities(d) if self.source.get("indicator") else None
+            # a composition's share reads its not-recorded level and its facilities; a quality field is that level
+            # itself, its facilities wait for the facility support (BACKLOG 2.6)
+            share = self.source.get("indicator") and not self.source.get("quality")
+            missing = self._share_missing(block, d) if share else None
+            cube = self._share_facilities(d) if share else None
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
                 node = x.fields[0].split(":")[-1]
@@ -1393,7 +1460,7 @@ def kinds_of(x: leads.Lead) -> set[str]:
 
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
 READER_FIELDS = ("source", "classifier", "structure", "mark", "indicator", "success", "link", "side", "anchor", "column",
-                 "place")
+                 "place", "support", "quality", "codes")
 
 
 def fitted(dataset: str | None = None, event: str | None = None, graph: str | None = None,

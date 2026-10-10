@@ -38,7 +38,7 @@ RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude"}
 #: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
 #: measure, composition, interval and care flow pegasus_data's roles declare for the source's records
-_ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all"}
+_ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all", "supports": "all"}
 DEPTH_READERS = {"survey": {}, "standard": dict(_ALL), "deep": dict(_ALL), "exhaustive": dict(_ALL)}
 #: the question registry's names read as the components of ARCHITECTURE §7.2 (BACKLOG 3.1 re-cuts the registry)
 COMPONENT = {"excess": "transient", "step": "step", "trend": "trend", "cluster": "level", "share": "ratio (share)",
@@ -419,7 +419,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     import duckdb
 
     names = gateway.municipality_names()
-    rows, desc, views, figs = [], [], {}, []
+    rows, desc, views, figs, groups = [], [], {}, [], []
     current = leads.Register().current()
     for it in (i for i in scope.items if i.status == "in"):
         for name, src in _fields_of(it):
@@ -453,10 +453,13 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
                     figs.append(_series_figure(out, sv, f, label, it))
+                    groups.extend(_groups(it, s, f, label, log))
     findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
     pq.write_table(pa.Table.from_pylist(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
                    out / "descriptive.parquet")
+    pq.write_table(pa.Table.from_pylist(groups) if groups else pa.table({"field": pa.array([], pa.string())}),
+                   out / "groups.parquet")
     db = out / "study.duckdb"
     if db.exists():
         db.unlink()
@@ -465,6 +468,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
         con.execute(f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{path}')")
     con.execute(f"CREATE VIEW findings AS SELECT * FROM read_parquet('{(out / 'findings.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW descriptive AS SELECT * FROM read_parquet('{(out / 'descriptive.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW groups AS SELECT * FROM read_parquet('{(out / 'groups.parquet').as_posix()}')")
     con.close()
     hyp = _hypotheses(decl, scope)
     pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
@@ -608,6 +612,32 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     return out
 
 
+def _groups(it: Item, s, f, label: str, log) -> list[dict]:
+    """A count field split by each composition column (`tools.Session.by_composition`), observed and expected by value,
+    nationally and by state per year: the expectation is the place's age–sex expectation at Brazil's mix of the value."""
+    if (it.source or {}).get("population"):
+        return []
+    out = []
+    places = np.asarray(s.expectations.model(f.block).data.places)
+    state = places // 10000
+    years = np.asarray(s.expectations.model(f.block).data.years)
+    for d_col in fields.declared(it.dataset):
+        if d_col.kind != "composition" or d_col.reason:
+            continue
+        try:
+            y, mu, values = s.by_composition(f.node, d_col.column)
+        except Exception as exc:  # noqa: BLE001 - a column that cannot be split is a note, the others are written
+            log(f"study: {it.dataset} {f.node} by {d_col.column}: {type(exc).__name__}: {exc}")
+            continue
+        for t, year in enumerate(years):
+            for level, unit, sel in [("national", "BR", np.ones(len(places), bool))] +                     [("state", str(int(st)), state == st) for st in np.unique(state)]:
+                obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
+                out.extend({"field": f.id, "label": label, "dataset": it.dataset, "by": d_col.column, "by_name": d_col.name,
+                            "value": v, "level": level, "unit": unit, "year": int(year), "observed": float(obs[k]),
+                            "expected": float(exp[k])} for k, v in enumerate(values) if obs[k] > 0 or exp[k] > 0)
+    return out
+
+
 def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     """A measure's, an interval's or a share's field by year, nationally and by state (ARCHITECTURE §6.4):
     - a positive measure or an interval: the records' own median and 90th percentile (`gateway.mark_quantiles`; an
@@ -672,7 +702,8 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         "places": ", ".join(places[:20]) + (f" (+{len(places) - 20})" if len(places) > 20 else ""),
         "place_names": ", ".join(f"{(names.get(p) or {}).get('name', p)}/{(names.get(p) or {}).get('uf_sigla', '')}"
                                  for p in places[:8]) + (f" (+{len(places) - 8})" if len(places) > 8 else ""),
-        "n_places": len(places), "first_year": int(years[0]) if years else None,
+        "n_places": len(places), "groups": ", ".join(x.locus.get("groups") or []) or None,
+        "first_year": int(years[0]) if years else None,
         "last_year": int(years[-1]) if years else None,
         "effect": float(x.effect), "effect_unit": x.scale.replace("_", " "),
         "interval_low": float(x.interval[0]) if x.interval else None,
@@ -738,7 +769,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              f"<p>{len(read)} sources read, {len(rows)} findings: {len(signal)} unexplained by recording "
              f"(signal), {len(other)} with a recording or denominator explanation.</p>",
              table(rank, [("label", "field"), ("dataset", "source"), ("component", "component"),
-                          ("place_names", "places"), ("first_year", "from"), ("last_year", "to"),
+                          ("place_names", "places"), ("groups", "group"), ("first_year", "from"), ("last_year", "to"),
                           ("effect", "effect"), ("effect_unit", "unit"), ("q", "q"), ("replication", "replication"),
                           ("corroborated", "corroborated")], cap=20),
              "<h2>2. Descriptive epidemiology</h2>",

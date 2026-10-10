@@ -477,7 +477,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
            "data": config.data_version(), **gateway.population_key(population),
            **({} if profile == "group" else {"profile": profile}),
-           **({} if source == "events" and "classifier" not in source_args and structure == "ICD10" else
+           **({} if source == "events" and not {"classifier", "support"} & set(source_args) and structure == "ICD10" else
               {"source": source, **source_args, **({} if structure == "ICD10" else {"structure": structure})}),
            **({} if grain == "year" else {"grain": grain}),
            **({"codes": list(subset)} if subset else {}),

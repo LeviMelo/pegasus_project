@@ -412,6 +412,19 @@ def declared_flows(dataset: str) -> list[Declared]:
     return out
 
 
+def support_sources(dataset: str, event: str) -> list[tuple[str, dict]]:
+    """The event type's other supports (ARCHITECTURE §5.3): each municipality column of the event's own entity
+    (`declared_flows`' care flows at the residence's level: the place of infection, the notifying municipality, the
+    hospital's, the place of death), its counts read there instead of at the residence (`gateway.event_counts`'s
+    ``support``), on the primary classifier."""
+    from . import gateway
+
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    return [(f"support:{c}", {"support": c, **({"classifier": primary} if primary else {})})
+            for d in declared_flows(dataset) if d.kind == "away" and "@" not in (c := d.column.split(":", 1)[1])]
+
+
 def flow_source(dataset: str, event: str, column: str) -> dict:
     """The reader of a place field (`declared_flows`: a care flow or an origin): its place against the residence, on the
     event type's primary classifier."""

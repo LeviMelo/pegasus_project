@@ -91,7 +91,8 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("institution_step", "best window's likelihood ratio against the facility's constant ratio to "
                                             "its catchment; Bonferroni over the T(T+1)/2 windows; the v0 lattice's gates"),
              )),
-    Question("group", "C", "a place whose excess differs across sex × age groups from the national pattern", "B0",
+    Question("group", "C", "a place whose excess differs across groups from the national pattern: sex × age, and "
+             "each composition column (schooling, outcome, …) at the place's age–sex structure", "B0",
              "area × group", "rate ratio", (
                  Method("group_disparity", "likelihood-ratio heterogeneity of the groups' SIRs; the v0 lens"),
              )),

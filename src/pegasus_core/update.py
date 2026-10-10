@@ -51,6 +51,7 @@ class System:
     nodes: list[str] | None = None               # only the fields under these tree nodes are asked (a study's topic)
     source: dict | None = None                   # the counts' reader (`monolith.assemble`): e.g. {"codes": ["P371"]}
     quality: list[str] | str | None = None       # "all", or columns: each one's blank or "ignored" share (`fields.quality_sources`)
+    supports: list[str] | str | None = None      # "all", or place columns: the counts at another support (`fields.support_sources`)
 
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
@@ -243,6 +244,8 @@ def system_readers(sys_: System, plan: Plan, blocks: list[str], out: dict | None
                 if sys_.mentions == "all" or c in (sys_.mentions or [])]
     readers += [(d.column, fields.flow_source(sys_.dataset, sys_.event, d.column))
                 for d in fields.declared_flows(sys_.dataset) if sys_.flows == "all" or d.column in (sys_.flows or [])]
+    readers += [(name, source) for name, source in fields.support_sources(sys_.dataset, sys_.event)
+                if sys_.supports == "all" or name.split(":", 1)[1] in (sys_.supports or [])]
     readers += [(name, source) for name, source in fields.quality_sources(sys_.dataset, sys_.event, plan.years)
                 if sys_.quality == "all" or name.split(":", 1)[1] in (sys_.quality or [])]
     readers = [(column, source, list(blocks)) for column, source in readers]
@@ -481,8 +484,10 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     if plan.triage:
         for sys_ in plan.systems:
             s = sessions[sys_.dataset]
+            # this plan's answers: the dataset's, on the years its sessions read (another period's are another run's)
             answers = [x for x in s.register.current() if x.kind == "answer"
-                       and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")]
+                       and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")
+                       and list(x.provenance.get("years") or s.years) in (list(s.years), list(plan.years))]
             served = [(x.dataset, x.event) for x in plan.systems] +                 [tuple(c) for c in plan.extra.get("corroborators") or ()]
             key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
                        leads=sorted(x.id for x in answers), served=sorted(served))
@@ -494,7 +499,10 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 done = []
                 for src_key, group in sorted(by_reader.items()):
                     src = json.loads(src_key)
-                    rs = s if not src else tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=src)
+                    # the session of the answers' own reader: a system read as a code set holds, in the register, the
+                    # dataset's chapter answers too, which its session cannot read (CIH-CR P37.1 and chapter I, 2026-10-10)
+                    mine = json.loads(json.dumps(s.source or {}, sort_keys=True, default=list))
+                    rs = s if src == mine else tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=src)
                     done += rs.triage(register=group, log=log)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
                 corr = s.corroborate(done, served=served, log=log)

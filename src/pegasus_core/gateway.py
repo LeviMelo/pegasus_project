@@ -557,7 +557,8 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
 
 
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                 places: pa.Array | None = None, race: str | None = None, cell: bool = True) -> EventCounts:
+                 places: pa.Array | None = None, race: str | None = None, cell: bool = True,
+                 support: str | None = None) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
 
     The columns come from pegasus_data's roles (the subject's residence, sex and age as
@@ -570,6 +571,9 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     stratum (the mother's on a birth); events with no valid race are unallocated ('race unknown').
     ``cell=False``: neither sex nor age is read, every event stands in sex 1, age 0 (a ratio field's numerator and
     denominator, `_events_population`: a foetal death has no age, and an unknown sex is still an event).
+    ``support``: another municipality column of the event read in place of the residence (ARCHITECTURE §5.3: the
+    place of infection, the notifying municipality, the hospital's, the place of death; `fields.support_sources`);
+    a record without it is unallocated by 'municipality'.
     """
     import pegasus_data as pg
 
@@ -577,11 +581,15 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
     strata = _strata(dataset, event, year)
+    if support:
+        if support not in {r["column"] for r in roles(dataset) if r.get("kind") == "place"}:
+            raise ValueError(f"{dataset}: {support!r} is no place column of its roles")
+        strata = {**strata, "residence": support, "place": support}
     if not cell:
         if race:
             raise ValueError("a race group is a stratum: cell=False reads none")
         strata = {**strata, "age": None, "sex": None, "implied_sex": 1, "implied_age": 0}
-    key = {"what": "event_counts", **({"cell": False} if not cell else {}), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
+    key = {"what": "event_counts", **({"cell": False} if not cell else {}), **({"support": support} if support else {}), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
