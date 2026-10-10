@@ -9,14 +9,19 @@ Early alarms on recent, incomplete data, for every place of a field. Three piece
   the reporting delay's distribution. F is estimated per place from a closed year (the delay is not stable across
   years, states or epidemic load: evaluation 2026-10-05, surveillance lags), each place's distribution shrunk toward
   the nation's by empirical Bayes (a Dirichlet–multinomial with its concentration by the method of moments).
-  Given y events known for a week of age a, binomial thinning with a flat prior on the week's total gives the
-  eventual count as y + NegBin(y + 1, F(a)) (the Poisson–gamma form of the nowcasts of Höhle & an der Heiden 2014 and
-  McGough et al. 2020, without their smoothing over weeks).
+  Given y events known for a week of age a, binomial thinning gives the eventual count as y plus the events still
+  to come, and the prior on the week's total is the alarm baseline's own NB(μ, φ) (the null being tested, as in the
+  Bayesian nowcasts of Höhle & an der Heiden 2014 and McGough et al. 2020): with the Poisson–gamma form of that
+  prior the events to come are NegBin(φ + y, (φ/μ + F) / (φ/μ + 1)). A flat prior on the total would read 1 death
+  known at F = 0.26 as a week of 7 and alarm everywhere (2026-10-10).
 - **The alarm** (`alarm`). The ADR's design is a false-alarm rate per place over time, a recurrence interval, not an
   FDR over one search. With the alarm baseline's predictive NB(μ, φ) (tier BPA, ADR-0012), a week's alarm threshold
-  is its upper quantile at 1 − 1/R, R the declared recurrence in place-weeks (5 years: R = 260), so a place with no
-  departure raises one false alarm per R weeks. A week alarms when the nowcast puts its eventual count at or above
-  the threshold with probability at least ``confidence``.
+  is its upper quantile at 1 − 1/R, R the declared recurrence in place-weeks (5 years: R = 260). A week alarms when the nowcast puts its eventual count at
+  or above the threshold with probability at least ``confidence`` c. Under the baseline as the truth the posterior
+  probability averages to the prior's 1/R, so by Markov's inequality a place with no departure raises at most one
+  false alarm per c·R place-weeks (2 per R at c = 0.5), whatever its delay.
+- **Weeks** (`window`). The last weeks that have ended by the as-of date, counted by position, so a window crosses
+  an epidemiological year (and the calendar year of the files holding its events) without bookkeeping of its own.
 
 What is not here yet: the revisions of preliminary files (records changed or discarded after they first appear,
 ADR-0004 point 3), which need dated snapshots of pegasus_data's catalog; and the benchmark against InfoDengue's
@@ -44,11 +49,16 @@ class Delays:
     national: np.ndarray
     concentration: float
 
-    def F(self, place: int, age: int) -> float:
-        """P(known within ``age`` weeks of onset) at ``place`` (the national F for a place with no history)."""
-        i = np.searchsorted(self.places, place)
-        row = self.cdf[i] if i < len(self.places) and self.places[i] == place else np.cumsum(self.national)
-        return float(row[min(max(age, 0), len(row) - 1)])
+    def F(self, place, age):
+        """P(known within ``age`` weeks of onset) at ``place`` (the national F for a place with no history); arrays
+        of places and ages give an array."""
+        place, age = np.broadcast_arrays(np.asarray(place), np.asarray(age))
+        i = np.minimum(np.searchsorted(self.places, place), len(self.places) - 1)
+        known = self.places[i] == place
+        rows = np.where(known[..., None], self.cdf[i], np.cumsum(self.national))
+        a = np.clip(age, 0, rows.shape[-1] - 1)
+        out = np.take_along_axis(rows, a[..., None], axis=-1)[..., 0]
+        return out if place.ndim else float(out)
 
 
 def delays(table, max_delay: int = 26) -> Delays:
@@ -77,17 +87,31 @@ def delays(table, max_delay: int = 26) -> Delays:
     return Delays(places, pmf, np.cumsum(pmf, 1), nat, alpha)
 
 
-def nowcast(known: np.ndarray, F: np.ndarray, quantiles: tuple[float, ...] = (0.05, 0.5, 0.95)) -> dict:
+def _pending(known, F, mu, phi) -> tuple:
+    """The events still to come for a week, with its baseline NB(μ, φ) as the prior on its total (a gamma frailty
+    λ ~ Gamma(φ, φ/μ) times a Poisson). The known y ~ Poisson(λF) and the pending ~ Poisson(λ(1 − F)) are independent
+    given λ, so λ | y ~ Gamma(φ + y, φ/μ + F) and the pending are NegBin(φ + y, p) with p = rate / (rate + 1 − F),
+    rate = φ/μ + F; Poisson(μ(1 − F)) where φ is infinite. Returns y, F, the NegBin's size and p, the Poisson's mean
+    and the mask of the finite φ, all of one shape."""
+    y, f, m = np.broadcast_arrays(np.asarray(known, dtype=float), np.clip(np.asarray(F, dtype=float), 1e-6, 1.0),
+                                  np.maximum(np.asarray(mu, dtype=float), 1e-12))
+    ph = np.broadcast_to(np.asarray(phi, dtype=float), y.shape)
+    fin = np.isfinite(ph)
+    shape = np.where(fin, ph, 1.0)
+    rate = shape / m + f
+    return y, f, shape + y, rate / (rate + 1 - f), m * (1 - f), fin
+
+
+def nowcast(known: np.ndarray, F: np.ndarray, mu: np.ndarray, phi: np.ndarray | float,
+            quantiles: tuple[float, ...] = (0.05, 0.5, 0.95)) -> dict:
     """The eventual counts of recent weeks: ``known`` [n] the events known so far, ``F`` [n] the probability an event
-    of each week is known by now. Under binomial thinning with a flat prior on the week's total, the events still to
-    come are NegBin(y + 1, F): mean (y + 1)(1 − F)/F. Returns the mean and the requested quantiles of the eventual
-    count; F = 1 returns the known count."""
-    y = np.asarray(known, dtype=float)
-    f = np.clip(np.asarray(F, dtype=float), 1e-6, 1.0)
-    mean = y + np.where(f < 1, (y + 1) * (1 - f) / f, 0.0)
-    out = {"mean": mean}
+    of each week is known by now, ``mu`` and ``phi`` the week's baseline NB, the prior on its total (`_pending`).
+    Returns the posterior mean and the requested quantiles of the eventual count. F = 1 gives the known count; a
+    week whose F is near 0 gives its baseline."""
+    y, f, n, p, lam, fin = _pending(known, F, mu, phi)
+    out = {"mean": y + np.where(fin, n * (1 - p) / p, lam)}
     for qq in quantiles:
-        out[qq] = y + np.where(f < 1, stats.nbinom.ppf(qq, y + 1, f), 0.0)
+        out[qq] = y + np.where(fin, stats.nbinom.ppf(qq, n, p), stats.poisson.ppf(qq, lam))
     return out
 
 
@@ -107,16 +131,30 @@ def threshold(mu: np.ndarray, phi: np.ndarray | float, recurrence: float) -> np.
 def alarm(known: np.ndarray, F: np.ndarray, mu: np.ndarray, phi: np.ndarray | float, recurrence: float = 260.0,
           confidence: float = 0.5) -> dict:
     """Alarms for recent place-weeks: ``known`` events so far, ``F`` the share known by now (`Delays.F`), ``mu`` and
-    ``phi`` the alarm baseline's predictive (tier BPA). P(eventual ≥ threshold) under the nowcast is
-    P(NegBin(y + 1, F) ≥ k − y); a week alarms when it is at least ``confidence``. Returns the threshold, that
-    probability, the nowcast's mean and the alarm flags."""
-    y = np.asarray(known, dtype=float)
-    f = np.clip(np.asarray(F, dtype=float), 1e-6, 1.0)
+    ``phi`` the alarm baseline's predictive (tier BPA). P(eventual ≥ threshold) is P(pending ≥ k − y) under
+    `_pending`; a week alarms when it is at least ``confidence``. Returns the threshold, that probability, the
+    nowcast's mean and the alarm flags."""
+    y, f, n, p, lam, fin = _pending(known, F, mu, phi)
     k = threshold(mu, phi, recurrence)
     need = k - y
-    p_exceed = np.where(need <= 0, 1.0, np.where(f < 1, stats.nbinom.sf(need - 1, y + 1, f), 0.0))
-    return {"threshold": k, "p_exceed": p_exceed, "nowcast": nowcast(y, f, ())["mean"],
+    p_exceed = np.where(need <= 0, 1.0, np.where(fin, stats.nbinom.sf(need - 1, n, p), stats.poisson.sf(need - 1, lam)))
+    return {"threshold": k, "p_exceed": p_exceed, "nowcast": nowcast(y, f, mu, phi, ())["mean"],
             "alarm": p_exceed >= confidence, "recurrence": recurrence}
+
+
+def window(day, weeks: int) -> dict:
+    """The last ``weeks`` epidemiological weeks that have ended by ``day`` (a week ends on its Saturday, so ``day`` itself
+    closes a week only when it is one), by ``age`` (0 the newest): ``start`` (its Sunday), ``year`` and ``week``
+    (`epi_week`) and ``anchor`` (its Wednesday, whose calendar year and month a baseline period is read at). A week
+    still running is not a week of events: its total is not yet there to be nowcast, and a first week of the year
+    holding one day of it read as a whole week was the boundary's false alarms (evaluation 2026-10-10). Delays are
+    whole weeks, so a week's age is the weeks since it ended."""
+    d = np.datetime64(day, "D")
+    end = d - ((d.astype(np.int64) + 4 + 1) % 7).astype("timedelta64[D]")           # the last Saturday on or before d
+    age = np.arange(weeks)
+    start = end - np.timedelta64(6, "D") - (7 * age).astype("timedelta64[D]")
+    ey, ew = epi_week(start)
+    return {"age": age, "start": start, "year": ey, "week": ew, "anchor": start + np.timedelta64(3, "D")}
 
 
 def expected_false_alarms(places: int, weeks: int, recurrence: float) -> float:

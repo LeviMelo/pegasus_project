@@ -439,64 +439,84 @@ class Session:
 
     def alarms(self, node: str, as_of: str, report: str, recurrence: float = 260.0, weeks: int = 8,
                confidence: float = 0.5) -> list[dict]:
-        """Phase 4 (`surveillance`; ADR-0004): the alarms of the last ``weeks`` epidemiological weeks before the date
-        ``as_of`` (ISO) for every place of a field. The events known by then are the current year's records whose
-        ``report`` date (`gateway.entry_date`) precedes it (`gateway.delay_counts`); each place's reporting delay comes
-        from the last closed year; the baseline is the alarm tier (BPA, ADR-0012) fitted on the years before, at its
-        own grain and allocated to weeks in proportion to their days (stated: a weekly alarm fit replaces it).
-        Returns one row per place-week that alarms, strongest first."""
+        """Phase 4 (`surveillance`; ADR-0004): the alarms of the last ``weeks`` epidemiological weeks that have ended by
+        the date ``as_of`` (ISO; `surveillance.window`) for every place of a field. The events known by then are the
+        records of the files holding those weeks (a window crossing a year reads both, a week straddling two files
+        reads both parts) whose ``report`` date (`gateway.entry_date`) falls within the week's age
+        (`gateway.delay_counts`); each place's reporting delay comes from the last closed year before the window;
+        each week's baseline is the alarm tier (BPA, ADR-0012) fitted on the years before the week's own epidemiological
+        year, at its own grain and allocated to weeks in proportion to their days (stated: a weekly alarm fit replaces
+        it), and is also the prior on the week's total (`surveillance.nowcast`). Returns one row per place-week that
+        alarms, strongest first."""
+        import pandas as pd
+
         from . import gateway, surveillance
 
-        day = np.datetime64(as_of, "D")
-        year = int(str(day)[:4])
-        if year not in self.years:
-            # the baseline is fitted on the years before as_of and read in its year: a session ending earlier (the
+        win = surveillance.window(as_of, weeks)
+        ayear = win["anchor"].astype("datetime64[Y]").astype(int) + 1970
+        if not set(map(int, ayear)) <= set(self.years):
+            # the baseline is fitted on the years before each week and read in its year: a session ending earlier (the
             # default 2010-2023 asked about 2024) had no period holding it, and the empty assembly failed (2026-10-10)
-            wide = Session(self.dataset, self.event, list(range(min(self.years), year + 1)), self.graph,
+            lo, hi = min(min(self.years), int(ayear.min())), max(max(self.years), int(ayear.max()))
+            wide = Session(self.dataset, self.event, list(range(lo, hi + 1)), self.graph,
                            supply=self.supply, rank=self.rank, source=self.source)
             return wide.alarms(node, as_of, report, recurrence, weeks, confidence)
-        closed = surveillance.delays(gateway.delay_counts(self.dataset, self.event, year - 1, report))
-        cur = gateway.delay_counts(self.dataset, self.event, year, report).to_pandas()
-        ey, ew = surveillance.epi_week(np.array([day]))
-        now = int(ew[0])
-        cur = cur[(cur["year"] == int(ey[0])) & (cur["week"] > now - weeks) & (cur["week"] <= now)]
-        cur = cur[cur["delay"] <= now - cur["week"]]                      # known by as_of
-        known = cur.groupby(["u", "week"])["n"].sum()
-        s = self.surprise(node, "BPA", train_last=year - 1)
-        yrs = np.asarray(s.years)
-        monthly = bool(yrs.max() > 10000)                   # periods labelled YYYYMM at the monthly grain
-        month = int(str(day)[5:7])
-        col = np.flatnonzero(yrs == (year * 100 + month if monthly else year))
-        if col.size == 0:
-            raise ValueError(f"the alarm baseline has no period holding {as_of}: the session's years must include {year}")
-        first = np.datetime64(f"{year}-{month:02d}", "M")
-        days = int(((first + 1).astype("datetime64[D]") - first.astype("datetime64[D]")).astype(int)) if monthly else 365.25
-        mu_week = s.mu[:, col[0]] * 7 / days
-        phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[:, col[0]]
-        index = {int(p): i for i, p in enumerate(s.places)}
-        test = self.ledger.register(control.Hypothesis(f"alarm|{node}|{as_of}", "scan", {
-            "model": "nowcast against the alarm baseline (BPA)", "field": s.field.id, "as_of": as_of,
-            "recurrence": recurrence, "weeks": weeks}))
-        out = []
-        for (u, w), y in known.items():
-            i = index.get(int(u))
-            if i is None:
-                continue
-            a = surveillance.alarm(np.array([y]), np.array([closed.F(int(u), now - int(w))]), np.array([mu_week[i]]),
-                                   np.array([phi[i]]), recurrence, confidence)
-            if a["alarm"][0]:
-                out.append({"place": int(u), "week": int(w), "known": int(y), "nowcast": float(a["nowcast"][0]),
-                            "threshold": float(a["threshold"][0]), "p_exceed": float(a["p_exceed"][0]),
-                            "baseline_week": float(mu_week[i])})
+        files = sorted({int(y) for y in np.concatenate([win["start"], win["start"] + np.timedelta64(6, "D")])
+                        .astype("datetime64[Y]").astype(int) + 1970})
+        control.check_reserved(self.dataset, files)                       # the events read here are the session's too
+        closed = surveillance.delays(gateway.delay_counts(self.dataset, self.event, files[0] - 1, report))
+        # the known events are the field's own (its leaves, or the session's code set), against the field's baseline;
+        # the delay distribution above is the event type's (reporting is the system's, and the field's alone is sparse)
+        reg = self.expectations.registry
+        codes = tuple(self.source.get("codes") or ()) or (() if node == "*" else tuple(reg.leaves(node)))
+        cur = pd.concat([gateway.delay_counts(self.dataset, self.event, y, report, codes=codes,
+                                              classifier=self.source.get("classifier")).to_pandas() for y in files])
+        cur = cur.merge(pd.DataFrame({k: win[k] for k in ("year", "week", "age")}), on=["year", "week"])
+        cur = cur[cur["delay"] <= cur["age"]]                                  # known by as_of, in whole weeks
+        known = cur.groupby(["u", "year", "week", "age"], as_index=False)["n"].sum()
+        out, field_id, test = [], None, None
+        for y in sorted(set(map(int, ayear))):
+            s = self.surprise(node, "BPA", train_last=y - 1)
+            field_id = field_id or s.field.id
+            if test is None:
+                test = self.ledger.register(control.Hypothesis(f"alarm|{node}|{as_of}", "scan", {
+                    "model": "nowcast against the alarm baseline (BPA)", "field": s.field.id, "as_of": as_of,
+                    "recurrence": recurrence, "weeks": weeks}))
+            yrs = np.asarray(s.years)
+            monthly = bool(yrs.max() > 10000)                   # periods labelled YYYYMM at the monthly grain
+            index = pd.Index(s.places)
+            for j in np.flatnonzero(ayear == y):
+                anchor = win["anchor"][j]
+                month = int(str(anchor)[5:7])
+                col = np.flatnonzero(yrs == (y * 100 + month if monthly else y))
+                if col.size == 0:
+                    raise ValueError(f"the alarm baseline has no period holding week {win['week'][j]} of {win['year'][j]}: "
+                                     f"the session's years must include {y}")
+                first = np.datetime64(f"{y}-{month:02d}", "M")
+                days = (int(((first + 1).astype("datetime64[D]") - first.astype("datetime64[D]")).astype(int))
+                        if monthly else 365.25)
+                mu_week = s.mu[:, col[0]] * 7 / days
+                phi = np.broadcast_to(np.asarray(s.phi, dtype=float), s.mu.shape)[:, col[0]]
+                k = known[(known["year"] == win["year"][j]) & (known["week"] == win["week"][j])]
+                i = index.get_indexer(k["u"].to_numpy())
+                k, i = k[i >= 0], i[i >= 0]
+                y_known = k["n"].to_numpy(float)
+                a = surveillance.alarm(y_known, closed.F(k["u"].to_numpy(), k["age"].to_numpy()), mu_week[i], phi[i],
+                                       recurrence, confidence)
+                for r in np.flatnonzero(a["alarm"]):
+                    out.append({"place": int(k["u"].iloc[r]), "year": int(win["year"][j]), "week": int(win["week"][j]),
+                                "known": int(y_known[r]), "nowcast": float(a["nowcast"][r]),
+                                "threshold": float(a["threshold"][r]), "p_exceed": float(a["p_exceed"][r]),
+                                "baseline_week": float(mu_week[i[r]]), "train_last": y - 1})
         out = sorted(out, key=lambda r: -r["p_exceed"])
         self.ledger.complete(test, 1.0 - max((r["p_exceed"] for r in out), default=0.0), None,
                              {"place_weeks": int(len(known)), "alarms": len(out)})
         self.register.add([leads.Lead(
-            kind="residual", estimand="alarm", tier="BPA", fields=[s.field.id],
-            locus={"places": [r["place"]], "years": [int(ey[0]), int(ey[0])], "week": r["week"]},
+            kind="residual", estimand="alarm", tier="BPA", fields=[field_id],
+            locus={"places": [r["place"]], "years": [r["year"], r["year"]], "week": r["week"]},
             effect=r["nowcast"] / max(r["baseline_week"], 1e-12), scale="rate_ratio", interval=None,
             p=1.0 - r["p_exceed"], q=1.0 / recurrence, family=f"alarm|{node}", null="the alarm baseline (BPA)",
-            calibrated=False, train_last=year - 1, provenance={"as_of": as_of, **r}) for r in out])
+            calibrated=False, train_last=r["train_last"], provenance={"as_of": as_of, **r}) for r in out])
         return out
 
     def ask(self, question: str, node: str, q: float = 0.05, **kw) -> list:

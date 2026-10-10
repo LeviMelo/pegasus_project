@@ -580,6 +580,10 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
+    if (published := published_years(dataset)) and int(year) not in published:
+        # a year the catalog holds no publication of (SINAN-TOXG before 2019): said, as pegasus_data says it, before
+        # the year's roles are read (they have no columns then, and a missing residence read as a schema defect)
+        raise nothing_published()(f"{dataset}: no publication for {year} (published: {min(published)}-{max(published)})")
     strata = _strata(dataset, event, year)
     if support:
         if support not in {r["column"] for r in roles(dataset) if r.get("kind") == "place"}:
@@ -1679,24 +1683,33 @@ def raw_field(name: str, years: list[int]):
 
 
 
-def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | None = None) -> pa.Table:
+def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | None = None,
+                 codes: tuple[str, ...] | list = (), classifier: str | None = None) -> pa.Table:
     """The reporting delay of one publication year (phase 4, ADR-0004): events by residence ``u``, the epidemiological
     week of their onset (``onset``; default the event's date, `_when`) and the whole weeks between it and the
     ``report`` date (SINAN's data entry, DT_DIGITA; SIH's processing month; SIM's registration). Rows with either
-    date missing or a negative delay are left out and counted in the table's metadata. Columns: u, year, week,
-    delay, n."""
+    date missing or a negative delay are left out and counted in the table's metadata. ``codes``: only the events whose
+    ``classifier`` code (default the primary) starts with one of them, a field's (SIM chapter IX's known deaths, not
+    every death against IX's baseline: 3.5 times the alarms, 2026-10-10). Columns: u, year, week, delay, n."""
     when = onset or _when(dataset)
+    codes = sorted({str(c).replace(".", "").upper() for c in codes})
+    if codes and classifier is None:
+        classifier = next((c["column"] for c in event_type(dataset, event).get("classifiers") or [] if c["role"] == "primary"), None)
+        if classifier is None:
+            raise ValueError(f"{dataset} {event}: codes need a classifier, and the event type has none")
     key = {"what": "delay_counts", "code": config.code_key(delay_counts), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "onset": when, "report": report,
-           "data": config.data_version(), **_df_key(dataset, year)}
+           "data": config.data_version(), **_df_key(dataset, year), **({"codes": codes, "classifier": classifier} if codes else {})}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
     strata = _strata(dataset, event)
-    raw = _records(dataset, event, year, [strata["residence"], when, report])
+    raw = _records(dataset, event, year, [strata["residence"], when, report] + ([classifier] if codes else []))
     con = duckdb.connect()
     con.register("r", raw)
+    where = ("WHERE " + " OR ".join(f"starts_with(upper(trim(CAST(\"{classifier}\" AS VARCHAR))), '{c}')" for c in codes)
+             if codes else "")
     t = con.execute(f"""SELECT {_residence_sql(strata["residence"])} AS u, {_date_sql(when)} AS d0,
-                        {_date_sql(report)} AS d1 FROM r""").fetch_arrow_table()
+                        {_date_sql(report)} AS d1 FROM r {where}""").fetch_arrow_table()
     d0 = t.column("d0").to_numpy(zero_copy_only=False).astype("datetime64[D]")
     d1 = t.column("d1").to_numpy(zero_copy_only=False).astype("datetime64[D]")
     u = t.column("u").to_numpy(zero_copy_only=False)

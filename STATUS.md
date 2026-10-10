@@ -100,7 +100,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `scans/pairs` | 291 | dependence between two fields at their common support: Moran-basis spectral randomisation null, minimum-effect p | `Pair`, `MoranBasis`, `statistics`, `between`, `within`, `minimum_effect_p` | config, control, graphs, store |
 | `scans/utilization` | 41 | parallel analysis / rank-1 share of the care-use factor | `parallel_analysis`, `rank1_share` | config, scans.maps, scans.pairs |
 | `scans/patterns` | 131 | multiplicative place x time x field patterns (CP-APR factorisation) with stability | `Factorisation`, `fit`, `congruence`, `stability`, `temporal_stability`, `spatial_stability` | config |
-| `surveillance` | 124 | prospective surveillance: epidemiological weeks, reporting-delay distributions per place (empirical Bayes), nowcast, alarm threshold at a declared recurrence | `Delays`, `delays`, `nowcast`, `threshold`, `alarm`, `expected_false_alarms` | gateway |
+| `surveillance` | 162 | prospective surveillance: the weeks that have ended by an as-of date (`window`, across epidemiological years and files), reporting-delay distributions per place (empirical Bayes), nowcast with the week's alarm baseline as the prior on its total, alarm threshold at a declared recurrence (false alarms at most 1/(c·R) by Markov) | `Delays`, `delays`, `window`, `nowcast`, `threshold`, `alarm`, `expected_false_alarms` | gateway |
 
 ### 3.5 Stage E: interpretation
 
