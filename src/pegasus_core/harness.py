@@ -966,6 +966,28 @@ def verdict_positives() -> tuple[Positive, ...]:
     return tuple(out)
 
 
+def locus_reach(sb: surprise.Surprise, places: list[int], in_years: np.ndarray, direction: str = "") -> dict:
+    """Whether a positive's own locus could clear a search at all: its events against expectation summed over its places
+    and years, as one test (NB variance, cells taken as independent), its z and one-sided p in its direction; and the
+    bars it must pass, q alone (a claim confirmed by itself, §8.3) and q / m for the first rejection of a family of the
+    field's m cells. A miss that clears the family's bar is a method's defect; one that does not is beyond any search
+    over the field at this noise (OPEN_QUESTIONS 15: Boa Vista's births, p 3.9e-3 against 5e-5)."""
+    idx = np.nonzero(np.isin(sb.places, np.asarray(places, dtype=sb.places.dtype)))[0]
+    y = np.asarray(sb.y, dtype=float)[np.ix_(idx, np.nonzero(in_years)[0])]
+    mu = np.asarray(sb.mu, dtype=float)[np.ix_(idx, np.nonzero(in_years)[0])]
+    phi = np.broadcast_to(np.asarray(sb.phi, dtype=float), np.shape(sb.mu))[np.ix_(idx, np.nonzero(in_years)[0])]
+    ok = np.isfinite(y) & np.isfinite(mu) & (mu > 0)
+    var = float(np.sum(mu[ok] + np.where(np.isfinite(phi[ok]), mu[ok] ** 2 / phi[ok], 0.0)))
+    if var <= 0:
+        return {"cells": 0}
+    z = float((np.sum(y[ok]) - np.sum(mu[ok])) / np.sqrt(var))
+    pval = float(stats.norm.sf(-z if direction == "down" else z))
+    m = int(np.sum(np.isfinite(np.asarray(sb.mu, dtype=float)) & (np.asarray(sb.mu, dtype=float) > 0)))
+    return {"cells": int(ok.sum()), "observed": round(float(np.sum(y[ok])), 1), "expected": round(float(np.sum(mu[ok])), 1),
+            "z": round(z, 2), "p": float(f"{pval:.3g}"), "family_cells": m, "clears_alone": pval <= Q,
+            "clears_family": pval <= Q / max(m, 1)}
+
+
 def event_record(positives: tuple[Positive, ...] | None = None, years: list[int] | None = None, grains=("year",),
                  log=print) -> list[dict[str, Any]]:
     """Every method of every built question against the documented positives (§10.1; the methods' records of
@@ -1059,6 +1081,8 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
                                         if area_events > 0 else None,
                                         "effect": round(float(best.effect), 2), "p": float(f"{best.p:.3g}"),
                                         "shape": best.stats.get("shape", {}).get("shape")}}
+        if kind == "count":
+            rec["reach"] = locus_reach(sb, [u for u, a in zip(place_events, in_area, strict=True) if a], in_years, p.direction)
         rec["status"] = "scored"
         verdicts = []
         for k, v in rec["methods"].items():

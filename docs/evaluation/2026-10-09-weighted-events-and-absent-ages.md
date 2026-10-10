@@ -199,3 +199,14 @@ B1.
   1, so the weighted BH keeps FDR ≤ q, and Boa Vista's weight is 1.0.
 - **The field's rejections.** 81 unweighted, 65 at 1.5×, 75 averaged.
 - **What it does not change.** Boa Vista is still missed: BH's threshold over 77,980 place-years is about 5e-5 (OPEN_QUESTIONS 15).
+
+**A positive's reach.** `harness.locus_reach` tests the locus itself as one aggregate (its places and years, NB variance).
+`event_record` reports it beside every method's verdict, so a miss that a family could reach (a method's defect) is told
+from one beyond any search.
+- **Roraima's births, 2018–2019.**
+  - Boa Vista: 17,099 births against 15,768 expected, z 2.82, p 2.4e-3. It clears q alone, not the q/m of a family of
+    77,980 cells.
+  - Pacaraima: z 0.77; the B1 expectation took its rise. It clears neither.
+  - The Macapá control: z −1.29.
+- **What this means for S1.5.** Both positives were beyond reach; the next declarations are chosen with their reach
+  computed first.
