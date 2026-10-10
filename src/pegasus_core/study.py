@@ -391,8 +391,89 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW findings AS SELECT * FROM read_parquet('{(out / 'findings.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW descriptive AS SELECT * FROM read_parquet('{(out / 'descriptive.parquet').as_posix()}')")
     con.close()
-    _report(decl, scope, out, rows, desc, [f for f in figs if f])
+    hyp = _hypotheses(decl, scope)
+    pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
+                   out / "hypotheses.parquet")
+    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp)
     return views
+
+
+def _when(text: Any) -> list[int]:
+    """The years a hypothesis's ``when`` covers: ``2018``, ``2018-03``, ``2018-01..2018-06``, ``2016..2018``."""
+    parts = str(text).split("..")
+    first, last = int(parts[0][:4]), int(parts[-1][:4])
+    return list(range(first, last + 1))
+
+
+def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
+    """The declared hypotheses (ARCHITECTURE §7.7, version 1): each tested once, at its locus, in every source of the
+    scope whose years and places hold it, against the B1 expectation; its own test, not a member of a discovery family.
+    level and transient: observed against expected over the locus, the upper tail of the sum under its negative
+    binomial (moments of the cells' predictive), the rate ratio with an exact Poisson interval; step: the ratio of
+    observed to expected after the declared year against before it."""
+    from scipy import stats
+
+    out = []
+    for h in decl.hypotheses:
+        comp, places = str(h.get("component", "transient")), [int(p) for p in (h.get("where") or [])]
+        years = _when(h.get("when"))
+        for it in (i for i in scope.items if i.status == "in"):
+            base = {"hypothesis": h.get("note") or json.dumps(h, ensure_ascii=False), "component": comp,
+                    "source": it.dataset, "field_reader": json.dumps(it.source or {"nodes": it.nodes}),
+                    "places": ", ".join(map(str, places)), "years": f"{years[0]}-{years[-1]}"}
+            if comp == "step":
+                needed = [y for y in it.years if y < years[0]]
+                if not needed or not set(years) & set(it.years):
+                    out.append({**base, "answer": f"not testable: {it.dataset} holds {it.years[0]}-{it.years[-1]}"})
+                    continue
+            elif not set(years) <= set(it.years):
+                out.append({**base, "answer": f"not testable: {it.dataset} holds {it.years[0]}-{it.years[-1]}, "
+                                              f"the hypothesis {years[0]}-{years[-1]}"})
+                continue
+            try:
+                sv = _session(it).surprise(_study_nodes(it, None)[0], "B1")
+            except Exception as exc:  # noqa: BLE001 - said in the answer
+                out.append({**base, "answer": f"not read: {type(exc).__name__}: {exc}"})
+                continue
+            # IBGE codes: the fit's places are six-digit; a declared seven-digit code drops its check digit
+            pl6 = [p // 10 if p > 999999 else p for p in places]
+            rows_u = np.isin(np.asarray(sv.places), pl6) if places else np.ones(len(sv.places), bool)
+            if not rows_u.any():
+                out.append({**base, "answer": "not testable: none of the places is in the fit"})
+                continue
+            yrs = np.asarray(sv.years)
+            var = sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)
+
+            def window(sel_t, sv=sv, rows_u=rows_u, var=var):
+                Y = float(sv.y[np.ix_(rows_u, sel_t)].sum())
+                M = float(sv.mu[np.ix_(rows_u, sel_t)].sum())
+                V = float(var[np.ix_(rows_u, sel_t)].sum())
+                return Y, M, V
+
+            inside = np.isin(yrs, years)
+            Y, M, V = window(inside)
+            if comp == "step":
+                Yb, Mb, _ = window(yrs < years[0])
+                after = np.isin(yrs, [y for y in yrs if y >= years[0]])
+                Ya, Ma, _ = window(after)
+                ratio = (Ya / Ma) / (Yb / Mb) if Ma > 0 and Mb > 0 and Yb > 0 else None
+                se = np.sqrt(1 / max(Ya, 0.5) + 1 / max(Yb, 0.5))
+                p = float(stats.norm.sf(np.log(ratio) / se)) if ratio else None
+                out.append({**base, "observed": Ya, "expected": Ma, "effect": ratio, "effect_unit": "ratio of O/E after to before",
+                            "low": float(ratio * np.exp(-1.96 * se)) if ratio else None,
+                            "high": float(ratio * np.exp(1.96 * se)) if ratio else None, "p": p,
+                            "answer": "tested"})
+                continue
+            if M <= 0:
+                out.append({**base, "answer": "not testable: no expected events at the locus"})
+                continue
+            size = M ** 2 / max(V - M, 1e-9)                      # the sum's NB by moments (Poisson when V = M)
+            pval = float(stats.nbinom.sf(Y - 1, size, size / (size + M))) if V > M * 1.0001 else                 float(stats.poisson.sf(Y - 1, M))
+            lo = stats.chi2.ppf(0.025, 2 * Y) / 2 / M if Y > 0 else 0.0
+            hi = stats.chi2.ppf(0.975, 2 * Y + 2) / 2 / M
+            out.append({**base, "observed": Y, "expected": M, "effect": Y / M, "effect_unit": "rate ratio",
+                        "low": float(lo), "high": float(hi), "p": pval, "answer": "tested"})
+    return out
 
 
 def _slug(text: str) -> str:
@@ -495,7 +576,8 @@ def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
 # ---------------------------------------------------------------------- the report
 
 
-def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str]) -> None:
+def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
+            hyp: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     e = html.escape
     read = [i for i in scope.items if i.status == "in"]
@@ -536,9 +618,10 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>5. Hypotheses</h2>",
-             ("<ul>" + "".join(f"<li>{e(json.dumps(h, ensure_ascii=False))}: not yet answered (hypothesis mode, "
-                               "BACKLOG 3.6)</li>" for h in decl.hypotheses) + "</ul>") if decl.hypotheses else
-             "<p>None declared.</p>",
+             table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("field_reader", "field"),
+                               ("years", "years"), ("observed", "observed"), ("expected", "expected"),
+                               ("effect", "effect"), ("low", "95 % low"), ("high", "95 % high"), ("p", "p"),
+                               ("answer", "answer")], cap=60) if decl.hypotheses else "<p>None declared.</p>",
              "<h2>6. Methods and limitations</h2>",
              "<ul><li>Expectations: hierarchical negative-binomial models per block (PegaSUS ARCHITECTURE §6); findings "
              "against tier B1 unless stated; error control by Benjamini–Hochberg/Bogomolov per question family at the "

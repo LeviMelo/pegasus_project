@@ -2,7 +2,7 @@
 
 **Date.** 2026-10-06. **Status.** Active. Revises ARCHITECTURE (§1.1, P16, §6.1, §7.0, §7.5, §8.4, §10, §12). Marks ADR-0026 and ADR-0027 for supersession as N1 and O6 land.
 
-**Evidence and reasoning.** `docs/history/2026-10-discussion/2026-10-06-course-correction.md` (the review), written after the author's critique of that day's work:
+**Evidence and reasoning.** `history/2026-10-discussion/2026-10-06-course-correction.md` (the review), written after the author's critique of that day's work:
 - detectors are general and system-agnostic;
 - statistical validity is not epidemiological validity;
 - relations are a joint, systematic problem;

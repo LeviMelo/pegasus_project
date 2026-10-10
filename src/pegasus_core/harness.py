@@ -1006,7 +1006,7 @@ def locus_reach(sb: surprise.Surprise, places: list[int], in_years: np.ndarray, 
 def event_record(positives: tuple[Positive, ...] | None = None, years: list[int] | None = None, grains=("year",),
                  log=print) -> list[dict[str, Any]]:
     """Every method of every built question against the documented positives (§10.1; the methods' records of
-    docs/plans/2026-10-07-questions-and-methods.md): per positive and method, whether a finding meets the event
+    history/2026-10-plans/2026-10-07-questions-and-methods.md): per positive and method, whether a finding meets the event
     criterion (its years overlapping the event's, half its places or more in the event's area, of a shape the
     question takes, `questions._shape` where the method states none), the matching finding, and how many findings
     the field had. A positive whose question is not built yet, whose locus a script derives, or whose dataset is not

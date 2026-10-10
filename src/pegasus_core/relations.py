@@ -15,7 +15,7 @@ outcome's history has absorbed part of the lagged effect (evaluation 2026-10-06,
 The term inside the monolith's joint fit is the v2. It is the **pairwise confirmation** of a relation the joint model
 reports (ADR-0029, stage D), never the search.
 
-**The joint model** (stage D; docs/plans/2026-10-06-o7-joint-relations.md): which fields move together over places
+**The joint model** (stage D; history/2026-10-plans/2026-10-06-o7-joint-relations.md): which fields move together over places
 and periods, at which spatial scale, and which leads which. One pipeline, no pairwise search and no zoning:
 
 1. `innovations`: every field's departures whitened by its own predictive (N1): per place, the Pearson residuals

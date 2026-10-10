@@ -3,7 +3,7 @@
 **Date.** 2026-10-05. **Status.** Active.
 
 **Evidence.**
-- The pairs-gate measurement (`scripts/gate_eb.py`; handoff `docs/history/2026-10-handoffs/data/pairs_gate.md`; its evaluation entry ships with the code).
+- The pairs-gate measurement (`scripts/gate_eb.py`; handoff `history/2026-10-handoffs/data/pairs_gate.md`; its evaluation entry ships with the code).
 - `docs/evaluation/2026-10-04-eb-census-positives.md`.
 
 ## What was measured

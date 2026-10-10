@@ -1,7 +1,7 @@
 # ADR-0036: Architecture revision 5 — studies, declared and exhaustive
 
 **Date.** 2026-10-10. **Status.** Active. Replaces ARCHITECTURE revision 4 (archived as
-`docs/history/ARCHITECTURE-rev4-2026-10-07.md`); supersedes ADR-0030's order of work (packages S0–S7), now `BACKLOG.md`.
+`history/ARCHITECTURE-rev4-2026-10-07.md`); supersedes ADR-0030's order of work (packages S0–S7), now `BACKLOG.md`.
 
 **Evidence.**
 - **A live assessment of the running system** (`data/assessment/2026-10-10-capability-assessment.md`, a Sonnet agent
@@ -63,7 +63,7 @@
     - ARCHITECTURE.md is the ground truth, plan and theory;
     - STATUS.md is the map of the code;
     - BACKLOG.md is the ordered work across both repositories;
-    - superseded plans and discussions are archived under `docs/history/`.
+    - superseded plans and discussions are archived under `history/`.
 12. **The win condition** (author): an exhaustive study of toxoplasmosis from one declaration, accepted by the
     criteria in BACKLOG.md.
 

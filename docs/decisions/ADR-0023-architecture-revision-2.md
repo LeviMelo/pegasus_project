@@ -3,7 +3,7 @@
 **Date.** 2026-10-06. **Status.** Active. It revises ADR-0002's architecture on the author's instruction. It amends ADR-0022 (admission becomes weighting) and the gate of ARCHITECTURE §10.5 (retired). ADR-0015, ADR-0019 and ADR-0021 stand.
 
 **Evidence.**
-- The author's critique of 2026-10-06, and the review that answers it: `docs/history/2026-10-discussion/2026-10-06-architecture-review.md`.
+- The author's critique of 2026-10-06, and the review that answers it: `history/2026-10-discussion/2026-10-06-architecture-review.md`.
 - The measurements cited there:
   - the chapter IX solver profile: 16 of 30 Newton steps at the CG cap, 0.15–0.5 s per Hessian–vector product against 0.017 s per evaluation of the total;
   - the 277-death block spending 85 % of its time in Hessian–vector products;

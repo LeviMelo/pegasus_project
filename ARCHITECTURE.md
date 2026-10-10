@@ -3,7 +3,7 @@
 **The ground truth of the project: what PegaSUS is for, the plan it follows, and the theory it rests on.**
 Revision 5, 2026-10-10, written with the author after a day-long review of what PegaSUS could and could not do for a
 researcher (the reference: a study of toxoplasmosis). It replaces revision 4 (2026-10-07), archived in
-`docs/history/ARCHITECTURE-rev4-2026-10-07.md`. Code comments that cite "§N" refer to revision 4 until the code they sit
+`history/ARCHITECTURE-rev4-2026-10-07.md` in the archive outside the repository (`C:/Users/Galaxy/LEVI/archive/pegasus_project_docs_history_2026-10-10.zip`; not read). Code comments that cite "§N" refer to revision 4 until the code they sit
 in is next touched.
 
 - **What the code is today** (modules, objects, commands, what works) is in `STATUS.md`, not here.

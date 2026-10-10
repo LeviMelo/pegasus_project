@@ -436,7 +436,7 @@ class Session:
 
     def ask(self, question: str, node: str, q: float = 0.05, **kw) -> list:
         """A question of `questions.QUESTIONS` on one field: every method answering it at q/k, their findings merged
-        into answers by overlapping loci, each naming the methods that agree (docs/plans/2026-10-07-questions-and-methods.md)."""
+        into answers by overlapping loci, each naming the methods that agree (history/2026-10-plans/2026-10-07-questions-and-methods.md)."""
         from . import questions
         return questions.ask(self, question, node, q, **kw)
 

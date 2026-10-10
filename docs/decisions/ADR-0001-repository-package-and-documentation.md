@@ -14,7 +14,7 @@
    - pegasus_data holds the observed and modelled data;
    - PegaSUS holds inference;
    - only `pegasus_core.gateway` imports pegasus_data;
-   - missing data capabilities are requested in `docs/history/2026-10-handoffs/`.
+   - missing data capabilities are requested in `history/2026-10-handoffs/`.
 3. **The documentation model is pegasus_data's,** with the author's weight rules (CLAUDE.md §7):
    - ARCHITECTURE is the authority;
    - ADRs only for final decisions;
@@ -22,6 +22,6 @@
    - STATUS rewritten, not appended;
    - `scripts/check_docs.py` keeps the documents consistent;
    - CLAUDE.md and AGENTS.md are identical.
-4. **Design discussions are archived in `docs/history/2026-10-discussion/`** once superseded. The earlier PegaSUS documents are frozen in `docs/history/`.
+4. **Design discussions are archived in `history/2026-10-discussion/`** once superseded. The earlier PegaSUS documents are frozen in `history/`.
 
 **Consequences.** `import pegasus` in the shared environment still reaches the 2026 engine. Nothing in this repository imports it.

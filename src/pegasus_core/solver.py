@@ -1,5 +1,5 @@
 """The v1 solver of a count block: exact Newton on the assembled block-arrowhead Hessian (ARCHITECTURE §5.3;
-`docs/plans/2026-10-06-optimization.md` §3–4).
+`history/2026-10-plans/2026-10-06-optimization.md` §3–4).
 
 The objective of a count block is Poisson in η (`Monolith.objective`): −Σ y·η + Λ + ½ Σ τ xᵀQx, with x the centred
 effects. Its gradient is M − Y + τQx (M the marginal sums of μ over each effect's cells, Y the sufficient

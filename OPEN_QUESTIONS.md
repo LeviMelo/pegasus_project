@@ -2,7 +2,7 @@
 
 Unresolved questions only.
 
-- **When one is answered,** the row moves to `docs/history/open_questions_resolved.md`, whole and annotated with its resolution: an ADR, an evaluation, or an ARCHITECTURE section.
+- **When one is answered,** the row is removed; its resolution is the ADR, evaluation or ARCHITECTURE section that answered it.
 - **Questions that are pegasus_data's** live in pegasus_data's own `OPEN_QUESTIONS.md`.
 
 **Status:** `open` · `measuring` · `blocked (on what)`.

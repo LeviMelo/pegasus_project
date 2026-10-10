@@ -12,7 +12,7 @@ Checks, all mechanical:
     6  every module under src/pegasus_core is named in STATUS.md (the module map)
     7  CLAUDE.md and AGENTS.md are byte-for-byte copies
 
-`docs/history/` is frozen: not scanned.
+Superseded documents are archived outside the repository and not scanned.
 
     python scripts/check_docs.py
 """

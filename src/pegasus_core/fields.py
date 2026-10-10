@@ -279,7 +279,7 @@ def common_support(a: Field, b: Field) -> str:
 
 @dataclass(frozen=True)
 class Declared:
-    """A field pegasus_data's roles declare beyond the counts (docs/plans/2026-10-07-fields-from-roles.md):
+    """A field pegasus_data's roles declare beyond the counts (history/2026-10-plans/2026-10-07-fields-from-roles.md):
     ``kind`` measure (a number that is a measurement) or composition (a category's codes), the ``column``, its role
     and name, and for a measure its declared missing codes and domain. ``reason`` is set when it is not modelled."""
     dataset: str

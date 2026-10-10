@@ -1843,7 +1843,7 @@ class Monolith:
     def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
                max_sweeps: int = 5, sweep_tol: float = 0.05,
                courses: bool = False) -> Monolith:
-        """This fit made robust to the departures stage C must report (docs/plans/2026-10-07-robust-expectation.md):
+        """This fit made robust to the departures stage C must report (history/2026-10-plans/2026-10-07-robust-expectation.md):
         each round flags the leaf × place × period cells beyond the predictive's upper ``trim`` quantile (their
         observed totals against NB(μ, φ_x), φ_x the leaf-place-period dispersion by trimmed likelihood, so the flags
         are not judged by a dispersion the outliers inflated), imputes their counts by the current expectation (EM for
@@ -1961,7 +1961,7 @@ class Monolith:
     def fit_category_courses(self, y: np.ndarray | None = None, taus: np.ndarray | None = None,
                              centre: float = 1e4, missing: np.ndarray | None = None, data: BlockData | None = None,
                              log=print) -> dict:
-        """Each category's own time course h_cat[e, t] (docs/plans/2026-10-07-robust-expectation.md, step 4): given
+        """Each category's own time course h_cat[e, t] (history/2026-10-plans/2026-10-07-robust-expectation.md, step 4): given
         every other effect, the category's yearly totals O[e, t] (of ``y``, the cells' counts; None: the data's) are
         Poisson(M[e, t] e^{h[e, t]}), M the expectation without the course; h has an RW2 prior of precision τ shared
         by the block and is centred over periods (a penalty ``centre`` on its mean: the course is a shape, the level

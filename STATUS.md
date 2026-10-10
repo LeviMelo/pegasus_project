@@ -333,9 +333,9 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
 - `scans/patterns.py` and `scans/utilization.py` are imported by no production path (only by `data/` scripts); `relations.spectral_factor_model` likewise by `data/o7_*` scripts; the production relation map uses `bands` + `factor_model`.
 - `scans/lenses` v0 lenses are live as methods of questions, not dead.
 - Store kind `triage_block` and the `_archive/` registers have no reader or writer in `src/`.
-- `data/` holds ~190 experiment scripts that import the package; none is on a production path. `data/handoffs/` keeps only two build logs (the notes moved to `docs/history/2026-10-handoffs/data/`).
+- `data/` holds ~190 experiment scripts that import the package; none is on a production path. `data/handoffs/` keeps only two build logs (the notes moved to `history/2026-10-handoffs/data/`).
 - `pegasus_project/pegasus_data_home/` (untracked) is a stray pegasus_data home created by an unrooted call before `config` set `PEGASUS_DATA_HOME`.
-- Docstrings in `src/` still cite `ARCHITECTURE §N` of revision 4 and `docs/plans/...` (now under `docs/history/2026-10-plans/`).
+- Docstrings in `src/` still cite `ARCHITECTURE §N` of revision 4 and `docs/plans/...` (now under `history/2026-10-plans/`).
 
 ---
 

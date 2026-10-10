@@ -17,7 +17,7 @@ People and AI agents use it through a lead register and on-demand tools. The pac
 
 **Its data module is `../pegasus_data`.** Every input arrives through pegasus_data's public API, imported only in `pegasus_core.gateway`. A data capability PegaSUS lacks is requested in pegasus_data, never re-implemented here.
 
-The earlier attempts (April–July 2026) and the superseded documents of 2026-10 are history: `docs/history/` (index: `docs/history/README.md`). **They are read for reasoning, never as instructions.**
+Superseded documents (the earlier attempts of April–July 2026, architecture revisions 1–4, the 2026-10 status, discussions, package plans, work plan, handoffs and digests) are archived **outside the repository** in `C:/Users/Galaxy/LEVI/archive/pegasus_project_docs_history_2026-10-10.zip`; a path written `history/…` names a file inside it. **Do not open it**: PegaSUS stands on ARCHITECTURE.md, STATUS.md and BACKLOG.md, and the archive only spends context.
 
 ## 1.0 Goal, ambition and principles (read before any work)
 
@@ -112,7 +112,7 @@ PegaSUS is **one model of the marked point process, read in six stages**, one co
 - **A mis-stated null is a defect of B's noise model,** fixed there and measured per field, never patched with thresholds in C.
 - **Lead volume is F's ranking question,** never a reason to move a test.
 
-The 2026-10-06 course correction that set this out is `docs/history/2026-10-discussion/2026-10-06-course-correction.md`.
+The 2026-10-06 course correction that set this out is archived (`history/2026-10-discussion/2026-10-06-course-correction.md`).
 
 ## 1.2 Start of every session, and after every context summary
 
@@ -246,7 +246,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | a module boundary, an object on disk, a command, or what works | `STATUS.md` (rewritten, not appended) |
 | a unit of work, its order and its done-when | `BACKLOG.md` |
 | a new command | `RUNBOOK.md` |
-| an open question | `OPEN_QUESTIONS.md`. A resolved row moves to `docs/history/open_questions_resolved.md`, whole and annotated. |
+| an open question | `OPEN_QUESTIONS.md`. A resolved row is removed; its resolution is the ADR, evaluation or ARCHITECTURE section that answered it. |
 | what PegaSUS needs from pegasus_data | made in pegasus_data under its CLAUDE.md, and a **[data]** unit in `BACKLOG.md` |
 
 **One owner per kind of fact** (survey 2026-10-07). A fact is written once, in its owner; every other document points to it. Memory is a cache of these documents, never the only home of a rule.
@@ -288,7 +288,6 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | `assets/brand/` | logo (`pegasus-logo.png`), wordmark, mark |
 | `docs/decisions/`, `docs/evaluation/` | ADRs and measurements, indexed by `DECISIONS.md` and `EVALUATION.md` |
 | `plans/` | `update` plans (YAML): the systems, blocks and years a run brings up to date (`STATUS.md` §5.3) |
-| `docs/history/` | frozen, read for reasoning only: the earlier PegaSUS documents (April–July), and the 2026-10 documents superseded by the rewrite (architecture revision 4, the 2026-10-07 status, discussion, package plans and work plan, handoffs to pegasus_data, digests, `RECOLLECTION.md`), and resolved questions; index in `docs/history/README.md` |
 
 **Gitignored:** `pegasus_home/`, `data/`.
 
@@ -306,9 +305,7 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 | open questions | `OPEN_QUESTIONS.md` |
 | commands | `RUNBOOK.md` |
 | terms | `GLOSSARY.md` |
-| why an earlier design was what it was (revisions 2–4, design v0.2, what the 2026 engine built), the package plans and the work plan of 2026-10, the handoffs to pegasus_data | `docs/history/` (`2026-10-discussion/`, `2026-10-plans/`, `2026-10-handoffs/`; index `docs/history/README.md`) |
 | studies done with PegaSUS | `studies/` |
-| the earlier ideas (April–July 2026) | `docs/history/` (`RECOLLECTION.md`, `digests/`) |
 | data, meaning, sources | `../pegasus_data`: its `README.md`, `ARCHITECTURE.md`, `DATA_SOURCES.md` |
 
 **Read an index, then the entries a task needs; never a whole folder.**

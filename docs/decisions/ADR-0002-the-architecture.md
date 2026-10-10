@@ -3,7 +3,7 @@
 **Date:** 2026-10-04. **Status:** active. **Accepted by the author**, after the design discussion of 3–4 October.
 
 **Context.**
-- The 2026 engine specified its goals well and failed in its mathematics and machinery. The record is in `docs/history/2026-10-discussion/2026-10-03-what-was-built.md`:
+- The 2026 engine specified its goals well and failed in its mathematics and machinery. The record is in `history/2026-10-discussion/2026-10-03-what-was-built.md`:
   - pooled Gaussianisation that baked gradients into its data (corr(z, log population) = 0.93);
   - one covariance over all places and 25 years;
   - a taxonomy used as a prior on relations;
@@ -11,7 +11,7 @@
   - weights computed and never used;
   - an output size set by multiplicity arithmetic;
   - a validation programme never run on real data.
-- The reasoning behind each choice below is in `docs/history/2026-10-discussion/2026-10-04-design-v0.2.md`.
+- The reasoning behind each choice below is in `history/2026-10-discussion/2026-10-04-design-v0.2.md`.
 
 **Decision.** `ARCHITECTURE.md` is the authority. In brief:
 1. **One model:** a marked point process of health events, fitted as one hierarchical model ("the monolith"). Population offsets and observation terms come from pegasus_data's modelled tier. Structure priors per variable shape act on levels only. A learned BYM2 runs over a family of proximity graphs. Interactions are low-rank (ARCHITECTURE §4).
@@ -42,4 +42,4 @@
 
 **Consequences.**
 - Phase 0 builds the harness, the gateway, the store and the ledger before any model.
-- PegaSUS depends on pegasus_data delivering the handoff `docs/history/2026-10-handoffs/2026-10-04-pegasus_data.md`.
+- PegaSUS depends on pegasus_data delivering the handoff `history/2026-10-handoffs/2026-10-04-pegasus_data.md`.

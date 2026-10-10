@@ -22,7 +22,6 @@ It reads all its data through **[pegasus_data](../pegasus_data)**, the project's
 | `DECISIONS.md`, `EVALUATION.md` | decisions and measurements, indexed |
 | `OPEN_QUESTIONS.md` | what is still open |
 | `GLOSSARY.md`, `RUNBOOK.md` | terms; commands |
-| `docs/history/` | the earlier attempts and the superseded documents, frozen (index: `docs/history/README.md`) |
 | `studies/` | studies done with pegasus_data (SIAC Mulher 2026) |
 
 ```bash
