@@ -1663,6 +1663,14 @@ def ensure_lake(dataset: str, years: list[int], log=print) -> dict:
     return counts
 
 
+@functools.cache
+def published_years(dataset: str) -> frozenset[int]:
+    """The years pegasus_data's catalog holds a publication of ``dataset`` for (`pegasus_data.availability`)."""
+    import pegasus_data as pg
+
+    return frozenset(int(y) for y in pg.availability(dataset, root=config.data_root()).published_years)
+
+
 def link_specs() -> dict:
     """pegasus_data's declared links (`curation/links.yml`): each spec's left and right sides."""
     from pegasus_data.linkage.engine import load_links

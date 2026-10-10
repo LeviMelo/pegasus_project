@@ -27,8 +27,8 @@ Words used below: **built** (the code exists), **checked** (what ran, named), **
 | stage | state |
 |---|---|
 | **A. Data** (pegasus_data) | SIM, SIH, SINASC, every SINAN agravo served; roles for 56 SINAN forms and SIM-DOFET (P1); SIH 2008–2010 labelled (P2); declarations of measures, missing codes and domains, link semantics (`same_event`), context denominators (`over`), multiple-cause groups; label lookups kept fresh (pegasus_data 14f6033). SIA/APAC and CIHA declared, not read |
-| **B. Expectation** | v1 solver; robust fitting by default; N1 built for counts (a second, simpler noise estimator for measures and shares is a departure to resolve); N2 open (SBC defect of the joint mode on data-poor places) |
-| **C. Departures** | the questions registry: excess, step, trend, cluster, share, institution, group; measures read by the multiscale methods since 2026-10-07 (unmeasured) |
+| **B. Expectation** | v1 solver; robust fitting by default, recodings moved within the block (ADR-0033: SIM IX calibrated by size); NB-P dispersion (ADR-0032); events whose row is a group read in one exposed cell (ADR-0034); N1 built for counts (a second, simpler noise estimator for measures and shares is a departure to resolve); N2 open (SBC defect of the joint mode on data-poor places) |
+| **C. Departures** | the questions registry: excess, step, trend, cluster, share, institution, group; the outbreak lens's weights averaged over a range of effects (OQ 15); a positive's reach reported beside every method's verdict; measures read by the multiscale methods since 2026-10-07 (unmeasured) |
 | **D. Relations** | `relation_map` (band factor model on N1 innovations), calibrated above the national scale; the dependency map (between-place E_b) rebuilt from declarations |
 | **E. Interpretation** | triage with rule versions (institution answers read by their own statistics), replication, corroboration, all ledgered |
 | **F. Use** | `report`, `dossier`, `verdict`; no reading delivered to the author yet |

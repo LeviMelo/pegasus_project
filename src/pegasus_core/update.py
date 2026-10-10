@@ -315,9 +315,17 @@ def _ensure_links(plan: Plan, out: dict, log) -> None:
     computes them, once, as a step of their own. No run after the plan's last year is computed: the plan's years are
     its data horizon (a later year's run reads that year's records; SIM 2024 is held out). A year whose covering runs
     are incomplete, or that cannot be linked, is read as unlinked, and said."""
+    specs = gateway.link_specs()
     for link, side in plan_links(plan):
         runs = sorted({z for y in plan.years for z in gateway.covering_runs(link, side, y)})
         need = [z for z in runs if z <= max(plan.years)]
+        # a year either side publishes nothing for is not linkable, and is said so rather than attempted on every run
+        # (CIHA starts in 2011)
+        sides = [specs[link].left.dataset, specs[link].right.dataset] if link in specs else []
+        unpublished = [z for z in need if any(z not in gateway.published_years(d) for d in sides)]
+        for z in unpublished:
+            out[f"link {link} {z}"] = "no publication on a side: not linked"
+        need = [z for z in need if z not in unpublished]
         missing = []
         for z in need:
             try:
