@@ -871,6 +871,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     signal = [r for r in rows if r.get("class") == "signal"]
     other = [r for r in rows if r.get("class") != "signal"]
     rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["effect"])) if r["effect"] and r["effect"] > 0 else 0))
+    stories = _stories(signal)
 
     def table(rs: list[dict], cols: list[tuple[str, str]], cap: int = 40) -> str:
         head = "".join(f"<th>{e(c)}</th>" for _, c in cols)
@@ -884,7 +885,12 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              f"{time.strftime('%Y-%m-%d %H:%M')}</p>",
              "<h2>1. Summary</h2>",
              f"<p>{len(read)} sources read, {len(rows)} findings: {len(signal)} unexplained by recording "
-             f"(signal), {len(other)} with a recording or denominator explanation.</p>",
+             f"(signal), {len(other)} with a recording or denominator explanation, in {len(stories)} stories (findings "
+             "sharing a place and overlapping years, across fields and sources).</p>",
+             "".join(_story_html(k, st, e) for k, st in enumerate(stories[:15], 1)),
+             (f"<p class=more>{len(stories) - 15} more stories in findings.parquet (column story)</p>"
+              if len(stories) > 15 else ""),
+             "<h3>Every signal finding</h3>",
              table(rank, [("label", "field"), ("dataset", "source"), ("component", "component"),
                           ("place_names", "places"), ("groups", "group"), ("first_year", "from"), ("last_year", "to"),
                           ("effect", "effect"), ("effect_unit", "unit"), ("q", "q"), ("replication", "replication"),
@@ -910,14 +916,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                                ("years", "years"), ("observed", "observed"), ("expected", "expected"),
                                ("effect", "effect"), ("low", "95 % low"), ("high", "95 % high"), ("p", "p"),
                                ("answer", "answer")], cap=60) if decl.hypotheses else "<p>None declared.</p>",
-             "<h2>6. Methods and limitations</h2>",
-             "<ul><li>Expectations: hierarchical negative-binomial models per block (PegaSUS ARCHITECTURE §6); findings "
-             "against tier B1 unless stated; error control by Benjamini–Hochberg/Bogomolov per question family at the "
-             "study's q.</li><li>Rates use the model's exposure (resident or SUS-dependent population); births as the "
-             "denominator of congenital fields comes with BACKLOG 2.x.</li><li>This version reads the seeds' codes in "
-             "each source's primary classifier only (principal diagnosis, underlying cause); secondary diagnoses, "
-             "certificate lines and code lists come with BACKLOG 2.1.</li><li>Relations, persons, seasonality and "
-             "propagation are not read at this depth or in this version.</li></ul>",
+             "<h2>6. Methods and limitations</h2>", _limitations(decl, scope),
              "<h2>7. Provenance</h2><p>provenance.json; every table is in study.duckdb (views onto the store and lake; "
              "nothing copied). <code>pegasus-core export</code> materialises the folder.</p>"]
     css = ("body{font-family:system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}"
@@ -925,6 +924,95 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
            "padding:3px 8px;text-align:left}th{background:#f4f4f4}img{max-width:100%;margin:.5em 0}.meta,.more{color:#666}")
     (out / "report.html").write_text(f"<!doctype html><meta charset=utf-8><title>{e(decl.study)}</title><style>{css}"
                                      f"</style>{''.join(parts)}", encoding="utf-8")
+
+
+def _stories(rows: list[dict]) -> list[list[dict]]:
+    """Findings grouped into stories (ARCHITECTURE §9): connected by a shared municipality and overlapping years, across
+    fields, components and sources; each story's rows strongest first, the stories by their strongest q. Each row gets
+    its story's number (``story``)."""
+    parent = list(range(len(rows)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    by_place: dict[str, list[int]] = {}
+    for i, r in enumerate(rows):
+        for p_ in str(r.get("places") or "").replace(" (+", ",").split(","):
+            if p_.strip().isdigit():
+                by_place.setdefault(p_.strip(), []).append(i)
+    for idx in by_place.values():
+        for i in idx:
+            for j in idx:
+                ri, rj = rows[i], rows[j]
+                if i < j and (ri.get("first_year") or 0) <= (rj.get("last_year") or 9999) \
+                        and (rj.get("first_year") or 0) <= (ri.get("last_year") or 9999):
+                    parent[find(i)] = find(j)
+    groups: dict[int, list[dict]] = {}
+    for i, r in enumerate(rows):
+        groups.setdefault(find(i), []).append(r)
+    out = sorted((sorted(g, key=lambda r: r["q"]) for g in groups.values()), key=lambda g: (g[0]["q"], -len(g)))
+    for k, g in enumerate(out, 1):
+        for r in g:
+            r["story"] = k
+    return out
+
+
+def _story_html(k: int, rows: list[dict], e) -> str:
+    """One story: where, when, what departs, in how many fields and sources, and its strongest findings."""
+    lead = rows[0]
+    fields_ = sorted({r["label"] for r in rows})
+    sources = sorted({r["dataset"] for r in rows})
+    years = [y for r in rows for y in (r.get("first_year"), r.get("last_year")) if y]
+    span = f"{min(years)}–{max(years)}" if years else ""
+    items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
+                    + (f" in {e(r['groups'])}" if r.get("groups") else "")
+                    + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
+                    + (", corroborated" if r.get("corroborated") else "") + "</li>" for r in rows[:6])
+    return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{len(rows)} findings in "
+            f"{len(fields_)} fields from {len(sources)} sources ({e(', '.join(sources))}).</p><ul>{items}</ul>")
+
+
+def _limitations(decl: Declaration, scope: Scope) -> str:
+    """What the study's sources say of themselves (pegasus_data ``source_notes``: definition, known errors,
+    limitations, validity and finality, with their citation), each field's declared exposure with its evidence, and
+    the fields this depth reads. Assembled from declarations, never written by hand (ARCHITECTURE §2.4, BACKLOG 1.8)."""
+    e = html.escape
+    now = int(time.strftime("%Y"))
+    seen, notes = set(), []
+    for it in (i for i in scope.items if i.status == "in"):
+        if (it.dataset, it.event) in seen:
+            continue
+        seen.add((it.dataset, it.event))
+        et = gateway.event_type(it.dataset, it.event) or {}
+        sn, ex = et.get("source_notes") or {}, et.get("exposure") or {}
+        bits = []
+        if sn.get("definition"):
+            bits.append(f"definition: {e(sn['definition'])}")
+        if sn.get("valid_from") and it.years and min(it.years) < sn["valid_from"]:
+            bits.append(f"valid from {sn['valid_from']} (earlier years are read but are not the source's own)")
+        if sn.get("final_after_years"):
+            prelim = [y for y in it.years if y > now - sn["final_after_years"]]
+            if prelim:
+                bits.append(f"preliminary: {prelim[0]}–{prelim[-1]} (a year is final {sn['final_after_years']} years later)")
+        bits += [f"known error: {e(x)}" for x in sn.get("known_errors") or ()]
+        bits += [f"limitation: {e(x)}" for x in sn.get("limitations") or ()]
+        if ex:
+            bits.append(f"rates per {ex.get('per', 1):g} {e(' + '.join(ex['events']))}: {e(ex['evidence'])}")
+        if bits:
+            cite = f" <span class=meta>({e(sn['source'])})</span>" if sn.get("source") else ""
+            notes.append(f"<li><b>{e(it.dataset)}</b> ({e(it.event)}){cite}<ul>"
+                         + "".join(f"<li>{b}</li>" for b in bits) + "</ul></li>")
+    readers = sorted(DEPTH_READERS[decl.depth])
+    methods = ("<li>Expectations: hierarchical negative-binomial models per block (ARCHITECTURE §6); findings against "
+               "tier B1 unless stated; Benjamini–Hochberg/Bogomolov per question family at the study's q.</li>"
+               f"<li>Fields read at depth {e(decl.depth)}: counts" + ("".join(f", {e(r)}" for r in readers))
+               + "; the seeds' codes in every classifier a source carries and on every certificate line or diagnosis."
+               "</li><li>Rates are per resident unless a source declares other events as its denominator (below).</li>")
+    body = f"<ul>{''.join(notes)}</ul>" if notes else "<p>No source of this study declares notes.</p>"
+    return f"<ul>{methods}</ul><h3>What the sources say of themselves</h3>{body}"
 
 
 def _fmt(v: Any) -> str:
