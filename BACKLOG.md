@@ -127,7 +127,7 @@ The interface and the product first, over today's machinery, so every later phas
 
 | id | unit | repo | done when |
 |---|---|---|---|
-| 4.1 | **Concept index**: SINAN↔ICD, SIGTAP procedure↔ICD compatibility, APAC ICD↔procedure/medicine counts, CATMAT↔SIGTAP where published, label search flagged; a public API | data | for B58/O98.6/P37.1 the index returns the SINAN agravos, the compatible procedures, the medicines dispensed under them with counts |
+| 4.1 | **Concept index**: SINAN↔ICD, SIGTAP procedure↔ICD compatibility, APAC ICD↔procedure/medicine counts, CATMAT↔SIGTAP where published, label search flagged; a public API | data | for B58/O98.6/P37.1 the index returns the SINAN agravos, the compatible procedures, the medicines dispensed under them with counts **In progress (pegasus_data d2f6f3f): `concept_index` gives SINAN agravos by their records' ID_AGRAVO, SIGTAP's compatible procedures, ICD-10 and SIGTAP label search (finds the toxoplasma serology). Left: APAC ICD → procedure/medicine counts (SIA AM, not in the lake yet), CATMAT ↔ SIGTAP, SINAN agravos outside the lake (opt-in download).** |
 | 4.2 | **Related codes from records**: co-occurrence on the same record (SIM lines, SIH secondary diagnoses, SINASC anomaly lists) and the same person (viable links), observed/expected with intervals and FDR | core (+data for record-level reads) | B20–B24 found related to B58 on certificates; hydrocephalus to P37.1 in admissions |
 | 4.3 | **Scope v2**: seeds → concept index → every dataset holding the codes in any role → related fields → person paths with viability → contexts; reasons and cost per item | core | acceptance item 1 except the not-yet-ingested sources |
 
