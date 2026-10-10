@@ -1001,6 +1001,9 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     e = html.escape
     read = [i for i in scope.items if i.status == "in"]
+    # a quality field's departures are the data's, not the disease's: their own section (ARCHITECTURE §9.1, BACKLOG 7.5)
+    quality = [r for r in rows if "quality:" in str(r.get("label"))]
+    rows = [r for r in rows if "quality:" not in str(r.get("label"))]
     signal = [r for r in rows if r.get("class") == "signal"]
     institutional = [r for r in rows if r.get("class") == "facility" or r.get("institution_facts")]
     other = [r for r in rows if r.get("class") not in ("signal", "facility") and not r.get("institution_facts")]
@@ -1040,6 +1043,11 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(institutional, [("label", "field"), ("dataset", "source"), ("component", "component"),
                                    ("first_year", "from"), ("last_year", "to"), ("effect", "effect"), ("q", "q"),
                                    ("institution_facts", "establishment (CNES)")], cap=30),
+             "<h2>3a. Data quality</h2><p>Places and periods where a column's blank or 'ignored' share departs from its "
+             "expectation: where the records of this topic are least complete, and where a recording practice changed.</p>",
+             table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
+                             ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
+                             ("q", "q")], cap=30) if quality else "<p>No quality departure at this depth.</p>",
              "<h2>3b. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),

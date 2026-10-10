@@ -87,3 +87,11 @@ lag in months waits for the monthly grain.
   year (one national month, 74 s once, then kept in the store). Hospital de Clínicas de Porto Alegre in 2023: a general
   hospital with a SUS link, 526 beds, an obstetric centre and a neonatal unit. A code absent in a year is "not
   registered", never zero.
+
+**Capture model (2.7).** `capture.multiple_systems` fits every log-linear model with main effects and any set of
+pairwise dependences and averages N̂ by Akaike weight (Buckland, Burnham & Augustin 1997). It was checked on the
+three-list spina bifida data (upstate New York, 1969–1974, Hook, Albright & Cross 1980; 621 cases; from R's conting):
+- every model's N̂, deviance and AIC equal R's `glm`;
+- the averaged N̂ is 734.8 [660.5, 809.1];
+- the lists' completeness is birth certificates 69%, death certificates 28%, rehabilitation 25%, against the authors'
+  68%, 27% and 25%.
