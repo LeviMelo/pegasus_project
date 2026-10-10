@@ -8,6 +8,7 @@ is a different address.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -39,7 +40,10 @@ def put_table(kind: str, key: dict[str, Any], table: pa.Table, meta: dict[str, A
 
 def get_table(kind: str, key: dict[str, Any]) -> pa.Table | None:
     path = address(kind, key) / "table.parquet"
-    return pq.read_table(path) if path.exists() else None
+    if not path.exists():
+        return None
+    _touch(path.parent)
+    return pq.read_table(path)
 
 
 def put_arrays(kind: str, key: dict[str, Any], arrays: dict[str, np.ndarray],
@@ -57,6 +61,7 @@ def get_arrays(kind: str, key: dict[str, Any]) -> dict[str, np.ndarray] | None:
     path = address(kind, key) / "arrays.npz"
     if not path.exists():
         return None
+    _touch(path.parent)
     with np.load(path, allow_pickle=False) as data:
         return {k: data[k] for k in data.files}
 
@@ -98,3 +103,43 @@ def _manifest(path: Path, key: dict[str, Any], meta: dict[str, Any] | None, **ex
             "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             **extra, **(meta or {})}
     (path / "manifest.json").write_text(json.dumps(body, indent=1, default=str), encoding="utf-8")
+
+
+#: The kinds `gc` may evict: caches of pegasus_data reads, rebuilt from the lake when asked again. Fits, results and
+#: registers are never evicted.
+CACHE_KINDS = ("gateway", "blockdata")
+
+
+def _touch(entry: Path) -> None:
+    """Stamp an entry as read now (its manifest's mtime), for `gc`'s least-recently-read order."""
+    with contextlib.suppress(OSError):  # a manifest being written by another process
+        os.utime(entry / "manifest.json")
+
+
+def gc(budget_gb: float, keep_hours: float = 24.0, dry_run: bool = False) -> dict[str, Any]:
+    """Evict the least recently read entries of `CACHE_KINDS` until they hold at most ``budget_gb``; an entry read or
+    written within ``keep_hours`` is kept whatever the budget (a running job may be about to read it)."""
+    import shutil
+
+    entries = []
+    for kind in CACHE_KINDS:
+        for manifest_path in (config.home() / kind).glob("*/manifest.json"):
+            entry = manifest_path.parent
+            try:
+                size = sum(f.stat().st_size for f in entry.iterdir())
+                entries.append((manifest_path.stat().st_mtime, size, entry))
+            except OSError:
+                continue
+    total = sum(size for _, size, _ in entries)
+    cutoff, budget = time.time() - keep_hours * 3600, budget_gb * 1e9
+    out = {"entries": len(entries), "bytes": total, "evicted": 0, "evicted_bytes": 0}
+    for stamp, size, entry in sorted(entries, key=lambda e: e[0]):
+        if total <= budget or stamp >= cutoff:
+            break
+        if not dry_run:
+            shutil.rmtree(entry, ignore_errors=True)
+        total -= size
+        out["evicted"] += 1
+        out["evicted_bytes"] += size
+    out["bytes_after"] = total
+    return out

@@ -485,6 +485,16 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 
 
 
+@app.command("gc")
+def gc_command(budget_gb: float = typer.Option(4.0, help="what the caches (gateway, blockdata) may hold"),
+               keep_hours: float = typer.Option(24.0, help="entries read or written this recently are kept"),
+               dry_run: bool = typer.Option(False, help="count what would go, delete nothing")) -> None:
+    """Evict the least recently read cache entries to a budget; fits and results are never evicted."""
+    from . import store
+
+    print(store.gc(budget_gb, keep_hours, dry_run))
+
+
 @app.command("map")
 def dependency_map(years: str = typer.Option("2015-2019", help="first-last year of the health fields"),
                    negatives: int = typer.Option(0, help="worlds of Moran-randomised surrogates for the false-edge rate"),

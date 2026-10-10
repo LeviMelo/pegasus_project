@@ -670,14 +670,20 @@ def grid_design(kind: str, shape: str, units: list[np.ndarray], mu_ut: np.ndarra
     return plants
 
 
+#: Methods a drawn world cannot judge, with the reason: what they read is not drawn (OPEN_QUESTIONS 16)
+GRID_NOT_JUDGED = {"institution_step": "reads the facility cube from the records; no world draws it"}
+
+
 def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.Generator,
-               noise: surprise.Noise | None = None, phi_field: np.ndarray | None = None) -> Any:
+               noise: surprise.Noise | None = None, phi_field: np.ndarray | None = None, spatial: bool = True) -> Any:
     """The block's counts drawn from its fit, y ~ NB(μ', φ) cell by cell (leaf × place × period × age–sex), where μ'
     is the fit's mean with the plants' multipliers on the field's ``leaves``. The background is the model's own
     world, so what a lens finds outside the plants is a false lead. With the field's ``noise`` structure (N1) and its
     place × period dispersion ``phi_field``, the field's own leaves are drawn as Poisson under one lognormal frailty per
     (place, period), log-variance κ·log(1 + 1/φ) and AR(1) over periods (`surprise.replicate_correlated`'s law), so the
-    field's totals carry the predictive's marginal and its serial dependence."""
+    field's totals carry the predictive's marginal and its serial dependence. ``spatial=False`` draws from the fit
+    without its place effects (the national profile and course times each place's population): the null of a lens that
+    reads B0, which a world keeping every place's level is not (OPEN_QUESTIONS 16)."""
     import dataclasses
 
     import torch
@@ -701,7 +707,7 @@ def grid_world(m: Any, leaves: np.ndarray, plants: list[Plant], rng: np.random.G
     def leaf(args):
         e, r = args
         with torch.no_grad():
-            mu = m.expected_by_group(np.array([e]))
+            mu = m.expected_by_group(np.array([e]), spatial=spatial)
         y = subset.replicate(mu * mult if e in inside else mu, np.inf if (frail is not None and e in inside) else m.phi, r)
         u, t, g = np.nonzero(y)
         return np.full(len(u), e), u, t, g, y[u, t, g]
@@ -783,15 +789,20 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     s_orig = session.surprise(node, "B1")                                 # the field's noise structure (N1)
     phi_field = np.broadcast_to(np.asarray(s_orig.phi, dtype=float), (U, T))
     rows, false_rows = [], []
-    plans = [(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
+    # a null world is null for the tier it is drawn from: B1's (every place's fitted level) for the lenses that read B1
+    # and above, B0's (no place effects) for the lenses that read B0 (OPEN_QUESTIONS 16)
+    reads_b0 = {x for x in lens_names if tools.LENS_TIERS.get((methods[x].lens or x) if x in methods else x) == "B0"}
+    plans = ([(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
+             + ([("null_b0", "none", null_worlds)] if null_worlds and reads_b0 else []))
     done = 0
     for kind, shape, n in plans:
-        units = [] if kind == "null" else grid_units(places, edges, kind)
+        units = [] if kind.startswith("null") else grid_units(places, edges, kind)
         for w in range(n):
             rng = np.random.default_rng(config.seed("grid", f.id, kind, shape, w))
-            plants = [] if kind == "null" else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas, offset=w)
+            plants = [] if kind.startswith("null") else grid_design(kind, shape, units, mu_ut, mu_g, edges, rng, thetas, offset=w)
             t0 = time.time()
-            sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng, s_orig.noise, phi_field))}
+            sess.expectations._models = {f.block: m.refit(grid_world(m, leaves, plants, rng, s_orig.noise, phi_field,
+                                                                     spatial=kind != "null_b0"))}
             sess._local.memo = {}                                           # each tier once per world
             s1 = sess.surprise(node, "B1")
             periods = np.asarray(s1.years)
@@ -806,7 +817,9 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
                                   # on the field's total, like the seen ratio (a group plant's own ratio is θ itself)
                                   "true_log_ratio": round(float(np.log(planted[c].sum() / mu_ut[c].sum())), 4),
                                   "seen_log_ratio": round(float(np.log(max(obs, 0.5) / exp_)), 4) if exp_ > 0 else None})
-            runs = [(x, t, tr, wt) for x in lens_names for t in (minimum_effects or {}).get(x, (None,))
+            judged = [x for x in lens_names if x not in GRID_NOT_JUDGED
+                      and (kind != "null" or x not in reads_b0) and (kind != "null_b0" or x in reads_b0)]
+            runs = [(x, t, tr, wt) for x in judged for t in (minimum_effects or {}).get(x, (None,))
                     for tr in (tiers or {}).get(x, (None,)) for wt in (weighted if x == "outbreak" else (False,))]
             for method, theta0, tier, wt in runs:
                 # a method runs its lens with its settings (divergence_neighbours and _national: trend_divergence read two

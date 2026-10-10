@@ -31,6 +31,11 @@ def data_root() -> str:
     return os.environ.get("PEGASUS_DATA_ROOT", "C:/Users/Galaxy/pegasus_core_data")
 
 
+# a pegasus_data call that names no root addresses PegaSUS's data root: unset, pegasus_data creates a home beside the
+# working directory, and two did (pegasus_project/pegasus_data_home fetched 167 files again, 2026-10-05..09)
+os.environ.setdefault("PEGASUS_DATA_HOME", data_root())
+
+
 def population_root() -> str:
     return os.environ.get("PEGASUS_POPULATION_ROOT",
                           "C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home")

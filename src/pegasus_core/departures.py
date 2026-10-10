@@ -130,8 +130,9 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
                 scales: list | None = None) -> list:
     """Cell excess departures of a field (stage C) over the ladder of supports ``scales`` (None: the municipality):
     at each support and size class (`size_classes`, Efron's separate classes) the two-group model on its predictive
-    scores, its empirical-null p-values scaled by its π0; one BH at q per class over every support's cells of that class;
-    the minimum relevant effect as each reported cell's own test. Returns
+    scores, its empirical-null p-values scaled by its π0; one BH at q over every class's and support's cells (the classes
+    give each cell its null, not its own family: a BH per class let each of up to ten classes spend q, and 6 of 10 null
+    worlds of births had a finding, 2026-10-10); the minimum relevant effect as each reported cell's own test. Returns
     `lenses.Finding`s whose ``stats`` carry the support, the lfdr, the empirical null and the effect."""
     from .scans import lenses
 
@@ -150,7 +151,9 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
             inside = cls == c
             fit = two_group(sk.z[inside])
             lfdr[inside] = fit["lfdr"]
-            p[inside] = fit["pi0"] * stats.norm.sf(sk.z[inside], fit["delta0"], fit["sigma0"])
+            # the empirical null may widen the predictive's N(0, 1), never narrow it: on births' null worlds a class's
+            # centre narrower than 1 under-stated its tail (the same worlds: 4 findings in worlds 0-3 without, 2 with)
+            p[inside] = fit["pi0"] * stats.norm.sf(sk.z[inside], fit["delta0"], max(fit["sigma0"], 1.0))
             fits[int(c)] = fit
         parts.append((sk, sc, fits, lfdr, ok))
         ps.append(p.ravel())
@@ -169,10 +172,10 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
             floors.append(np.ravel(floor))
     p_all, rel_all, floor_all = np.concatenate(ps), np.concatenate(rel), np.concatenate(floors)
     cls_all = np.concatenate(classes)
+    # each class's own null, one family over all of them (Efron 2008's separate classes; Cai and Sun 2009)
+    testable = cls_all >= 0
     sig = np.zeros(len(p_all), dtype=bool)
-    for c in np.unique(cls_all[cls_all >= 0]):           # each size class its own family (Efron 2008)
-        inside = cls_all == c
-        sig[inside] = control.bh(p_all[inside], q)
+    sig[testable] = control.bh(p_all[testable], q)
     sig &= rel_all <= q
     out, offset = [], 0
     for sk, sc, fits, lfdr, _ok in parts:

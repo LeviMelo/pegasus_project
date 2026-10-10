@@ -1192,7 +1192,7 @@ The package is named `pegasus_core` because the name `pegasus` is taken by the 2
 | `corroborate` | the independent sources from declarations (any ICD-10-coded served event type less its linked records; context fields declaring `icd10` and `harm`), the place-set null (§8.3) | gateway, store |
 | `leads` | the lead object, ranking, register | control, scans |
 | `harness` | positives, negatives, surrogates, the designed grid of planted signals in refitted worlds and its power surfaces (§10.3; the gate retired, ADR-0028) | all of the above |
-| `store` | content-addressed artefacts (§11.3) | pyarrow |
+| `store` | content-addressed artefacts (§11.3); a read stamps its entry, and `gc` evicts the least recently read cache entries (gateway, blockdata) to a budget, never fits or results | pyarrow |
 | `tools` | the agent and person interface (§9.3); MCP server in phase 3 | leads, scans, surprise, gateway, replication, corroborate |
 | `mcp_server` | the tools over MCP (§9.3, ADR-0008): read-mostly, `confirm_claim` guarded; optional extra `mcp`. Built and paused: use and integration to be planned with the author | tools, leads, control |
 | `jobs` | the machine a computation runs on (§5.7): the machine-wide job slot and the GPU slot, thread counts, a sequence of heavy commands under one slot (`pegasus-core run`); independent fits over threads (`parallel_map`) | gateway |
