@@ -57,7 +57,7 @@ their own reader and on their own years; `READER_FIELDS` names code sets, qualit
 structure divided 0 by 0 ("Residuals are not finite"): such a cell now carries no variance. The study maps draw a
 municipality's (O − E)/sd rather than O/E, whose small places were mostly noise.
 
-**Declared denominators (2.2b).** pegasus_data ADR-0161: TOXG, TOXC, SIFG and SIFC are read per live birth, SIM-DOFET
+**Declared denominators (2.2b).** pegasus_data decision 0161: TOXG, TOXC, SIFG and SIFC are read per live birth, SIM-DOFET
 per total birth (live births and foetal deaths), by default. TOXG is 2.96 per 1,000 live births in 2019 and 6.44 in
 2024 (Rio Grande do Sul 8.32 in 2023); the literature's Uberlândia figure for 2020–2025 is 3.6–5.6. Foetal deaths
 are 10.1–10.8 per 1,000 total births. Under an event exposure a composition's expected mix is the year's national one.
