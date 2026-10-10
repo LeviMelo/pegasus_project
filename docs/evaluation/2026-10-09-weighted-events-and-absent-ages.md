@@ -180,3 +180,22 @@ dengue's 2014 warning signs on a 2010–2023 plan, SIH's VAL_SH_FED and VAL_UCI,
 - It names every column it leaves ("not read: filled 2014-2026 only").
 - Dengue on 2010–2023 keeps 33 compositions and leaves 43 from its 2014 form, which a plan on their years reads.
 - `fields.declared` gives a column empty in some of the readings' years its reason.
+
+**S1.5's fifth round under ADR-0033 (births only).** `data/probes/s1_5/roraima_births.py`, result in
+`roraima_births_v11.json`. Every method was rerun on the births field (B1, NB-P, the robust v11 expectation).
+- **Boa Vista and Pacaraima 2018–2019.** Still missed by cell excess (482 findings in the field), excess (100),
+  outbreak (65) and space–time (3).
+- **The control.** The Macapá negative control stays clean.
+- **Why.** Boa Vista's 11–16 % rise, about 1,000 births a year, stands at about 3 noise sd. The false-discovery family
+  of 77,980 place-years asks for more. Relevance no longer stops it (ADR-0031); the family's size does
+  (OPEN_QUESTIONS 15).
+- **Still to score.** The delivery-admission declaration waits for the SIH lake.
+
+**OQ 15: the outbreak lens's weights, and what a capital's excess needs.** Probe `data/probes/oq15_weights.py`, on births
+B1.
+- **The weight.** Boa Vista's 2019 cell (8,936 births against 7,956 expected, p 3.9e-3) had a Roeder–Wasserman weight of
+  0.0005 at the one reference effect of 1.5×: at 1.5× the cell is a sure detection.
+- **The change.** The weights are now averaged over nine reference effects, log-uniform from 1.05 to 2×. They average
+  1, so the weighted BH keeps FDR ≤ q, and Boa Vista's weight is 1.0.
+- **The field's rejections.** 81 unweighted, 65 at 1.5×, 75 averaged.
+- **What it does not change.** Boa Vista is still missed: BH's threshold over 77,980 place-years is about 5e-5 (OPEN_QUESTIONS 15).
