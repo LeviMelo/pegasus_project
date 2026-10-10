@@ -449,14 +449,15 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
                 rows.extend(_finding(x, it, label, names) for x in current
-                            if x.fields and x.kind == "answer" and x.fields[0] == f.id
+                            if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
                     figs.append(_series_figure(out, sv, f, label, it))
                     try:
                         d = s.expectations.model(f.block).data
                         expo = dict(zip(np.asarray(d.places).tolist(), d.N.sum(axis=(1, 2)).tolist(), strict=True))
-                        figs.append(_map_figure(out, sv, f, label, it, [r for r in rows if r["field"] == f.id], expo))
+                        figs.append(_map_figure(out, sv, f, label, it, [r for r in rows if r["field"] == f.id], expo,
+                                                str(d.population)))
                     except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
                     groups.extend(_groups(it, s, f, label, log))
@@ -594,8 +595,11 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     std = std / std.sum() if std.sum() > 0 else std
     state = np.asarray(d.places) // 10000
     out = []
-    ratio = str((it.source or {}).get("population", "")).startswith("events:")
-    per, scale = ((f"1 {it.source['population'][len('events:'):]} event", 1.0) if ratio else ("100,000 person-years", 1e5))
+    # the exposure the block was fitted on: person-years, or other events (a declared ratio, or the event type's
+    # declared denominator: live births), reported per 1,000 of them
+    ratio = str(d.population).startswith("events:")
+    per, scale = ((f"1,000 {d.population[len('events:'):].replace(';', ' + ')} events", 1e3) if ratio
+                  else ("100,000 person-years", 1e5))
 
     def row(level: str, unit: str, t: int, yy: np.ndarray, nn: np.ndarray) -> dict:
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -749,7 +753,7 @@ def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
     return f"figures/{name}"
 
 
-def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict) -> str | None:
+def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict, population: str = "") -> str | None:
     """Two maps of the field over the study's years: each state's rate (events per exposure: per 100,000 person-years,
     or per denominator event for a ratio) and each municipality's standardised departure from B1, the places
     of the field's findings outlined (pegasus_data's IBGE meshes, `pg.mesh`)."""
@@ -762,7 +766,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 
     places = np.asarray(sv.places)
     obs, mu = sv.y.sum(1), sv.mu.sum(1)
-    ratio = str((it.source or {}).get("population", "")).startswith("events:")
+    ratio = str(population).startswith("events:")
     n_of = np.array([expo.get(int(p), 0.0) for p in places])
     states = pg.mesh("state", root=config.data_root())
     munis = pg.mesh("municipality", root=config.data_root())
@@ -773,7 +777,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
         sel = st == k
         e = float(obs[sel].sum())
         n = float(n_of[sel].sum())
-        by_state[str(int(k))] = (e / n * (1.0 if ratio else 1e5)) if n else np.nan
+        by_state[str(int(k))] = (e / n * (1e3 if ratio else 1e5)) if n else np.nan
     states["rate"] = states["code"].map(by_state)
     # the standardised departure over the years, (O − E)/sd with the NB variance: a small place's ratio is mostly noise
     var = (sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)).sum(1)
@@ -786,7 +790,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
     name = f"{_slug(it.dataset + '_' + f.node)}_map.png"
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.6), dpi=110)
     states.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
-                legend_kwds={"shrink": 0.6, "label": "per denominator event" if ratio else "per 100,000"})
+                legend_kwds={"shrink": 0.6, "label": "per 1,000 denominator events" if ratio else "per 100,000"})
     a1.set_title(f"{label}: rate by state, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
     munis.plot(column="z", ax=a2, cmap="RdBu_r", norm=mcolors.TwoSlopeNorm(0.0, -4.0, 4.0), legend=True,
                missing_kwds={"color": "#eee"}, legend_kwds={"shrink": 0.6, "label": "(observed − expected) / sd",

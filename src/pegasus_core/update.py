@@ -485,7 +485,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         for sys_ in plan.systems:
             s = sessions[sys_.dataset]
             # this plan's answers: the dataset's, on the years its sessions read (another period's are another run's)
-            answers = [x for x in s.register.current() if x.kind == "answer"
+            answers = [x for x in s.register.current() if x.kind == "answer" and x.status != "retired"
                        and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")
                        and list(x.provenance.get("years") or s.years) in (list(s.years), list(plan.years))]
             served = [(x.dataset, x.event) for x in plan.systems] +                 [tuple(c) for c in plan.extra.get("corroborators") or ()]

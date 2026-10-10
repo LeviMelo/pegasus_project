@@ -167,7 +167,7 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
         return _events_population(sorted(set(years)), source)
     if source != "popsvs":
         raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-6, hybrid, account-2 "
-                       "or events:<dataset>:<event>[:codes] (popsvs-5y: a control)")
+                       "or events:<dataset>:<event>[:codes][;...] (popsvs-5y: a control)")
     import pegasus_data as pg
 
     years = sorted(set(years))
@@ -190,7 +190,8 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
 
 def _events_population(years: list[int], source: str) -> pa.Table:
     """Another field's events as the exposure (ARCHITECTURE §5.2, a ratio field): ``events:<dataset>:<event>`` or
-    ``events:<dataset>:<event>:<code>,<code>`` (the events whose classifier code starts with one of them), optionally
+    ``events:<dataset>:<event>:<code>,<code>`` (the events whose classifier code starts with one of them), several
+    terms joined by ``;`` summed (total births: ``events:SINASC-DN:birth;SIM-DOFET:foetal_death``), optionally
     ``@<lag>`` (the denominator's events ``lag`` years earlier: deaths over the admissions of the year before), counted by
     place and year into one cell (sex 1, age 0) for every municipality POPSVS holds (0 where the denominator has none).
     The numerator is read in that same cell (`monolith.assemble`), so the field is the numerator's rate per denominator
@@ -199,26 +200,28 @@ def _events_population(years: list[int], source: str) -> pa.Table:
 
     spec, _, lag = source.partition("@")
     lag = int(lag or 0)
-    parts = spec.split(":", 3)
-    if len(parts) < 3:
-        raise ValueError(f"{source!r}: write events:<dataset>:<event>[:codes][@lag]")
-    dataset, event = parts[1], parts[2]
-    codes = [c.replace(".", "").upper() for c in parts[3].split(",")] if len(parts) > 3 and parts[3] else []
+    terms = []
+    for term in spec.removeprefix("events:").split(";"):
+        parts = term.split(":", 2)
+        if len(parts) < 2 or not all(parts[:2]):
+            raise ValueError(f"{source!r}: write events:<dataset>:<event>[:codes][;<dataset>:<event>[:codes]...][@lag]")
+        terms.append((parts[0], parts[1], [c.replace(".", "").upper() for c in parts[2].split(",")] if len(parts) > 2 and parts[2] else []))
     key = {"what": "population", "source": source, "years": years, "data": config.data_version(),
-           **_declared_key(dataset, event)}
+           "declared": [_declared_key(d, e) for d, e, _ in terms]}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
     places = population(years, "POPSVS", "popsvs").column("u").unique()
     rows = []
-    for y in years:
-        c = event_counts(dataset, event, y - lag, cell=False).counts
-        if codes:
-            hit = pc.starts_with(c.column("code"), codes[0])
-            for k in codes[1:]:
-                hit = pc.or_(hit, pc.starts_with(c.column("code"), k))
-            c = c.filter(pc.fill_null(hit, False))
-        rows.append(pa.table({"u": c.column("u"), "year": pa.array([y] * c.num_rows, pa.int16()), "y": c.column("y")}))
+    for dataset, event, codes in terms:      # several event types summed: total births are live births and foetal deaths
+        for y in years:
+            c = event_counts(dataset, event, y - lag, cell=False).counts
+            if codes:
+                hit = pc.starts_with(c.column("code"), codes[0])
+                for k in codes[1:]:
+                    hit = pc.or_(hit, pc.starts_with(c.column("code"), k))
+                c = c.filter(pc.fill_null(hit, False))
+            rows.append(pa.table({"u": c.column("u"), "year": pa.array([y] * c.num_rows, pa.int16()), "y": c.column("y")}))
     con = duckdb.connect()
     con.register("e", pa.concat_tables(rows) if rows else pa.table({"u": [], "year": [], "y": []}))
     con.register("pl", pa.table({"u": places}))
@@ -228,7 +231,7 @@ def _events_population(years: list[int], source: str) -> pa.Table:
                CAST(0 AS SMALLINT) AS age, CAST(coalesce(sum(e.y), 0) AS DOUBLE) AS n
         FROM pl CROSS JOIN yy LEFT JOIN e ON e.u = pl.u AND e.year = yy.year
         GROUP BY ALL ORDER BY u, year""").fetch_arrow_table()
-    store.put_table("gateway", key, table, {"source": f"events of {dataset} {event} {codes or ''} as an exposure"})
+    store.put_table("gateway", key, table, {"source": f"events of {terms} as an exposure"})
     return table
 
 

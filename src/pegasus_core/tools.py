@@ -201,7 +201,10 @@ class Session:
                 keep = np.ones(len(code), bool) if f.node == "*" else np.array([str(x)[:3] in leaves or str(x) in leaves for x in code])
                 u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
                 keep &= u >= 0
-                g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
+                # under an events exposure (a ratio, live births) the block's expectation stands in one cell: the
+                # value's share is then the year's national one, not cell 0's
+                g = (np.zeros(tab.num_rows, dtype=np.int64) if str(d.population).startswith("events:") else
+                     (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges))
                 vals = np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None else np.full(len(code), value, object)
                 n = tab.column("n" if value is None else "m").to_numpy().astype(float)
                 frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep]))

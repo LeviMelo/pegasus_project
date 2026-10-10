@@ -173,11 +173,17 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
     """The exposure a field reads when none is named (and ``PEGASUS_POPULATION`` is unset): ``hybrid`` (POPSVS and
     the account's age 0) for a newborn-exposure field, defined by its data as a block of which at least
     ``NEWBORN_SHARE`` of the events are at age 0 (SIM chapter XVI: 0.9; chapter IX: 0.002), else ``popsvs``
-    (ADR-0010 amended). Only event counts are classified; code-list and mark readers keep POPSVS."""
+    (ADR-0010 amended). Only event counts are classified; code-list and mark readers keep POPSVS. An event type that
+    declares its exposure (pegasus_data ``exposure``) reads it."""
     if race is not None:      # a race group: the account's race slice; a death's recorded race through the infant matrix (ADR-0020)
         return "account-3+confusion" if dataset == "SIM.DO" else "account-3"
     if source != "events":
         return "popsvs"
+    # an event whose denominator is other events, declared with its evidence (pegasus_data's event type ``exposure``:
+    # live births for a gestational or congenital condition, total births for foetal deaths): read per those events
+    declared = (gateway.event_type(dataset, event) or {}).get("exposure")
+    if declared:
+        return "events:" + ";".join(declared["events"])
     return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version(),
                                    _.get("structure", "ICD10"), _.get("classifier")) >= NEWBORN_SHARE else "popsvs"
 
