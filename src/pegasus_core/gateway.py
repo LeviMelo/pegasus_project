@@ -651,11 +651,21 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     status = spec.get("status") or {}
     weight = [spec["weight"]] if spec.get("weight") else []
     wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else []) + weight))
-    dups = spec.get("duplicates") is not None       # duplicate entries are dropped on every column (pegasus_data rule)
+    # pegasus_data's duplicates rule (its decision 0159): rows compared on every column need every column; the source's
+    # own flag (SINAN's NDUPLIC_N) needs that column, which a form or a year may lack
+    rule = spec.get("duplicates") or {}
+    dups = bool(rule)
+    flag = (rule.get("flag") or {}).get("column")
+    select = None if "except" in rule else wanted + ([flag] if flag else [])
+    kwargs = {"root": config.data_root(), "max_download": 8 * 1024**3, **({"provenance": "all"} if identity else {})}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        table = pg.query(dataset, period=year, geography="BR", select=None if dups else wanted, present="codes",
-                         root=config.data_root(), max_download=8 * 1024**3, **({"provenance": "all"} if identity else {}))
+        try:
+            table = pg.query(dataset, period=year, geography="BR", select=select, present="codes", **kwargs)
+        except Exception as exc:
+            if not (flag and f"'{flag}' is not present" in str(exc)):
+                raise
+            table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes", **kwargs)
     if identity:
         from pegasus_data.linkage.identity import record_ids
 

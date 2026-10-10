@@ -162,6 +162,9 @@ in municipality 210340.
 - **What the read can and cannot say.** It records the concentration, but its mechanism tests compare a code's share
   within its block, and a single-code field has no mix. So it cannot tell one notifier's surge from a real wave
   handled by one unit. The concentration stays evidence, not a verdict.
+- **What it was (the same day).** Neither: the 32 rows are one outbreak of 32 ill entered again and again. 19 are
+  identical but for entry metadata, and 13 differ in a fact (onset 23 or 25 March). pegasus_data's decision 0159 keeps
+  one of the identical rows; the near-copies stay, which copy is right being unknown.
 
 **Raw reads in PegaSUS's data root decode the DBC files again in every process.** One CIHA state-month (SP 2013-06,
 689,806 records) takes 30.6 s in a new process, 22.4 s in another and 6.8 s within the same one.
