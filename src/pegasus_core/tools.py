@@ -89,6 +89,14 @@ class Session:
     _scales: dict | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
+        # the years the dataset publishes: a reading never asks a source for years it does not have (SINAN-CHIK from
+        # 2015 under the default 2010-2023 failed every alarm, 2026-10-10)
+        published = gateway.published_years(self.dataset)
+        if published:
+            kept = [y for y in self.years if y in published]
+            if not kept:
+                raise LookupError(f"{self.dataset} publishes {min(published)}-{max(published)}; asked {self.years}")
+            self.years = kept
         control.check_reserved(self.dataset, self.years)     # the reserve is read by claims only (§8.3)
         self.expectations = surprise.Expectations(self.dataset, self.event, self.years, self.graph, source=self.source, supply=self.supply, rank=self.rank)
 
@@ -376,6 +384,12 @@ class Session:
 
         day = np.datetime64(as_of, "D")
         year = int(str(day)[:4])
+        if year not in self.years:
+            # the baseline is fitted on the years before as_of and read in its year: a session ending earlier (the
+            # default 2010-2023 asked about 2024) had no period holding it, and the empty assembly failed (2026-10-10)
+            wide = Session(self.dataset, self.event, list(range(min(self.years), year + 1)), self.graph,
+                           supply=self.supply, rank=self.rank, source=self.source)
+            return wide.alarms(node, as_of, report, recurrence, weeks, confidence)
         closed = surveillance.delays(gateway.delay_counts(self.dataset, self.event, year - 1, report))
         cur = gateway.delay_counts(self.dataset, self.event, year, report).to_pandas()
         ey, ew = surveillance.epi_week(np.array([day]))
@@ -428,7 +442,7 @@ class Session:
 
     def survey_questions(self, blocks: list[str] | None = None, questions: tuple[str, ...] | None = None,
                          q: float = 0.05, levels: tuple[str, ...] | None = None, log=print,
-                         train_last: int | None = None) -> list[leads.Lead]:
+                         train_last: int | None = None, nodes: tuple[str, ...] | None = None) -> list[leads.Lead]:
         """The pass over every field with events, asking questions instead of running lenses (`questions`): per field
         and question, the methods' answers (each method at q/k inside the field, merged by overlapping loci); an
         answer's p is its smallest method p times k (Bonferroni over the methods, valid under any dependence);
@@ -437,7 +451,8 @@ class Session:
         those tree levels (None: every level). An answer of another shape than its question's (`questions.ask`'s
         ``other_shape``) is logged and left to the question of its shape, whose own methods test it. With
         ``train_last`` the prospective questions are asked instead, of the years after it, against fits on the years up
-        to it (ADR-0012); without it they are not asked."""
+        to it (ADR-0012); without it they are not asked. ``nodes`` keeps the fields whose events all lie under one of
+        those tree nodes (a study's topic, ARCHITECTURE §4); None keeps every field."""
         from . import questions as qs
 
         names = tuple(n for n in (questions or tuple(qs.QUESTIONS))
@@ -456,8 +471,14 @@ class Session:
         asked_fields, asked_families = set(), set()
         for block in blocks or self._blocks():
             asked_families |= {f"{qn}|{block}{measure}{suffix}" for qn in names}
+            within = None
+            if nodes:
+                reg = self.expectations.registry
+                within = [set(reg.leaves(n)) for n in nodes if n in reg.level]
             for f in self.fields(block):
                 if levels is not None and f.level not in levels:
+                    continue
+                if within is not None and not any(set(self.expectations.registry.leaves(f.node)) <= w for w in within):
                     continue
                 asked_fields.add(f.id)
                 # each field's answers are an object of the state (work plan §2): stored when every question was

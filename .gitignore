@@ -5,3 +5,7 @@ pegasus_home/
 *.egg-info/
 .ruff_cache/
 reports/
+
+# study folders (ARCHITECTURE §3.4): products of a run, referencing the store; the declarations are tracked
+studies/*/
+!studies/siac_mulher_2026/

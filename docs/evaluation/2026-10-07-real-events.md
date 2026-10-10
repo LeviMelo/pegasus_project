@@ -23,7 +23,7 @@ The criterion: a finding whose years overlap the event's and at least half of wh
   - The Poisson fit sets the category's level with the epidemic years included. Measles is expected at 200–300 admissions every year against 33–83 observed outside 2018–19 (891 and 833). Yellow fever is expected at about 32 deaths a year against 0–8 outside 2017–18 (195 and 257).
 - **Chapter XX is fine.** It holds no epidemics, so its dispersion is honest, and Brumadinho is found by every method.
 
-**Consequence.** Stage B is refitted robustly before any detector is judged further: plan `docs/plans/2026-10-07-robust-expectation.md`. It is accepted on these events, with no constant tuned to them.
+**Consequence.** Stage B is refitted robustly before any detector is judged further: plan `docs/history/2026-10-plans/2026-10-07-robust-expectation.md`. It is accepted on these events, with no constant tuned to them.
 
 ## After the stage-B fix (same script, same criterion, same methods)
 

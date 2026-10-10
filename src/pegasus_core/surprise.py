@@ -164,8 +164,8 @@ class Expectations:
     def model(self, block: str) -> monolith.Monolith:
         if block not in self._models:
             cls = monolith.model_class(self.source)
-            self._models[block] = cls.load(self.dataset, self.event, block, self.years, self.graph,
-                                           device=self.device, **self._reader(), **({"rank": self.rank} if self.rank else {}))
+            self._models[block] = monolith.load_or_fit(cls, self.dataset, self.event, block, self.years, self.graph,
+                                                       device=self.device, rank=self.rank, **self._reader())
             if self.robust and cls is monolith.Monolith and not self.rank:
                 self._models[block] = self._models[block].robust_stored()
             if self.supply and cls is monolith.Monolith and self._models[block].data.grain == "year":
@@ -226,8 +226,8 @@ class Expectations:
         cls = monolith.model_class(self.source)
         if issubclass(cls, monolith.MarkModel):
             raise NotImplementedError("the prospective tier is for counts")
-        model = cls.load(self.dataset, self.event, f.block, train, self.graph, device=self.device, **self._reader(),
-                         **({"rank": self.rank} if self.rank else {}))
+        model = monolith.load_or_fit(cls, self.dataset, self.event, f.block, train, self.graph, device=self.device,
+                                     rank=self.rank, **self._reader())
         if purpose not in PURPOSE_TIER:
             raise ValueError(f"purpose {purpose!r}: one of {sorted(PURPOSE_TIER)}")
         regime = monolith.regime_history(model, history, purpose)

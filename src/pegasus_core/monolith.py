@@ -131,6 +131,43 @@ def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, s
     return at0 / total if total else 0.0
 
 
+def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
+              device: str = "cpu", source: dict | None = None, warm: str | None = "auto", log=print):
+    """Assemble one block, fit its model and store it: the one fitting path (`pegasus-core fit`, `update`, and a reading
+    that finds no stored fit, `load_or_fit`).
+    ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
+    ``warm`` starts from the best related stored fit ("auto") or from nothing (None)."""
+    from . import graphs
+
+    source = dict(source or {})
+    if "bounds" in source:
+        source["bounds"] = tuple(source["bounds"])
+    data = assemble(dataset, event, block, years, **source)
+    model = model_class(source)(data, graphs.graph(data.places, graph), graph, device=device)
+    model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
+    model.save()
+    if type(model) is Monolith:
+        # the robust refit every count reading uses (`surprise.Expectations.model`): part of fitting the block,
+        # never left to the first reading (15 min a chapter on SIH, inside a question pass, 2026-10-07)
+        model.robust_stored(log=lambda line: log(f"{dataset} {block} {line}"))
+    return model
+
+
+def load_or_fit(cls, dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
+                device: str = "cpu", rank: int = 0, log=print, **reader):
+    """The stored fit of a block, fitted first when the store has none (ARCHITECTURE §6.6: fit on demand). A reading
+    (a survey, a question, a prospective tier's training fit) never fails for want of a fit; the low-rank interaction
+    (``rank``) is a model choice and is never fitted on demand."""
+    try:
+        return cls.load(dataset, event, block, years, graph, device=device, **reader, **({"rank": rank} if rank else {}))
+    except LookupError:
+        if rank:
+            raise
+    log(f"{dataset} {block} {years[0]}-{years[-1]}: no stored fit, fitting it")
+    fit_block(dataset, event, block, list(years), graph, device=device, source=reader or None, log=log)
+    return cls.load(dataset, event, block, years, graph, device=device, **reader)
+
+
 def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", race: str | None = None,
                        **_) -> str:
     """The exposure a field reads when none is named (and ``PEGASUS_POPULATION`` is unset): ``hybrid`` (POPSVS and
@@ -257,9 +294,16 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                      ``classifier=``, ``casemix=``, ``facility_effects=``): n, l1 = Σ log m, l2 = Σ (log m)²; y is l1/n
         count        the same reader, a count-valued mark: n, s1 = Σ m, s2 = Σ m²; y is s1/n
         share        a binary mark (``indicator=``, ``success=``, ``classifier=``): n, k; y is k/n, l2 is k
+
+    ``codes=`` (with block ``*``) keeps only the events whose classifier code starts with one of those codes, read at the
+    code's full width: a subcategory (P37.1, congenital toxoplasmosis, inside the category P37 of other congenital
+    infections), a list of codes, any declared code set, as one field of its own (ARCHITECTURE §5.2; a study's seed)
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     structure = source_args.pop("structure", "ICD10")
+    subset = tuple(str(c).replace(".", "").upper() for c in (source_args.pop("codes", None) or ()))
+    if subset and block != "*":
+        raise ValueError(f"codes={list(subset)} is a field of its own: block '*', not {block!r}")
     width = 3 if block == "*" else gateway.category_width(structure)
     years = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
@@ -360,6 +404,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     for year in years:
         ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args)
         tab = ec.counts
+        if subset:
+            keep = pc.starts_with(tab.column("code"), subset[0])
+            for c in subset[1:]:
+                keep = pc.or_(keep, pc.starts_with(tab.column("code"), c))
+            tab = tab.filter(pc.fill_null(keep, False))
         # the codes are few and the rows many: decide once per distinct code, then index
         enc = pc.dictionary_encode(tab.column("code").combine_chunks() if block == "*" else
                                    pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width))
@@ -423,6 +472,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            **({} if source == "events" and "classifier" not in source_args and structure == "ICD10" else
               {"source": source, **source_args, **({} if structure == "ICD10" else {"structure": structure})}),
            **({} if grain == "year" else {"grain": grain}),
+           **({"codes": list(subset)} if subset else {}),
            **({"admissible": 2} if not group_cells.all() or never else {}),
            **({} if group_outer is None else {"geography": geography})}
     y = sums[CELL_MEAN[source]] / sums["n"] if source in CELL_VALUES else sums["y"]

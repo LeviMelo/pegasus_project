@@ -23,7 +23,7 @@
 
 ## Result
 
-**Run.** 2026-10-05; code `data/y35_goias_{sim,sih,labels,analysis,sih_analysis}.py`, `data/y35_goias/fbsp.json`; outputs `data/y35_goias/{analysis.out,results.json}`; handoff `data/handoffs/y35_goias.md`. SIM.DO 2012-2021 was read through `pegasus_data` with explicit select lists (residence = `CODMUNRES`; the reserve, SIM.DO 2024, was not read). Y35 is the 3-character category (all subcodes), Y35.0 (firearm) in brackets. The declaration's 142 for 2019 is 146 here (residence) and 157 by occurrence; the filter behind 142 was not reconstructed.
+**Run.** 2026-10-05; code `data/y35_goias_{sim,sih,labels,analysis,sih_analysis}.py`, `data/y35_goias/fbsp.json`; outputs `data/y35_goias/{analysis.out,results.json}`; handoff `docs/history/2026-10-handoffs/data/y35_goias.md`. SIM.DO 2012-2021 was read through `pegasus_data` with explicit select lists (residence = `CODMUNRES`; the reserve, SIM.DO 2024, was not read). Y35 is the 3-character category (all subcodes), Y35.0 (firearm) in brackets. The declaration's 142 for 2019 is 146 here (residence) and 157 by occurrence; the filter behind 142 was not reconstructed.
 
 **Yearly table.** Deaths by residence in Goiás; pooled = X93-95 + Y22-24 + X72-74 + W32-34 + Y35 as declared; FBSP = police-killing count of the latest edition carrying the year, police on and off duty; n/o = not obtained.
 

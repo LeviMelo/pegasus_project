@@ -2,7 +2,7 @@
 
 **Regime:** SIM.DO deaths 2010–2023 by residence, chapter I block (contiguity), tier B0, `lenses.spatial_cluster` (30 nearest places, 200 replicates); `data/positive_endemic.py`, artefact `data/logs/positive_endemic.json`. Commit: this entry's own.
 
-**The data are deaths (B57, B65), not SINAN notifications.** `SINAN-CHAG` and `SINAN-ESQU` have no event types in pegasus_data (`pg.event_types` raises), though both decode (26 and 20 published years): handoff `docs/handoffs/2026-10-05-sinan-chag-esqu.md`. Deaths measure the chronic disease (Chagas) and the severe end (schistosomiasis); acute Chagas notifications would be an Amazon signal, a different locus.
+**The data are deaths (B57, B65), not SINAN notifications.** `SINAN-CHAG` and `SINAN-ESQU` have no event types in pegasus_data (`pg.event_types` raises), though both decode (26 and 20 published years): handoff `docs/history/2026-10-handoffs/2026-10-05-sinan-chag-esqu.md`. Deaths measure the chronic disease (Chagas) and the severe end (schistosomiasis); acute Chagas notifications would be an Amazon signal, a different locus.
 
 **References for the endemic areas (Ministry of Health):**
 - **Chagas:** the Ministry's table of deaths and mortality coefficient by state of residence, SIM, 2010–2019 ([PDF](https://www.gov.br/saude/pt-br/assuntos/saude-de-a-a-z/d/doenca-de-chagas/arquivos/mortalidade-por-doenca-de-chagas-2010-a-2019.pdf)). Mean coefficients per 100,000: Goiás 11.5, Distrito Federal 7.4, Minas Gerais 5.4, Bahia 4.3, Tocantins 3.5, against Brazil 2.25. The reference locus is these five states (1,656 municipalities). The table is itself a tabulation of SIM, so it fixes where the locus is, not an independent count.

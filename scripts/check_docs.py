@@ -9,10 +9,10 @@ Checks, all mechanical:
     3  every evaluation entry is in EVALUATION.md, and every docs/ link resolves
     4  every OQ-N referenced is a row of OPEN_QUESTIONS.md
     5  every script named in a current document exists
-    6  every module under src/pegasus_core is named in ARCHITECTURE.md
+    6  every module under src/pegasus_core is named in STATUS.md (the module map)
     7  CLAUDE.md and AGENTS.md are byte-for-byte copies
 
-`docs/history/` and `docs/discussion/` are frozen: not scanned.
+`docs/history/` is frozen: not scanned.
 
     python scripts/check_docs.py
 """
@@ -26,7 +26,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DECISIONS = ROOT / "docs" / "decisions"
 EVALUATION = ROOT / "docs" / "evaluation"
-HANDOFFS = ROOT / "docs" / "handoffs"
 PACKAGE = ROOT / "src" / "pegasus_core"
 
 ADR_REF = re.compile(r"ADR-(\d{4})")
@@ -38,7 +37,7 @@ ROW = re.compile(r"^\|\s*(\d{1,3})\s*\|", re.MULTILINE)
 
 def current_documents() -> dict[str, str]:
     out = {p.name: p.read_text(encoding="utf-8") for p in sorted(ROOT.glob("*.md"))}
-    for folder in (DECISIONS, EVALUATION, HANDOFFS):
+    for folder in (DECISIONS, EVALUATION):
         for p in sorted(folder.glob("*.md")):
             out[f"{folder.name}/{p.name}"] = p.read_text(encoding="utf-8")
     return out
@@ -53,7 +52,7 @@ def main() -> int:
     # 1
     for name, text in docs.items():
         for n in sorted({int(x) for x in ADR_REF.findall(text)}):
-            if n not in adr_files and not name.startswith("handoffs/"):
+            if n not in adr_files:
                 problems.append(f"{name} references ADR-{n:04d}, which does not exist")
     # 2
     numbers = sorted(adr_files)
@@ -84,14 +83,20 @@ def main() -> int:
             if not (ROOT / "scripts" / script).exists():
                 problems.append(f"{name} names scripts/{script}, which does not exist")
     # 6
-    arch = docs.get("ARCHITECTURE.md", "")
+    status = docs.get("STATUS.md", "")
     for p in sorted(PACKAGE.rglob("*.py")):
         rel = p.relative_to(PACKAGE)
         if rel.name == "__init__.py" and rel.parent == Path("."):
             continue
-        module = rel.parts[0].removesuffix(".py")
-        if f"`{module}`" not in arch:
-            problems.append(f"module {module} (src/pegasus_core/{rel.as_posix()}) is not named in ARCHITECTURE.md")
+        if rel.name == "__init__.py":            # a subpackage: named as `scans`
+            names = [rel.parts[0]]
+        elif len(rel.parts) > 1:                 # a module of a subpackage: `scans/cohort` or `scans.cohort`
+            module = rel.with_suffix("").as_posix()
+            names = [module, module.replace("/", ".")]
+        else:
+            names = [rel.stem]
+        if not any(f"`{n}`" in status for n in names):
+            problems.append(f"module {names[0]} (src/pegasus_core/{rel.as_posix()}) is not named in STATUS.md")
     # 7
     if (ROOT / "CLAUDE.md").read_bytes() != (ROOT / "AGENTS.md").read_bytes():
         problems.append("CLAUDE.md and AGENTS.md differ")

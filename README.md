@@ -11,19 +11,18 @@ Each lead carries its size, its certainty, its checks and its replication record
 
 It reads all its data through **[pegasus_data](../pegasus_data)**, the project's data module: DATASUS decoded and labelled, linked records, populations and context.
 
-**State:** architecture accepted 2026-10-04, revised 2026-10-06 (revisions 2 and 3: established methods, six stages); roadmap revision 4 (2026-10-07): the whole system end to end first, packages S0–S7 (ARCHITECTURE §12). Where the work stands: `STATUS.md`.
+**State:** architecture revision 5 (2026-10-10): the win condition is an exhaustive study of one topic from one declaration (ARCHITECTURE §1.4). The code as it is: `STATUS.md`; the ordered work: `BACKLOG.md`.
 
 | document | what it holds |
 |---|---|
-| `ARCHITECTURE.md` | **the authority:** objects, mathematics, scans, error control, code, phases |
+| `ARCHITECTURE.md` | **the ground truth, the plan and the theory:** purpose and principles, the data space, studies, fields, expectations, questions, relations, interpretation, execution, validation, departures |
+| `STATUS.md` | **the map of the code:** modules, stores, commands, interfaces, what works and what is broken |
+| `BACKLOG.md` | the ordered work, unit by unit, with its done-when |
 | `CLAUDE.md` / `AGENTS.md` | how to work in this repository: disciplines, documentation policy |
-| `STATUS.md` | the state of the work |
 | `DECISIONS.md`, `EVALUATION.md` | decisions and measurements, indexed |
 | `OPEN_QUESTIONS.md` | what is still open |
 | `GLOSSARY.md`, `RUNBOOK.md` | terms; commands |
-| `docs/handoffs/` | what PegaSUS needs from pegasus_data |
-| `docs/discussion/` | the reasoning behind the design, and what the 2026 engine actually did |
-| `docs/RECOLLECTION.md`, `docs/history/` | the earlier attempts and their documents |
+| `docs/history/` | the earlier attempts and the superseded documents, frozen (index: `docs/history/README.md`) |
 | `studies/` | studies done with pegasus_data (SIAC Mulher 2026) |
 
 ```bash

@@ -2,7 +2,7 @@
 
 PegaSUS is one model of the events, read many ways; its state is the fitted blocks, the ledger and the register.
 `run` brings that state up to a declared plan (the systems and blocks it holds, the years, the readings kept current):
-blocks not fitted are fitted (`fit_block`), and each reading (the stage-C questions of every field, the relation map
+blocks not fitted are fitted (`monolith.fit_block`), and each reading (the stage-C questions of every field, the relation map
 across the systems, stage E on the answers, the report) is redone only where its inputs changed: every step is keyed
 by the data and code versions and its inputs in the store. A plan:
 
@@ -30,7 +30,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from . import config, control, fields, gateway, store
+from . import config, control, fields, gateway, monolith, store
 
 
 @dataclass
@@ -48,6 +48,8 @@ class System:
     flows: list[str] | str | None = None         # "all", or `fields.declared_flows` fields: events away from residence
     codes: list[str] | str | None = None         # "all", or `fields.declared_codes` fields: a code column's own tree
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
+    nodes: list[str] | None = None               # only the fields under these tree nodes are asked (a study's topic)
+    source: dict | None = None                   # the counts' reader (`monolith.assemble`): e.g. {"codes": ["P371"]}
 
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
@@ -90,27 +92,6 @@ class Plan:
         return cls(list(years), systems, raw.get("questions"), bool(raw.get("relations", True)),
                    bool(raw.get("triage", True)), raw.get("report", "reports/leads.md"), raw.get("graph", "contiguity"),
                    {k: v for k, v in raw.items() if k not in known})
-
-
-def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
-              device: str = "cpu", source: dict | None = None, warm: str | None = "auto", log=print):
-    """Assemble one block, fit its model and store it: the one fitting path (`pegasus-core fit`, `update`).
-    ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
-    ``warm`` starts from the best related stored fit ("auto") or from nothing (None)."""
-    from . import graphs, monolith
-
-    source = dict(source or {})
-    if "bounds" in source:
-        source["bounds"] = tuple(source["bounds"])
-    data = monolith.assemble(dataset, event, block, years, **source)
-    model = monolith.model_class(source)(data, graphs.graph(data.places, graph), graph, device=device)
-    model.fit(outer=40, warm=warm, mean_tol=1.0, log=lambda line: log(f"{dataset} {block} {line}"))
-    model.save()
-    if type(model) is monolith.Monolith:
-        # the robust refit every count reading uses (`surprise.Expectations.model`): part of fitting the block,
-        # never left to the first reading (15 min a chapter on SIH, inside a question pass, 2026-10-07)
-        model.robust_stored(log=lambda line: log(f"{dataset} {block} {line}"))
-    return model
 
 
 def _links(sys_: System) -> list[str]:
@@ -202,7 +183,7 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
         try:
             t.expectations.model(block)
         except LookupError:
-            fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, log=log)
+            monolith.fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, log=log)
     t.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                        levels=tuple(sys_.levels) if sys_.levels else None, log=log)
     selected = s.temporal_confirm(last, log=log)
@@ -254,7 +235,7 @@ def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
         s.expectations.model("*")
     except LookupError:
         try:
-            fit_block(s.dataset, s.event, "*", list(s.years), s.graph, source=s.source or None, log=log)
+            monolith.fit_block(s.dataset, s.event, "*", list(s.years), s.graph, source=s.source or None, log=log)
             out[f"fit {label} * (share denominator)"] = "fitted"
         except (ValueError, LookupError) as exc:
             out[f"fit {label} * (share denominator)"] = f"failed: {exc}"
@@ -356,17 +337,18 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     _ensure_lake(plan, out, log)
     _ensure_links(plan, out, log)
     for sys_ in plan.systems:
-        s = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph)
+        s = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=dict(sys_.source or {}))
         sessions[sys_.dataset] = s
         blocks = _chapters(sys_) if sys_.blocks == ["all"] else sys_.blocks
         for block in list(blocks):
-            key = _key("fit", (fit_block,), dataset=sys_.dataset, event=sys_.event, block=block, years=plan.years, graph=plan.graph)
+            key = _key("fit", (monolith.fit_block,), dataset=sys_.dataset, event=sys_.event, block=block, years=plan.years, graph=plan.graph)
             try:
                 s.expectations.model(block)
                 out[f"fit {sys_.dataset} {block}"] = "fitted already"
             except LookupError:
                 try:
-                    fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, log=log)
+                    monolith.fit_block(sys_.dataset, sys_.event, block, s.years, plan.graph, source=sys_.source,
+                                       log=log)   # the years it publishes
                 except (ValueError, LookupError) as exc:     # "all": a chapter the events never use
                     if sys_.blocks != ["all"]:
                         raise
@@ -378,12 +360,14 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"fit {sys_.dataset} {block}"] = "fitted"
         _ensure_total(s, plan, f"{sys_.dataset}", out, log)
         key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
-                   blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years)
+                   blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years,
+                   **({"nodes": sys_.nodes} if sys_.nodes else {}), **({"source": sys_.source} if sys_.source else {}))
         if plan.questions == []:                  # an empty list asks none (a plan of disparities, of fits)
             out[f"questions {sys_.dataset}"] = "none asked"
         elif force or not _done(key):
             leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
-                                       levels=tuple(sys_.levels) if sys_.levels else None, log=log)
+                                       levels=tuple(sys_.levels) if sys_.levels else None, log=log,
+                                       nodes=tuple(sys_.nodes) if sys_.nodes else None)
             _mark(key, {"answers": len(leads)})
             out[f"questions {sys_.dataset}"] = len(leads)
         else:
@@ -412,19 +396,21 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     ms.expectations.model(block)
                 except LookupError:
                     try:
-                        fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source=source, log=log)
+                        monolith.fit_block(sys_.dataset, sys_.event, block, ms.years, plan.graph, source=source, log=log)
                     except (ValueError, LookupError) as exc:     # a chapter of another tree the events never use
                         log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
                         out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
             _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
-                       blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years)
+                       blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years,
+                       **({"nodes": sys_.nodes} if sys_.nodes else {}))
             if plan.questions == []:
                 out[f"questions {sys_.dataset} {column}"] = "none asked"
             elif force or not _done(key):
                 leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
-                                            levels=tuple(sys_.levels) if sys_.levels else None, log=log)
+                                            levels=tuple(sys_.levels) if sys_.levels else None, log=log,
+                                            nodes=tuple(sys_.nodes) if sys_.nodes else None)
                 _mark(key, {"answers": len(leads)})
                 out[f"questions {sys_.dataset} {column}"] = len(leads)
             else:
@@ -439,7 +425,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     try:
                         rs.expectations.model(block)
                     except LookupError:
-                        fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source={"race": k}, log=log)
+                        monolith.fit_block(sys_.dataset, sys_.event, block, plan.years, plan.graph, source={"race": k}, log=log)
                         out[f"fit {sys_.dataset} {block} race {k}"] = "fitted (disparity)"
                 found = tools.disparity(sys_.dataset, sys_.event, node, plan.years, graph=plan.graph, log=log)
                 _mark(key, {"leads": len(found)})
@@ -455,7 +441,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             try:
                 monolith_class_load(s, block, train)
             except LookupError:
-                fit_block(sys_.dataset, sys_.event, block, train, plan.graph, log=log)
+                monolith.fit_block(sys_.dataset, sys_.event, block, train, plan.graph, log=log)
                 out[f"fit {sys_.dataset} {block} {train[0]}-{train[-1]}"] = "fitted (prospective)"
         key = _key("prospective", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                    blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years)

@@ -36,7 +36,7 @@ def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: 
     one ``BLOCK <name> <summary>`` line each, and a failed block is reported and the next one fitted."""
     import time
 
-    from . import jobs, update
+    from . import jobs, monolith
 
     with jobs.slot(f"fit {dataset} {' '.join(blocks)}", gpu=device != "cpu"):
         jobs.threads()
@@ -44,7 +44,7 @@ def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: 
         for block in blocks:
             start = time.time()
             try:
-                model = update.fit_block(dataset, event, block, _years(years), graph, device,
+                model = monolith.fit_block(dataset, event, block, _years(years), graph, device,
                                          source=json.loads(source) if source else None,
                                          warm=None if cold else "auto", log=console.print)
             except Exception as exc:  # noqa: BLE001 - one block's failure is reported, the next one is fitted
@@ -483,6 +483,39 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 
     mcp_server.main((["--allow-confirm"] if allow_confirm else []) + (["--ledger", ledger] if ledger else []))
 
+
+
+@app.command("scope")
+def scope_command(declaration: str) -> None:
+    """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
+    download cost, what is deferred past the depth's budget, what a seed named and is not read."""
+    import yaml
+
+    from . import study
+
+    decl = study.load(declaration)
+    console.print(yaml.safe_dump(study.resolve(decl).to_dict(), sort_keys=False, allow_unicode=True))
+
+
+@app.command("study")
+def study_command(declaration: str) -> None:
+    """Run a study from its declaration (ARCHITECTURE §3) and write its folder beside the declaration."""
+    from . import jobs, study
+
+    decl = study.load(declaration)
+    with jobs.slot(f"study {decl.study}"):
+        out = study.run(decl, log=console.print)
+    console.print(f"study folder: {out}")
+
+
+@app.command("export")
+def export_command(folder: str, to: str = typer.Option(..., help="the directory to write"),
+                   tables: str = typer.Option(None, help="comma-separated views of study.duckdb; default all"),
+                   fmt: str = typer.Option("parquet", "--format", help="parquet or csv")) -> None:
+    """Materialise a study folder, by default whole (ARCHITECTURE §3.6): the only operation that copies data."""
+    from . import study
+
+    console.print(f"exported to {study.export(folder, to, tables.split(',') if tables else None, fmt)}")
 
 
 @app.command("gc")
