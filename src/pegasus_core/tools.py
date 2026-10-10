@@ -240,7 +240,7 @@ class Session:
         for k, v in enumerate(values):
             if v not in gateway.RACE:
                 continue
-            tab = gateway._tensor_population(sorted(tidx), "account-6", gateway.RACE[v])
+            tab = gateway._tensor_population(sorted(tidx), RACE_POPULATION, gateway.RACE[v])
             u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
             t = np.array([tidx.get(int(x), -1) for x in tab.column("year").to_numpy()])
             g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
@@ -1524,6 +1524,11 @@ def kinds_of(x: leads.Lead) -> set[str]:
 
 
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
+#: the population a race's expected share is read from: the account's tensor with race slices over the widest years
+#: (1991-2030; ARCHITECTURE §12.3)
+RACE_POPULATION = "account-6"
+
+
 def group_columns(dataset: str, event: str) -> dict[str, tuple[str, ...]]:
     """The category columns a field is split by as group dimensions (ARCHITECTURE §5.3, component 8), with their
     declared missing codes: every modelled composition and the subject's race stratum (its 'ignorado' a value of its

@@ -69,3 +69,9 @@ Catarina's pardos at 0.25. A race is now expected at the place's own population 
 to Brazil's observed totals. TOXG 2019–2024 has 36 departures. Espírito Santo records "amarela" 18.5 times expected,
 beside its schooling "0" at 21.7, which points to a recording practice. Roraima notifies indigenous women at 0.24 of
 their share. Piauí leaves race unrecorded 2.9 times.
+
+**Gestational → congenital as a relation (3.5, measured).** `tools.compare` (the joint factor model over graph-spectral
+bands and lags) on SINAN-TOXG and TOXC, 2019–2024, annual grain: 55 relations. The two move together in the same year
+at every scale (ρ 0.18–0.24 over 20 to 443 places, 0.73 macro-regional, 0.98 national), read as a shared driver, not a
+lead. That fits a pregnancy shorter than the annual grain and one screening programme behind both notifications. A
+lag in months waits for the monthly grain.

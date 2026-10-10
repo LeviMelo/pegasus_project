@@ -223,8 +223,8 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
     """Scope v2's sources beyond the primary classifiers (ARCHITECTURE §4, BACKLOG 4.3), from pegasus_data's concept
     index (`pegasus_data.concept_index`):
     - every other ICD-10 classifier holding the seeds (SIA's diagnoses), read as a code set on that classifier;
-    - SINAN agravos whose records carry the codes beyond the seeded ones (SINAN-SDTA's toxoplasmosis outbreaks), read
-      as a code set on ``ID_AGRAVO``;
+    - the event types whose records name the codes as their condition (`pegasus_data.condition_codes`: a role of model
+      ``event_type`` on ICD-10, SINAN's agravo code) beyond the seeded ones, read as a code set on that column;
     - SIGTAP procedures whose name matches a term (toxoplasma serology, the heel-prick IgM), read as a code set on
       every SIGTAP classifier. A procedure only *compatible* with the codes (a caesarean under O98.6) is not the topic's
       event: it is recorded in the scope's notes, and reached through its diagnoses."""
@@ -250,13 +250,18 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
                                       f"(SIGTAP) holds the procedures named for the topic ({', '.join(procedures)})",
                                       source={"classifier": c["column"], "structure": "SIGTAP", "codes": procedures}))
-    for d in ix["sinan"]:
-        if d["dataset"] in seeded or d["dataset"] not in served:
+    # the columns that name a record's condition (the roles' event-type columns on ICD-10: SINAN's agravo code), where
+    # the index counted the codes and no classifier above reads them already
+    read = {(it.dataset, (it.source or {}).get("classifier")) for it in items}
+    for d in ix["conditions"]:
+        if d["dataset"] in seeded or d["dataset"] not in served or (d["dataset"], d["column"]) in read:
             continue
         for et in gateway.event_types(d["dataset"]):
-            items.append(Item(d["dataset"], et["name"], ["*"], None, [], f"its records' agravo code (ID_AGRAVO) carries "
-                              f"{', '.join(f'{k} ({v})' for k, v in d['codes'].items())} in {d['year']}",
-                              source={"classifier": "ID_AGRAVO", "codes": sorted(d["codes"])}))
+            if any(c.get("column") == d["column"] and c.get("role") == "primary" for c in et.get("classifiers") or []):
+                continue                    # its primary classifier: read with its tree by the primary loop
+            items.append(Item(d["dataset"], et["name"], ["*"], None, [], f"its records' condition code ({d['column']}) "
+                              f"carries {', '.join(f'{k} ({v})' for k, v in d['codes'].items())} in {d['year']}",
+                              source={"classifier": d["column"], "codes": sorted(d["codes"])}))
     compatible = sorted({(r["procedure"], r["procedure_name"]) for r in ix["procedures"]})
     if compatible:
         excluded.append({"seed": "SIGTAP compatibility", "why": f"{len(compatible)} procedures are allowed under the codes "

@@ -1113,3 +1113,4 @@ it.
 | dispersion group minimum | `monolith.MIN_DISPERSION_CELLS` | 200 | hand-set |
 | job slots | `PEGASUS_HEAVY_SLOTS` | 1 | measured (2026-10-06) |
 | download budget per depth | `study.DOWNLOAD_BUDGET_GB` | 2, 10, 40 GB, unbounded | hand-set; to become the cost model's budget (BACKLOG 9.1) |
+| population of a race's expected share | `tools.RACE_POPULATION` | account-6 (race slices, 1991–2030) | hand-set; the account version a study pins |
