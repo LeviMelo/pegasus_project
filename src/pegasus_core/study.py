@@ -17,6 +17,7 @@ import html
 import json
 import shutil
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -32,8 +33,13 @@ DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
 DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts"}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios"}
+RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude"}
+#: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
+#: measure, composition, interval and care flow pegasus_data's roles declare for the source's records
+_ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all"}
+DEPTH_READERS = {"survey": {}, "standard": dict(_ALL), "deep": dict(_ALL), "exhaustive": dict(_ALL)}
 #: the question registry's names read as the components of ARCHITECTURE §7.2 (BACKLOG 3.1 re-cuts the registry)
 COMPONENT = {"excess": "transient", "step": "step", "trend": "trend", "cluster": "level", "share": "ratio (share)",
              "institution": "facility support", "group": "group heterogeneity", "divergence": "trend (reference)",
@@ -57,6 +63,7 @@ class Declaration:
     q: float = 0.05
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
+    ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
 
 
 class DeclarationError(ValueError):
@@ -102,6 +109,15 @@ def load(path: str | Path) -> Declaration:
     for g in grain:
         if g not in ("year", "month", "week"):
             problems.append(f"grain {g!r}: year, month or week")
+    ratios = doc.get("ratios") or []
+    for i, r in enumerate(ratios if isinstance(ratios, list) else [ratios]):
+        if not isinstance(r, dict) or not r.get("numerator") or not r.get("denominator"):
+            problems.append(f"ratios[{i}]: write {{numerator: DATASET[:event][:codes], denominator: ..., lag: years}}")
+            continue
+        for k in sorted(set(r) - RATIO_KEYS):
+            problems.append(f"ratios[{i}]: unknown key {k!r} (keys: {', '.join(sorted(RATIO_KEYS))})")
+        if not isinstance(r.get("lag", 0), int) or r.get("lag", 0) < 0:
+            problems.append(f"ratios[{i}]: lag {r.get('lag')!r} is a whole number of years, 0 or more")
     if doc.get("where", "BR") != "BR":
         problems.append("where: only BR (the whole country) is read in this version (BACKLOG 1.x)")
     if problems:
@@ -109,7 +125,8 @@ def load(path: str | Path) -> Declaration:
     return Declaration(study=str(doc["study"]), seeds={k: [str(c) for c in v] for k, v in seeds.items()}, years=years,
                        path=path, include=list(topic.get("include") or []), exclude=list(topic.get("exclude") or []),
                        where=doc.get("where", "BR"), grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
-                       hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"))
+                       hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
+                       ratios=list(ratios) if isinstance(ratios, list) else [ratios])
 
 
 # ---------------------------------------------------------------------- the scope
@@ -129,6 +146,8 @@ class Item:
     records: int | None = None           # the topic's events in its years (all events for an agravo's own dataset)
     mentions: list[str] | None = None    # declared readers of every code a record carries (certificate lines, all diagnoses)
     source: dict | None = None           # a reader of its own: {"codes": [...]} for a code set read as one field
+    readers: dict = field(default_factory=dict)   # the declared readers the depth adds (`update.System`'s keys)
+    denominator: tuple | None = None     # a ratio's denominator dataset and lag (its exposure is in ``source``)
     note: str = ""
 
 
@@ -146,6 +165,19 @@ class Scope:
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts}
+
+
+def _field_spec(text: str) -> tuple[str, str, list[str]]:
+    """``DATASET[:event][:codes]`` -> (dataset, event, codes): the event defaults to the dataset's only event type."""
+    ds, *rest = str(text).split(":")
+    types = [e["name"] for e in gateway.event_types(ds)] if ds in set(gateway.event_datasets()) else []
+    if not types:
+        raise LookupError(f"{ds}: no dataset with event types by that name")
+    event = rest[0] if rest and rest[0] else (types[0] if len(types) == 1 else None)
+    if event not in types:
+        raise LookupError(f"{text}: name the event type, one of {types}")
+    codes = [_icd(c) for c in rest[1].split(",")] if len(rest) > 1 and rest[1] else []
+    return ds, event, codes
 
 
 def _icd(code: str) -> str:
@@ -232,12 +264,30 @@ def resolve(decl: Declaration, log=print) -> Scope:
                                       f"its primary classifier ({prim['column']}) holds {', '.join(held)}"
                                       + (f"; also read in every code its records carry ({', '.join(mentions)})"
                                          if mentions else ""), mentions=mentions))
+    for r in decl.ratios:
+        try:
+            num, den = _field_spec(r["numerator"]), _field_spec(r["denominator"])
+        except LookupError as exc:
+            excluded.append({"seed": f"ratio {r['numerator']} / {r['denominator']}", "why": str(exc)})
+            continue
+        lag = int(r.get("lag", 0))
+        exposure = f"events:{den[0]}:{den[1]}" + (f":{','.join(den[2])}" if den[2] else "") + (f"@{lag}" if lag else "")
+        items.append(Item(num[0], num[1], ["*"], None, [], f"declared ratio: {r['numerator']} per {r['denominator']}"
+                          + (f" {lag} year(s) earlier" if lag else ""),
+                          source={"population": exposure, **({"codes": num[2]} if num[2] else {})},
+                          denominator=(den[0], lag)))
     # the cost: years in the lake are free, the rest download; the budget is spent cheapest first, and a source
     # whose tree holds the topic but whose records hold none is not read (its tree is not its records)
     budget = DOWNLOAD_BUDGET_GB[decl.depth]
     priced = []
     for it in items:
         ys, cost = _cost(it.dataset, decl.years)
+        if it.denominator:
+            # a ratio reads its denominator's years too (``lag`` earlier): both are priced, and only years both publish
+            dys, dcost = _cost(it.denominator[0], [y - it.denominator[1] for y in decl.years])
+            ys = [y for y in ys if y - it.denominator[1] in dys]
+            cost = {y: (None if cost[y] is None or dcost[y - it.denominator[1]] is None
+                        else cost[y] + dcost[y - it.denominator[1]]) for y in ys}
         if not ys:
             it.status, it.note = "deferred", "publishes none of the study's years"
             continue
@@ -279,6 +329,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
             excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} "
                              f"but its records hold none in {it.years[0]}-{it.years[-1]}"})
     items = [i for i in items if i.status != "none"]
+    for it in items:
+        # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
+        # readers would read every event of the type against the population
+        it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget)
 
@@ -307,15 +361,17 @@ def run(decl: Declaration, log=print) -> Path:
     steps = {}
     for it in read:
         others = [[o.dataset, o.event] for o in read if o.dataset != it.dataset]
-        plan = update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
-                                                                  mentions=it.mentions, source=it.source)],
-                           relations=False, triage=True, report=None, extra={"corroborators": others})
+        plan = _plan(it, others)
         log(f"study {decl.study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}")
+        # one step per item: a dataset read as a code set, a chapter and a ratio is three
+        step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
         try:
-            steps[it.dataset] = update.run(plan, log=log)
+            steps[step] = update.run(plan, log=log)
         except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
-            steps[it.dataset] = {"error": f"{type(exc).__name__}: {exc}"}
-            log(f"study {decl.study}: {it.dataset} failed: {type(exc).__name__}: {exc}")
+            where = traceback.extract_tb(exc.__traceback__)[-3:]
+            steps[step] = {"error": f"{type(exc).__name__}: {exc}",
+                           "at": [f"{Path(w.filename).name}:{w.lineno} {w.name}" for w in where]}
+            log(f"study {decl.study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}")
     tables = _write_products(decl, scope, out, log)
     prov = {"study": decl.study, "written": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(time.time() - t0, 1),
             "code_version": config.code_version(), "data_version": config.data_version(), "steps": steps,
@@ -325,10 +381,32 @@ def run(decl: Declaration, log=print) -> Path:
     return out
 
 
-def _session(it: Item):
+def _plan(it: Item, others: list | None = None):
+    """The `update` plan of one item: its system with the readers its depth adds."""
+    from . import update
+
+    return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
+                                                              mentions=it.mentions, source=it.source, **it.readers)],
+                       relations=False, triage=True, report=None, extra={"corroborators": others or []})
+
+
+def _session(it: Item, source: dict | None = None):
     from . import tools
 
-    return tools.Session(it.dataset, it.event, it.years, "contiguity", source=dict(it.source or {}))
+    return tools.Session(it.dataset, it.event, it.years, "contiguity", source=dict(it.source or {} if source is None else source))
+
+
+def _fields_of(it: Item) -> list[tuple[str, dict | None]]:
+    """Every field an item's run fitted, as (name, reader): its primary counts, then each reader its depth added
+    (`update.system_readers`, the list `update.run` fits and asks)."""
+    from . import update
+
+    plan = _plan(it)
+    try:
+        extra = [(name, src) for name, src, _ in update.system_readers(plan.systems[0], plan, list(it.blocks))]
+    except Exception as exc:  # noqa: BLE001 - readers that cannot be listed leave the primary field; said by the caller
+        return [("", None), ("!", {"error": f"{type(exc).__name__}: {exc}"})]
+    return [("", None)] + extra
 
 
 def _study_nodes(it: Item, s) -> list[str]:
@@ -344,40 +422,37 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     rows, desc, views, figs = [], [], {}, []
     current = leads.Register().current()
     for it in (i for i in scope.items if i.status == "in"):
-        try:
-            s = _session(it)
-        except LookupError as exc:
-            log(f"study: {it.dataset}: {exc}")
-            continue
-        for node in _study_nodes(it, s):
-            try:
-                f = s.expectations.field(node)
-                sv = s.surprise(node, "B1")
-            except Exception as exc:  # noqa: BLE001 - a field that could not be read is a note in the report
-                log(f"study: {it.dataset} {node}: {type(exc).__name__}: {exc}")
+        for name, src in _fields_of(it):
+            if name == "!":
+                log(f"study: {it.dataset}: its readers could not be listed: {src['error']}")
                 continue
-            label = f.label or node
-            key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
-                   "code": config.code_key(_expectation_table)}
-            path = store.address("study_table", key) / "table.parquet"
-            if not path.exists():
-                store.put_table("study_table", key, _expectation_table(sv, names))
-            slug = _slug(f"{it.dataset}_{node}")
-            views[f"expectations_{slug}"] = path.as_posix()
-            desc.extend(_descriptive(it, s, f, label))
-            for x in current:
-                # a code set's answers by its own field; otherwise every reader of the node (primary counts, mentions)
-                if not x.fields or x.kind != "answer":
+            try:
+                s = _session(it, src)
+            except LookupError as exc:
+                log(f"study: {it.dataset} {name}: {exc}")
+                continue
+            for node in _study_nodes(it, s):
+                try:
+                    f = s.expectations.field(node)
+                    sv = s.surprise(node, "B1")
+                except Exception as exc:  # noqa: BLE001 - a field that could not be read is a note in the report
+                    log(f"study: {it.dataset} {name} {node}: {type(exc).__name__}: {exc}")
                     continue
-                if it.source:
-                    if x.fields[0] != f.id:
-                        continue
-                elif not x.fields[0].startswith(f"{it.dataset}:{it.event}:") or x.fields[0].rsplit(":", 1)[-1] != node:
-                    continue
-                if list(x.provenance.get("years") or []) != list(it.years):
-                    continue
-                rows.append(_finding(x, it, label, names))
-            figs.append(_series_figure(out, sv, f, label, it))
+                label = (f.label or node) + (f" — {name}" if name else "")
+                key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
+                       "code": config.code_key(_expectation_table)}
+                path = store.address("study_table", key) / "table.parquet"
+                if not path.exists():
+                    store.put_table("study_table", key, _expectation_table(sv, names))
+                views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
+                desc.extend(_descriptive(it, s, f, label))
+                # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
+                # interval, a composition's share)
+                rows.extend(_finding(x, it, label, names) for x in current
+                            if x.fields and x.kind == "answer" and x.fields[0] == f.id
+                            and list(x.provenance.get("years") or []) == list(it.years))
+                if not name:
+                    figs.append(_series_figure(out, sv, f, label, it))
     findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
     pq.write_table(pa.Table.from_pylist(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
@@ -491,9 +566,14 @@ def _expectation_table(sv, names: dict) -> pa.Table:
 def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     """Counts, crude and directly age–sex-standardised rates per 100,000 by year, nationally and by state, from the
     fitted block's own cells (the population of the model's exposure; the standard is the period's national
-    age–sex structure)."""
+    age–sex structure). Each crude rate carries its exact Poisson 95% interval (Garwood), the exposure held fixed; a
+    ratio field's rate is per denominator event (``per``), its "population" the denominator's events."""
+    from scipy.stats import chi2
+
     m = s.expectations.model(f.block)
     d = m.data
+    if d.n is not None:
+        return _descriptive_cells(it, s, f, label, d)
     leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
     U, T, G = d.N.shape
     y = np.zeros((U, T, G))
@@ -504,21 +584,80 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     std = std / std.sum() if std.sum() > 0 else std
     state = np.asarray(d.places) // 10000
     out = []
+    ratio = str((it.source or {}).get("population", "")).startswith("events:")
+    per, scale = ((f"1 {it.source['population'][len('events:'):]} event", 1.0) if ratio else ("100,000 person-years", 1e5))
 
     def row(level: str, unit: str, t: int, yy: np.ndarray, nn: np.ndarray) -> dict:
         with np.errstate(divide="ignore", invalid="ignore"):
             rate_g = np.where(nn > 0, yy / nn, 0.0)
         events, pop = float(yy.sum()), float(nn.sum())
+        lo = chi2.ppf(0.025, 2 * events) / 2 if events > 0 else 0.0
+        hi = chi2.ppf(0.975, 2 * events + 2) / 2
         return {"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit,
-                "year": int(np.asarray(d.years)[t]), "events": events, "population": pop,
-                "crude_per_100k": 1e5 * events / pop if pop else None,
-                "standardised_per_100k": 1e5 * float((rate_g * std).sum()) if pop else None}
+                "year": int(np.asarray(d.years)[t]), "events": events, "population": pop, "per": per,
+                "rate": scale * events / pop if pop else None, "rate_low": scale * lo / pop if pop else None,
+                "rate_high": scale * hi / pop if pop else None,
+                "crude_per_100k": None if ratio or not pop else 1e5 * events / pop,
+                "standardised_per_100k": None if ratio or not pop else 1e5 * float((rate_g * std).sum())}
 
     for t in range(T):
         out.append(row("national", "BR", t, y[:, t].sum(0), N[:, t].sum(0)))
         for st in np.unique(state):
             sel_u = state == st
             out.append(row("state", str(int(st)), t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
+    return out
+
+
+def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
+    """A measure's, an interval's or a share's field by year, nationally and by state (ARCHITECTURE §6.4):
+    - a positive measure or an interval: the records' own median and 90th percentile (`gateway.mark_quantiles`; an
+      interval's mark is days + 1, given in days);
+    - a count-valued measure: the mean per event;
+    - a share (n events, y the share): the share with its exact (Clopper–Pearson) 95% interval."""
+    from scipy.stats import beta
+
+    kind = (s.source or {}).get("source", "events")
+    days = 1.0 if (s.source or {}).get("anchor") else 0.0
+    leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
+    sel = np.isin(d.e, leaves)
+    state = np.asarray(d.places)[d.u[sel]] // 10000
+    t_of, n, y = d.t[sel], d.n[sel].astype(float), d.y[sel].astype(float)
+    src = s.source or {}
+    # the node's codes (a whole tree's field reads every event)
+    codes = [] if f.node == "*" else list(s.expectations.registry.leaves(f.node))
+    quant: dict[int, dict] = {}
+    out = []
+
+    def row(level: str, unit: str, t: int, keep: np.ndarray) -> dict:
+        nn = float(n[keep].sum())
+        base = {"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit,
+                "year": int(np.asarray(d.years)[t]), "events": nn, "population": None}
+        if nn <= 0:
+            return base
+        if kind == "mark":
+            # the records' own median and 90th percentile (`gateway.mark_quantiles`), never the log moments' exp(mean)
+            year = int(np.asarray(d.years)[t])
+            if year not in quant:
+                quant[year] = {int(r["state"]): r for r in gateway.mark_quantiles(
+                    it.dataset, it.event, year, src["mark"], tuple(src["bounds"]), src.get("classifier"),
+                    tuple(src.get("missing") or ()), src.get("anchor"), int(src.get("sign", 1)), tuple(codes)).to_pylist()}
+            q = quant[year].get(0 if unit == "BR" else int(unit))
+            if q is None:
+                return base
+            return {**base, "events": float(q["n"]), "per": "days, median" if days else "median",
+                    "rate": q["q50"] - days, "p90": q["q90"] - days}
+        if kind == "count":
+            return {**base, "per": "mean per event", "rate": float((n[keep] * y[keep]).sum() / nn)}
+        k = float((n[keep] * y[keep]).sum())
+        return {**base, "per": "share", "rate": k / nn,
+                "rate_low": float(beta.ppf(0.025, k, nn - k + 1)) if k > 0 else 0.0,
+                "rate_high": float(beta.ppf(0.975, k + 1, nn - k)) if k < nn else 1.0}
+
+    for t in range(len(d.years)):
+        at = t_of == t
+        out.append(row("national", "BR", t, at))
+        for st in np.unique(state):
+            out.append(row("state", str(int(st)), t, at & (state == st)))
     return out
 
 
@@ -604,7 +743,8 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                           ("corroborated", "corroborated")], cap=20),
              "<h2>2. Descriptive epidemiology</h2>",
              table(nat, [("label", "field"), ("dataset", "source"), ("year", "year"), ("events", "events"),
-                         ("crude_per_100k", "crude /100k"), ("standardised_per_100k", "standardised /100k")], cap=80),
+                         ("rate", "rate"), ("rate_low", "95% from"), ("rate_high", "to"), ("per", "per"),
+                         ("standardised_per_100k", "standardised /100k")], cap=80),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
              "<h2>3. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),

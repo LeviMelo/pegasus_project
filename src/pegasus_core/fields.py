@@ -535,6 +535,29 @@ def share_sources(dataset: str, event: str, column: str, probe_year: int) -> lis
                  **({"classifier": primary} if primary else {})}) for v in order[1:]]
 
 
+def quality_sources(dataset: str, event: str, years: list[int]) -> list[tuple[str, dict]]:
+    """The quality fields of an event type (ARCHITECTURE §5.3): for every column its roles declare (`declared`, any kind,
+    modelled or not: a code the form asks for is a quality question whatever its use), the share of events with the
+    value blank or among the column's declared missing codes, by place and period (`gateway.share_moments` with
+    ``quality``). Only columns the roles say exist in every one of ``years`` (a later form's column is not "missing"
+    before it existed); an interval's quality is its date column's."""
+    from . import gateway
+
+    roles = {r["column"]: r for r in gateway.roles(dataset)}
+    et = gateway.event_type(dataset, event)
+    primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    out = []
+    for d in declared(dataset):
+        col = d.column.split(":", 1)[-1]
+        r = roles.get(col, {})
+        if not r or (r.get("first_year") or years[0]) > years[0] or (r.get("last_year") or years[-1]) < years[-1]:
+            continue
+        out.append((f"quality:{col}", {"source": "share", "indicator": col, "quality": True,
+                                       "missing": list(r.get("missing") or d.missing or ()),
+                                       **({"classifier": primary} if primary else {})}))
+    return list(dict(out).items())
+
+
 def declared_links(dataset: str, event: str) -> list[Declared]:
     """The person-level fields of ``dataset`` (S2): for every declared link (pegasus_data `links.yml`) with a side
     on this dataset, the share of that side's events linked to the other side's (`gateway.linked_counts`): an outcome

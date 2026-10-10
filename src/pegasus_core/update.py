@@ -50,6 +50,7 @@ class System:
     disparities: list[str] | None = None         # nodes whose race disparities are kept current (`tools.disparity`)
     nodes: list[str] | None = None               # only the fields under these tree nodes are asked (a study's topic)
     source: dict | None = None                   # the counts' reader (`monolith.assemble`): e.g. {"codes": ["P371"]}
+    quality: list[str] | str | None = None       # "all", or columns: each one's blank or "ignored" share (`fields.quality_sources`)
 
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
@@ -226,16 +227,47 @@ def _codes_readers(sys_: System, plan: Plan, out: dict) -> list[tuple[str, dict,
     return found
 
 
+def system_readers(sys_: System, plan: Plan, blocks: list[str], out: dict | None = None) -> list[tuple[str, dict, list[str]]]:
+    """A system's fields beyond its primary counts, as (name, reader, blocks): its declared measures, compositions (one
+    share per value), person-level links, intervals, mentions, care flows, other classifiers and code columns. `run`
+    fits and asks each; a study writes each one's products (`study`), so both read one list."""
+    out = {} if out is None else out
+    readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_, plan, out)]
+    readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions, plan, out)
+                for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
+    readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
+    readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
+                for column in _declared(sys_, "interval", sys_.intervals, plan, out)]
+    wanted = [d.column for d in fields.declared_mentions(sys_.dataset)]
+    readers += [(c, fields.mentions_source(sys_.dataset, c)) for c in wanted
+                if sys_.mentions == "all" or c in (sys_.mentions or [])]
+    readers += [(d.column, fields.flow_source(sys_.dataset, sys_.event, d.column))
+                for d in fields.declared_flows(sys_.dataset) if sys_.flows == "all" or d.column in (sys_.flows or [])]
+    readers += [(name, source) for name, source in fields.quality_sources(sys_.dataset, sys_.event, plan.years)
+                if sys_.quality == "all" or name.split(":", 1)[1] in (sys_.quality or [])]
+    readers = [(column, source, list(blocks)) for column, source in readers]
+    # another classifier's counts: the same events by its own tree, every chapter of it
+    readers += [(name, source, roots) for name, source, roots in fields.classifier_sources(sys_.dataset, sys_.event)
+                if sys_.classifiers == "all" or name.split(":", 1)[1] in (sys_.classifiers or [])]
+    return readers + _codes_readers(sys_, plan, out)
+
+
 def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
     """The all-events fit (block ``*``) a count reader's share question reads as its denominator
     (`tools.Session._expected_total`), fitted as a declared step of the plan."""
     if plan.questions == [] or (plan.questions and "share" not in plan.questions) or s.expectations.registry.classifier == "*"             or any(s.source.get(k) for k in ("mark", "indicator", "link", "place")):
         return
+    from . import tools
+
+    if str(s.source.get("population", "")).startswith("events:"):
+        return                  # a ratio field asks no share (`tools.Session.lens`)
+    # a code set's share is of all the type's events: the denominator is the unrestricted reader's fit
+    src = {k: v for k, v in s.source.items() if k != "codes"}
     try:
-        s.expectations.model("*")
+        (s.expectations if src == s.source else tools.Session(s.dataset, s.event, s.years, s.graph, source=src).expectations).model("*")
     except LookupError:
         try:
-            monolith.fit_block(s.dataset, s.event, "*", list(s.years), s.graph, source=s.source or None, log=log)
+            monolith.fit_block(s.dataset, s.event, "*", list(s.years), s.graph, source=src or None, log=log)
             out[f"fit {label} * (share denominator)"] = "fitted"
         except (ValueError, LookupError) as exc:
             out[f"fit {label} * (share denominator)"] = f"failed: {exc}"
@@ -372,24 +404,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             out[f"questions {sys_.dataset}"] = len(leads)
         else:
             out[f"questions {sys_.dataset}"] = "done on these versions"
-        readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_, plan, out)]
-        readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions, plan, out)
-                    for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]
-        readers += [(column, fields.link_source(sys_.dataset, sys_.event, column)) for column in _links(sys_)]
-        readers += [(column, fields.interval_source(sys_.dataset, sys_.event, column, plan.years[-1]))
-                    for column in _declared(sys_, "interval", sys_.intervals, plan, out)]
-        wanted = [d.column for d in fields.declared_mentions(sys_.dataset)]
-        readers += [(c, fields.mentions_source(sys_.dataset, c)) for c in wanted
-                    if sys_.mentions == "all" or c in (sys_.mentions or [])]
-        readers += [(d.column, fields.flow_source(sys_.dataset, sys_.event, d.column))
-                    for d in fields.declared_flows(sys_.dataset) if sys_.flows == "all" or d.column in (sys_.flows or [])]
         resolved[sys_.dataset] = list(blocks)
-        readers = [(column, source, list(blocks)) for column, source in readers]
-        # another classifier's counts: the same events by its own tree, every chapter of it
-        readers += [(name, source, roots) for name, source, roots in fields.classifier_sources(sys_.dataset, sys_.event)
-                    if sys_.classifiers == "all" or name.split(":", 1)[1] in (sys_.classifiers or [])]
-        readers += _codes_readers(sys_, plan, out)
-        for column, source, blocks in readers:
+        for column, source, blocks in system_readers(sys_, plan, list(resolved[sys_.dataset]), out):  # noqa: B020
             ms = tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=source)
             for block in blocks:
                 try:

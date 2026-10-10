@@ -258,6 +258,9 @@ q: 0.05                               # the study's false-discovery rate
 hypotheses:                           # optional declared tests (§7.7)
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria water outbreak"}
 contexts: auto                        # or a list; auto = every applicable context (§4.5)
+ratios:                               # optional ratio fields (§5.2): DATASET[:event][:codes], lag in years
+  - {numerator: SINAN-TOXC, denominator: SINAN-TOXG}
+  - {numerator: SIM-DOFET, denominator: SINASC.DN}
 ```
 
 Every key has a default except `study` and `topic.seeds`. A topic may also be a whole system or the whole data space
@@ -509,7 +512,9 @@ of power (ADR-0028); it is weighted and reported with its minimum detectable eff
 Every typed column also yields **quality fields**: the share of "ignored" or missing values by place, period and
 facility; the share of codes that cannot be an underlying cause; a source's notification start by place. They are
 fields like any other: every component applies (a facility that stops recording anomalies is a step in a quality
-field), and they feed interpretation (§9.1).
+field), and they feed interpretation (§9.1). Built: one share field per declared column present in every study year, k the blank or declared-missing
+values (a code the roles do not declare missing is a value), read on the item's own classifier so quality is the
+topic's records' (`fields.quality_sources`).
 
 ---
 
@@ -580,7 +585,7 @@ together.
 | measure (bounded score) | ordinal (cumulative logit) on the histogram |
 | composition | beta-binomial per category against the national composition by age and sex, with the place and time structure |
 | interval | the delay's median and upper quantile per cell (log-normal or quantile model) with the same structure |
-| ratio | the numerator given the denominator: binomial (a share) or Poisson with the denominator field as exposure, same structure |
+| ratio | the numerator given the denominator: binomial (a share) or Poisson with the denominator field as exposure, same structure. Built: the denominator's events by place-year are the exposure (`gateway.population("events:DS:EV[:codes][@lag]")`), numerator and exposure in one cell with neither sex nor age read (`event_counts(cell=False)`: a foetus has no age); the count model then applies unchanged |
 | linked share | binomial with the link's variance added |
 | capture | log-linear model over the systems' inclusion patterns, place and period effects hierarchical; the total and each system's completeness with intervals |
 

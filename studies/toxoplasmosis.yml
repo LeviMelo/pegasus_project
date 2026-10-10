@@ -11,3 +11,5 @@ grain: [year]
 depth: survey
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
+ratios:
+  - {numerator: SINAN-TOXC, denominator: SINAN-TOXG}   # congenital notifications per gestational notification

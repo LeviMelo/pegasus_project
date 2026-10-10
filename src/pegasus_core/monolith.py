@@ -324,7 +324,10 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         S[pu, pt, pg] = pop.column("s").to_numpy()
 
     strata = gateway._strata(dataset, event)
-    if strata.get("persons") is False:
+    # a ratio field (another field's events as the exposure, `gateway._events_population`): the denominator has no sex or
+    # age of the numerator's persons, so both stand in one cell, as a group's events do
+    collapse = str(population).startswith("events:")
+    if strata.get("persons") is False or collapse:
         # a group's events have no sex or age (`gateway._strata`: they stand in sex 1, band 0): the whole population of
         # the place is exposed in that one cell, every other cell unexposed (fixed at zero, as a mother's male cells)
         N[:, :, 0] = N.sum(axis=2)
@@ -355,7 +358,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     # birth: applied there, male-only anomaly classes had no exposure and the fit's start was NaN (2026-10-06)
     own_strata = gateway.strata(dataset, event)["implied_sex"] is None
     # the age and sex edits are ICD-10's (`code_attributes`): another tree has none declared
-    adm, never = ({}, set()) if block == "*" or not own_strata or structure != "ICD10" else _admissible(edges, underlying)
+    # (a ratio field reads no sex or age: its one cell admits every code)
+    adm, never = ({}, set()) if block == "*" or not own_strata or collapse or structure != "ICD10" else _admissible(edges, underlying)
     never = never & set(categories)
     every = (np.ones(2 * nB, dtype=bool), "")
     cls = {c: adm.get(c, every) for c in categories}
@@ -388,6 +392,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     readers = {"events": gateway.event_counts, "code_list": gateway.code_list_counts, "mark": gateway.mark_moments,
                "count": gateway.mark_moments, "share": gateway.share_moments, "linked": gateway.linked_counts,
                "away": gateway.away_counts}
+    if collapse:
+        # neither the numerator's sex nor its age is read (a foetal death has no age; an unknown sex is still an event)
+        readers["events"] = functools.partial(gateway.event_counts, cell=False)
     if grain == "month":
         if source not in ("events", "code_list"):
             raise NotImplementedError("the monthly grain reads event counts and code-list counts")
@@ -443,8 +450,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         parts.append((code_of[row_code[in_block]],
                       _index_of(places, sub.column("u").to_numpy()),
                       time_index.astype(np.int64),
-                      ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
-                       + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64),
+                      (np.zeros(sub.num_rows, dtype=np.int64) if collapse else
+                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
+                        + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64)),
                       *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
     filled = np.asarray(in_tree)
     if block != "*" and filled.max() > 0 and (filled == 0).any():
@@ -1120,10 +1128,15 @@ class Monolith:
             cand = store.manifest("monolith", source)
         else:
             family = _family(mine)
+            unit = lambda key: key.get("population", "") if str(key.get("population", "")).startswith("events:") else "persons"   # noqa: E731
             scored = []
             for m in store.manifests("monolith"):
                 k = m["key"]
                 if k == mine or _family(k) != family or "taus" not in m:
+                    continue
+                if unit(k) != unit(mine):
+                    # person-years and another field's events are rates of different units (b0 ~ -16 against ~ -1):
+                    # a ratio field started from its count field stayed at μ ~ 1e-66 (TOXC over TOXG, 2026-10-10)
                     continue
                 span = lambda key: set(_periods_of(key))   # noqa: E731
                 shared = len(span(k) & span(mine))

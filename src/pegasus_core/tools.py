@@ -320,17 +320,24 @@ class Session:
                     for r in res["steps"]]
         if lens == "share_excess":                   # the field's share of all events (§7.1, the observation lens)
             from . import departures
+            if str(self.source.get("population", "")).startswith("events:"):
+                raise ValueError(f"{self.dataset}: a ratio field's share of all events is its numerator's code set's question")
             s = self.surprise(node, "B1")
-            self._prepare_grid()
-            if self._total is None:
+            # a code set's share is of all the type's events: the total and its fit are the unrestricted reader's (the
+            # code set's own fit as the total read every place's share as ~0 against ~1, CIH-CR P37.1: 4185 "departures"
+            # from 3 events, 2026-10-10)
+            base = self if not self.source.get("codes") else Session(
+                self.dataset, self.event, self.years, self.graph, source={k: v for k, v in self.source.items() if k != "codes"})
+            base._prepare_grid()
+            if base._total is None:
                 raise ValueError(f"{self.dataset}: no all-event count to take a share of (one block, no tree)")
-            index = {int(p_): i for i, p_ in enumerate(self._grid_places)}
+            index = {int(p_): i for i, p_ in enumerate(base._grid_places)}
             rows = np.array([index.get(int(p_), -1) for p_ in s.places])
             have = rows >= 0
             total = np.zeros(s.y.shape)
-            total[have] = self._total[rows[have]]
+            total[have] = base._total[rows[have]]
             mu_total = np.zeros(s.y.shape)
-            mu_total[have] = self._expected_total()[rows[have]]
+            mu_total[have] = base._expected_total()[rows[have]]
             return departures.share_excess(s.y, total, s.mu, mu_total, s.places, s.years, s.field.id, self.ledger, **kw)
         s = self.surprise(node, tier, train_last)
         if "rate_ratio" not in kw and (rr := surprise.location_rate_ratio(s)) is not None:

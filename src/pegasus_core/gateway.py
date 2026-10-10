@@ -163,8 +163,11 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
         con.register("p", pop)
         return con.execute("""SELECT u, year, sex, CAST(least(age // 5 * 5, 80) AS SMALLINT) AS age, sum(n) AS n
                               FROM p GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
+    if source.startswith("events:"):
+        return _events_population(sorted(set(years)), source)
     if source != "popsvs":
-        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-6, hybrid or account-2 (popsvs-5y: a control)")
+        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-6, hybrid, account-2 "
+                       "or events:<dataset>:<event>[:codes] (popsvs-5y: a control)")
     import pegasus_data as pg
 
     years = sorted(set(years))
@@ -182,6 +185,50 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
                CAST(sum(population) AS DOUBLE) AS n
         FROM p WHERE sex IN ('1', '2') GROUP BY ALL ORDER BY u, year, sex, age""").fetch_arrow_table()
     store.put_table("gateway", key, table, {"source": f"pegasus_data.load_population({series})"})
+    return table
+
+
+def _events_population(years: list[int], source: str) -> pa.Table:
+    """Another field's events as the exposure (ARCHITECTURE §5.2, a ratio field): ``events:<dataset>:<event>`` or
+    ``events:<dataset>:<event>:<code>,<code>`` (the events whose classifier code starts with one of them), optionally
+    ``@<lag>`` (the denominator's events ``lag`` years earlier: deaths over the admissions of the year before), counted by
+    place and year into one cell (sex 1, age 0) for every municipality POPSVS holds (0 where the denominator has none).
+    The numerator is read in that same cell (`monolith.assemble`), so the field is the numerator's rate per denominator
+    event: congenital over gestational toxoplasmosis, admissions per notified case."""
+    import pyarrow.compute as pc
+
+    spec, _, lag = source.partition("@")
+    lag = int(lag or 0)
+    parts = spec.split(":", 3)
+    if len(parts) < 3:
+        raise ValueError(f"{source!r}: write events:<dataset>:<event>[:codes][@lag]")
+    dataset, event = parts[1], parts[2]
+    codes = [c.replace(".", "").upper() for c in parts[3].split(",")] if len(parts) > 3 and parts[3] else []
+    key = {"what": "population", "source": source, "years": years, "data": config.data_version(),
+           **_declared_key(dataset, event)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    places = population(years, "POPSVS", "popsvs").column("u").unique()
+    rows = []
+    for y in years:
+        c = event_counts(dataset, event, y - lag, cell=False).counts
+        if codes:
+            hit = pc.starts_with(c.column("code"), codes[0])
+            for k in codes[1:]:
+                hit = pc.or_(hit, pc.starts_with(c.column("code"), k))
+            c = c.filter(pc.fill_null(hit, False))
+        rows.append(pa.table({"u": c.column("u"), "year": pa.array([y] * c.num_rows, pa.int16()), "y": c.column("y")}))
+    con = duckdb.connect()
+    con.register("e", pa.concat_tables(rows) if rows else pa.table({"u": [], "year": [], "y": []}))
+    con.register("pl", pa.table({"u": places}))
+    con.register("yy", pa.table({"year": pa.array(years, pa.int16())}))
+    table = con.execute("""
+        SELECT CAST(pl.u AS INTEGER) AS u, CAST(yy.year AS SMALLINT) AS year, CAST(1 AS TINYINT) AS sex,
+               CAST(0 AS SMALLINT) AS age, CAST(coalesce(sum(e.y), 0) AS DOUBLE) AS n
+        FROM pl CROSS JOIN yy LEFT JOIN e ON e.u = pl.u AND e.year = yy.year
+        GROUP BY ALL ORDER BY u, year""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"events of {dataset} {event} {codes or ''} as an exposure"})
     return table
 
 
@@ -510,7 +557,7 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
 
 
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                 places: pa.Array | None = None, race: str | None = None) -> EventCounts:
+                 places: pa.Array | None = None, race: str | None = None, cell: bool = True) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
 
     The columns come from pegasus_data's roles (the subject's residence, sex and age as
@@ -521,14 +568,20 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     never guessed. Events two systems share are read through their declared link (`linked_counts`), never by a
     system's own column. ``race`` (a race code 1-5): only the events of that race, by the subject's declared race
     stratum (the mother's on a birth); events with no valid race are unallocated ('race unknown').
+    ``cell=False``: neither sex nor age is read, every event stands in sex 1, age 0 (a ratio field's numerator and
+    denominator, `_events_population`: a foetal death has no age, and an unknown sex is still an event).
     """
     import pegasus_data as pg
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
-    strata = _strata(dataset, event)
-    key = {"what": "event_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
+    strata = _strata(dataset, event, year)
+    if not cell:
+        if race:
+            raise ValueError("a race group is a stratum: cell=False reads none")
+        strata = {**strata, "age": None, "sex": None, "implied_sex": 1, "implied_age": 0}
+    key = {"what": "event_counts", **({"cell": False} if not cell else {}), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
@@ -921,6 +974,31 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     return unallocated
 
 
+def mark_quantiles(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float], classifier: str | None = None,
+                   missing: tuple[str, ...] | list = (), anchor: str | None = None, sign: int = 1,
+                   codes: tuple[str, ...] | list = ()) -> pa.Table:
+    """A mark's own distribution by state and nationally (state 0) for one year: n, the median and the 90th percentile
+    of the raw mark (an interval's: days + 1, `_mark_frame`) over the events whose code starts with one of ``codes``
+    (all events without). What a study's descriptive table reports: the cells' log moments are the model's location,
+    and a delay is no log-normal (SINAN-TOXG 2019 onset to closure: median 103 days, the moments' exp(mean log) 61)."""
+    key = {"what": "mark_quantiles", "code": config.code_key(mark_quantiles), "dataset": dataset, "event": event,
+           **_declared_key(dataset, event), "year": year, "mark": mark, "bounds": list(bounds), "missing": list(missing),
+           "classifier": classifier, "anchor": anchor, "sign": sign, "codes": sorted(codes), "data": config.data_version(),
+           **_df_key(dataset, year)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    con = duckdb.connect()
+    _mark_frame(con, dataset, event, year, mark, tuple(bounds), classifier, None, None, None, missing=tuple(missing),
+                anchor=anchor, sign=sign)
+    where = " OR ".join(f"starts_with(code, '{c}')" for c in codes) or "TRUE"
+    table = con.execute(f"""SELECT CAST(coalesce(u // 10000, 0) AS INTEGER) AS state, CAST(count(*) AS INTEGER) AS n,
+            quantile_cont(m, 0.5) AS q50, quantile_cont(m, 0.9) AS q90
+        FROM adj WHERE {where} GROUP BY ROLLUP (u // 10000) ORDER BY state""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"quantiles of {dataset} {mark}"})
+    return table
+
+
 def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float],
                  classifier: str | None = None, places: pa.Array | None = None, casemix: str | None = None,
                  facility_effects: str | None = None, missing: tuple[str, ...] | list = (), anchor: str | None = None,
@@ -1024,12 +1102,25 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
     return out
 
 
-def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...], classifier: str | None = None,
-                  places: pa.Array | None = None, missing: tuple[str, ...] | list = ()) -> EventCounts:
+def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...] = (), classifier: str | None = None,
+                  places: pa.Array | None = None, missing: tuple[str, ...] | list = (), quality: bool = False) -> EventCounts:
     """A share's states per (u, year, sex, age, code): n events with ``indicator`` recorded and k of them with a value
-    among ``success`` (SIH ``MORTE`` = 1: died in hospital), from the column's composition (`composition_counts`)."""
+    among ``success`` (SIH ``MORTE`` = 1: died in hospital), from the column's composition (`composition_counts`).
+    ``quality``: the column's quality field (ARCHITECTURE §5.3) instead: n every event, k those whose value is blank or
+    among the column's declared ``missing`` codes ('ignorado'); a code not declared missing is a value, never guessed."""
     comp = composition_counts(dataset, event, year, indicator, missing, classifier, places)
     con = duckdb.connect()
+    if quality:
+        con.register("c", comp.counts)
+        con.register("m", comp.missing)
+        counts = con.execute("""
+            WITH a AS (SELECT u, year, sex, age, code, sum(n) AS n, 0 AS k FROM c GROUP BY ALL
+                       UNION ALL SELECT u, year, sex, age, code, sum(m) AS n, sum(m) AS k FROM m GROUP BY ALL)
+            SELECT u, year, sex, age, code, CAST(sum(n) AS INTEGER) AS n, CAST(sum(k) AS INTEGER) AS k
+            FROM a GROUP BY u, year, sex, age, code ORDER BY code, u, sex, age""").fetch_arrow_table()
+        kept = comp.unallocated.filter(pc.invert(pc.is_in(comp.unallocated.column("reason"),
+                                                          pa.array(["value missing", "value not recorded"]))))
+        return EventCounts(counts, kept, {**comp.key, "what": "quality_moments"})
     con.register("c", comp.counts)
     yes = ", ".join("'" + str(s).replace("'", "''") + "'" for s in success)
     counts = con.execute(f"""SELECT u, year, sex, age, code, CAST(sum(n) AS INTEGER) AS n,
@@ -1180,15 +1271,18 @@ def strata(dataset: str, event: str | None = None) -> dict:
     return _strata(dataset, event)
 
 
-def _strata(dataset: str, event: str | None = None) -> dict:
+def _strata(dataset: str, event: str | None = None, year: int | None = None) -> dict:
     """The subject's residence, sex, age and race columns, from pegasus_data's roles (race: the subject's declared
     race stratum, the mother's on a birth, None where none is declared). ``event`` names the event type when its rows
     are not persons: a grid of people (SINAN-SDTA's ``case``) or a group (its ``outbreak``); without it, a dataset
-    whose events count a grid reads the grid's strata."""
+    whose events count a grid reads the grid's strata. A role held by another column in another layout generation
+    (SIM-DOFET's residence: MUNIRES to 1995, CODMUNRES from 1996) is read in ``year``'s column; without a year, in the
+    latest generation's (keyed by the last row, the alphabetical MUNIRES failed every DOFET year since 1996)."""
     import pegasus_data as pg
 
-    rs = pg.roles(dataset)
-    rows = [r for r in rs if r.get("model") == "stratum"]
+    rs = pg.roles(dataset) if year is None else pg.roles(dataset, period=year)
+    rows = sorted((r for r in rs if r.get("model") == "stratum"),
+                  key=lambda r: (r.get("last_year") or 9999, r.get("first_year") or 0))
     by_prop = {r["property"]: r for r in rows}
     specs = pg.event_types(dataset) if _has_events(dataset) else []
     spec = next((e for e in specs if e["name"] == event), None) if event else next((e for e in specs if e.get("grid")), None)
