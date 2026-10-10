@@ -78,6 +78,7 @@ Each row: what a measurement showed, and where it now lives (the register the au
 | SIM IX's large places sat 2–3 % above their expectation: the robust refit imputed persistent recodings (Fortaleza's I10 ×5) and so removed deaths only large places' levels rest on | a flagged excess that the block's other leaves' deficit accounts for is moved back to them, not removed; IX calibrated by size | ADR-0033, OPEN_QUESTIONS 13 |
 | an outbreak's people are columns by sex and band, not rows | an event's row may be a grid; the block's ages are the bands population and event share, the place its entity's | pegasus_data decision 0156, unit P3 |
 | counted as people, foodborne-outbreak ill fit with φ 0.066: they arrive an outbreak at a time | the unit of detection is the cluster: an event whose row is a group is read in one exposed cell, the place's whole population (outbreaks: φ 1.04 against the ill's 0.066) | ADR-0034 |
+| every raw read in PegaSUS's data root decoded the DBC files again (no record lake): a national CIHA year 30-60 min, the links' years hours | the lake is a declared step of `update` over the datasets a plan reads (a CIHA year: 12 s) | work plan S0.8 |
 | exposure variance double-counts φ | no exposure-variance term by default | ADR-0010 |
 | SIH leads are dominated by one hospital's coding | a facility triage class now; the institution lattice is raised in priority | facility triage (running) |
 | surveys ran on one core for hours | threaded surveys, a single model load | bef4b70 |

@@ -651,14 +651,25 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     status = spec.get("status") or {}
     weight = [spec["weight"]] if spec.get("weight") else []
     wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else []) + weight))
+    dups = spec.get("duplicates") is not None       # duplicate entries are dropped on every column (pegasus_data rule)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes",
+        table = pg.query(dataset, period=year, geography="BR", select=None if dups else wanted, present="codes",
                          root=config.data_root(), max_download=8 * 1024**3, **({"provenance": "all"} if identity else {}))
     if identity:
         from pegasus_data.linkage.identity import record_ids
 
         table = table.append_column("_rid", record_ids(table))
+    if dups:
+        import dataclasses
+
+        from pegasus_data.semantics.event_types import event_type as data_event_type
+        from pegasus_data.semantics.event_types import events_of
+
+        # the duplicates rule alone: the status is applied below, as for every event
+        only = dataclasses.replace(data_event_type(dataset, event), status_column=None, consolidation_key=())
+        keep = [c for c in dict.fromkeys(wanted + (["_rid"] if identity else [])) if c in table.column_names]
+        table = events_of(table, only).select(keep)
     if status.get("column") and status.get("values"):
         table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
                                       value_set=pa.array([str(v) for v in status["values"]])))
