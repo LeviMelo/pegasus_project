@@ -50,7 +50,13 @@ cell_excess is the pooled version here.
   - `grid_world(spatial=False)` draws from the fit without its place effects. A grid that reads B0 lenses adds
     `null_b0` worlds, and only those lenses read them.
   - institution_step is not judged (`GRID_NOT_JUDGED`).
-  - The check on births runs as `data/probes/oq16_null_b0.json`.
+  - Births, 10 `null_b0` worlds (`data/probes/oq16_null_b0.json`):
+    - excess_level: 2 worlds with a finding, 0.2 findings a world (24.1 in B1 worlds);
+    - group_disparity: 0 worlds;
+    - spatial_cluster: all 10 worlds, 3.4 findings a world (12.4 in B1 worlds).
+  - The worlds keep the field's persistent place-year frailty, which a cluster summed over the years collects. The
+    cell excess's heavy tail traces to the same frailty (OPEN_QUESTIONS 12).
+  - A null plan that no requested lens reads is no longer drawn.
 
 **The classed cell excess, after ADR-0035.** Null worlds on births, the same seeds in every run (ADR-0035 amendment):
 
@@ -65,6 +71,10 @@ cell_excess is the pooled version here.
   - P(z > 3) is 0.0009-0.0015 in the seven smaller classes against N(0, 1)'s 0.00135, but 0.0026, 0.0021 and 0.0044 in
     the three largest;
   - the three cells BH rejects have expectations of 451, 980 and 8,727 births.
+  - The same seed, drawn as plain NB(μ, φ) without the field's correlated frailty, has Gaussian tails in every class
+    (P(z > 3) 0.0009-0.0018) and no rejection.
+  - So the heavy tail is the persistent place-year frailty, which dominates large places, and the per-cell predictive
+    does not carry its shape.
 - **Consequence for real data.** Births' findings in large places carry part of this tail. ADR-0035 had moved 308 of
   455 findings into the four largest classes. OPEN_QUESTIONS 12 holds the fix, which belongs in the model.
 

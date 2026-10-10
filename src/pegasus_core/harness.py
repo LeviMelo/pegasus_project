@@ -792,7 +792,9 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     # a null world is null for the tier it is drawn from: B1's (every place's fitted level) for the lenses that read B1
     # and above, B0's (no place effects) for the lenses that read B0 (OPEN_QUESTIONS 16)
     reads_b0 = {x for x in lens_names if tools.LENS_TIERS.get((methods[x].lens or x) if x in methods else x) == "B0"}
-    plans = ([(k, s, worlds) for k in kinds for s in shapes] + ([("null", "none", null_worlds)] if null_worlds else [])
+    reads_b1 = {x for x in lens_names if x not in reads_b0 and x not in GRID_NOT_JUDGED}
+    plans = ([(k, s, worlds) for k in kinds for s in shapes]
+             + ([("null", "none", null_worlds)] if null_worlds and reads_b1 else [])
              + ([("null_b0", "none", null_worlds)] if null_worlds and reads_b0 else []))
     done = 0
     for kind, shape, n in plans:
