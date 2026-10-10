@@ -476,6 +476,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
 
     names = gateway.municipality_names()
     rows, desc, views, figs, groups = [], [], {}, [], []
+    series = {}          # each primary field's observed and expected by place and period: the related fields' reading
     current = leads.Register().current()
     for it in (i for i in scope.items if i.status == "in"):
         for name, src in _fields_of(it):
@@ -504,10 +505,15 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                 desc.extend(_descriptive(it, s, f, label))
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
-                rows.extend(_finding(x, it, label, names) for x in current
+                rows.extend({**_finding(x, it, label, names), "_places": [int(q) for q in x.locus.get("places") or []],
+                             "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
+                                                     | ({str(f_)} if (f_ := ((x.robustness.get("triage") or {}).get("facility")
+                                                                             or {}).get("one_institution")) else set()))}
+                            for x in current
                             if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
+                    series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu)
                     figs.append(_series_figure(out, sv, f, label, it))
                     try:
                         d = s.expectations.model(f.block).data
@@ -517,6 +523,16 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                     except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
                     groups.extend(_groups(it, s, f, label, log))
+    related = _related(rows, series)
+    pq.write_table(pa.Table.from_pylist(related) if related else pa.table({"finding": pa.array([], pa.string())}),
+                   out / "related.parquet")
+    _institution_facts(rows, log)
+    profile = _context_profiles(decl, scope, rows, log)
+    pq.write_table(pa.Table.from_pylist(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
+                   out / "context_profile.parquet")
+    for r in rows:
+        r.pop("_places", None)
+        r.pop("_institutions", None)
     findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
     pq.write_table(pa.Table.from_pylist(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
@@ -532,6 +548,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW findings AS SELECT * FROM read_parquet('{(out / 'findings.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW descriptive AS SELECT * FROM read_parquet('{(out / 'descriptive.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW groups AS SELECT * FROM read_parquet('{(out / 'groups.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW context_profile AS SELECT * FROM read_parquet('{(out / 'context_profile.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW related AS SELECT * FROM read_parquet('{(out / 'related.parquet').as_posix()}')")
     con.close()
     hyp = _hypotheses(decl, scope)
     pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
@@ -705,6 +723,116 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     return out
 
 
+def _related(rows: list[dict], series: dict) -> list[dict]:
+    """Related-field consistency (ARCHITECTURE §9, BACKLOG 7.4): every other primary field of the study read at a
+    finding's places and years, observed against expected (B1), with its exact Poisson 95% interval on the observed
+    count over the expected. A congenital excess beside a gestational one at the same places is consistent; beside none
+    it asks why. Each row names the related fields whose interval excludes 1 (``related``)."""
+    from scipy.stats import chi2
+
+    out = []
+    for r in rows:
+        places = set(r.get("_places") or [])
+        if not places or not r.get("first_year"):
+            continue
+        lo_y, hi_y = int(r["first_year"]), int(r["last_year"] or r["first_year"])
+        notes = []
+        for fid, (label, dataset, pl, yrs, y, mu) in series.items():
+            if fid == r["field"]:
+                continue
+            ui = np.flatnonzero(np.isin(pl, list(places)))
+            ti = np.flatnonzero((yrs // (100 if yrs.max() > 9999 else 1) >= lo_y) & (yrs // (100 if yrs.max() > 9999 else 1) <= hi_y))
+            if not len(ui) or not len(ti):
+                continue
+            o, e_ = float(y[np.ix_(ui, ti)].sum()), float(mu[np.ix_(ui, ti)].sum())
+            if e_ <= 0:
+                continue
+            low = (chi2.ppf(0.025, 2 * o) / 2 if o > 0 else 0.0) / e_
+            high = chi2.ppf(0.975, 2 * o + 2) / 2 / e_
+            out.append({"finding": r["id"], "related_field": fid, "label": label, "dataset": dataset,
+                        "observed": o, "expected": e_, "ratio": o / e_, "low": low, "high": high})
+            if low > 1 or high < 1:
+                notes.append(f"{label} ({dataset}) {o / e_:.2f} [{low:.2f}, {high:.2f}]")
+        r["related"] = "; ".join(notes[:4]) or None
+    return out
+
+
+def _institution_facts(rows: list[dict], log) -> None:
+    """A finding concentrated in an establishment is an institutional finding, read with the establishment's facts
+    (ARCHITECTURE §9.1, BACKLOG 7.1): each institution's CNES registration at the finding's first and last year (name,
+    type, care level, SUS link, beds, obstetric centre, neonatal unit; `gateway.establishment_facts`), absent in the
+    first year meaning it opened within the finding. Written to ``institution_facts`` on the row."""
+    def short(v) -> str:
+        v = str(v or "")
+        return v.rsplit(" (", 1)[0] if v.endswith(")") else v
+
+    for r in rows:
+        codes = r.get("_institutions") or []
+        if not codes or not r.get("last_year"):
+            continue
+        try:
+            last = gateway.establishment_facts(codes, int(r["last_year"]))
+            first = gateway.establishment_facts(codes, int(r["first_year"])) if r.get("first_year") else last
+        except Exception as exc:  # noqa: BLE001 - facts that cannot be read leave the finding without them, said
+            log(f"study: establishment facts {codes}: {type(exc).__name__}: {exc}")
+            continue
+        parts = []
+        for c in codes:
+            f_ = last.get(c)
+            if f_ is None:
+                parts.append(f"{c}: not registered in {r['last_year']}")
+                continue
+            beds = sum(int(x) for x in (f_.get("QTLEITP1"), f_.get("QTLEITP2")) if str(x or "").isdigit())
+            parts.append(f"{short(f_.get('CNES'))} ({c}), {short(f_.get('CODUFMUN'))}: {short(f_.get('TP_UNID'))}; "
+                         f"{short(f_.get('VINC_SUS'))}; {beds} beds; obstetric centre {short(f_.get('CENTROBS'))}; "
+                         f"neonatal unit {short(f_.get('CENTRNEO'))}"
+                         + ("" if c in first else f"; opened after {r['first_year']}"))
+        r["institution_facts"] = " | ".join(parts) or None
+
+
+def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) -> list[dict]:
+    """Every finding's context profile (ARCHITECTURE §9, BACKLOG 7.2): for each context of the scope (pegasus_data's
+    declared fields, each over its declared denominator, `gateway.context_value`), the mean over the finding's places
+    in the study's period and its percentile among Brazil's municipalities. Each finding row also names its three most
+    extreme contexts (``context``). A context that cannot be read is skipped and logged, never zero."""
+    from scipy.stats import percentileofscore
+
+    if not rows or not scope.contexts:
+        return []
+    pop = gateway.population(decl.years[-1:]).group_by("u").aggregate([("n", "sum")])
+    places = np.asarray(pop.column("u").to_numpy())
+    index = {int(u): i for i, u in enumerate(places)}
+    # a context is a rate over its declared denominator; a count with none would rank places by size alone (every
+    # capital at p100), so size enters once, as the residents
+    values = {"population (residents)": np.asarray(pop.column("n_sum").to_numpy(), dtype=float)}
+    spec = gateway.declared_fields()
+    for name in (c for c in scope.contexts if (spec.get(c) or {}).get("over")):
+        try:
+            v, _ = gateway.context_value(name, list(decl.years), places)
+        except Exception as exc:  # noqa: BLE001 - a context without data for the period is skipped, said
+            log(f"study: context {name}: {type(exc).__name__}: {exc}")
+            continue
+        if np.isfinite(v).sum() >= 100:
+            values[name] = v
+    out = []
+    for r in rows:
+        idx = [index[u] for u in r.get("_places") or [] if u in index]
+        if not idx:
+            continue
+        extreme = []
+        for name, v in values.items():
+            here = v[idx]
+            if not np.isfinite(here).any():
+                continue
+            m = float(np.nanmean(here))
+            pct = float(percentileofscore(v[np.isfinite(v)], m))
+            out.append({"finding": r["id"], "context": name, "value": m, "percentile": pct,
+                        "places_with_value": int(np.isfinite(here).sum()), "places": len(idx)})
+            extreme.append((abs(pct - 50.0), name, pct))
+        r["context"] = "; ".join(f"{n} p{p:.0f}" for _, n, p in sorted(extreme, reverse=True)[:3]) or None
+    return out
+
+
 def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     """A measure's, an interval's or a share's field by year, nationally and by state (ARCHITECTURE §6.4):
     - a positive measure or an interval: the records' own median and 90th percentile (`gateway.mark_quantiles`; an
@@ -874,7 +1002,8 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     e = html.escape
     read = [i for i in scope.items if i.status == "in"]
     signal = [r for r in rows if r.get("class") == "signal"]
-    other = [r for r in rows if r.get("class") != "signal"]
+    institutional = [r for r in rows if r.get("class") == "facility" or r.get("institution_facts")]
+    other = [r for r in rows if r.get("class") not in ("signal", "facility") and not r.get("institution_facts")]
     rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["effect"])) if r["effect"] and r["effect"] > 0 else 0))
     stories = _stories(signal)
 
@@ -899,13 +1028,19 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(rank, [("label", "field"), ("dataset", "source"), ("component", "component"),
                           ("place_names", "places"), ("groups", "group"), ("first_year", "from"), ("last_year", "to"),
                           ("effect", "effect"), ("effect_unit", "unit"), ("q", "q"), ("replication", "replication"),
-                          ("corroborated", "corroborated")], cap=20),
+                          ("corroborated", "corroborated"), ("related", "related fields there (O/E, 95%)"),
+                          ("context", "context (national percentile)")], cap=20),
              "<h2>2. Descriptive epidemiology</h2>",
              table(nat, [("label", "field"), ("dataset", "source"), ("year", "year"), ("events", "events"),
                          ("rate", "rate"), ("rate_low", "95% from"), ("rate_high", "to"), ("per", "per"),
                          ("standardised_per_100k", "standardised /100k")], cap=80),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
-             "<h2>3. Findings with a recording explanation</h2>",
+             "<h2>3. Institutional findings</h2><p>Departures concentrated in one establishment: often real (a referral "
+             "centre, a new service, a screening programme), read with the establishment's registration.</p>",
+             table(institutional, [("label", "field"), ("dataset", "source"), ("component", "component"),
+                                   ("first_year", "from"), ("last_year", "to"), ("effect", "effect"), ("q", "q"),
+                                   ("institution_facts", "establishment (CNES)")], cap=30),
+             "<h2>3b. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                            ("class", "class"), ("class_reason", "why")], cap=30),

@@ -75,3 +75,15 @@ bands and lags) on SINAN-TOXG and TOXC, 2019–2024, annual grain: 55 relations.
 at every scale (ρ 0.18–0.24 over 20 to 443 places, 0.73 macro-regional, 0.98 national), read as a shared driver, not a
 lead. That fits a pregnancy shorter than the annual grain and one screening programme behind both notifications. A
 lag in months waits for the monthly grain.
+
+**Interpretation on every finding (7.2, 7.4).**
+- **Context profile.** Each finding carries the mean of every rated context over its places, as a national
+  percentile. Counts without a declared denominator ranked by size alone (every capital at p100), so only rated
+  contexts enter, plus the residents once. Examples: a small Piauí municipality has sewer network p1 and households
+  without a bathroom p99; Manaus is urban p98 with SUS primary-care units per resident p3.
+- **Related fields.** Every other primary field is read at the finding's places and years as O/E with an exact
+  interval. TOXC across Rio Grande do Sul in 2019–2020 is 1.36 [1.24, 1.49]; Porto Alegre in 2023 is 0.57 [0.42, 0.75].
+- **Institutional findings (7.1).** An establishment's CNES.ST registration is read for the finding's first and last
+  year (one national month, 74 s once, then kept in the store). Hospital de Clínicas de Porto Alegre in 2023: a general
+  hospital with a SUS link, 526 beds, an obstetric centre and a neonatal unit. A code absent in a year is "not
+  registered", never zero.

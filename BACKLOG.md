@@ -161,10 +161,10 @@ The interface and the product first, over today's machinery, so every later phas
 
 | id | unit | repo | done when |
 |---|---|---|---|
-| 7.1 | **Institutional findings**: the facility class becomes a finding class read with CNES facts (type, opening, services, beds) and other-chapter volume | core (+data for CNES facts by facility-year) | a facility-concentrated toxoplasmosis finding shows its facility's facts |
-| 7.2 | **Context profile** on every finding | core | every finding row carries it |
+| 7.1 | **Institutional findings**: the facility class becomes a finding class read with CNES facts (type, opening, services, beds) and other-chapter volume | core (+data for CNES facts by facility-year) | a facility-concentrated toxoplasmosis finding shows its facility's facts **Built: a facility-concentrated finding is reported as institutional (its own report section, no longer among recording explanations), with each establishment's CNES.ST registration at the finding's first and last year (`gateway.establishment_facts`: name, type, SUS link, beds, obstetric centre, neonatal unit; absent at the start = opened within it). Hospital de Clínicas de Porto Alegre 2023: general hospital, SUS, 526 beds, obstetric and neonatal. Other-chapter volume is not yet attached.** |
+| 7.2 | **Context profile** on every finding | core | every finding row carries it **Built: `context_profile.parquet` (every finding × every rated context: mean over its places in the period, national percentile), the three most extreme named on the row; counts without a declared denominator are left out and size enters once (residents). A small Piauí municipality: sewer network p1, households without a bathroom p99. Strata contexts (ANS, INEP, climate, disasters) need their `where` and are skipped, logged.** |
 | 7.3 | **Stories as the report's unit**, ranked by evidence, effect, burden | core | the report leads with stories |
-| 7.4 | **Related-field consistency** beside corroboration | core | gestational → congenital consistency shown on stories |
+| 7.4 | **Related-field consistency** beside corroboration | core | gestational → congenital consistency shown on stories **Built: `related.parquet`, every other primary field of the study at a finding's places and years, O/E with its exact interval; the row names those whose interval excludes 1. TOXC over Rio Grande do Sul 2019–2020 1.36 [1.24, 1.49]; Porto Alegre 2023 0.57 [0.42, 0.75].** |
 | 7.5 | **Quality findings** in the report | core | the data-quality section is filled from 2.5 and 6.4 |
 
 ## Phase 8: the model where a study needs it

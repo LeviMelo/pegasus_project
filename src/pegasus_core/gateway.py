@@ -1726,6 +1726,39 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     return out
 
 
+#: an establishment's facts read for an institutional finding (ARCHITECTURE §9.1): pegasus_data's CNES.ST attributes
+#: (`_query_engine.planner.CNES_ATTRIBUTE_FIELDS`), as the establishment was registered in the month read
+ESTABLISHMENT_FACTS = ("CNES.TYPE", "CNES.CARE_LEVEL", "CNES.SUS_LINK", "CNES.MANAGEMENT", "CNES.SURGICAL_BEDS",
+                       "CNES.CLINICAL_BEDS", "CNES.HAS_OBSTETRIC_CENTRE", "CNES.HAS_NEONATAL_UNIT", "CNES.HAS_EMERGENCY")
+
+
+def establishment_facts(codes: list[str], year: int, month: int = 12) -> dict[str, dict[str, str]]:
+    """Each CNES code's registration in ``year``-``month`` (CNES.ST, national, labelled: the establishment's name and its
+    `ESTABLISHMENT_FACTS`); a code absent that month is absent from the result (not yet open, or closed). One national
+    month is read once and kept in the store."""
+    import pegasus_data as pg
+    from pegasus_data._query_engine.planner import CNES_ATTRIBUTE_FIELDS
+
+    cols = ["CNES", "CODUFMUN", *(CNES_ATTRIBUTE_FIELDS[f] for f in ESTABLISHMENT_FACTS)]
+    key = {"what": "establishment_facts", "year": int(year), "month": int(month), "columns": cols,
+           "data": config.data_version()}
+    table = store.get_table("gateway", key)
+    if table is None:
+        raw = pg.query("CNES.ST", period=f"{int(year)}-{int(month):02d}", geography="BR", select=cols,
+                       root=config.data_root())
+        names = {f"({c})": c for c in cols}
+        table = raw.rename_columns([next((v for k, v in names.items() if n.endswith(k)), n) for n in raw.column_names])
+        store.put_table("gateway", key, table, {"source": f"pegasus_data.query(CNES.ST, {year}-{month:02d})"})
+    want = {str(c).strip() for c in codes}
+    out = {}
+    for r in table.to_pylist():
+        label = str(r.get("CNES") or "")
+        code = label.rsplit("(", 1)[-1].rstrip(")") if label.endswith(")") else label
+        if code in want:
+            out[code] = r
+    return out
+
+
 def municipality_names() -> dict[str, dict[str, str]]:
     """Every municipality's name, state and macro-region by its six-digit code (pegasus_data's geography)."""
     from pegasus_data import geography

@@ -1,0 +1,15 @@
+# The generality check (2026-10-10): a second topic through the same declaration, so what was built for the reference
+# study is shown not to be toxoplasmosis' own. Gestational and congenital syphilis: SINAN SIFG/SIFC, A50 (congenital)
+# and O98.1 (in pregnancy) in hospital, death and birth records.
+study: syphilis
+topic:
+  seeds:
+    icd10: [A50, A51, A52, A53, O98.1]
+    sinan: [SIFG, SIFC]
+    terms: [sifilis]
+period: 2010-2025
+where: BR
+grain: [year]
+depth: survey
+ratios:
+  - {numerator: SINAN-SIFC, denominator: SINAN-SIFG}   # congenital notifications per gestational notification
