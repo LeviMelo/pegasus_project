@@ -181,10 +181,11 @@ class Session:
         f = self.expectations.field(node)
         m = self.expectations.model(f.block)
         d = m.data
-        d_col = next((x for x in fields.declared(self.dataset) if x.column == column), None)
-        if d_col is None or d_col.kind != "composition" or d_col.reason:
-            raise ValueError(f"{self.dataset}.{column} is not a modelled composition")
+        missing = group_columns(self.dataset, self.event).get(column)
+        if missing is None:
+            raise ValueError(f"{self.dataset}.{column} is neither a modelled composition nor the race stratum")
         y_g, mu_g = self.by_group(node)
+        collapsed = str(d.population).startswith("events:")
         leaves = set(self.expectations.registry.leaves(f.node))
         primary = (self.source or {}).get("classifier") or next(
             (c["column"] for c in gateway.event_type(self.dataset, self.event).get("classifiers") or [] if c["role"] == "primary"), None)
@@ -193,7 +194,7 @@ class Session:
         index = {int(p_): i for i, p_ in enumerate(d.places)}
         frames = []
         for t, year in enumerate(np.asarray(d.years)):
-            c = gateway.composition_counts(self.dataset, self.event, int(year), column, d_col.missing, primary)
+            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary)
             for tab, value in ((c.counts, None), (c.missing, "not recorded")):
                 if tab is None or tab.num_rows == 0:
                     continue
@@ -203,23 +204,66 @@ class Session:
                 keep &= u >= 0
                 # under an events exposure (a ratio, live births) the block's expectation stands in one cell: the
                 # value's share is then the year's national one, not cell 0's
-                g = (np.zeros(tab.num_rows, dtype=np.int64) if str(d.population).startswith("events:") else
-                     (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges))
+                g_true = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
+                g = np.zeros(tab.num_rows, dtype=np.int64) if collapsed else g_true
                 vals = np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None else np.full(len(code), value, object)
                 n = tab.column("n" if value is None else "m").to_numpy().astype(float)
-                frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep]))
-        values = sorted({v for *_, vals, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
+                frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep], g_true[keep]))
+        values = sorted({v for *_, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
         vi = {v: k for k, v in enumerate(values)}
         U, T, G, K = len(d.places), len(d.years), d.N.shape[2], len(values)
         y = np.zeros((U, T, K))
-        cell = np.zeros((T, G, K))
-        for u, t, g, vals, n in frames:
+        cell, true = np.zeros((T, G, K)), np.zeros((T, G, K))
+        for u, t, g, vals, n, gt in frames:
             k = np.array([vi[v] for v in vals], dtype=np.int64)
             np.add.at(y, (u, t, k), n)
             np.add.at(cell, (t, g, k), n)
+            np.add.at(true, (t, gt, k), n)
+        if column == gateway._strata(self.dataset, self.event).get("race") and set(values) - {"not recorded"} <= set(gateway.RACE):
+            return y, self._race_expected(d, mu_g, true, y, values, edges, nB, collapsed), values
         share = np.divide(cell, cell.sum(2, keepdims=True), out=np.zeros_like(cell), where=cell.sum(2, keepdims=True) > 0)
         mu = np.einsum("utg,tgk->utk", mu_g, share)
         return y, mu, values
+
+    def _race_expected(self, d, mu_g, true, y, values, edges, nB, collapsed) -> np.ndarray:
+        """A race's expected events in a place: the field's age–sex expectation times the place's own population share
+        of that race in each cell (the population account's race slices, `gateway._tensor_population`; under an events
+        exposure, the cells weighted by the events' national age–sex profile), "not recorded" at its national share in
+        the cell, each race re-levelled per year to Brazil's observed total. A place departs when its race mix differs
+        from Brazil's disparity given its own population: Santa Catarina's few pardos read against Brazil's mix were a
+        "departure" of 0.25 (2026-10-10)."""
+        U, T, G = d.N.shape
+        K = len(values)
+        index = {int(p_): i for i, p_ in enumerate(d.places)}
+        tidx = {int(yr): i for i, yr in enumerate(np.asarray(d.years))}
+        pop = np.zeros((U, T, G, K))
+        for k, v in enumerate(values):
+            if v not in gateway.RACE:
+                continue
+            tab = gateway._tensor_population(sorted(tidx), "account-6", gateway.RACE[v])
+            u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
+            t = np.array([tidx.get(int(x), -1) for x in tab.column("year").to_numpy()])
+            g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
+            ok = (u >= 0) & (t >= 0)
+            np.add.at(pop, (u[ok], t[ok], g[ok], k), tab.column("n").to_numpy()[ok])
+        share = np.divide(pop, pop.sum(3, keepdims=True), out=np.zeros_like(pop), where=pop.sum(3, keepdims=True) > 0)
+        nr = values.index("not recorded") if "not recorded" in values else None
+        nr_cell = (np.divide(true[:, :, nr], true.sum(2), out=np.zeros((T, G)), where=true.sum(2) > 0)
+                   if nr is not None else np.zeros((T, G)))
+        if collapsed:
+            w = np.divide(true.sum(2), true.sum((1, 2))[:, None], out=np.zeros((T, G)), where=true.sum((1, 2))[:, None] > 0)
+            mu_tot = mu_g.sum(2)                                                      # [U, T]
+            mix = np.einsum("tg,utgk->utk", w, share)
+            nr_t = (w * nr_cell).sum(1)
+            mu = mu_tot[:, :, None] * mix * (1 - nr_t)[None, :, None]
+            if nr is not None:
+                mu[:, :, nr] = mu_tot * nr_t[None, :]
+        else:
+            mu = np.einsum("utg,utgk->utk", mu_g * (1 - nr_cell)[None], share)
+            if nr is not None:
+                mu[:, :, nr] = (mu_g * nr_cell[None]).sum(2)
+        obs, exp = y.sum(0), mu.sum(0)                                                # [T, K]
+        return mu * np.divide(obs, exp, out=np.ones_like(obs), where=exp > 0)[None]
 
     def exposure(self, sources: list[tuple[str, str]], per: float = 1000.0) -> np.ndarray:
         """[U, T] an exposure on this session's places and periods: the events of ``sources`` ((dataset, event) pairs,
@@ -359,13 +403,11 @@ class Session:
             if self.source.get("source", "events") != "events" or str(self.source.get("population", "")).startswith("events:"):
                 return out
             # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
-            for d_col in fields.declared(self.dataset):
-                if d_col.kind != "composition" or d_col.reason:
-                    continue
-                y_c, mu_c, values = self.by_composition(node, d_col.column)
-                found = lenses.group_disparity(y_c, mu_c, places, f"{fid}|by:{d_col.column}", self.ledger, **{"phi": phi, **kw})
+            for column in group_columns(self.dataset, self.event):
+                y_c, mu_c, values = self.by_composition(node, column)
+                found = lenses.group_disparity(y_c, mu_c, places, f"{fid}|by:{column}", self.ledger, **{"phi": phi, **kw})
                 for x in found:
-                    x.locus = {**x.locus, "groups_by": d_col.column, "group_value": values[x.locus["groups"][0]]}
+                    x.locus = {**x.locus, "groups_by": column, "group_value": values[x.locus["groups"][0]]}
                 out.extend(found)
             return out
         if lens == "institution_step":               # one institution against its catchment (E_i, §4.5)
@@ -1482,6 +1524,17 @@ def kinds_of(x: leads.Lead) -> set[str]:
 
 
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
+def group_columns(dataset: str, event: str) -> dict[str, tuple[str, ...]]:
+    """The category columns a field is split by as group dimensions (ARCHITECTURE §5.3, component 8), with their
+    declared missing codes: every modelled composition and the subject's race stratum (its 'ignorado' a value of its
+    own, "not recorded")."""
+    out = {d.column: tuple(d.missing) for d in fields.declared(dataset) if d.kind == "composition" and not d.reason}
+    race = gateway._strata(dataset, event).get("race")
+    if race and race not in out:
+        out[race] = tuple(next((r.get("missing") or () for r in gateway.roles(dataset) if r["column"] == race), ()))
+    return out
+
+
 READER_FIELDS = ("source", "classifier", "structure", "mark", "indicator", "success", "link", "side", "anchor", "column",
                  "place", "support", "quality", "codes")
 

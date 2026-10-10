@@ -62,3 +62,10 @@ per total birth (live births and foetal deaths), by default. TOXG is 2.96 per 1,
 2024 (Rio Grande do Sul 8.32 in 2023); the literature's Uberlândia figure for 2020–2025 is 3.6–5.6. Foetal deaths
 are 10.1–10.8 per 1,000 total births. Under an event exposure a composition's expected mix is the year's national one.
 Retired answers are no longer triaged or written to a study.
+
+**Race as a group dimension (3.4).** Read against Brazil's mix, race "departed" wherever the population differs: Santa
+Catarina's pardos at 0.25. A race is now expected at the place's own population share of it in each age–sex cell
+(population-account-6's race slices; under a births exposure, at the events' national age–sex profile), re-levelled
+to Brazil's observed totals. TOXG 2019–2024 has 36 departures. Espírito Santo records "amarela" 18.5 times expected,
+beside its schooling "0" at 21.7, which points to a recording practice. Roraima notifies indigenous women at 0.24 of
+their share. Piauí leaves race unrecorded 2.9 times.

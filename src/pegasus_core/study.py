@@ -208,7 +208,7 @@ def _records(it: Item, years: list[int]) -> int:
     total = 0
     prefixes = list(it.nodes or []) + list((it.source or {}).get("codes") or [])
     for y in years:
-        c = gateway.event_counts(it.dataset, it.event, y).counts
+        c = gateway.event_counts(it.dataset, it.event, y, classifier=(it.source or {}).get("classifier")).counts
         if prefixes:
             hit = pc.starts_with(c.column("code"), prefixes[0])
             for n in prefixes[1:]:
@@ -216,6 +216,56 @@ def _records(it: Item, years: list[int]) -> int:
             c = c.filter(pc.fill_null(hit, False))
         total += int(pc.sum(c.column("y")).as_py() or 0)
     return total
+
+
+def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items: list[Item], excluded: list[dict],
+                   served: set[str]) -> None:
+    """Scope v2's sources beyond the primary classifiers (ARCHITECTURE §4, BACKLOG 4.3), from pegasus_data's concept
+    index (`pegasus_data.concept_index`):
+    - every other ICD-10 classifier holding the seeds (SIA's diagnoses), read as a code set on that classifier;
+    - SINAN agravos whose records carry the codes beyond the seeded ones (SINAN-SDTA's toxoplasmosis outbreaks), read
+      as a code set on ``ID_AGRAVO``;
+    - SIGTAP procedures whose name matches a term (toxoplasma serology, the heel-prick IgM), read as a code set on
+      every SIGTAP classifier. A procedure only *compatible* with the codes (a caesarean under O98.6) is not the topic's
+      event: it is recorded in the scope's notes, and reached through its diagnoses."""
+    import pegasus_data as pg
+
+    prefixes = sorted(set(nodes) | set(codes))
+    terms = decl.seeds.get("terms", [])
+    if not prefixes and not terms:
+        return
+    ix = pg.concept_index(prefixes, terms, root=config.data_root())
+    seeded = {it.dataset for it in items if it.source is None and it.nodes is None}
+    procedures = sorted({r["code"] for r in ix["labels"] if r["structure"] == "SIGTAP" and r["level"] == "procedure"})
+    for ds in sorted(served):
+        for et in gateway.event_types(ds):
+            for c in et.get("classifiers") or []:
+                if c.get("role") == "primary" and c.get("structure") == "ICD10":
+                    continue                    # read by the primary loop, with its tree
+                if c.get("structure") == "ICD10" and prefixes:       # its records decide (`_records`)
+                    items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
+                                      f"(ICD-10) carries {', '.join(prefixes)}, read as one code set",
+                                      source={"classifier": c["column"], "codes": prefixes}))
+                elif c.get("structure") == "SIGTAP" and procedures:
+                    items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
+                                      f"(SIGTAP) holds the procedures named for the topic ({', '.join(procedures)})",
+                                      source={"classifier": c["column"], "structure": "SIGTAP", "codes": procedures}))
+    for d in ix["sinan"]:
+        if d["dataset"] in seeded or d["dataset"] not in served:
+            continue
+        for et in gateway.event_types(d["dataset"]):
+            items.append(Item(d["dataset"], et["name"], ["*"], None, [], f"its records' agravo code (ID_AGRAVO) carries "
+                              f"{', '.join(f'{k} ({v})' for k, v in d['codes'].items())} in {d['year']}",
+                              source={"classifier": "ID_AGRAVO", "codes": sorted(d["codes"])}))
+    compatible = sorted({(r["procedure"], r["procedure_name"]) for r in ix["procedures"]})
+    if compatible:
+        excluded.append({"seed": "SIGTAP compatibility", "why": f"{len(compatible)} procedures are allowed under the codes "
+                         "(not the topic's events: reached through their diagnoses): "
+                         + "; ".join(f"{c} {n}" for c, n in compatible[:12]) + (" …" if len(compatible) > 12 else "")})
+    weak = [r for r in ix["labels"] if r["structure"] == "ICD10" and not any(r["code"].startswith(p) for p in prefixes)]
+    if weak:
+        excluded.append({"seed": "terms", "why": "ICD-10 labels match a term but no seed holds them (a name, the weakest "
+                         "evidence; add them as seeds to read them): " + ", ".join(f"{r['code']} {r['label']}" for r in weak)})
 
 
 def resolve(decl: Declaration, log=print) -> Scope:
@@ -264,6 +314,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
                                       f"its primary classifier ({prim['column']}) holds {', '.join(held)}"
                                       + (f"; also read in every code its records carry ({', '.join(mentions)})"
                                          if mentions else ""), mentions=mentions))
+    _concept_items(decl, nodes, codes, items, excluded, served)
     for r in decl.ratios:
         try:
             num, den = _field_spec(r["numerator"]), _field_spec(r["denominator"])
@@ -631,18 +682,19 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     places = np.asarray(s.expectations.model(f.block).data.places)
     state = places // 10000
     years = np.asarray(s.expectations.model(f.block).data.years)
-    for d_col in fields.declared(it.dataset):
-        if d_col.kind != "composition" or d_col.reason:
-            continue
+    from . import tools
+
+    names = {d.column: d.name for d in fields.declared(it.dataset)}
+    for column in tools.group_columns(it.dataset, it.event):
         try:
-            y, mu, values = s.by_composition(f.node, d_col.column)
+            y, mu, values = s.by_composition(f.node, column)
         except Exception as exc:  # noqa: BLE001 - a column that cannot be split is a note, the others are written
-            log(f"study: {it.dataset} {f.node} by {d_col.column}: {type(exc).__name__}: {exc}")
+            log(f"study: {it.dataset} {f.node} by {column}: {type(exc).__name__}: {exc}")
             continue
         for t, year in enumerate(years):
             for level, unit, sel in [("national", "BR", np.ones(len(places), bool))] +                     [("state", str(int(st)), state == st) for st in np.unique(state)]:
                 obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
-                out.extend({"field": f.id, "label": label, "dataset": it.dataset, "by": d_col.column, "by_name": d_col.name,
+                out.extend({"field": f.id, "label": label, "dataset": it.dataset, "by": column, "by_name": names.get(column, "race"),
                             "value": v, "level": level, "unit": unit, "year": int(year), "observed": float(obs[k]),
                             "expected": float(exp[k])} for k, v in enumerate(values) if obs[k] > 0 or exp[k] > 0)
     return out
