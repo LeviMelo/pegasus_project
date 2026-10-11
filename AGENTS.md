@@ -187,6 +187,15 @@ $PY scripts/check_docs.py
 - **A synthetic that reproduces a symptom can validate the wrong mechanism.** Confirm every fix on the real object, and rerun the headline result after it.
 - **Locate a phenomenon in the model before fixing it.** A recurring patch means a missing abstraction.
 - **Check a fact before stating it:** a count, a date, what a document or a paper says.
+- **Never run, wait on or measure outdated code** (author, 2026-10-11). A run tests the commit it was launched on and
+  nothing else.
+  - The moment a commit changes code a running job executes, stop that job and relaunch it on the new commit. Do not
+    keep it "to measure cost" or "to see the rest": its numbers describe code that no longer exists, and every hour
+    it holds the machine is lost.
+  - Never launch a run on a commit older than the working branch's head, and never read a run's output as evidence
+    about the current code without checking the commit it ran.
+  - Prefer the smallest run that exercises the failure point (a restricted declaration: few sources, short period,
+    one depth's new paths) over a full study. A full study is the milestone, not the debugging loop.
 - **Profile before optimising.** Record speed as measured, never as hoped; a missed target is a defect to locate in the profile.
 
 ---
