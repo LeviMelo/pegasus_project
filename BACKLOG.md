@@ -179,7 +179,7 @@ The interface and the product first, over today's machinery, so every later phas
 
 | id | unit | repo | done when |
 |---|---|---|---|
-| 9.1 | **Cost model** from measured throughput, shown by `scope` | core | estimates within a factor 1.5 of the actual run on the toxoplasmosis study |
+| 9.1 | **Cost model** from measured throughput, shown by `scope` | core | estimates within a factor 1.5 of the actual run on the toxoplasmosis study **Built, to be measured: each item's wall clock predicted before the run (`study._estimate`: its own measured seconds from earlier studies' provenance; else the nearest stored fit of its dataset and block scaled by years, or the stores' fit-seconds-on-events relation; plus the median measured question pass), shown by `scope` (`estimated_minutes`); each run records its items' seconds. Fit seconds on events alone scatter by a factor ~7 (log sd 2.1 over 273 fits), so the first runs set the per-source figures.** |
 | 9.2 | **Vectorised component passes** across a family's fields | core | per-field component pass at least 5× faster on a SINAN family, same answers |
 | 9.3 | **Screen, then examine** with error control across the stages | core | same findings at q on the grid, less time |
 | 9.4 | Lake and store hygiene as studies grow (pinning, `gc` budgets, prune after verified builds) | core + data | disk stays within its floor during the exhaustive run |

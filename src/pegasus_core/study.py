@@ -148,6 +148,7 @@ class Item:
     source: dict | None = None           # a reader of its own: {"codes": [...]} for a code set read as one field
     readers: dict = field(default_factory=dict)   # the declared readers the depth adds (`update.System`'s keys)
     denominator: tuple | None = None     # a ratio's denominator dataset and lag (its exposure is in ``source``)
+    est_seconds: float | None = None     # the run's predicted wall clock for this item (`_estimate`)
     note: str = ""
 
 
@@ -164,7 +165,8 @@ class Scope:
         return {"study": self.study, "depth": self.depth, "download_budget_gb": self.budget_gb,
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
-                "not_read": self.excluded, "contexts": self.contexts}
+                "not_read": self.excluded, "contexts": self.contexts,
+                "estimated_minutes": round(sum(i.est_seconds or 0 for i in self.items if i.status == "in") / 60, 1)}
 
 
 def _field_spec(text: str) -> tuple[str, str, list[str]]:
@@ -216,6 +218,51 @@ def _records(it: Item, years: list[int]) -> int:
             c = c.filter(pc.fill_null(hit, False))
         total += int(pc.sum(c.column("y")).as_py() or 0)
     return total
+
+
+def _estimate(decl: Declaration, items: list[Item]) -> None:
+    """Each item's predicted wall clock (BACKLOG 9.1), from measured throughput: an item a past study ran is predicted
+    by its own measured seconds (provenance of studies beside this one, scaled by its years); otherwise its fits by the
+    nearest stored fit of the same dataset and block (scaled by years), or, for a source never fitted, by the stores'
+    log-log relation of fit seconds to events; plus its questions at the median measured seconds per item."""
+    import glob
+    import json
+
+    from . import store
+
+    measured, per_item = {}, []
+    for path in glob.glob(str(decl.path.parent / "*" / "provenance.json")):
+        try:
+            prov = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for step, v in (prov.get("steps") or {}).items():
+            if isinstance(v, dict) and v.get("seconds") and "error" not in v:
+                measured[step] = float(v["seconds"])
+                per_item.append(float(v["seconds"]))
+    fits = [m for m in store.manifests("monolith") if m.get("fit_seconds")]
+    if len(fits) >= 10:
+        e = np.log([max(float(m.get("events") or 1.0), 1.0) for m in fits])
+        b, a = np.polyfit(e, np.log([float(m["fit_seconds"]) for m in fits]), 1)
+    else:
+        a, b = 3.0, 0.3
+    questions = float(np.median(per_item)) if per_item else 120.0
+    for it in items:
+        if it.status != "in" or not it.years:
+            continue
+        step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
+        if step in measured:
+            it.est_seconds = round(measured[step], 1)
+            continue
+        fit = 0.0
+        for block in it.blocks:
+            same = [m for m in fits if m["key"].get("dataset") == it.dataset and m["key"].get("block") == block]
+            if same:
+                m = max(same, key=lambda m: len(m["key"].get("years") or []))
+                fit += float(m["fit_seconds"]) * len(it.years) / max(len(m["key"].get("years") or [1]), 1)
+            else:
+                fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
+        it.est_seconds = round(fit + questions, 1)
 
 
 def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items: list[Item], excluded: list[dict],
@@ -389,6 +436,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
         # readers would read every event of the type against the population
         it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
+    _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget)
 
@@ -422,7 +470,9 @@ def run(decl: Declaration, log=print) -> Path:
         # one step per item: a dataset read as a code set, a chapter and a ratio is three
         step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
         try:
+            t_item = time.time()
             steps[step] = update.run(plan, log=log)
+            steps[step]["seconds"] = round(time.time() - t_item, 1)
         except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
             where = traceback.extract_tb(exc.__traceback__)[-3:]
             steps[step] = {"error": f"{type(exc).__name__}: {exc}",
