@@ -611,17 +611,48 @@ def resolve(decl: Declaration, log=print) -> Scope:
                  for t in (gateway.treatments(nodes + codes) if nodes or codes else []) for sub in t["substances"]]
     contexts += _medicines(nodes + codes)
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
+    extra: list[tuple[float, Item]] = []            # (strength, item): the related codes' fields, read within the depth's time
     if decl.depth != "survey":
         # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
         for r in (r for r in related if r["related"]):
-            items.append(Item(r["dataset"], r["event"], ["*"], None, list(r["years"]),
-                              f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the "
-                              f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
+            extra.append((float(r.get("low") or 0.0), Item(
+                r["dataset"], r["event"], ["*"], None, list(r["years"]),
+                f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the topic's codes, "
+                f"{r['lift']:.1f} times expected", source={"codes": [r["code"]]})))
     if decl.depth in ("deep", "exhaustive"):
-        items += _related_elsewhere(decl, [r for r in related if r["related"]], served)
+        strength = {r["code"]: float(r.get("low") or 0.0) for r in related if r["related"]}
+        extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
+                  for it in _related_elsewhere(decl, [r for r in related if r["related"]], served)]
+    items += _within_time(decl, items, extra)
     overlap, overhead = _phase_record(decl)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+
+
+#: the wall clock a depth may spend on the related codes' fields beyond the topic's own (minutes; the topic's items are
+#: always read): the standard scope held 240 related fields beside 36 of the topic's, about 16 hours (2026-10-11)
+TIME_BUDGET_MIN = {"survey": 0.0, "standard": 240.0, "deep": 720.0, "exhaustive": float("inf")}
+
+
+def _within_time(decl: Declaration, items: list[Item], extra: list[tuple[float, Item]]) -> list[Item]:
+    """The related fields ``extra`` (strength, item) admitted strongest first (the lower bound of the code's lift) while
+    their estimated seconds (`_estimate`) fit the depth's time budget beside the topic's items; the rest are deferred
+    with why, never dropped."""
+    if not extra:
+        return []
+    added = [it for _, it in extra]
+    _estimate(decl, added)
+    room = TIME_BUDGET_MIN[decl.depth] * 60
+    spent = 0.0
+    for strength, it in sorted(extra, key=lambda p: -p[0]):
+        cost = it.est_seconds or 0.0
+        if spent + cost <= room:
+            spent += cost
+            continue
+        it.status = "deferred"
+        it.note = (f"past the {decl.depth} depth's {TIME_BUDGET_MIN[decl.depth] / 60:g} h for related fields "
+                   f"(lift's lower bound {strength:.1f}; stronger ones read first)")
+    return added
 
 
 def _phase_record(decl: Declaration) -> tuple[float, float]:
