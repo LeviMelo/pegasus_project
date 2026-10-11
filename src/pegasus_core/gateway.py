@@ -101,6 +101,16 @@ def population_key(source: str | None = None) -> dict:
     return {} if source == "popsvs" else {"population": source, **({"population_model": "+".join(models)} if models else {})}
 
 
+def valid_places(year: int) -> pa.Array:
+    """The municipalities the population holds in ``year``: a reading's valid residences. A year it holds none of
+    raises: SIM-DOFET before 2000 (POPSVS starts there) read every death as unallocated by municipality, a count of
+    nothing that looked like data (2026-10-11)."""
+    u = population([year]).column("u").unique()
+    if len(u) == 0:
+        raise LookupError(f"no population for {year}: its events cannot be placed against a denominator")
+    return u
+
+
 def population(years: range | list[int], series: str = "POPSVS", source: str | None = None, dataset: str | None = None,
                race: str | None = None) -> pa.Table:
     """Person-years by (u, year, sex, age): u 6-digit, sex 1 male / 2 female.
@@ -614,7 +624,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
                               allow_partial=False, max_download=8 * 1024**3)
     con = duckdb.connect()
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     sex = _sex_sql(strata, dataset, raw)
     code = f'upper(trim("{column}"))' if column else "'*'"
@@ -836,7 +846,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     raw = _records(dataset, event, year, cols)
     con = duckdb.connect()
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{spec_class}" AS VARCHAR)))' if spec_class else "'*'"
     where = ""
@@ -943,7 +953,7 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
         ([classifier] if classifier else []) + ([casemix] if casemix else []) + ([fcol] if fcol else [])
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     pg = f"coalesce(left(trim(CAST(\"{casemix}\" AS VARCHAR)), {CASEMIX_CHARS}), '')" if casemix else "''"
@@ -1092,7 +1102,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     xs = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "x_{i}"' for i, c in enumerate(batch))
@@ -1210,7 +1220,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con = duckdb.connect()
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     div = 10 ** (6 - width)
@@ -1336,7 +1346,7 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     con = duckdb.connect()
     raw = _records(dataset, event, year, cols)
     con.register("r", raw)
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)},
@@ -2140,7 +2150,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     con = duckdb.connect()
     con.register("r", raw)
     con.register("pm", pa.table({"rid": ids, "p": p}))
-    valid = places if places is not None else population([year]).column("u").unique()
+    valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
     con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
