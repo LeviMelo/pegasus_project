@@ -488,9 +488,18 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
                                       f"(ICD-10) carries {', '.join(prefixes)}, read as one code set",
                                       source={"classifier": c["column"], "codes": prefixes}))
                 elif c.get("structure") == "SIGTAP" and procedures:
+                    # the instruments SIGTAP registers each procedure on, against the column's (pegasus_data
+                    # `can_record`): SIGTAP is every SIA dataset's tree, and the serology procedures, recorded by BPA
+                    # and AIH only, made the survey decode 6,800 APAC files for none (2026-10-11); None (undeclared or
+                    # unlisted) keeps the code
+                    ok = [p for p in procedures if pg.can_record(ds, c["column"], [p], root=config.data_root()) is not False]
+                    if not ok:
+                        excluded.append({"seed": f"{ds}:{et['name']}", "why": f"its {c['column']} records instruments "
+                                         f"SIGTAP registers none of {', '.join(procedures)} on"})
+                        continue
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
-                                      f"(SIGTAP) holds the procedures named for the topic ({', '.join(procedures)})",
-                                      source={"classifier": c["column"], "structure": "SIGTAP", "codes": procedures}))
+                                      f"(SIGTAP) holds the procedures named for the topic ({', '.join(ok)})",
+                                      source={"classifier": c["column"], "structure": "SIGTAP", "codes": ok}))
     # the columns that name a record's condition (the roles' event-type columns on ICD-10: SINAN's agravo code), where
     # the index counted the codes and no classifier above reads them already
     read = {(it.dataset, (it.source or {}).get("classifier")) for it in items}
