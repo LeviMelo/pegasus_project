@@ -102,3 +102,13 @@ under independence within sex × ten-year age strata (exact Poisson, BH at 0.05)
 leads: B24 on 7,816 certificates at 27.6 times expected [27.0, 28.2], B20 at 23.1. AIDS's opportunistic infections
 follow: pneumocystosis (B59, 16.2), cytomegalovirus (B25, 22.5), CNS tuberculosis (A17, 25.3), candidiasis (B37, 16.3).
 That is the known clinical picture of cerebral toxoplasmosis in AIDS. The read takes 7 s once the counts are cached.
+
+**Same-record outcomes in the cohort scan (6.1).** `pegasus-core cohort SINASC-DN birth baby 2021 --outcome
+record:IDANOMAL=1 --outcome record:CODANOMAL~Q90` gave 2,677,101 births, 22,959 with an anomaly and 1,125 with Down
+syndrome. Of 256 contrasts over 25 attributes, 39 hold at q 0.05:
+- preterm gestations carry 3.3–4.3 times the anomaly rate;
+- breech presentation 2.6 times;
+- an unrecorded sex 85 times (an undetermined sex marks a genital anomaly);
+- Down syndrome is raised in Robson groups 7 and 10 (breech; preterm).
+
+The run took 1,056 s, mostly reading the record identities.

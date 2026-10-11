@@ -151,7 +151,7 @@ The interface and the product first, over today's machinery, so every later phas
 
 | id | unit | repo | done when |
 |---|---|---|---|
-| 6.1 | **Same-record outcomes in the cohort scan** (an anomaly at birth against the mother's attributes) | core | SINASC anomalies × mother's attributes answered |
+| 6.1 | **Same-record outcomes in the cohort scan** (an anomaly at birth against the mother's attributes) | core | SINASC anomalies × mother's attributes answered **Done: `cohort` reads outcomes on the person's own record (`record:COLUMN=values`, `record:COLUMN~codes`), no link needed. SINASC 2021 (2,677,101 births): anomaly recorded on 22,959, Down syndrome (Q90) on 1,125; preterm gestations 3.3–4.3× the anomaly rate, breech presentation 2.6×, sex not recorded 85× (undetermined sex marks genital anomalies); 1,056 s, the record identities' read the bulk.** |
 | 6.2 | **New links declared and measured**: TOXG → SINASC birth, TOXC → SINASC birth (SINAN carries the birth year only since the LGPD), notification ↔ admission ↔ death for the topic's codes; viability decides | data | each link run with its viability verdict on real years |
 | 6.3 | **Linked sequences in studies** (fields along a scope's person paths) | core | births with anomalies → infant admission → death shares in the toxoplasmosis study |
 | 6.4 | **Capture–recapture** as a study product (2.7 + quality) | core | completeness by system, state, year in `quality.parquet` |
