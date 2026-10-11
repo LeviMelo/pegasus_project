@@ -165,12 +165,12 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                 counts[name] = (y, mu)
     # the same events in two systems: measured overlap, and the "not linked to" fields
     shared: dict[tuple[int, str], float] = {}           # (field index, other dataset) -> its events' linked share
-    in_map = {ds.upper().replace(".", "-"): (ds, ev) for ds, ev, _ in systems}
+    in_map = {gateway.dataset_key(ds): (ds, ev) for ds, ev, _ in systems}
     for spec_name, spec in gateway.link_specs().items():
         if not spec.same_event:
             continue
         for side, sd_, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
-            mine, theirs = sd_.dataset.upper().replace(".", "-"), other.dataset.upper().replace(".", "-")
+            mine, theirs = gateway.dataset_key(sd_.dataset), gateway.dataset_key(other.dataset)
             if mine not in in_map or theirs not in in_map or (sd_.group and sd_.where):
                 continue
             ds, ev = in_map[mine]

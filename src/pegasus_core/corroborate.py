@@ -36,7 +36,7 @@ from . import config, gateway, store
 
 
 def _system(dataset: str) -> str:
-    return dataset.upper().replace(".", "-")
+    return gateway.dataset_key(dataset)
 
 
 @dataclass(frozen=True)

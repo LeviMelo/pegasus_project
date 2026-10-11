@@ -161,6 +161,7 @@ class Scope:
     contexts: list[str]
     budget_gb: float
     related: list[dict] = field(default_factory=list)   # codes found with the seeds on the same records (`cooccur`)
+    paths: list[dict] = field(default_factory=list)     # declared links touching the read sources, with their runs' verdicts
 
     def to_dict(self) -> dict:
         """The scope as plain values (numpy scalars from the counts made plain: YAML refuses them)."""
@@ -171,6 +172,7 @@ class Scope:
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
+                "person_paths": self.paths,
                 "estimated_minutes": round(sum(i.est_seconds or 0 for i in self.items if i.status == "in") / 60, 1)}
 
 
@@ -294,6 +296,86 @@ def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) 
             out += [{"dataset": it.dataset, "event": it.event, "where": d.column, "years": [it.years[0], it.years[-1]],
                      **r} for r in rows if r["related"]]
     return sorted(out, key=lambda r: -r["lift"])
+
+
+#: the verdicts of a stored link run (pegasus_data judges each before any result: the pairs a shifted key finds by
+#: chance, the held-out agreements) under which its pairs are read
+USABLE_LINKS = ("viable", "use with caution")
+
+
+def _link_runs() -> list[dict]:
+    """Every stored run of a current link spec (pegasus_data's link store), with its file stem."""
+    import pegasus_data as pg
+    from pegasus_data.linkage import store as link_store
+
+    out = []
+    for r in link_store.runs(pg.load_settings(root=config.data_root())):
+        run = r.get("run") or {}
+        if run.get("current"):
+            out.append({**r, "stem": f"{run.get('method')}_{run.get('geography')}_{run.get('period')}_{run.get('spec_digest')}"})
+    return out
+
+
+def _person_paths(items: list[Item], runs: list[dict]) -> list[dict]:
+    """Scope v2's person paths (BACKLOG 4.3, 6.2): every declared link (pegasus_data `links.yml`) with a side on a read
+    source, what it pairs, and each stored run's verdict; ``verdict`` is the best of them, "not run" when none is
+    stored. A path is not a field: `_linked_items` reads the ones whose runs are usable."""
+    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"}
+    rank = {"viable": 2, "use with caution": 1}
+    out = []
+    for name, spec in gateway.link_specs().items():
+        ends = [gateway.dataset_key(spec.left.dataset), gateway.dataset_key(spec.right.dataset)]
+        if not set(ends) & read:
+            continue
+        mine = sorted((r for r in runs if r["run"].get("spec") == name), key=lambda r: str(r["run"].get("period")))
+        best = max((r.get("verdict") or "not viable" for r in mine), key=lambda v: rank.get(v, 0), default="not run")
+        out.append({"link": name, "left": spec.left.dataset, "right": spec.right.dataset,
+                    "sides_read": [s for s, k in zip(("left", "right"), ends, strict=True) if k in read],
+                    "what": " ".join(str(spec.description).split()), "verdict": best,
+                    "runs": [{"period": r["run"].get("period"), "method": r["run"].get("method"), "pairs": r.get("pairs"),
+                              "chance_percent": r.get("chance_percent"),
+                              "chance_upper95_percent": r.get("chance_upper95_percent"), "verdict": r.get("verdict")}
+                             for r in mine]})
+    return out
+
+
+def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], excluded: list[dict]) -> list[Item]:
+    """The linked-share fields of the person paths (ARCHITECTURE §5.2): on every read source a usable path has a side
+    on, the share of the source's events paired across the link (`fields.link_source`), over the years whose covering
+    runs (`gateway.covering_runs`: a padded side's records of a year are paired by the runs around it) are all stored
+    with a usable verdict. A year without one is left out and said, never read as unlinked."""
+    from pegasus_data.linkage.engine import link_method, stored_key
+
+    verdicts = {(r["run"].get("spec"), r["stem"]): r.get("verdict") for r in runs}
+    out = []
+    for p in (p for p in paths if p["verdict"] in USABLE_LINKS):
+        method = link_method(p["link"])
+        for it in (i for i in items if i.status == "in" and i.source is None):
+            for side in (s for s in p["sides_read"] if gateway.same_dataset(p[s], it.dataset)):
+                column = f"link:{p['link']}:{side}"
+                d = next((x for x in fields.declared_links(it.dataset, it.event) if x.column == column), None)
+                if d is None:
+                    continue
+                if d.reason:
+                    excluded.append({"seed": f"{it.dataset}:{column}", "why": d.reason})
+                    continue
+
+                def usable(z: int, link: str = p["link"], method: str = method) -> bool:
+                    return verdicts.get((link, stored_key(link, method, z, "BR").stem)) in USABLE_LINKS
+
+                ys = [y for y in it.years if all(usable(z) for z in gateway.covering_runs(p["link"], side, y))]
+                if not ys:
+                    excluded.append({"seed": f"{it.dataset}:{column}", "why": f"no year of {it.years[0]}-{it.years[-1]} "
+                                     f"has every covering run of {p['link']} stored with a usable verdict"})
+                    continue
+                verdict = sorted({r["verdict"] for r in p["runs"] if r["verdict"] in USABLE_LINKS})
+                items.append(Item(it.dataset, it.event, list(it.blocks), it.nodes, ys,
+                                  f"person path {p['link']}: the share of its {side} side's events paired with "
+                                  f"{p['right' if side == 'left' else 'left']} ({', '.join(verdict)})",
+                                  source=fields.link_source(it.dataset, it.event, column), records=it.records,
+                                  note="" if ys == it.years else f"years {sorted(set(it.years) - set(ys))} have no usable run"))
+                out.append(items[-1])
+    return out
 
 
 def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items: list[Item], excluded: list[dict],
@@ -467,6 +549,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
         # readers would read every event of the type against the population
         it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
+    runs = _link_runs()
+    paths = _person_paths(items, runs)
+    if decl.depth != "survey":
+        _linked_items(items, paths, runs, excluded)     # a survey lists the paths; each linked share is a fit of its own
     _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
@@ -476,7 +562,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
             items.append(Item(r["dataset"], r["event"], ["*"], None, list(r["years"]),
                               f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the "
                               f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
-    return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related)
+    return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths)
 
 
 # ---------------------------------------------------------------------- the run
@@ -1190,6 +1276,8 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
             hyp: list[dict] | None = None, relations: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
+    from pegasus_data.linkage.engine import CAUTION, VIABLE
+
     e = html.escape
     read = [i for i in scope.items if i.status == "in"]
     # a quality field's departures are the data's, not the disease's: their own section (ARCHITECTURE §9.1, BACKLOG 7.5)
@@ -1258,6 +1346,15 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                                       ("observed", "records with both"), ("expected", "expected"), ("lift", "lift"),
                                       ("low", "95% from"), ("high", "to"), ("q", "q")], cap=25)
                 if scope.related else "<p>None at q.</p>"),
+             "<h3>Person paths</h3><p>Declared record links between the sources read (no name is published: pairs "
+             "are found on birth date, sex, residence and dates). A link is read only where its negative control, the "
+             f"same key shifted, finds few pairs by chance (viable at most {VIABLE[0]:g}% with {VIABLE[1]:g}% "
+             f"agreement of its held-out fields, with caution at most {CAUTION[0]:g}% with {CAUTION[1]:g}%, on the "
+             "95% upper bound); otherwise what it would answer is not answered here.</p>"
+             + (table([{**p, "best": _best_run(p)} for p in scope.paths],
+                      [("link", "link"), ("left", "from"), ("right", "to"), ("verdict", "verdict"),
+                       ("best", "best stored run (period: pairs, chance %)"), ("what", "what it pairs")], cap=40)
+                if scope.paths else "<p>No declared link touches the sources read.</p>"),
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>5. Hypotheses</h2>",
@@ -1274,6 +1371,17 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
            "padding:3px 8px;text-align:left}th{background:#f4f4f4}img{max-width:100%;margin:.5em 0}.meta,.more{color:#666}")
     (out / "report.html").write_text(f"<!doctype html><meta charset=utf-8><title>{e(decl.study)}</title><style>{css}"
                                      f"</style>{''.join(parts)}", encoding="utf-8")
+
+
+def _best_run(path: dict) -> str:
+    """A person path's stored run with the most pairs among its best verdict's, as 'period: pairs, chance %'."""
+    rank = {"viable": 2, "use with caution": 1}
+    runs = sorted(path["runs"], key=lambda r: (rank.get(r.get("verdict") or "", 0), r.get("pairs") or 0), reverse=True)
+    if not runs:
+        return "not run"
+    r = runs[0]
+    chance = r.get("chance_upper95_percent") if r.get("chance_upper95_percent") is not None else r.get("chance_percent")
+    return f"{r['period']}: {r.get('pairs')} pairs" + (f", chance ≤ {chance:.1f}%" if chance is not None else "")
 
 
 def _stories(rows: list[dict]) -> list[list[dict]]:

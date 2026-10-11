@@ -581,7 +581,7 @@ def declared_links(dataset: str, event: str) -> list[Declared]:
     out = []
     for name, spec in gateway.link_specs().items():
         for side, sd, other in (("left", spec.left, spec.right), ("right", spec.right, spec.left)):
-            if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
+            if not gateway.same_dataset(sd.dataset, dataset):
                 continue
             reason = ("a grouped side with a filter or a 'latest' order is not read yet"
                       if sd.group and (sd.where or getattr(sd, "latest", None)) else "")
@@ -601,7 +601,8 @@ def link_source(dataset: str, event: str, column: str) -> dict:
     _, name, side = column.split(":")
     et = gateway.event_type(dataset, event)
     primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
-    return {"source": "linked", "link": name, "side": side, **({"classifier": primary} if primary else {})}
+    return {"source": "linked", "link": name, "side": side, **({"classifier": primary} if primary else {}),
+            "runs": gateway.link_runs_key(name)}     # the stored pairs' content: every key built from the reader follows it
 
 
 def coverage(dataset: str, event: str) -> list[dict]:

@@ -880,7 +880,7 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
     import pegasus_data as pg
     from pegasus_data._request import parse_dataset
 
-    system = {"SIH": "SIHSUS"}.get(parse_dataset(dataset)[0], parse_dataset(dataset)[0])
+    system = parse_dataset(dataset)[0]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         labelled = pg.translate(pa.table({column: list(codes)}), system=system).to_pylist()
@@ -1819,7 +1819,7 @@ def code_groups(dataset: str) -> dict[str, list[str]]:
     ``codes``: every diagnosis of an admission, every cause a death certificate mentions), by role."""
     from pegasus_data.linkage.roles import load_roles
 
-    spec = load_roles().get(dataset.upper().replace(".", "-"))
+    spec = next((v for k, v in load_roles().items() if same_dataset(k, dataset)), None)
     if spec is None:
         return {}
     return {name: [r.column, *r.also] for name, r in spec.roles.items() if getattr(r, "type", "") == "codes"}
@@ -2005,8 +2005,22 @@ def _rep_sql(group: list[str]) -> str:
     return f'min("_rid") OVER (PARTITION BY {keys})'
 
 
+def link_runs_key(link: str) -> str:
+    """The content of ``link``'s stored runs (their reports, which name the pairs' identity and counts), as a key: a
+    reader of the link carries it, so its assemblies and fits follow a run added, rerun or relabelled. Keyed on the
+    data version alone, a fit made on pairs that matched nothing outlived their relabelling (2026-10-10)."""
+    import hashlib
+    from pathlib import Path
+
+    h = hashlib.sha256()
+    for report in sorted((Path(config.data_root()) / "lake" / "links" / link).glob("*.json")):
+        h.update(report.name.encode())
+        h.update(report.read_bytes())
+    return h.hexdigest()[:12]
+
+
 def linked_counts(dataset: str, event: str, year: int, link: str, side: str, classifier: str | None = None,
-                  places: pa.Array | None = None) -> EventCounts:
+                  places: pa.Array | None = None, runs: str | None = None) -> EventCounts:
     """The events of one side of a declared link per (u, year, sex, age, code): n, kv the variance of the linked count
     (Σ p(1 − p), the linkage's own uncertainty), and k the expected number with a
     partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
@@ -2019,13 +2033,14 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
-    if sd.dataset.upper().replace(".", "-") != dataset.upper().replace(".", "-"):
+    if not same_dataset(sd.dataset, dataset):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
     group = _group_columns(dataset, sd)
     strata = _strata(dataset, event)
     _per_record(dataset, event, "a link's pairs")
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
+           "runs": runs or link_runs_key(link),
            **_df_key(dataset, year), "code": config.code_key(linked_counts)}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
@@ -2056,6 +2071,10 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+    if pairs.num_rows and not con.execute("SELECT count(*) FROM e JOIN pm USING (rid)").fetchone()[0]:
+        # pairs that name none of the side's records name them another way (runs stored under the fallback identity
+        # read zero everywhere until pegasus_data relabelled them, 2026-10-10): an empty share must not look measured
+        raise LookupError(f"{link}: {pairs.num_rows} pairs, none naming a {dataset} record of {year}")
     sens = getattr(spec, "sensitivity", "")
     if sens and sens != side:
         # the other side's records should all find a partner: its linked share by residence is the link's sensitivity,
@@ -2087,9 +2106,25 @@ def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> t
     return t, t.column("rid")
 
 
+@functools.cache
+def dataset_key(dataset: str) -> str:
+    """A dataset's one name whatever its spelling (pegasus_data's `parse_dataset`: SIH-RD, SIH.RD and SIHSUS-RD are
+    SIHSUS-RD). The event types, the roles and the links each spell some datasets their own way; compared by their
+    spelling, SIH's every-diagnosis reader and its links were never found for SIHSUS-RD (2026-10-10)."""
+    from pegasus_data._request import parse_dataset
+
+    system, series = parse_dataset(dataset)
+    return f"{system}-{series or system}".upper()
+
+
+def same_dataset(a: str, b: str) -> bool:
+    return dataset_key(a) == dataset_key(b)
+
+
 def data_code(dataset: str) -> str:
-    """pegasus_data's code of a dataset as its links and persons name it (SIM.DO -> SIM-DO)."""
-    return dataset.upper().replace(".", "-")
+    """pegasus_data's code of a dataset as its links and persons name it (SIHSUS-RD -> SIH-RD, SIM.DO -> SIM-DO)."""
+    named = {dataset_key(sd.dataset): sd.dataset for spec in link_specs().values() for sd in (spec.left, spec.right)}
+    return named.get(dataset_key(dataset), dataset.upper().replace(".", "-"))
 
 
 def persons(year: int, draw: int | None = None):
