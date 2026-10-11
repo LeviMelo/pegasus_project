@@ -697,8 +697,12 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
             if not gateway.same_dataset(kind[0], it.dataset) or (it.dataset, kind) in done:
                 continue
             done.add((it.dataset, kind))
-            same = [("record", f"{r['where']}~{r['code']}") for r in scope.related
-                    if r.get("related") and gateway.same_dataset(r["dataset"], it.dataset) and r.get("where")]
+            # the outcome on the person's own record: the topic's codes on a declared code list the study reads in this
+            # source (`_related_elsewhere`: SINASC's CODANOMAL with an anomaly found beside the topic's codes)
+            same = [("record", f"{col}~{','.join(o.nodes)}") for o in scope.items
+                    if o.status == "in" and gateway.same_dataset(o.dataset, it.dataset) and o.nodes
+                    and (o.source or {}).get("source") == "code_list" for col in (o.source or {}).get("column") or []]
+            same = list(dict.fromkeys(same))
             # the persons must be the topic's: an agravo's own notifications (every record is the topic), or a source
             # whose own records carry the topic's related codes (a birth's anomalies); every admission of SIH is not
             if not (it.reason.startswith("seed sinan:") or same):
