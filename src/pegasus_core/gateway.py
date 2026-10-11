@@ -2047,9 +2047,13 @@ def ensure_lake(dataset: str, years: list[int], log=print) -> dict:
         raise OSError(f"{free:.0f} GB free, under the {LAKE_MIN_FREE_GB} GB a lake build leaves")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        counts = pg.build_lake(dataset, years, root=config.data_root())
+        # the downloaded files go once their verified partitions hold them: kept, each gigabyte a deep study may
+        # download (40) cost disk twice, against 19 GB free (2026-10-11); a rebuild fetches them again
+        counts = pg.build_lake(dataset, years, root=config.data_root(), release=True)
+    freed = (counts.get("released") or {}).get("bytes", 0) / 1024**3
     log(f"lake {dataset} {years[0]}-{years[-1]}: {counts.get('files', 0)} files decoded, "
-        f"{counts.get('partitions', 0)} partitions written, {counts.get('partitions_reused', 0)} kept")
+        f"{counts.get('partitions', 0)} partitions written, {counts.get('partitions_reused', 0)} kept, "
+        f"{freed:.1f} GB of downloads released")
     return counts
 
 

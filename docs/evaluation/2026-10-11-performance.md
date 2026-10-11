@@ -89,3 +89,9 @@ time that pegasus_data now writes into each run's report (`seconds`).
   directly.
 - Memory per item measured against its cells, for admission by estimate rather than by the free memory now.
 - The robust refit and question pass profiled on a cold item: the run was started and not yet read.
+
+**Disk (later the same day).** A lake build kept each downloaded file beside its Parquet. The data root's disk fell to
+19 GB free, against the 40 GB a deep study may download. `gateway.ensure_lake` now builds with `release=True`, which
+deletes the build's files once verified partitions hold them (pegasus_data's one release rule; a rebuild fetches them
+again). `prune` over the root freed 10.4 GB, to 28 GB free.
+
