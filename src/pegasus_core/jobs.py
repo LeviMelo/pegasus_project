@@ -53,6 +53,7 @@ def slot(label: str, gpu: bool = False) -> Iterator[None]:
 def threads(n: int | None = None) -> int:
     """Limit this process's BLAS, OpenMP, numba and torch threads to ``n`` (default `default_threads`)."""
     n = n or default_threads()
+    os.environ["PEGASUS_THREADS"] = str(n)          # what `default_threads` reads: our own thread pools follow it
     from threadpoolctl import threadpool_limits
 
     threadpool_limits(limits=n)

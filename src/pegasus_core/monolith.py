@@ -19,6 +19,7 @@ cell is ever formed. φ is estimated afterwards by moments (§5.2).
 
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
 import functools
 import hashlib
@@ -2165,10 +2166,13 @@ class Monolith:
                 self.hc = torch.as_tensor(arrays["h_cat"], dtype=self.dtype, device=self.device)
             return self
         m = self.robust(rounds, trim, min_expected, log=log)
+        m.robust_tag = tag
         arrays = {k: v.detach().cpu().numpy() for k, v in m.params.items()}
         if m.hc is not None:
             arrays["h_cat"] = m.hc.detach().cpu().numpy()
-        store.put_arrays("monolith", m.key(), arrays, {**m.summary(), "robust_info": m.robust_info})
+        # stored under the key it is looked up by: `robust` stamps its own tag (v 9), and saved under that the refit was
+        # never found again, so every session recomputed it (SIH A00-A09 each time, 2026-10-11)
+        store.put_arrays("monolith", key, arrays, {**m.summary(), "robust_info": m.robust_info})
         return m
 
     def without(self, cells: np.ndarray) -> Monolith:
@@ -2643,11 +2647,14 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
             phi = 1.0 / (ic + k * sc)
             phi_p = 1.0 / (ip + k * sp_)
             pr = phi / (phi + mm)
-            mass = stats.nbinom.cdf(bb, phi, pr) - stats.nbinom.cdf(aa - 1, phi, pr)      # the truncation
+            mass = _nb_mass(aa, bb, phi, pr)                                           # the truncation
             return -float(np.sum(phi * np.log(phi / (phi + mm)))
                           + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp)))
                           - np.sum(np.log(np.maximum(mass, 1e-300))))
 
+        fit.objective = nll
+        if getattr(fit, "only_objective", False):
+            return 0.0, 0.0
         res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded")
         h = 0.25
         info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2     # observed information in log κ
@@ -2660,12 +2667,9 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
     P = 2.0
     for _ in range(rounds):
         if power:
-            # P by the profile of the trimmed likelihood over κ (the same cells and bounds as κ's own fit)
-            def profile(pp: float) -> float:
-                fit(ok, np.maximum(mu, 1e-12) ** (pp - 2) / mu_ref ** (pp - 2))
-                return fit.last_nll
-            P = float(optimize.minimize_scalar(profile, bounds=(1.0, 2.0), method="bounded",
-                                               options={"xatol": 0.01}).x)
+            # (log κ, P) jointly by the same trimmed likelihood; a profile over P ran a κ search at every P (TOXG's
+            # surprise 13.4 s against 8.4 s, the same estimates; SIH A00-A09 22.1 against 15.0 s, φ within 0.2 %)
+            P = _joint_power(fit, ok, mu, mu_ref, lo, hi, P)
             size = np.maximum(mu, 1e-12) ** (P - 2) / mu_ref ** (P - 2)
         top, _ = fit(ok)
         cur = np.full(mu.shape[0], top) if not levels else _shrink_levels(fit, ok, top, levels, mu.shape[0])
@@ -2677,6 +2681,58 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
             report["power"] = P
         return np.where(np.asarray(cur)[:, None] < lo + 0.01, np.inf, 1.0 / (np.exp(cur)[:, None] * size))
     return float(to_phi(cur[0])) if not levels else to_phi(cur)
+
+
+def _nb_mass(aa: np.ndarray, bb: np.ndarray, phi: np.ndarray, pr: np.ndarray) -> np.ndarray:
+    """P(aa ≤ Y ≤ bb) under NB(φ, p): the regularised incomplete beta directly, nbinom.cdf(k) = I_p(φ, k + 1), and 0 for
+    the lower tail where aa = 0. `stats.nbinom.cdf` twice over every cell was 35 % of a question pass (py-spy,
+    TOXG, 2026-10-11): its argument checks and broadcasting on every evaluation."""
+    upper = _betainc(phi, bb + 1.0, pr)
+    lower = np.zeros_like(upper)
+    m = aa >= 1
+    if m.any():
+        lower[m] = _betainc(phi[m], aa[m], pr[m])
+    return upper - lower
+
+
+def _betainc(a: np.ndarray, b: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """`special.betainc` over the process's threads (`jobs.default_threads`) for large arrays: a ufunc releases the
+    interpreter lock, so chunks run in parallel; 2 M cells 0.60 s on one thread, 0.19 s on four, identical values."""
+    n = len(a)
+    k = min(jobs.default_threads(), max(1, n // 250_000))
+    if k <= 1:
+        return special.betainc(a, b, x)
+    out = np.empty(n)
+    parts = np.array_split(np.arange(n), k)
+
+    def one(ix: np.ndarray) -> None:
+        out[ix] = special.betainc(a[ix], b[ix], x[ix])
+
+    with concurrent.futures.ThreadPoolExecutor(k) as pool:
+        list(pool.map(one, parts))
+    return out
+
+
+def _joint_power(fit, ok: np.ndarray, mu: np.ndarray, mu_ref: float, lo: float, hi: float, start_p: float) -> float:
+    """P of `place_year_phi`'s NB-P component with log κ, jointly, by bounded L-BFGS-B on the same trimmed likelihood
+    (`fit`'s objective at each P's cell scale)."""
+    base = np.maximum(mu, 1e-12) / mu_ref
+
+    def value(v: np.ndarray) -> float:
+        fit.only_objective = True
+        try:
+            fit(ok, base ** (float(v[1]) - 2.0))
+        finally:
+            fit.only_objective = False
+        return fit.objective(float(v[0]))
+
+    best = None
+    for s0 in (np.array([0.5 * (lo + hi), start_p]), np.array([lo + 1.0, 1.5])):
+        r = optimize.minimize(value, s0, method="L-BFGS-B", bounds=[(lo, hi), (1.0, 2.0)],
+                              options={"eps": 1e-4, "ftol": 1e-10})
+        if best is None or r.fun < best.fun:
+            best = r
+    return float(best.x[1])
 
 
 def _shrink_levels(fit, ok: np.ndarray, top: float, levels: tuple, U: int) -> np.ndarray:
