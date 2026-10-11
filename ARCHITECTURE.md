@@ -696,8 +696,8 @@ group dimension where it applies: the system is general because the grid is.
 | 5 | **seasonality** | the cycle differs by place, or changes over time | B2s | ○ per-place season amplitude and phase against the field's, and their change |
 | 6 | **spatial coherence** | neighbouring places depart together | B0/B1 residual arrangement | ✓ graph-connected scans; ✓ heat-kernel scales (multiscale) |
 | 7 | **propagation** | departures ordered in space through time: emergence, diffusion, extinction | B1 | ○ first-departure times over the graph and their gradient (direction and speed of spread); ○ emergence of a field in places where it was absent |
-| 8 | **group heterogeneity** | the departure differs across a group dimension | B0 by group | ✓ sex × age (`group_disparity`); ✓ race (`disparity`); ○ every composition column as a group dimension |
-| 9 | **relation** | co-variation with another field or context, over distance, lag, scale and group (§8.1) | each field's own tier | ✓ dependency map (between places), distributed lag, `compare` (scale), `joint`; ○ one cross-structure estimator (§8.1) |
+| 8 | **group heterogeneity** | the departure differs across a group dimension | B0 by group | ✓ sex × age (`group_disparity`); ✓ race (`disparity`; and as a group dimension against the place's own population by race); ✓ every composition column as a group dimension (`Session.by_composition`) |
+| 9 | **relation** | co-variation with another field or context, over distance, lag, scale and group (§8.1) | each field's own tier | ✓ dependency map (between places), distributed lag, `compare` (scale), `joint`; ✓ a study's relations among its fields and the exhaustive data-space screen (`relation_survey`); ○ one cross-structure estimator (§8.1) |
 
 Prospective use is not a component: it is every component tested against BP/BPA over recent periods (alarms).
 
