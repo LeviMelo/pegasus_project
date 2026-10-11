@@ -873,11 +873,20 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
         years = sorted(a[3] & b[3])
         if len(years) < 4 or (a[0], a[2]) == (b[0], b[2]):
             continue
-        try:
-            rows = tools.compare(a[:3], b[:3], years, q=decl.q)
-        except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
-            log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
-            continue
+        # an object of the state: a re-run reads it (BACKLOG 1.3), the key the pair, its years, the data and the code
+        key = {"what": "study_relation", "x": list(a[:3]), "y": list(b[:3]), "years": years, "q": decl.q,
+               "data": config.data_version(), "code": config.code_key(tools.compare)}
+        hit = store.get_table("study_table", key)
+        if hit is not None:
+            rows = hit.to_pylist()
+        else:
+            try:
+                rows = tools.compare(a[:3], b[:3], years, q=decl.q)
+            except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
+                log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
+                continue
+            flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
+            store.put_table("study_table", key, pa.Table.from_pylist(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
         out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))}, "pair": f"{a[0]}:{a[2]} ~ {b[0]}:{b[2]}",
                  "years": f"{years[0]}-{years[-1]}"} for r in rows]
     return out
