@@ -229,6 +229,11 @@ class Session:
                         else np.full(tab.num_rows, value, object))
                 n = tab.column("n" if value is None else "m").to_numpy().astype(float)
                 frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep], g_true[keep]))
+        if not frames and float(np.sum(y_g)) > 0:
+            # events, none in an age-sex cell: SIM-DOFET's foetal deaths carry no age, so a composition read against the
+            # field's age-sex structure has nothing to read, and an empty answer would look like no departure
+            raise ValueError(f"{self.dataset}: its events carry no age or sex (every one unallocated by them): a group "
+                             f"question at the age-sex structure does not apply to {column}")
         values = sorted({v for *_, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
         vi = {v: k for k, v in enumerate(values)}
         U, T, G, K = len(d.places), len(d.years), d.N.shape[2], len(values)
