@@ -328,8 +328,13 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
 - **Unbuilt combinations** (`NotImplementedError`): monthly grain for the low-rank interaction and for anything but event and code-list counts; NB mean fit with the interaction; refit of an interaction model; Laplace level sweeps for NB; Laplace draws across blocks; the prospective tier for non-counts; B2s on annual blocks; the facility supply term at monthly grain; a grouped link side with a filter or "latest" order.
 - **Store hygiene.** `ledger_A` (10,527 parts) and `ledger_T2019` (2,248) are not compacted; fitted-block lookup depends on the exact year range of the request.
 
-**Broken**
-- **Persons read nothing through national link runs stored before 2026-10-10.** Those runs named records `<_blob_sha256>:<_row>`, readers the content key, so linked shares and cohort outcomes read 0 (SIM 2019: 0 of 28,669 infant-death pairs). Fixed in pegasus_data branch `links` (`store.load` relabels; `linked_counts` refuses pairs that name none of a side's records); the main checkout still lacks it until `links` merges.
+**Broken** (the survey run of 2026-10-11 on the old code, `study_toxo_survey9`, 5.0 h against an estimate of 46.5 min; rerun on the fixes as `survey10`)
+- **CUDA out of memory poisoned processes.** One error in SIM-DO chapter I's lane failed that lane's next item, and one in the products phase failed 30 later steps. Fixed: `config.cuda_failed` moves the process to the CPU and the step is retried there (`config.on_cpu_if_cuda_fails`).
+- **Lanes outgrew their admission.** Three lanes held 42 GB committed on 31.6 GB, and SIM-DO chapter I's robust refit alone held 23 GB; all three paged. Fixed: under memory pressure every lane but the largest is paused (`study._run_items`).
+- **SIH chapter I's robust refit ran out of host memory** in `_impute`, at `np.unique` over 160 M entries: recodings move the excess to every sibling leaf's sex-age groups. To be measured on `survey10`.
+- **Stratum contexts (ANS, INEP) failed when read by name.** Fixed: their declarations name the rows they are read by (`where`).
+
+Fixed before the survey: persons read nothing through link runs stored before 2026-10-10, which named records by row (pegasus_data `store.load` relabels; merged).
 
 Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).

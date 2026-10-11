@@ -1679,7 +1679,9 @@ def _context_entry(entry: str | dict) -> tuple[list[str], dict | None, str | Non
 
     spec_of = declared_fields()
     names = entry["field"].split("+") if isinstance(entry, dict) else entry.split("+")
-    where = entry.get("where") if isinstance(entry, dict) else None
+    # a field whose rows are strata declares the rows that make it one value per place (ANS's medical-hospital
+    # plans, INEP's total margin); read by name without them it failed on a missing status (the survey, 2026-10-11)
+    where = entry.get("where") if isinstance(entry, dict) else (spec_of[names[0]].get("where") if len(names) == 1 else None)
     if isinstance(entry, dict) and "over" in entry:
         # an entry's own denominator: a stratum of a field (a medicine's sales of all medicines sold) is a rate of
         # something the whole field is not
