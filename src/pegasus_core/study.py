@@ -640,6 +640,38 @@ def _medicines(codes: list[str]) -> list[dict]:
     return out
 
 
+def _capture_note(scope: Scope) -> str:
+    """Whether the read systems can estimate each other's completeness (capture–recapture, ARCHITECTURE §5.2): three
+    systems linked pairwise by viable runs, from the scope's person paths; otherwise which links stand in the way. Every
+    link of a pair is named: a pair's links pair different records (SIH × SIM: admissions that ended in death, or the
+    topic's admissions to the certificates naming it). Two lists cannot test their own dependence (a child admitted is
+    likelier to be notified), so a pair alone gives a lower bound at best, and none is stated as an estimate."""
+    read = {gateway.dataset_key(i.dataset) for i in scope.items if i.status == "in"}
+    links: dict[frozenset, list[tuple[str, str]]] = {}
+    for p in scope.paths:
+        a, b = gateway.dataset_key(p["left"]), gateway.dataset_key(p["right"])
+        if a in read and b in read and a != b and set(p.get("sides_read") or ()) >= {"left", "right"}:
+            links.setdefault(frozenset((a, b)), []).append((p["link"], p["verdict"]))
+    names = sorted(read)
+    edges = lambda t: (frozenset((t[0], t[1])), frozenset((t[0], t[2])), frozenset((t[1], t[2])))   # noqa: E731
+    triangles = [(a, b, c) for i, a in enumerate(names) for j, b in enumerate(names[i + 1:], i + 1) for c in names[j + 1:]
+                 if all(x in links for x in edges((a, b, c)))]
+    said = lambda x: " or ".join(f"{name} {verdict}" for name, verdict in links[x])   # noqa: E731
+    ready = [t for t in triangles if all(any(v == "viable" for _, v in links[x]) for x in edges(t))]
+    if ready:
+        return ("Three systems are linked pairwise by viable runs (" + "; ".join(
+            " × ".join(t) + ": " + "; ".join(said(x) for x in edges(t)) for t in ready) + "): their completeness is "
+            "estimable by capture–recapture where these links pair the topic's records; not computed at this depth.")
+    if triangles:
+        return ("No completeness is estimated: capture–recapture needs three systems linked pairwise by viable runs. "
+                + " ".join(" × ".join(t) + ": " + "; ".join(said(x) for x in edges(t)) + "." for t in triangles)
+                + " Two linked lists cannot test their own dependence, so a pair would give a lower bound at best.")
+    pairs = "; ".join(f"{' × '.join(sorted(k))}: {said(k)}" for k in sorted(links, key=sorted))
+    return ("No completeness is estimated: no three read systems are linked pairwise" +
+            (f" (linked pairs: {pairs}). Two lists cannot test their own dependence, so a pair would give a lower bound "
+             "at best." if pairs else "."))
+
+
 def _chapter(tree: dict, code: str) -> str:
     """The ICD-10 chapter holding ``code``, up its parents (the block a code's node is fitted in)."""
     for _ in range(10):
@@ -1721,6 +1753,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
                              ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                              ("q", "q")], cap=30) if quality else "<p>No quality departure at this depth.</p>",
+             f"<h3>Completeness across systems</h3><p>{e(_capture_note(scope))}</p>",
              "<h2>3b. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
