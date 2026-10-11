@@ -1,0 +1,20 @@
+# The debugging loop for the reference study: the deep paths (persons, later-year replication, related codes, contexts,
+# the hypothesis) on the topic's own four sources and nine years, minutes not hours. The full study is the milestone.
+study: toxoplasmosis_quick
+topic:
+  seeds:
+    icd10: [B58, O98.6, P37.1]
+    sinan: [TOXG, TOXC]
+    terms: [toxoplasm]
+  only: [SINAN-TOXG, SINAN-TOXC, SIH-RD, SIM-DO]
+period: 2015-2023
+where: BR
+grain: [year]
+depth: deep
+time: 20
+chapters: false
+contexts: [sisagua_surveillance_ecoli_present, households_water_network_comparable, ans_beneficiaries]
+hypotheses:
+  - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
+ratios:
+  - {numerator: SINAN-TOXC, denominator: SINAN-TOXG}

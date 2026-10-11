@@ -35,9 +35,9 @@ DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
 DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios"}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters"}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
-TOPIC_KEYS = {"seeds", "include", "exclude"}
+TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 #: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
 #: measure, composition, interval and care flow pegasus_data's roles declare for the source's records
 _ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all", "supports": "all"}
@@ -55,6 +55,7 @@ class Declaration:
     path: Path
     include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    only: list[str] = field(default_factory=list)      # the datasets (or systems) the study is restricted to
     where: Any = "BR"
     grain: list[str] = field(default_factory=lambda: ["year"])
     depth: str = "survey"
@@ -62,6 +63,13 @@ class Declaration:
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
+    time: float | None = None    # minutes for the related codes' fields, in place of the depth's `TIME_BUDGET_MIN`
+    download: float | None = None  # gigabytes the study may download, in place of the depth's `DOWNLOAD_BUDGET_GB`
+    chapters: bool | None = None   # the topic's nodes read inside their fitted chapters (None: beyond a survey)
+
+    @property
+    def in_chapters(self) -> bool:
+        return self.depth != "survey" if self.chapters is None else self.chapters
 
 
 class DeclarationError(ValueError):
@@ -116,15 +124,29 @@ def load(path: str | Path) -> Declaration:
             problems.append(f"ratios[{i}]: unknown key {k!r} (keys: {', '.join(sorted(RATIO_KEYS))})")
         if not isinstance(r.get("lag", 0), int) or r.get("lag", 0) < 0:
             problems.append(f"ratios[{i}]: lag {r.get('lag')!r} is a whole number of years, 0 or more")
+    if topic.get("include"):
+        problems.append("topic.include (fields forced in, ARCHITECTURE §3.1) is not built yet: it would be ignored; "
+                        "topic.only restricts the study to datasets or systems, topic.exclude leaves them out")
+    if doc.get("chapters") is not None and not isinstance(doc["chapters"], bool):
+        problems.append(f"chapters {doc['chapters']!r}: true (the topic's codes inside their fitted chapters) or false "
+                        "(as code sets of their own)")
+    if doc.get("download") is not None and (not isinstance(doc["download"], (int, float)) or doc["download"] < 0):
+        problems.append(f"download {doc['download']!r}: gigabytes the study may download, 0 or more")
+    if doc.get("time") is not None and (not isinstance(doc["time"], (int, float)) or doc["time"] < 0):
+        problems.append(f"time {doc['time']!r}: minutes for the related codes' fields, 0 or more")
     if doc.get("where", "BR") != "BR":
         problems.append("where: only BR (the whole country) is read in this version (BACKLOG 1.x)")
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
     return Declaration(study=str(doc["study"]), seeds={k: [str(c) for c in v] for k, v in seeds.items()}, years=years,
                        path=path, include=list(topic.get("include") or []), exclude=list(topic.get("exclude") or []),
+                       only=list(topic.get("only") or []),
                        where=doc.get("where", "BR"), grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
-                       ratios=list(ratios) if isinstance(ratios, list) else [ratios])
+                       ratios=list(ratios) if isinstance(ratios, list) else [ratios],
+                       time=float(doc["time"]) if doc.get("time") is not None else None,
+                       download=float(doc["download"]) if doc.get("download") is not None else None,
+                       chapters=doc.get("chapters"))
 
 
 # ---------------------------------------------------------------------- the scope
@@ -334,7 +356,9 @@ def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) 
     if not seeds:
         return []
     out, seen = [], set()
-    for it in (i for i in items if i.status == "in" and i.mentions):
+    # every read dataset whose records carry several codes, however its items are fitted: keyed on the item's mention
+    # readers, a code-set item (a survey's, or `chapters: false`) found no related code at all (2026-10-11)
+    for it in (i for i in items if i.status == "in" and fields.declared_mentions(i.dataset)):
         if (it.dataset, it.event) in seen:
             continue
         seen.add((it.dataset, it.event))
@@ -531,12 +555,12 @@ def resolve(decl: Declaration, log=print) -> Scope:
                                       f"holds {c} ({tree[c]['label']}), read as a field of its own (its category "
                                       f"{tree[c]['parent']} holds other conditions)", source={"codes": [c]}))
                 held = [n for n in nodes if n in reg.level]
-                if held and decl.depth == "survey":
-                    # a survey reads the topic's codes as one field of their own: its node inside a fitted chapter
-                    # (every infectious disease in 5,570 places over 16 years, for B58) was most of the survey's hours,
-                    # and the chapter's context is standard depth's (2026-10-11)
+                if held and not decl.in_chapters:
+                    # the topic's codes as one field of their own (a survey's default, or `chapters: false`): its node
+                    # inside a fitted chapter (every infectious disease in 5,570 places over 16 years, for B58) was most
+                    # of the survey's hours, and the chapter's context is standard depth's (2026-10-11)
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its primary classifier ({prim['column']}) "
-                                      f"holds {', '.join(held)}, read as a field of its own at survey depth",
+                                      f"holds {', '.join(held)}, read as a field of its own (not inside its chapter)",
                                       source={"codes": held}))
                 elif held:
                     mentions = [d.column for d in fields.declared_mentions(ds)] or None
@@ -557,9 +581,12 @@ def resolve(decl: Declaration, log=print) -> Scope:
                           + (f" {lag} year(s) earlier" if lag else ""),
                           source={"population": exposure, **({"codes": num[2]} if num[2] else {})},
                           denominator=(den[0], lag)))
+    # the declaration's own choice (`topic.only` / `topic.exclude`), before anything is priced or counted: the keys
+    # were accepted and never applied, so no study could be cut down (2026-10-11)
+    items = _declared_only(decl, items, excluded)
     # the cost: years in the lake are free, the rest download; the budget is spent cheapest first, and a source
     # whose tree holds the topic but whose records hold none is not read (its tree is not its records)
-    budget = DOWNLOAD_BUDGET_GB[decl.depth]
+    budget = DOWNLOAD_BUDGET_GB[decl.depth] if decl.download is None else decl.download      # the declaration's, if set
     priced = []
     for it in items:
         ys, cost = _cost(it.dataset, decl.years)
@@ -589,13 +616,13 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.years = ys
         elif free:
             it.years = free
-            it.note = (f"years {paid} deferred: {gb:.1f} GB to download against the {decl.depth} budget of {budget:g} GB"
+            it.note = (f"years {paid} deferred: {gb:.1f} GB to download against the study's budget of {budget:g} GB"
                        + (f"; {unknown} not sized by the catalog" if unknown else ""))
         elif not paid:
             it.years = ys
         else:
             it.status, it.years, it.download_gb = "deferred", ys, round(gb, 2)
-            it.note = (f"{gb:.1f} GB to download against the {decl.depth} budget of {budget:g} GB"
+            it.note = (f"{gb:.1f} GB to download against the study's budget of {budget:g} GB"
                        + (f"; {unknown} not sized by the catalog" if unknown else ""))
             continue
         if it.extract or any(cost.get(y) != 0.0 for y in it.years):
@@ -647,7 +674,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
         strength = {r["code"]: float(r.get("low") or 0.0) for r in related if r["related"]}
         extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
                   for it in _related_elsewhere(decl, [r for r in related if r["related"]], served)]
-    items += _within_time(decl, items, extra)
+    kept = _declared_only(decl, [it for _, it in extra], excluded)
+    items += _within_time(decl, items, [(w, it) for w, it in extra if it in kept])
     if decl.depth in ("deep", "exhaustive"):
         # replication in later years (ARCHITECTURE §8.3, acceptance item 6): selected on the years up to the last
         # LATER_YEARS held out, tested once on them; the survey's findings stood at R0 with nothing to replicate them
@@ -657,6 +685,37 @@ def resolve(decl: Declaration, log=print) -> Scope:
     overlap, overhead = _phase_record(decl)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+
+
+def _dataset_matches(name: str, entry: str) -> bool:
+    """Whether ``name`` is the dataset ``entry`` names (any spelling: `parse_dataset`), or of the system it names alone
+    ("SIASUS" is every SIA dataset)."""
+    from pegasus_data._request import parse_dataset
+
+    def canon(x):
+        try:
+            return parse_dataset(x)
+        except Exception:  # noqa: BLE001 - a name pegasus_data does not parse is compared as written
+            return (x, None)
+
+    a, b = canon(name), canon(entry)
+    return a == b or (b[1] in (None, b[0]) and "-" not in entry and "." not in entry and a[0] == b[0])
+
+
+def _declared_only(decl: Declaration, items: list[Item], excluded: list[dict]) -> list[Item]:
+    """The items the declaration allows: when ``topic.only`` names datasets (or systems), only theirs; never those
+    ``topic.exclude`` names. What is left out is listed with why."""
+    out = []
+    for it in items:
+        if decl.only and not any(_dataset_matches(it.dataset, e) for e in decl.only):
+            why = "not among the declaration's topic.only"
+        elif any(_dataset_matches(it.dataset, e) for e in decl.exclude):
+            why = "named in the declaration's topic.exclude"
+        else:
+            out.append(it)
+            continue
+        excluded.append({"seed": f"{it.dataset}:{it.event}", "why": why})
+    return out
 
 
 #: the later years a deep study holds out to replicate its leads in (`Item.confirm_last`)
@@ -676,7 +735,8 @@ def _within_time(decl: Declaration, items: list[Item], extra: list[tuple[float, 
         return []
     added = [it for _, it in extra]
     _estimate(decl, added)
-    room = TIME_BUDGET_MIN[decl.depth] * 60
+    minutes = TIME_BUDGET_MIN[decl.depth] if decl.time is None else decl.time      # the declaration's own, if it says
+    room = minutes * 60
     spent = 0.0
     for strength, it in sorted(extra, key=lambda p: -p[0]):
         cost = it.est_seconds or 0.0
@@ -684,7 +744,7 @@ def _within_time(decl: Declaration, items: list[Item], extra: list[tuple[float, 
             spent += cost
             continue
         it.status = "deferred"
-        it.note = (f"past the {decl.depth} depth's {TIME_BUDGET_MIN[decl.depth] / 60:g} h for related fields "
+        it.note = (f"past the {minutes / 60:g} h for related fields ({'declared' if decl.time is not None else decl.depth}) "
                    f"(lift's lower bound {strength:.1f}; stronger ones read first)")
     return added
 
@@ -907,6 +967,10 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str])
                     if src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
                         continue
                     seen.add((ds, et["name"], d.column, code))
+                    if not decl.in_chapters and "source" not in src:     # a code set on that column, no chapter fit
+                        out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {d.column.split(':', 1)[1]}",
+                                        source={"classifier": src["classifier"], "codes": [code]}))
+                        continue
                     out.append(Item(ds, et["name"], [_chapter(tree, code)], [code], ys,
                                     f"{why}; read in its {d.column.split(':', 1)[1]}", source=src))
     return out
@@ -935,6 +999,7 @@ def run(decl: Declaration, log=print) -> Path:
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
     t = time.time()
+    read = _probe(scope, read, log)
     prepared = _prepare_store(decl, read, log)
     read = _count_prepared(scope, read, log)
     (out / "scope.yml").write_text(yaml.safe_dump({**scope.to_dict(), "estimated_minutes": estimate}, sort_keys=False,
@@ -952,6 +1017,36 @@ def run(decl: Declaration, log=print) -> Path:
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
     return out
+
+
+def _probe(scope: Scope, read: list[Item], log) -> list[Item]:
+    """Before a source's years are fetched to count the topic in them, its latest year alone: an item priced without a
+    count (its data not in the lake) whose probe year holds none of the topic's records, and that has no mentions to
+    read them through, is left out with why, and its other years are never fetched. Survey10 decoded 6,800 files of
+    SIA-AN and SIA-AR, all its years, for items holding none (2026-10-11)."""
+    keep = []
+    for it in read:
+        if it.records is not None or it.extract or it.mentions or not it.years or it.denominator:
+            keep.append(it)
+            continue
+        year = max(it.years)
+        try:
+            gateway.ensure_lake(it.dataset, [year], log=log)
+            n = _records(it, [year])
+        except Exception as exc:  # noqa: BLE001 - a probe that fails decides nothing: the item goes on, its run says why
+            log(f"study: probe {it.dataset} {year}: {type(exc).__name__}: {exc}")
+            keep.append(it)
+            continue
+        if n == 0:
+            it.status = "none"
+            held = ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
+            scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} but its probe year "
+                                   f"{year} holds none of them; its other years were not fetched"})
+            log(f"study: {it.dataset} {it.event}: none of the topic in {year}, its other years not fetched")
+            continue
+        keep.append(it)
+    scope.items = [i for i in scope.items if i.status != "none"]
+    return keep
 
 
 def _count_prepared(scope: Scope, read: list[Item], log) -> list[Item]:
