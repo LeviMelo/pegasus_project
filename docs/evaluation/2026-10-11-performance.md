@@ -58,6 +58,13 @@ time that pegasus_data now writes into each run's report (`seconds`).
   same 1,923.5 recoded deaths and the same μ hash. On XVI the arrays are 13 MB and the peak is unchanged (1.5 GB
   traced, 0.68 GB of it the refit's arrowhead solver). Chapter I's are of the order of 0.7 GB each; its peak has not
   been measured yet.
+- **Recodings spread over every sibling cell.** `_impute` gives each sibling leaf its share of a flagged excess
+  (ADR-0033) over every sex-age group. That grew SIM-DO XVI 2015–2019 from 66,574 entries to 3,280,913: 97 % of them
+  under 0.01 deaths, 0.2 % of the mass. SIH chapter I's run out of host memory at 160 M entries. Each share now goes
+  whole into the leaf's most expected group, exact at leaf, place and period. On XVI: 210,120 entries, robust refit
+  62 → 34 s, φ unchanged, 1,620 against 1,621 cells flagged, μ within 1.2e-4 at the median (p99 7.7e-4, max 0.34 %),
+  leaf totals within 0.8 %. Drawing the shares as whole counts (stochastic EM) was tried and rejected: 125,000 entries,
+  but a rare leaf's total moved by up to 61 %.
 - **A lane crash.** The first lane run lost all three workers abruptly, while another process held the GPU. The rerun
   was clean, and a dead lane's items now run again in the parent.
 

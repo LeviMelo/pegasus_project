@@ -2154,16 +2154,18 @@ class Monolith:
             add = deficit
             add *= np.divide(moved, pool, out=np.zeros_like(pool), where=pool > 0)   # back to the siblings
             self.recoded = float(moved.sum())
-            for e in np.unique(np.nonzero(add > 1e-9)[0]):
-                uu, tt = np.nonzero(add[e] > 1e-9)
+            # Each sibling's share exactly, at its leaf, place and period, in the sex-age group it is most expected in:
+            # spread over every group, SIM-DO XVI 2015-2019's 66,574 entries became 3,280,913 (97 % under 0.01 deaths,
+            # 0.2 % of the mass) and SIH chapter I's could not be held (160 M entries, 2026-10-11)
+            for e in np.unique(np.nonzero(add > 0)[0]):
+                uu, tt = np.nonzero(add[e] > 0)
                 mg = self.expected_by_group(np.array([e]))[uu, tt]
-                w = np.divide(mg, mg.sum(1, keepdims=True), out=np.zeros_like(mg), where=mg.sum(1, keepdims=True) > 0)
-                ii, gg = np.nonzero(w > 0)
-                parts_e.append(np.full(len(ii), e, dtype=d.e.dtype))
-                parts_u.append(uu[ii].astype(d.u.dtype))
-                parts_t.append(tt[ii].astype(d.t.dtype))
-                parts_g.append(gg.astype(d.g.dtype))
-                parts_y.append(add[e][uu, tt][ii] * w[ii, gg])
+                ok = mg.sum(1) > 0
+                parts_e.append(np.full(int(ok.sum()), e, dtype=d.e.dtype))
+                parts_u.append(uu[ok].astype(d.u.dtype))
+                parts_t.append(tt[ok].astype(d.t.dtype))
+                parts_g.append(mg[ok].argmax(1).astype(d.g.dtype))
+                parts_y.append(add[e][uu[ok], tt[ok]])
         e_, u_, t_, g_, y_ = (np.concatenate(x) for x in (parts_e, parts_u, parts_t, parts_g, parts_y))
         # one entry per cell: a sibling's added counts join its observed ones
         key = ((e_.astype(np.int64) * d.N.shape[0] + u_) * d.N.shape[1] + t_) * d.N.shape[2] + g_
