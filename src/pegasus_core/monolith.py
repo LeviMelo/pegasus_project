@@ -2642,15 +2642,35 @@ def place_year_phi(y: np.ndarray, mu: np.ndarray, phi_cells: np.ndarray, *levels
         pos = yy > 0           # a zero count adds only φ log(φ/(φ+μ)): the gamma terms are needed where y > 0 (sparse fields: few)
         yp, mp, ip, sp_ = yy[pos], mm[pos], ic[pos], sc[pos]
 
-        def nll(log_k: float) -> float:
-            k = np.exp(log_k)
-            phi = 1.0 / (ic + k * sc)
-            phi_p = 1.0 / (ip + k * sp_)
-            pr = phi / (phi + mm)
-            mass = _nb_mass(aa, bb, phi, pr)                                           # the truncation
-            return -float(np.sum(phi * np.log(phi / (phi + mm)))
-                          + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp)))
-                          - np.sum(np.log(np.maximum(mass, 1e-300))))
+        if len(yy) >= 100_000 and config.device(len(yy)) == "cuda":
+            # the cells stay on the GPU for the whole search: every evaluation there, one float back (an array shipped
+            # per evaluation lost the GPU's gain to the transfers, 2026-10-11)
+            import cupy as xp
+            from cupyx.scipy import special as xs
+
+            yy, mm, ic, sc, aa, bb, yp, mp, ip, sp_ = (xp.asarray(v) for v in (yy, mm, ic, sc, aa, bb, yp, mp, ip, sp_))
+            low = aa >= 1
+            a1 = xp.maximum(aa, 1.0)
+
+            def nll(log_k: float) -> float:
+                k = float(np.exp(log_k))
+                phi = 1.0 / (ic + k * sc)
+                phi_p = 1.0 / (ip + k * sp_)
+                pr = phi / (phi + mm)
+                mass = xs.betainc(phi, bb + 1.0, pr) - xp.where(low, xs.betainc(phi, a1, pr), 0.0)    # the truncation
+                return -float(xp.sum(phi * xp.log(phi / (phi + mm)))
+                              + xp.sum(xs.gammaln(yp + phi_p) - xs.gammaln(phi_p) + yp * xp.log(mp / (phi_p + mp)))
+                              - xp.sum(xp.log(xp.maximum(mass, 1e-300))))
+        else:
+            def nll(log_k: float) -> float:
+                k = np.exp(log_k)
+                phi = 1.0 / (ic + k * sc)
+                phi_p = 1.0 / (ip + k * sp_)
+                pr = phi / (phi + mm)
+                mass = _nb_mass(aa, bb, phi, pr)                                       # the truncation
+                return -float(np.sum(phi * np.log(phi / (phi + mm)))
+                              + np.sum(special.gammaln(yp + phi_p) - special.gammaln(phi_p) + yp * np.log(mp / (phi_p + mp)))
+                              - np.sum(np.log(np.maximum(mass, 1e-300))))
 
         fit.objective = nll
         if getattr(fit, "only_objective", False):
@@ -2697,7 +2717,8 @@ def _nb_mass(aa: np.ndarray, bb: np.ndarray, phi: np.ndarray, pr: np.ndarray) ->
 
 def _betainc(a: np.ndarray, b: np.ndarray, x: np.ndarray) -> np.ndarray:
     """`special.betainc` over the process's threads (`jobs.default_threads`) for large arrays: a ufunc releases the
-    interpreter lock, so chunks run in parallel; 2 M cells 0.60 s on one thread, 0.19 s on four, identical values."""
+    interpreter lock, so chunks run in parallel; 2 M cells 0.60 s on one thread, 0.19 s on four, identical values. A
+    process computing on CUDA evaluates the whole likelihood there instead (`place_year_phi`)."""
     n = len(a)
     k = min(jobs.default_threads(), max(1, n // 250_000))
     if k <= 1:

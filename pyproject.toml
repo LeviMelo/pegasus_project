@@ -19,6 +19,7 @@ dependencies = [
   "duckdb>=1.5",
   "polars>=1.0",
   "torch>=2.5",
+  "cupy-cuda12x>=13",    # the NB mass's incomplete beta on the GPU (monolith._betainc); the CUDA 12 build torch uses
   "numba>=0.60",
   "threadpoolctl>=3",
   "psutil>=5.9",          # the machine's available memory, read before a study lane starts (study._run_items)
