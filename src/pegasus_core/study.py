@@ -1040,13 +1040,16 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                             f"lane {keep} ({active[keep][1]:.1f} GB)")
                     except psutil.Error:
                         continue
-        elif paused and avail > LANE_FREE_GB:
+        elif paused:
+            # the smallest paused lane, once its own memory fits beside the floor: resumed at the floor alone, two 11 GB
+            # lanes took turns pausing each other (the survey, 2026-10-11)
             pid = min(paused, key=lambda p: lanes_now.get(p, (None, 0.0))[1])
-            try:
-                paused.pop(pid).resume()
-                log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
-            except psutil.Error:
-                pass
+            if avail > LANE_FREE_GB + lanes_now.get(pid, (None, 0.0))[1] or len(active) == 0:
+                try:
+                    paused.pop(pid).resume()
+                    log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
+                except psutil.Error:
+                    pass
 
     with cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn")) as pool:
         try:
