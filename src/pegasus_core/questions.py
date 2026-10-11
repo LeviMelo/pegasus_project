@@ -81,6 +81,14 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                                         "effects), STEM; a cluster at its own scale, no zoning", kinds=("count", "mark")),
                  Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
              )),
+    Question("propagation", "C", "the periods at which places first depart from the expectation ordered in space: a source, "
+             "the speed and direction of spread (a wave), and the field's emergence where it was absent", "B1",
+             "area × period", "km per month", (
+                 Method("propagation", "each place's first cell departure (the cell departure model, BH at q); the source "
+                                       "and Theil-Sen speed of onset against distance, tested by Moran spectral randomisation "
+                                       "of the onsets with the source search inside the null; successive waves, fixed-sequence "
+                                       "at q"),
+             ), ("propagation",)),
     Question("share", "C", "a field's share of all events departing from its expectation in a place and period: "
              "recording practice (the ill-defined share) or composition", "B1", "area × period", "share ratio", (
                  Method("share_excess", "beta-binomial on the observed total, the share expected from stage B, "

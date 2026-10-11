@@ -50,16 +50,17 @@ from .scans import explain, lenses
 from .scans import scales as scales_mod
 
 LENS_TIERS = {"institution_step": "B1", "share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
-              "spatial_cluster": "B0", "group_disparity": "B0"}
+              "spatial_cluster": "B0", "group_disparity": "B0", "propagation": "B1"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
 # epidemic stays a departure), the others the calibrated EXPECTATION (BP: a regime mixture, for surprises).
-PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"}
+PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP", "propagation": "BP"}
 # the methods that read a location field in one direction only: asked of both (`Session.scan`)
 TWO_SIDED = ("cell_excess", "excess", "excess_step", "excess_trend", "excess_level")
 SCALE = {"institution_step": "rate_ratio", "share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
          "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
-         "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
+         "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio",
+         "propagation": "km_per_month"}
 
 
 def lens_tier(lens: str, prospective: bool = False) -> str:
@@ -401,6 +402,9 @@ class Session:
             mu_total[have] = base._expected_total()[rows[have]]
             return departures.share_excess(s.y, total, s.mu, mu_total, s.places, s.years, s.field.id, self.ledger, **kw)
         s = self.surprise(node, tier, train_last)
+        if lens == "propagation":                    # the arrangement of the cell departures in space through time (stage C)
+            from . import propagation
+            return propagation.propagation(s, self.ledger, graph=self.graph, **kw)
         if "rate_ratio" not in kw and (rr := surprise.location_rate_ratio(s)) is not None:
             kw["rate_ratio"] = rr                     # a location's relevance is on its own scale, not the counts'
         if surprise.gaussian(s) and lens in TWO_SIDED and not kw.pop("one_side", False):
