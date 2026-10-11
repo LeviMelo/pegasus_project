@@ -218,8 +218,15 @@ def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | 
     held = control.reserved(dataset)
     ys = [y for y in years if (not published or y in published) and (not held or y < min(held))]
     volume = _volumes(dataset, config.data_root())
-    lake = pg.lake_coverage(dataset, root=config.data_root())        # not cached: a run's `ensure_lake` extends it
+    # read once per scope (`resolve` clears it): not across a run, whose `ensure_lake` extends the lake; per call, the
+    # deep scope priced each related code in every served dataset by a fresh read
+    if dataset not in _LAKE:
+        _LAKE[dataset] = frozenset(pg.lake_coverage(dataset, root=config.data_root()))
+    lake = _LAKE[dataset]
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
+
+
+_LAKE: dict[str, frozenset[int]] = {}
 
 
 @functools.cache
@@ -487,6 +494,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
     """The scope of a declaration (ARCHITECTURE §4, version 1): every event type whose primary classifier holds the
     seeds' ICD-10 nodes, and the SINAN agravos named; each with the years it publishes and their download cost,
     deferred past the depth's budget."""
+    _LAKE.clear()                         # the lake as it is now (`_cost`)
     items: list[Item] = []
     excluded: list[dict] = []
     served = set(gateway.event_datasets())

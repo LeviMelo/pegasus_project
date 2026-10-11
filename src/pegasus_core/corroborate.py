@@ -211,6 +211,8 @@ class Fields:
             for y in self.years:
                 if (published and int(y) not in published) or int(y) in held:   # not published (TOXC before 2019)
                     continue
+                if source.link and gateway.link_year_reserved(source.link[0], source.link[1], int(y)):
+                    continue                              # its partners are read through a run touching the reserve
                 try:
                     t = source_year(source, int(y))
                 except gateway.nothing_published():      # not published for the year (chikungunya before 2015): no events

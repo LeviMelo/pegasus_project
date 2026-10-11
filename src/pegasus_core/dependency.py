@@ -100,6 +100,8 @@ def _linked(dataset: str, event: str, link: str, side: str, years: list[int], pl
     index = {int(u): i for i, u in enumerate(places)}
     out = {name: np.zeros(len(places)) for name in leaves}
     for year in years:
+        if gateway.link_year_reserved(link, side, int(year)):
+            continue                                  # its partners only through a run touching the confirmation reserve
         t = gateway.linked_counts(dataset, event, year, link, side, classifier=primary).counts
         code3 = [str(c)[:3] for c in t.column("code").to_pylist()]
         for u, c, k in zip(t.column("u").to_pylist(), code3, t.column("k").to_pylist(), strict=True):

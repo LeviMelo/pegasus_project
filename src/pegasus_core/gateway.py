@@ -2370,6 +2370,12 @@ def run_touches_reserve(link: str, year: int) -> bool:
     return False
 
 
+def link_year_reserved(link: str, side: str, year: int) -> bool:
+    """Whether ``side``'s records of ``year`` are paired by a run touching the confirmation reserve (`covering_runs`,
+    `run_touches_reserve`): SIH 2023's admissions reach SIM through run 2023, whose SIM side is padded into 2024."""
+    return any(run_touches_reserve(link, z) for z in covering_runs(link, side, year))
+
+
 def reserved_links(year: int) -> frozenset[str]:
     """The declared links whose run of ``year`` touches the confirmation reserve (`run_touches_reserve`)."""
     return frozenset(name for name in link_specs() if run_touches_reserve(name, year))
