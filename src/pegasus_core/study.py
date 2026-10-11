@@ -1625,10 +1625,14 @@ def _reliability(methods) -> dict:
     """A finding's methods as measured on null worlds: ``uncalibrated`` when every method that raised it finds
     departures in null worlds beyond its error rate (calibrated False), with the measured share in ``reliability``. A
     finding is never removed for it (validation characterises, it does not gate): the report says it, and a story made
-    only of such findings ranks after the others. `institution_step` had findings in 20 of 20 null worlds and
-    `group_disparity` in 60 of 125 (STATUS), and the survey printed 122 of their answers as signals (2026-10-11)."""
-    names = [m for m in (methods if isinstance(methods, list) else str(methods).replace("+", ",").split(",")) if m]
-    recs = [(m, _method_records().get(m.strip()) or {}) for m in names]
+    only of such findings ranks after the others. `group_disparity` had findings in 60 of 125 null worlds (STATUS),
+    and the survey printed 107 of its answers as signals (2026-10-11)."""
+    from .harness import GRID_NOT_JUDGED
+
+    names = [m.strip() for m in (methods if isinstance(methods, list) else str(methods).replace("+", ",").split(",")) if m]
+    # a method no drawn world can judge has no null-world record to go by (its stored one read real records inside the
+    # worlds: `institution_step`'s 20 of 20 were real steps)
+    recs = [(m, {} if m in GRID_NOT_JUDGED else _method_records().get(m) or {}) for m in names]
     bad = [(m, r) for m, r in recs if r.get("calibrated") is False]
     if not bad or len(bad) < len(recs):
         return {"uncalibrated": False, "reliability": None}
