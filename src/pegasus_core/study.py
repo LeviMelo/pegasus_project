@@ -617,6 +617,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     profile = _context_profiles(decl, scope, rows, log)
     pq.write_table(pa.Table.from_pylist(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
+    _stories([r for r in rows if r.get("class") == "signal" and "quality:" not in str(r.get("label"))])  # `story` saved
     for r in rows:
         r.pop("_places", None)
         r.pop("_institutions", None)
@@ -834,14 +835,16 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
         lo_y, hi_y = int(r["first_year"]), int(r["last_year"] or r["first_year"])
         notes = []
         for fid, (label, dataset, pl, yrs, y, mu) in series.items():
-            if fid == r["field"]:
-                continue
             ui = np.flatnonzero(np.isin(pl, list(places)))
             year_of = yrs // 100 if yrs.max() > 9999 else yrs          # YYYYMM periods at the monthly grain
             ti = np.flatnonzero((year_of >= lo_y) & (year_of <= hi_y))
             if not len(ui) or not len(ti):
                 continue
             o, e_ = float(y[np.ix_(ui, ti)].sum()), float(mu[np.ix_(ui, ti)].sum())
+            if fid == r["field"]:
+                # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation
+                r["observed"], r["expected"], r["excess"] = o, e_, o - e_
+                continue
             if e_ <= 0:
                 continue
             low = (chi2.ppf(0.025, 2 * o) / 2 if o > 0 else 0.0) / e_
@@ -1235,7 +1238,10 @@ def _stories(rows: list[dict]) -> list[list[dict]]:
     groups: dict[int, list[dict]] = {}
     for i, r in enumerate(rows):
         groups.setdefault(find(i), []).append(r)
-    out = sorted((sorted(g, key=lambda r: r["q"]) for g in groups.values()), key=lambda g: (g[0]["q"], -len(g)))
+    # ranked by evidence (independent sources), burden (excess events at the stories' loci), then the strongest q
+    # (ARCHITECTURE §9, BACKLOG 7.3)
+    out = sorted((sorted(g, key=lambda r: r["q"]) for g in groups.values()),
+                 key=lambda g: (-len({r["dataset"] for r in g}), -sum(max(r.get("excess") or 0.0, 0.0) for r in g), g[0]["q"]))
     for k, g in enumerate(out, 1):
         for r in g:
             r["story"] = k
@@ -1253,8 +1259,10 @@ def _story_html(k: int, rows: list[dict], e) -> str:
                     + (f" in {e(r['groups'])}" if r.get("groups") else "")
                     + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
                     + (", corroborated" if r.get("corroborated") else "") + "</li>" for r in rows[:6])
+    excess = sum(max(r.get("excess") or 0.0, 0.0) for r in rows)
     return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{len(rows)} findings in "
-            f"{len(fields_)} fields from {len(sources)} sources ({e(', '.join(sources))}).</p><ul>{items}</ul>")
+            f"{len(fields_)} fields from {len(sources)} sources ({e(', '.join(sources))})"
+            + (f"; {excess:,.0f} events above expectation" if excess else "") + f".</p><ul>{items}</ul>")
 
 
 def _limitations(decl: Declaration, scope: Scope) -> str:
