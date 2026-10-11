@@ -341,6 +341,36 @@ def array_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def cuda_failed(exc: BaseException) -> bool:
+    """Whether ``exc`` is the card failing (out of its memory, or a kernel error). If so this process computes on the
+    CPU from now on: ``PEGASUS_DEVICE`` is set, so `device` and `array_device` answer the CPU, and the graph spectra
+    held on the card are dropped. A CUDA error leaves the process's context unusable: in the survey one out-of-memory
+    error in SIM-DO chapter I's lane failed that lane's next item, and one in the products phase failed 30 of its
+    later steps (2026-10-11)."""
+    import torch
+
+    oom = getattr(torch.cuda, "OutOfMemoryError", ())
+    if not (isinstance(exc, oom) or (isinstance(exc, RuntimeError) and "CUDA" in str(exc))):
+        return False
+    os.environ["PEGASUS_DEVICE"] = "cpu"
+    from . import multiscale
+
+    multiscale._SPECTRA.clear()
+    return True
+
+
+def on_cpu_if_cuda_fails(fn, *args, **kwargs):
+    """``fn(*args, **kwargs)``; if the card fails under it (`cuda_failed`), said, and once more on the CPU."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        if not cuda_failed(exc):
+            raise
+        print(f"CUDA failed in {getattr(fn, '__qualname__', fn)} ({str(exc).splitlines()[0]}): on the CPU from now on",
+              flush=True)
+        return fn(*args, **kwargs)
+
+
 def seed(*parts: object) -> int:
     """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4)."""
     digest = hashlib.blake2b("|".join(map(str, parts)).encode(), digest_size=8).digest()

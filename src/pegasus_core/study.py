@@ -760,7 +760,8 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
         step = _step_name(it)
         try:
             t_item = time.time()
-            steps[step] = update.run(_plan(it, [o for o in others if o[0] != it.dataset]), log=print)
+            steps[step] = config.on_cpu_if_cuda_fails(update.run, _plan(it, [o for o in others if o[0] != it.dataset]),
+                                                      log=print)
             steps[step]["seconds"] = round(time.time() - t_item, 1)
         except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
             where = traceback.extract_tb(exc.__traceback__)[-3:]
@@ -768,7 +769,7 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
                            "at": [f"{Path(w.filename).name}:{w.lineno} {w.name}" for w in where]}
             print(f"study {decl_study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}", flush=True)
         if device:
-            steps[step]["device"] = device
+            steps[step]["device"] = os.environ.get("PEGASUS_DEVICE") or device     # cpu after a CUDA failure
         steps[step]["peak_gb"] = _peak_gb()              # the lane's peak so far: what the next study admits it by
     return steps
 
@@ -811,6 +812,8 @@ def _lane_estimates(decl: Declaration) -> dict[str, float]:
 #: while the machine's available memory is above both
 STUDY_LANES = int(os.environ.get("PEGASUS_STUDY_LANES", "3"))
 LANE_FREE_GB = float(os.environ.get("PEGASUS_LANE_FREE_GB", "6"))
+#: the available memory below which every lane but the largest is paused (`_run_items`)
+LANE_PRESSURE_GB = float(os.environ.get("PEGASUS_LANE_PRESSURE_GB", "2"))
 
 
 def _run_items(decl: Declaration, read: list[Item], log) -> dict:
@@ -821,6 +824,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     still waiting when the card is free), the others on the CPU, and the cores are shared between lanes. One lane is
     the sequential run. A failure in a lane is its items' errors; the others go on."""
     import concurrent.futures as cf
+    import contextlib
     import multiprocessing as mp
 
     import psutil
@@ -849,28 +853,68 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
 
     steps: dict = {}
     pending, running, lost = list(order), {}, []
+    paused: dict[int, psutil.Process] = {}
+
+    def balance() -> None:
+        # Lanes grow after they are admitted: three survey lanes held 42 GB committed on a 31.6 GB machine, and all of
+        # them paged (SIM-DO chapter I's robust refit alone 23 GB, 2026-10-11). Under pressure every lane but the
+        # largest is suspended, so the system pages the idle ones out and the largest runs at its own speed; they are
+        # resumed one at a time, the smallest first, as memory frees.
+        avail = psutil.virtual_memory().available / 2**30
+        lanes_now = {}
+        for c in me.children():
+            try:
+                lanes_now[c.pid] = (c, c.memory_info().private / 2**30)
+            except (psutil.Error, AttributeError):
+                continue
+        active = {pid: v for pid, v in lanes_now.items() if pid not in paused}
+        if avail < LANE_PRESSURE_GB and len(active) > 1:
+            keep = max(active, key=lambda pid: active[pid][1])
+            for pid, (proc, gb) in active.items():
+                if pid != keep and gb > 1.0:
+                    try:
+                        proc.suspend()
+                        paused[pid] = proc
+                        log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} ({gb:.1f} GB) paused beside "
+                            f"lane {keep} ({active[keep][1]:.1f} GB)")
+                    except psutil.Error:
+                        continue
+        elif paused and avail > LANE_FREE_GB:
+            pid = min(paused, key=lambda p: lanes_now.get(p, (None, 0.0))[1])
+            try:
+                paused.pop(pid).resume()
+                log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
+            except psutil.Error:
+                pass
+
     with cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn")) as pool:
-        while pending or running:
-            free_gb = room()
-            while pending and len(running) < lanes and (not running or free_gb >= max(LANE_FREE_GB, need[pending[0][0].dataset])):
-                gpu_busy = any(dev == "cuda" for dev, _ in running.values())
-                device = "cuda" if gpu and not gpu_busy else "cpu"
-                group = pending.pop(0)
-                log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
-                    f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
-                try:
-                    running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
-                except cf.process.BrokenProcessPool:
-                    lost.append(group)
+        try:
+            while pending or running:
+                balance()
                 free_gb = room()
-            done, _ = cf.wait(list(running), timeout=30, return_when=cf.FIRST_COMPLETED)
-            for f in done:
-                _device, group = running.pop(f)
-                try:
-                    steps.update(f.result())
-                except Exception as exc:  # noqa: BLE001 - a lane that died: its groups run again below, in this process
-                    log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
-                    lost.append(group)
+                while not paused and pending and len(running) < lanes and (not running or free_gb >= max(LANE_FREE_GB, need[pending[0][0].dataset])):
+                    gpu_busy = any(dev == "cuda" for dev, _ in running.values())
+                    device = "cuda" if gpu and not gpu_busy else "cpu"
+                    group = pending.pop(0)
+                    log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
+                        f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
+                    try:
+                        running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
+                    except cf.process.BrokenProcessPool:
+                        lost.append(group)
+                    free_gb = room()
+                done, _ = cf.wait(list(running), timeout=10, return_when=cf.FIRST_COMPLETED)
+                for f in done:
+                    _device, group = running.pop(f)
+                    try:
+                        steps.update(f.result())
+                    except Exception as exc:  # noqa: BLE001 - a lane that died: its groups run again below, in this process
+                        log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
+                        lost.append(group)
+        finally:
+            for proc in paused.values():         # never leave a lane suspended: the pool waits on it at shutdown
+                with contextlib.suppress(psutil.Error):
+                    proc.resume()
     for group in lost:
         steps.update(_run_group(decl.study, group, others, None, None))
     return steps
@@ -930,7 +974,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
             for node in _study_nodes(it, s):
                 try:
                     f = s.expectations.field(node)
-                    sv = s.surprise(node, "B1")
+                    sv = config.on_cpu_if_cuda_fails(s.surprise, node, "B1")
                 except Exception as exc:  # noqa: BLE001 - a field that could not be read is a note in the report
                     log(f"study: {it.dataset} {name} {node}: {type(exc).__name__}: {exc}")
                     continue
@@ -1188,7 +1232,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     names = {d.column: d.name for d in fields.declared(it.dataset)}
     for column in tools.group_columns(it.dataset, it.event):
         try:
-            y, mu, values = s.by_composition(f.node, column)
+            y, mu, values = config.on_cpu_if_cuda_fails(s.by_composition, f.node, column)
         except Exception as exc:  # noqa: BLE001 - a column that cannot be split is a note, the others are written
             log(f"study: {it.dataset} {f.node} by {column}: {type(exc).__name__}: {exc}")
             continue
@@ -1262,7 +1306,7 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
             rows = hit.to_pylist()
         else:
             try:
-                rows = tools.compare(a[:3], b[:3], years, q=decl.q)
+                rows = config.on_cpu_if_cuda_fails(tools.compare, a[:3], b[:3], years, q=decl.q)
             except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
                 log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
                 continue
@@ -1294,7 +1338,8 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
                 rows = hit.to_pylist()
             else:
                 try:
-                    rows = tools.determinants(x, contexts, list(it.years), q=decl.q, log=log, source=it.source)
+                    rows = config.on_cpu_if_cuda_fails(tools.determinants, x, contexts, list(it.years), q=decl.q,
+                                                       log=log, source=it.source)
                 except Exception as exc:  # noqa: BLE001 - a field that cannot be related is said, the others run
                     log(f"study: determinants of {x}: {type(exc).__name__}: {exc}")
                     continue
@@ -1317,7 +1362,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
         rows = hit.to_pylist()
     else:
         try:
-            rows = dependency.field_map(topic, contexts)
+            rows = config.on_cpu_if_cuda_fails(dependency.field_map, topic, contexts)
         except Exception as exc:  # noqa: BLE001 - the layer that cannot run is said; the time-varying rows stand
             log(f"study: place-level determinants: {type(exc).__name__}: {exc}")
             rows = []
