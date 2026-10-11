@@ -526,13 +526,21 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             in_block = in_block & inside
         sub = tab.filter(pa.array(in_block))
         time_index = (ym[in_block] if grain == "month" else np.full(sub.num_rows, tidx[int(year)], dtype=np.int64))
-        parts.append((code_of[row_code[in_block]],
-                      _index_of(places, sub.column("u").to_numpy()),
-                      time_index.astype(np.int64),
-                      (np.zeros(sub.num_rows, dtype=np.int64) if collapse else
-                       ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
-                        + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64)),
-                      *(sub.column(v).to_numpy().astype(np.float64) for v in values)))
+        pe, pu, pt = code_of[row_code[in_block]], _index_of(places, sub.column("u").to_numpy()), time_index.astype(np.int64)
+        pgrp = (np.zeros(sub.num_rows, dtype=np.int64) if collapse else
+                ((sub.column("sex").to_numpy().astype(np.int64) - 1) * nB
+                 + age_band(sub.column("age").to_numpy(), edges)).astype(np.int64))
+        pv = [sub.column(v).to_numpy().astype(np.float64) for v in values]
+        # the year summed into its cells before the years are joined: a year's counts come by every code of the type
+        # (SIH: millions of rows a year), and the share denominator's one field (block *) held all sixteen years' rows
+        # at once, 18.9 GB, to sum them into 3 million cells (2026-10-11)
+        cell = ((pe * len(places) + pu) * T + pt) * (2 * nB) + pgrp
+        cu, ci = np.unique(cell, return_inverse=True)
+        pv = [np.bincount(ci, weights=x, minlength=len(cu)) for x in pv]
+        pgrp, rest = cu % (2 * nB), cu // (2 * nB)
+        pt, rest = rest % T, rest // T
+        pu, pe = rest % len(places), rest // len(places)
+        parts.append((pe, pu, pt, pgrp, *pv))
     filled = np.asarray(in_tree)
     if block != "*" and filled.max() > 0 and (filled == 0).any():
         # a year in which no event carries a code of the tree, where other years do: the column is not filled that
