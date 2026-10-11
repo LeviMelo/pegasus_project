@@ -56,6 +56,54 @@ def age_band(age: np.ndarray, edges: list[int] | None = None) -> np.ndarray:
 # ---------------------------------------------------------------------- data
 
 
+def _nbp_profile(parts: dict, ref: float, device) -> tuple[float, float, float, float, float]:
+    """The NB-P dispersion's maximum likelihood (ADR-0032), (log φ0, P) jointly: the binned likelihood of
+    `_nb_loglik_binned` (the non-empty cells exactly, every cell's φ·log(1 + μ/φ) through 8,192 bins of log μ) in
+    float64 on the fits' device, minimised by L-BFGS-B over log φ0 in [log 10⁻³, log 10⁶] and P in [1, 2] with autograd's
+    exact gradient. A nested scalar search (P outside, log φ inside, each evaluation a pass over every non-empty cell on
+    the CPU) was 72 % of a study's wall clock (py-spy, 2026-10-11). Returns (log φ0, P, −loglik there, and log φ, −loglik
+    at P = 2, NB2's)."""
+    from scipy import optimize as opt
+
+    dt = torch.float64
+    y = torch.as_tensor(parts["y"], dtype=dt, device=device)
+    mu = torch.as_tensor(parts["mu"], dtype=dt, device=device)
+    n = torch.as_tensor(parts["n"], dtype=dt, device=device)
+    mbar = torch.as_tensor(parts["mbar"], dtype=dt, device=device)
+    spread = torch.as_tensor(parts["spread"], dtype=dt, device=device)
+    logmu, const = torch.log(mu), float(parts["const"])
+
+    def f(lp: torch.Tensor, pw: torch.Tensor) -> torch.Tensor:
+        ph = torch.exp(lp)
+        pc = ph * (mu / ref) ** (2.0 - pw)
+        lpm = torch.log(pc + mu)
+        full = (torch.lgamma(y + pc) - torch.lgamma(pc)).sum() - const + (pc * (torch.log(pc) - lpm) + y * (logmu - lpm)).sum()
+        pb = ph * (mbar / ref) ** (2.0 - pw)
+        total = (n * pb * torch.log1p(mbar / pb) - 0.5 * pb / (pb + mbar) ** 2 * spread).sum()
+        return -(full - (total - (pc * torch.log1p(mu / pc)).sum()))
+
+    def value_grad(v: np.ndarray, fixed_power: float | None = None):
+        lp = torch.tensor(float(v[0]), dtype=dt, device=device, requires_grad=True)
+        pw = torch.tensor(float(v[1]) if fixed_power is None else fixed_power, dtype=dt, device=device,
+                          requires_grad=fixed_power is None)
+        out = f(lp, pw)
+        out.backward()
+        g = [float(lp.grad)] + ([float(pw.grad)] if fixed_power is None else [])
+        return float(out), np.asarray(g)
+
+    lo, hi = float(np.log(1e-3)), float(np.log(1e6))
+    starts = [np.array([0.0, 1.5]), np.array([np.log(10.0), 1.9]), np.array([np.log(0.1), 1.1])]
+    best = None
+    for s0 in starts:            # three starts: the profile in P can be flat, and L-BFGS-B is local
+        r = opt.minimize(value_grad, s0, jac=True, method="L-BFGS-B", bounds=[(lo, hi), (1.0, 2.0)],
+                         options={"ftol": 1e-12, "gtol": 1e-8})
+        if best is None or r.fun < best.fun:
+            best = r
+    r2 = opt.minimize(lambda v: value_grad(np.array([v[0], 2.0]), fixed_power=2.0), np.array([best.x[0]]), jac=True,
+                      method="L-BFGS-B", bounds=[(lo, hi)], options={"ftol": 1e-12, "gtol": 1e-8})
+    return float(best.x[0]), float(best.x[1]), float(best.fun), float(r2.x[0]), float(r2.fun)
+
+
 @dataclass
 class BlockData:
     """Everything one block's fit needs, as dense arrays no larger than the population tensor."""
@@ -1571,7 +1619,8 @@ class Monolith:
                    + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None])
             base = torch.exp(lin)                                                 # [K, U, T]
             prof = self._prof(x)                                                  # [K, G]
-        y, u = self.data.y, self.data.u
+        fd = getattr(self, "fit_data", None) or self.data                         # the cells η is of (robust: imputed)
+        y, u = fd.y, fd.u
         sel = slice(None)
         keep = np.ones(self.N.shape[0], dtype=bool) if places is None else np.asarray(places, dtype=bool)
         if places is not None:
@@ -1628,7 +1677,10 @@ class Monolith:
                    + (x["s_all"][0] + x["v_all"][0])[None, :, None] + self._grp_place(x)[:, :, None])
             base = torch.exp(lin)
             prof = self._prof(x)
-            y, u = self.data.y, self.data.u
+            # the cells the model was fitted on: a robust refit's are the imputed ones (its `data` is the real block's,
+            # 7,342 cells fewer than its index on SIH A00-A09 2014-2023, and the arrays did not pair, 2026-10-11)
+            fd = getattr(self, "fit_data", None) or self.data
+            y, u = fd.y, fd.u
             sel = slice(None)
             if places is not None:
                 keep = np.asarray(places, dtype=bool)
@@ -1695,6 +1747,7 @@ class Monolith:
             total = float((n * pb * np.log1p(mbar / pb) - 0.5 * pb / (pb + mbar) ** 2 * spread).sum())
             return -(full - (total - float((pc * np.log1p(mu / pc)).sum())))
         nll.mu_ref = float(np.median(mu)) if len(mu) else 1.0
+        nll.parts = {"y": y, "mu": mu, "n": n, "mbar": mbar, "spread": spread, "const": const}
         return nll
 
     def _dispersion_power(self) -> float:
@@ -1708,17 +1761,7 @@ class Monolith:
             return self._dispersion()
         nll = self._nb_loglik_binned()
         ref = nll.mu_ref
-
-        def inner(power: float) -> tuple[float, float]:
-            r = optimize.minimize_scalar(lambda lp: nll(lp, power, ref), bounds=(np.log(1e-3), np.log(1e6)),
-                                         method="bounded", options={"xatol": 1e-3})
-            return float(r.fun), float(r.x)
-
-        res = optimize.minimize_scalar(lambda pw: inner(pw)[0], bounds=(1.0, 2.0), method="bounded",
-                                       options={"xatol": 0.005})
-        power = float(res.x)
-        fun, lp = inner(power)
-        fun2, lp2 = inner(2.0)
+        lp, power, fun, lp2, fun2 = _nbp_profile(nll.parts, ref, self.device)
         phi = float(np.exp(lp))
         self.phi_power, self.phi_ref = power, ref
         self.dispersion_check = {"phi": phi, "power": power, "mu_ref": ref,
@@ -1971,7 +2014,8 @@ class Monolith:
                 if moved < sweep_tol:
                     break
         m.phi = m._dispersion_power()
-        m.data = d
+        m.fit_data = m.data            # the imputed cells its index tensors (e, u, t, g) are of
+        m.data = d                     # readers see the block's real counts
         m.robust_info = info
         m.robust_tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 9, "courses": courses}
         log(f"robust: φ {self.phi:.3g} -> {m.phi:.3g}")
