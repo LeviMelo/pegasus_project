@@ -717,6 +717,14 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
             hi = stats.chi2.ppf(0.975, 2 * Y + 2) / 2 / M
             out.append({**base, "observed": Y, "expected": M, "effect": Y / M, "effect_unit": "rate ratio",
                         "low": float(lo), "high": float(hi), "p": pval, "answer": "tested"})
+    # each hypothesis is its own family (its own budget, ARCHITECTURE §7.7): Holm over the sources that test it
+    for hyp in {r["hypothesis"] for r in out}:
+        tested = sorted((r for r in out if r["hypothesis"] == hyp and r.get("p") is not None), key=lambda r: r["p"])
+        running = 0.0
+        for k, r in enumerate(tested):
+            running = max(running, min(1.0, (len(tested) - k) * r["p"]))
+            r["p_holm"] = running
+            r["answer"] = "supported" if running <= decl.q else "not supported at q"
     return out
 
 
@@ -1153,6 +1161,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("field_reader", "field"),
                                ("years", "years"), ("observed", "observed"), ("expected", "expected"),
                                ("effect", "effect"), ("low", "95 % low"), ("high", "95 % high"), ("p", "p"),
+                               ("p_holm", "p (Holm, over its sources)"),
                                ("answer", "answer")], cap=60) if decl.hypotheses else "<p>None declared.</p>",
              "<h2>6. Methods and limitations</h2>", _limitations(decl, scope),
              "<h2>7. Provenance</h2><p>provenance.json; every table is in study.duckdb (views onto the store and lake; "
