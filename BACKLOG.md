@@ -188,7 +188,7 @@ The interface and the product first, over today's machinery, so every later phas
 
 | id | unit | repo | done when |
 |---|---|---|---|
-| 10.1 | **The data-space screen** (§8.3) over every served field | core | the toxoplasmosis screen runs; what passes becomes related fields |
+| 10.1 | **The data-space screen** (§8.3) over every served field | core | the toxoplasmosis screen runs; what passes becomes related fields **Built, to be run at exhaustive depth: `study._screen` reads every system the store has fitted over the topic's years with the topic's own in one `relation_survey` (window chosen to maximise systems × years: 76 systems on 2019–2023), keeping the relations that involve a topic field. Fixed on the way: the factor model asked for more factors than stacked series (two fields: K 16 against 6).** |
 | 10.2 | **The win condition** | core + data | every acceptance item above holds; evaluation entry; the author reads the report |
 
 ---

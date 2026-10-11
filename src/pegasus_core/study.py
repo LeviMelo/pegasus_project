@@ -610,7 +610,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     related = _related(rows, series)
     pq.write_table(pa.Table.from_pylist(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
-    rel = _relations(scope, decl, log)
+    rel = _relations(scope, decl, log) + (_screen(scope, decl, log) if decl.depth == "exhaustive" else [])
     pq.write_table(pa.Table.from_pylist(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
@@ -880,6 +880,58 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
             continue
         out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))}, "pair": f"{a[0]}:{a[2]} ~ {b[0]}:{b[2]}",
                  "years": f"{years[0]}-{years[-1]}"} for r in rows]
+    return out
+
+
+def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
+    """The data-space screen (ARCHITECTURE §8.3, BACKLOG 10.1), at exhaustive depth: every system the store has fitted
+    over the topic's years (the window chosen to read the most data), read with the topic's own systems in one joint model (`tools.relation_survey`: the
+    factor model over graph bands and lags, one BH over everything), so a field anywhere in the data that moves with the
+    topic is found without being named. The relations involving a topic field are kept; each is a lead, never a cause."""
+    from . import store, tools
+
+    topic = [i for i in scope.items if i.status == "in" and not i.source]
+    if not topic:
+        return []
+    topic_years = sorted(set.intersection(*(set(i.years) for i in topic)))
+    if len(topic_years) < 4:
+        log(f"study: screen: the topic's systems share {len(topic_years)} years; four are needed")
+        return []
+    # every system the store has fitted over at least four of the topic's years; the window is the run of the topic's
+    # years from its first that maximises systems × years read (the fits on it are made on demand)
+    cover: dict[tuple[str, str, str], set[int]] = {}
+    for m in store.manifests("monolith"):
+        k = m["key"]
+        if k.get("codes") or k.get("source") or not k.get("block") or not k.get("event"):
+            continue
+        cover.setdefault((k["dataset"], k["event"], k["block"]), set()).update(k.get("years") or [])
+    best = (0, topic_years[:4])
+    for e in range(3, len(topic_years)):
+        window = topic_years[:e + 1]
+        n = sum(1 for ys in cover.values() if set(window) <= ys)
+        best = max(best, (n * len(window), window))
+    years = best[1]
+    plan: dict[tuple[str, str], set[str]] = {}
+    for it in topic:
+        plan.setdefault((it.dataset, it.event), set()).update(it.blocks)
+    for (ds, ev, block), ys in cover.items():
+        if set(years) <= ys:
+            plan.setdefault((ds, ev), set()).add(block)
+    spec = [(ds, ev, sorted(bl)) for (ds, ev), bl in plan.items()]
+    log(f"study: screen over {len(spec)} systems, {sum(len(b) for *_, b in spec)} blocks, {years[0]}-{years[-1]}")
+    try:
+        found = tools.relation_survey(spec, years, q=decl.q, log=log)
+    except Exception as exc:  # noqa: BLE001 - the screen failing leaves the study's own relations, said
+        log(f"study: screen: {type(exc).__name__}: {exc}")
+        return []
+    mine = {f"{i.dataset}:{i.event}:" for i in topic}
+    out = []
+    for x in found:
+        if not any(f.startswith(tuple(mine)) for f in x.fields):
+            continue
+        out.append({"pair": " ~ ".join(x.fields), "support": x.locus.get("band") or x.locus.get("scale"),
+                    "lag": x.locus.get("lag"), "rho": float(x.effect), "p": float(x.p), "q": float(x.q),
+                    "reported": True, "screen": True, "years": f"{years[0]}-{years[-1]}"})
     return out
 
 

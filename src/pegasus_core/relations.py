@@ -208,6 +208,7 @@ def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float =
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     F, U, T = d.r.shape
     n = U * T
+    K = min(K, F)        # no more factors than stacked series (two fields with their lags are 6 against K 16, 2026-10-10)
     ok = np.isfinite(d.v.reshape(F, n))
     f32, f64 = torch.float32, torch.float64      # the cells' contractions in single precision (a laptop GPU runs
     R = torch.as_tensor(np.where(ok, d.r.reshape(F, n), 0.0), dtype=f32, device=dev)   # double at 1/64 the rate),
