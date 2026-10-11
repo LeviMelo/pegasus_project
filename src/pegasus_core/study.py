@@ -945,9 +945,10 @@ def _peak_gb() -> float:
     return round(peak / 2**30, 2)
 
 
-#: a lane's expected peak when no earlier study measured its dataset: SIH's lanes peaked at 13.5-14.2 GB
-#: (2026-10-11), so unmeasured means large
-LANE_DEFAULT_GB = float(os.environ.get("PEGASUS_LANE_DEFAULT_GB", "12"))
+#: a lane's expected peak when no earlier study measured its dataset. A code-set lane peaks near 2.5 GB (TOXG, TOXC,
+#: DOFET P37.1) and SIH's chapter lanes at 13.5-14.2 GB (2026-10-11); a lane that outgrows its admission is paused
+#: (`_run_items`), so the default need not be the worst case: at 12 GB every unmeasured lane ran alone
+LANE_DEFAULT_GB = float(os.environ.get("PEGASUS_LANE_DEFAULT_GB", "6"))
 
 
 def _lane_estimates(decl: Declaration) -> dict[str, float]:
