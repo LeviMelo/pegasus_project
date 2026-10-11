@@ -195,11 +195,11 @@ def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguit
 
 @app.command()
 def ask(dataset: str, event: str, question: str, node: str, years: str = Years, graph: str = "contiguity",
-        q: float = 0.05, limit: int = 20) -> None:
-    """One stage-C question (excess, step, trend) of one field, through every method that answers it."""
+        q: float = 0.05, limit: int = 20, grain: str = "year") -> None:
+    """One stage-C question (excess, step, trend; seasonality at ``--grain month``) of one field, through every method that answers it."""
     from . import questions
 
-    s = _session(dataset, event, years, graph)
+    s = _session(dataset, event, years, graph, grain)
     answers = s.ask(question, node, q=q)
     t = Table("years", "places", "states", "methods", "shapes", "effects", "p")
     for a in answers[:limit]:

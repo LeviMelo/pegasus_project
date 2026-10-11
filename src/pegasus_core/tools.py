@@ -49,7 +49,7 @@ from . import (
 from .scans import explain, lenses
 from .scans import scales as scales_mod
 
-LENS_TIERS = {"institution_step": "B1", "share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1",
+LENS_TIERS = {"institution_step": "B1", "share_excess": "B1", "cell_excess": "B1", "excess": "B1", "excess_step": "B1", "excess_trend": "B1", "excess_level": "B0", "step": "B1", "outbreak": "B1", "change_point": "B1", "trend_divergence": "B2", "space_time": "B1", "season_departure": "B1",
               "spatial_cluster": "B0", "group_disparity": "B0"}
 # The lenses a prospective survey (``survey(prospective=t0)``, fit on the years up to t0) can run, with their tier
 # (ADR-0012): the outbreak lens reads the ALARM BASELINE (BPA: a flat level that past epidemics do not enter, so an
@@ -59,7 +59,8 @@ PROSPECTIVE_TIERS = {"outbreak": "BPA", "change_point": "BP", "space_time": "BP"
 TWO_SIDED = ("cell_excess", "excess", "excess_step", "excess_trend", "excess_level")
 SCALE = {"institution_step": "rate_ratio", "share_excess": "rate_ratio", "cell_excess": "rate_ratio", "excess": "rate_ratio", "excess_step": "rate_ratio", "excess_trend": "rate_ratio",
          "excess_level": "rate_ratio", "step": "rate_ratio", "outbreak": "rate_ratio", "change_point": "rate_ratio", "trend_divergence": "sd",
-         "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio"}
+         "space_time": "rate_ratio", "spatial_cluster": "rate_ratio", "group_disparity": "rate_ratio",
+         "season_departure": "rate_ratio"}
 
 
 def lens_tier(lens: str, prospective: bool = False) -> str:
@@ -594,8 +595,9 @@ class Session:
         those tree nodes (a study's topic, ARCHITECTURE §4); None keeps every field."""
         from . import questions as qs
 
+        grain = self.source.get("grain", "year")
         names = tuple(n for n in (questions or tuple(qs.QUESTIONS))
-                      if qs.QUESTIONS[n].prospective == (train_last is not None))
+                      if qs.QUESTIONS[n].prospective == (train_last is not None) and qs.QUESTIONS[n].grain in ("", grain))
         ask_kw = {"train_last": train_last} if train_last is not None else {}
         found: dict[str, list] = {}
         src = self.source

@@ -535,6 +535,15 @@ def _offset(s: surprise.Surprise) -> np.ndarray:
     return s.mu / np.exp(s.extras["alpha"][:, None] + s.extras["beta"][:, None] * st[None, :])
 
 
+def _unit_cells(s: surprise.Surprise, scale: scales_mod.Scale, off: np.ndarray
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A scale's units as NB cell series: Σy, Σ``off`` (the expectation the question reads) and the dispersion of the
+    sum, M² / Σ off²/φ (Var = Σ(μ + μ²/φ))."""
+    y, o = scale.sum(s.y), scale.sum(off)
+    inv = scale.sum(np.where(np.isfinite(s.phi) & (s.phi > 0), off ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
+    return y, o, np.divide(o ** 2, inv, out=np.full(o.shape, np.inf), where=inv > 0)
+
+
 def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The trend β (per sd of the years) of each unit of ``scale`` as a departure from the field's
     offset, its sd, and the unit's quasi-likelihood dispersion κ (≥ 1; its Pearson χ² per df around a smooth (cubic)
@@ -544,10 +553,7 @@ def unit_trends(s: surprise.Surprise, scale: scales_mod.Scale) -> tuple[np.ndarr
     infl = np.sqrt(surprise.trend_inflation(_lag1_correlation(s, scale)))      # N1: AR(1) errors widen a trend
     if scale.name == "municipality":
         return b, sd * infl, np.ones(len(b))
-    off = _offset(s)
-    y, o = scale.sum(s.y), scale.sum(off)
-    inv = scale.sum(np.where(np.isfinite(s.phi) & (s.phi > 0), off ** 2 / np.where(np.isfinite(s.phi), s.phi, 1.0), 0.0))
-    phi = np.divide(o ** 2, inv, out=np.full(o.shape, np.inf), where=inv > 0)
+    y, o, phi = _unit_cells(s, scale, _offset(s))
     st = (s.years - s.years.mean()) / max(float(s.years.std()), 1e-9)
     vague = lambda k: np.full(k, 1e-6)  # noqa: E731
     _, bb, sdd, _ = surprise.refit_place(y, o, phi, np.stack([np.ones_like(st), st], axis=1), tau=vague(2))
@@ -620,6 +626,167 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
                                 "scale": x.name, "dispersion": float(kappa[k]), "estimand": reference}))
         off += x.n
     ledger.complete(test, float(pool.min()), None, {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
+    return out
+
+
+def year_harmonics(s: surprise.Surprise, scale: scales_mod.Scale
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Each unit's seasonal departure from the field's in each complete calendar year at the monthly grain, as an NB
+    harmonic regression (the cosinor of Nelson et al. 1979; Cornelissen 2014): log m_t = log o_t + α_y +
+    a_y·(sin θ_t, cos θ_t), θ = 2π·month/12, with a free level α per unit and year.
+
+    **The field's season is the rest of the field's, in the same year.** B1's season is the fit's baseline (robust to
+    epidemics, a smooth cyclic walk); the data's own national cycle departs from it, so against B1 even a random group
+    of places "departs" (a place-permutation negative on dengue 2013-2019: 10-26 % of random groups at p < 0.05). The
+    reference is therefore B1 times the harmonic the same estimator finds on all other places (leave-one-out: Σy and
+    Σμ of the field less the unit, estimated first), the unit's departure ``a`` is from that, and its covariance adds
+    the reference's. The (unit, year) rows are shrunk to the reference by one Gaussian prior per coefficient, whose
+    precision is learned across them (Fellner–Schall, `surprise.refit_place`).
+
+    Returns the departures a [n, C, 2], their covariances [n, C, 2, 2], the standardised year positions [C], the years
+    [C] and the field's reference harmonic (sin, cos) of the unit's rest, B1's with the rest's departure, averaged over
+    the years [n, 2]."""
+    if int(s.years.max()) < 3000:
+        raise ValueError("the season is read at a sub-annual grain; this field is annual")
+    yr, moy = s.years // 100, s.years % 100 - 1
+    keep = [np.flatnonzero(yr == c) for c in np.unique(yr)]
+    keep = [k[np.argsort(moy[k])] for k in keep if len(k) == 12]
+    if len(keep) < 4:
+        raise ValueError(f"the season's change needs 4 complete years; this field has {len(keep)}")
+    y, o, phi = _unit_cells(s, scale, s.mu)
+    inv = np.where(np.isfinite(phi), o ** 2 / np.where(np.isfinite(phi), phi, 1.0), 0.0)
+    rest_y, rest_o = y.sum(0) - y, o.sum(0) - o
+    rest_inv = inv.sum(0) - inv
+    rest_phi = np.divide(rest_o ** 2, rest_inv, out=np.full(rest_o.shape, np.inf), where=rest_inv > 1e-12)
+    theta = 2 * np.pi * np.arange(12) / 12
+    X = np.stack([np.ones(12), np.sin(theta), np.cos(theta)], axis=1)
+    n, C = y.shape[0], len(keep)
+
+    def rows(a, shift=None):                         # [C·n, 12], year-major
+        return np.concatenate([a[:, k] * (1.0 if shift is None else np.exp(shift[c] @ X[:, 1:].T))
+                               for c, k in enumerate(keep)], axis=0)
+
+    _, br, _, _, hr = surprise.refit_place(rows(rest_y), rows(rest_o), rows(rest_phi), X, covariance=True)
+    br = br[:, 1:].reshape(C, n, 2)
+    vr = hr[:, 1:, 1:].reshape(C, n, 2, 2)
+    _, b, _, _, hinv = surprise.refit_place(rows(y), rows(o, br), rows(phi), X, covariance=True)
+    a = b[:, 1:].reshape(C, n, 2).transpose(1, 0, 2)
+    cov = (hinv[:, 1:, 1:].reshape(C, n, 2, 2) + vr).transpose(1, 0, 2, 3)
+    lo = np.log(np.maximum(o, 1e-300))
+    base = np.mean([2 / 12 * (lo[:, k] - lo[:, k].mean(1, keepdims=True)) @ X[:, 1:] for k in keep], axis=0)
+    years = np.array([int(yr[k[0]]) for k in keep])
+    pos = (years - years.mean()) / max(float(years.std()), 1e-9)
+    return a, cov, pos, years, base + br.mean(0)
+
+
+def _random_effects(a: np.ndarray, cov: np.ndarray, Z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per unit, the 2-vectors ``a`` [n, C, 2] of C years with covariances ``cov`` [n, C, 2, 2] as a multivariate
+    random-effects meta-regression on the design ``Z`` [C, p] (columns: the level, then the change per sd of the
+    years): a_y = Σ_j Z_yj θ_j + ε_y, ε_y ~ N(0, V_y + τ²I). The between-year variance τ² is scalar (a season's shift is
+    as likely in phase as in amplitude) by the multivariate DerSimonian–Laird moments (Jackson, White & Thompson
+    2010); the coefficients' covariance is scaled by the Hartung–Knapp–Sidik–Jonkman factor max(1, Q/df) (Röver,
+    Knapp & Friede 2015), so a unit whose years scatter more than their sampling errors say is not tested on those
+    errors. Returns θ [n, p, 2], its covariance [n, 2p, 2p] (coefficient-major) and (τ², Q/df) [n, 2]."""
+    n, C, _ = a.shape
+    p = Z.shape[1]
+    eye = np.eye(2)
+    # X_y = Z_y ⊗ I₂ [2, 2p]: the normal equations Σ X'WX θ = Σ X'W a, coefficient-major
+    Xy = np.einsum("cj,kl->ckjl", Z, eye).reshape(C, 2, 2 * p)
+
+    def solve(W):
+        S = np.einsum("cim,ucij,cjr->umr", Xy, W, Xy)
+        Sinv = np.linalg.pinv(S, hermitian=True)
+        th = np.einsum("umr,ur->um", Sinv, np.einsum("cim,ucij,ucj->um", Xy, W, a))
+        res = a - np.einsum("cim,um->uci", Xy, th)
+        return Sinv, th, np.einsum("uci,ucij,ucj->u", res, W, res)
+
+    W0 = np.linalg.pinv(cov, hermitian=True)
+    S0inv, _, Q0 = solve(W0)
+    df = 2 * C - 2 * p
+    # DL: τ² = (Q − df) / (Σ tr W_y − tr(S⁻¹ Σ X'W²X))
+    c_dl = np.einsum("ucii->u", W0) - np.einsum("umr,urm->u", S0inv, np.einsum("cim,ucij,ucjk,ckr->umr", Xy, W0, W0, Xy))
+    tau2 = np.where(c_dl > 0, np.maximum(Q0 - df, 0.0) / np.where(c_dl > 0, c_dl, 1.0), 0.0)
+    W = np.linalg.pinv(cov + tau2[:, None, None, None] * eye, hermitian=True)
+    Sinv, th, Q = solve(W)
+    hk = np.maximum(Q / df, 1.0)
+    return th.reshape(n, p, 2), Sinv * hk[:, None, None], np.stack([tau2, Q / df], axis=1)
+
+
+def _phase_shift(v: np.ndarray, g: np.ndarray) -> float:
+    """The months by which the harmonic ``v`` (sin, cos) peaks after ``g`` (negative: before), within ±6."""
+    return float((np.arctan2(v[0], v[1]) - np.arctan2(g[0], g[1]) + np.pi) % (2 * np.pi) - np.pi) * 12 / (2 * np.pi)
+
+
+def season_departure(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, q: float = 0.05,
+                     scales: list[scales_mod.Scale] | None = None, estimand: str = "level",
+                     ratio: float | None = None) -> list[Finding]:
+    """The seasonality question (ARCHITECTURE §7.2, component 5), from B1 at the monthly grain: does a unit's annual
+    cycle depart from the field's (B1's season), and did it change over the period? ``estimand``: ``level``, the
+    departure vector (a_sin, a_cos) of the unit's log-rate seasonal harmonic averaged over the years, or ``change``,
+    its difference between the last and the first year. Per unit and year the harmonic is fitted as in
+    `year_harmonics`; the years are combined as a random-effects meta-regression (`_random_effects`), the years being
+    the replicates that carry a season's interannual scatter (an epidemic that peaks early one year is a departure of
+    that year, not of the place).
+
+    The test is of the minimum relevant effect (P5): H0 is ‖departure‖ ≤ log θ0 (θ0 = ``RATE_RATIO``: in some month
+    the unit's rate differs from the field's season by at most that factor), T = d'V⁻¹d/2 against the non-central
+    F(2, C − p, δ² λmax(V⁻¹)), the largest non-centrality H0 allows (so conservative). All units of all ``scales``
+    are one family, BH within each scale at q/(number of scales). The effect is the rate ratio at the departing
+    month, exp‖d‖; the finding names the unit's peak month and amplitude against the field's, and the shift in months
+    (positive: later)."""
+    if s.tier != "B1":
+        raise ValueError("the season is tested against B1's (the field's season)")
+    if estimand not in ("level", "change"):
+        raise ValueError(estimand)
+    sc = scales or [scales_mod.municipality(s.places)]
+    theta0 = minimum_effect("season_departure", s.field.id) if ratio is None else ratio
+    delta = float(np.log(theta0))
+    family = f"season_departure|B1|{s.field.block}|{estimand}"
+    test = ledger.register(control.Hypothesis(family, "scan", {"lens": "season_departure", "field": s.field.id,
+                                                               "estimand": estimand, "scales": [x.name for x in sc]}))
+    rows = []
+    for x in sc:
+        a, cov, pos, years, ref = year_harmonics(s, x)
+        C = len(years)
+        if estimand == "level":
+            Z, span, j = np.ones((C, 1)), 1.0, 0
+        else:
+            Z, span, j = np.stack([np.ones(C), pos], axis=1), float(pos.max() - pos.min()), 1
+        th, V, het = _random_effects(a, cov, Z)
+        d = th[:, j] * span                                       # [n, 2]
+        Vd = V[:, 2 * j:2 * j + 2, 2 * j:2 * j + 2] * span ** 2
+        Vinv = np.linalg.pinv(Vd, hermitian=True)
+        stat = np.einsum("ui,uij,uj->u", d, Vinv, d) / 2
+        lam = delta ** 2 * np.linalg.eigvalsh(Vinv)[:, -1]
+        p = np.minimum(1.0, stats.ncf.sf(stat, 2, C - Z.shape[1], np.maximum(lam, 1e-9)))
+        p = np.where(np.isfinite(p) & (np.abs(d).sum(1) > 0), p, 1.0)
+        rows.append((x, d, th, ref, het, p, years))
+    pool = np.concatenate([r[5] for r in rows])
+    hit = _bh_by_scale([r[5] for r in rows], q)
+    out, off = [], 0
+
+    def peak(v):                                                   # the harmonic's maximum, as the middle of its month
+        return float((np.arctan2(v[0], v[1]) * 12 / (2 * np.pi)) % 12 + 0.5)
+
+    for x, d, th, ref, het, p, years in rows:
+        for k in np.nonzero(hit[off:off + x.n])[0]:
+            locus = {"places": [int(s.places[u]) for u in x.members(k)], "years": [int(years[0]), int(years[-1])]}
+            if x.name != "municipality":
+                locus.update(scale=x.name, unit=str(x.units[k]))
+            g = ref[k]
+            mid = g + th[k, 0]
+            start, end = (mid, mid) if estimand == "level" else (mid - 0.5 * d[k], mid + 0.5 * d[k])
+
+            out.append(Finding("season_departure", s.field.id, "B1", locus, float(np.exp(np.hypot(*d[k]))), float(p[k]),
+                               {"estimand": estimand, "scale": x.name, "departure": [float(d[k][0]), float(d[k][1])],
+                                "field_amplitude": float(np.hypot(*g)), "field_peak_month": peak(g),
+                                "amplitude": [float(np.hypot(*start)), float(np.hypot(*end))],
+                                "peak_month": [peak(start), peak(end)], "shift_months": [_phase_shift(start, g), _phase_shift(end, g)],
+                                "between_year_variance": float(het[k, 0]), "heterogeneity": float(het[k, 1]),
+                                "years": int(len(years)), "shape": {"shape": "season"}}))
+        off += x.n
+    ledger.complete(test, float(pool.min()) if pool.size else 1.0, None,
+                    {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
     return out
 
 
