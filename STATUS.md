@@ -186,17 +186,22 @@ Other outputs: `reports/` (gitignored: `leads.md`, `dossier.html`, per-plan repo
 
 ### 5.1 The questions registry (`questions.QUESTIONS`)
 
-| question | reference tier | methods (`id`) | shapes accepted |
-|---|---|---|---|
-| `excess` | B1 | `cell_excess`, `excess` (multiscale spike), `outbreak` (v0), `space_time` (v0) | spike, transient |
-| `step` | B1 | `excess_step`, `step` (Bayesian change point), `change_point` (v0) | step |
-| `trend` | B1 | `excess_trend` | trend |
-| `cluster` | B0 | `excess_level`, `spatial_cluster` (v0) | |
-| `share` | B1 | `share_excess` (beta-binomial) | |
-| `institution` | B1 | `institution_step` (v0 lattice) | |
-| `group` | B0 | `group_disparity` (v0) | |
-| `divergence` | B2 | `divergence_neighbours`, `divergence_national` (lens `trend_divergence`; municipality, region, state) | |
-| `prospective` | BP / BPA | `outbreak` (BPA), `change_point` (BP), `space_time` (BP) | |
+| question | component (ARCHITECTURE §7.2) | reference tier | methods (`id`) | shapes accepted |
+|---|---|---|---|---|
+| `excess` | transient | B1 | `cell_excess`, `excess` (multiscale spike), `outbreak` (v0), `space_time` (v0) | spike, transient |
+| `step` | step | B1 | `excess_step`, `step` (Bayesian change point), `change_point` (v0) | step |
+| `trend` | trend | B1 | `excess_trend` | trend |
+| `cluster` | level; `spatial_cluster` spatial coherence | B0 | `excess_level`, `spatial_cluster` (v0) | |
+| `propagation` | propagation | B1 | `propagation` (first departures, source, Theil–Sen speed, Moran spectral null) | propagation |
+| `share` | transient (ratio field) | B1 | `share_excess` (beta-binomial) | |
+| `institution` | step (facility support) | B1 | `institution_step` (v0 lattice) | |
+| `group` | group heterogeneity | B0 | `group_disparity` (v0) | |
+| `divergence` | trend (against neighbours or nation) | B2 | `divergence_neighbours`, `divergence_national` (lens `trend_divergence`; municipality, region, state) | |
+| `seasonality` | seasonality | B1, monthly | `season_level`, `season_change` (lens `season_departure`) | |
+| `prospective` | the method's component against BP/BPA | BP / BPA | `outbreak` (BPA), `change_point` (BP), `space_time` (BP) | |
+
+A finding's component is the set of its agreeing methods' (`questions.components`); relation is a study product
+(`tools.compare`, `tools.determinants` with time-varying contexts, `relation_survey`).
 
 Methods declare the field kinds they read (`count`, `mark`). Every method of a question runs at q/k (union bound); the Cauchy combination is not yet used. Every method has a stored record (calibration on null worlds, power on planted signals, recall on the documented events); all 16 are maturity `v0` (section 8).
 
@@ -324,8 +329,9 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
 - **Store hygiene.** `ledger_A` (10,527 parts) and `ledger_T2019` (2,248) are not compacted; fitted-block lookup depends on the exact year range of the request.
 
 **Broken**
-- **Prospective alarms (`alarms`).** Two failures on 2026-10-10: `LookupError: no fitted monolith ... years 2014-2022` (SINAN-CHIK needs a fit ending at the previous year, which does not exist), and `ValueError: SIM.DO IX: groups [...] have no admissible cell the population holds` from `surprise.prospective` > `monolith.assemble` (test-period assembly for SIM IX/X, J09-J18). The design for the weekly nowcast (`surveillance`) is built; the path that feeds it is not working.
-- **Robust dispersion guard.** A running job logged `robust: phi 1.84 -> 5.96e+05`, which effectively switches detection off for that block; nothing guards the refit.
+- **Persons read nothing through national link runs stored before 2026-10-10.** Those runs named records `<_blob_sha256>:<_row>`, readers the content key, so linked shares and cohort outcomes read 0 (SIM 2019: 0 of 28,669 infant-death pairs). Fixed in pegasus_data branch `links` (`store.load` relabels; `linked_counts` refuses pairs that name none of a side's records); the main checkout still lacks it until `links` merges.
+
+Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).
 
 ---

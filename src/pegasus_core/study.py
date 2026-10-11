@@ -545,6 +545,9 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
         # readers would read every event of the type against the population
         it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
+        coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
+        if coded and "supports" in DEPTH_READERS[decl.depth]:
+            it.readers = {"supports": DEPTH_READERS[decl.depth]["supports"]}     # the code set at its other places
     runs = _link_runs()
     paths = _person_paths(items, runs)
     if decl.depth != "survey":
