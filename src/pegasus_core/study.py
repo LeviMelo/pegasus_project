@@ -741,21 +741,46 @@ def _when(text: Any) -> list[int]:
     return list(range(first, last + 1))
 
 
+def _hypothesis_readers(scope: Scope):
+    """(item, reader, support) for every read item at its residence and, for a field read at the residence by its own
+    counts or a code set, at each other place it declares (`fields.support_sources`, the item's codes kept). A ratio or
+    a linked share is read at the residence only: its denominator is the residence's."""
+    for it in (i for i in scope.items if i.status == "in"):
+        yield it, it.source, "residence"
+        if it.source and ("population" in it.source or it.source.get("source") == "linked"):
+            continue
+        try:
+            supports = fields.support_sources(it.dataset, it.event)
+            span = {r["column"]: (r.get("first_year"), r.get("last_year")) for r in gateway.roles(it.dataset)}
+        except Exception:  # noqa: BLE001 - a source whose supports cannot be listed is tested at its residence
+            continue
+        for name, src in supports:
+            lo, hi = span.get(src["support"], (None, None))
+            if (lo and int(lo) > it.years[-1]) or (hi and int(hi) < it.years[0]):
+                continue                    # a column of another layout generation (DOFET's MUNIOCOR, before 1996)
+            yield it, {**src, **(it.source or {}), "support": src["support"]}, name.removeprefix("support:")
+
+
 def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
     """The declared hypotheses (ARCHITECTURE §7.7, version 1): each tested once, at its locus, in every source of the
     scope whose years and places hold it, against the B1 expectation; its own test, not a member of a discovery family.
     level and transient: observed against expected over the locus, the upper tail of the sum under its negative
     binomial (moments of the cells' predictive), the rate ratio with an exact Poisson interval; step: the ratio of
-    observed to expected after the declared year against before it."""
+    observed to expected after the declared year against before it.
+
+    Each source is tested at the residence and at every other place it declares (`fields.support_sources`: the place of
+    care, of infection, of notification): an outbreak's tests are billed where they were done, and SIA's consolidated
+    production names no patient's residence (Santa Maria 2018: 2-8 serology tests a month by residence, 1,100 rising
+    to 4,613 by the establishment's municipality)."""
     from scipy import stats
 
     out = []
     for h in decl.hypotheses:
         comp, places = str(h.get("component", "transient")), [int(p) for p in (h.get("where") or [])]
         years = _when(h.get("when"))
-        for it in (i for i in scope.items if i.status == "in"):
+        for it, reader, support in _hypothesis_readers(scope):
             base = {"hypothesis": h.get("note") or json.dumps(h, ensure_ascii=False), "component": comp,
-                    "source": it.dataset, "field_reader": json.dumps(it.source or {"nodes": it.nodes}),
+                    "source": it.dataset, "support": support, "field_reader": json.dumps(reader or {"nodes": it.nodes}),
                     "places": ", ".join(map(str, places)), "years": f"{years[0]}-{years[-1]}"}
             if comp == "step":
                 needed = [y for y in it.years if y < years[0]]
@@ -767,7 +792,7 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
                                               f"the hypothesis {years[0]}-{years[-1]}"})
                 continue
             try:
-                sv = _session(it).surprise(_study_nodes(it, None)[0], "B1")
+                sv = _session(it, reader).surprise(_study_nodes(it, None)[0], "B1")
             except Exception as exc:  # noqa: BLE001 - said in the answer
                 out.append({**base, "answer": f"not read: {type(exc).__name__}: {exc}"})
                 continue
@@ -1388,7 +1413,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>5. Hypotheses</h2>",
-             table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("field_reader", "field"),
+             table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("support", "place"), ("field_reader", "field"),
                                ("years", "years"), ("observed", "observed"), ("expected", "expected"),
                                ("effect", "effect"), ("low", "95 % low"), ("high", "95 % high"), ("p", "p"),
                                ("p_holm", "p (Holm, over its sources)"),
