@@ -487,7 +487,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     parts, unallocated, in_tree = [], {}, []
     for year in years:
         # a code set's codes go to the event counts, which read them from an extract where one holds them whole
-        extra = {"codes": subset} if subset and readers[source] is gateway.event_counts else {}
+        extra = ({"codes": subset} if subset and readers[source] in (gateway.event_counts, gateway.share_moments)
+                 else {})          # a share of a code set: only its records' compositions are read (`composition_counts`)
         ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args, **extra)
         tab = ec.counts
         if subset:

@@ -95,3 +95,9 @@ time that pegasus_data now writes into each run's report (`seconds`).
 deletes the build's files once verified partitions hold them (pegasus_data's one release rule; a rebuild fetches them
 again). `prune` over the root freed 10.4 GB, to 28 GB free.
 
+**Compositions of a code set (evening).** The quick deep study's SIH lane spent its time building compositions for
+SIH's 35 group columns × 9 years, each a table of about 6.9 M cells, to keep B58's. `composition_counts(codes=)` now
+reads only the code set's records (pegasus_data `query(rows=)`), and so do `by_composition` and the share reader of a
+code-set field. SIH 2017, schooling, B58: 971 rows in 2.9 s against 6,717,778 in 16.5 s, the same counts and the same
+unrecorded cells.
+

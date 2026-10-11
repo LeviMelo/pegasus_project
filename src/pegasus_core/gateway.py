@@ -728,11 +728,14 @@ def _df_key(dataset: str, year: int) -> dict:
     return {"df_residence": 1} if dataset.startswith("SIH") and year < 2018 else {}
 
 
-def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False) -> pa.Table:
+def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False,
+             rows: dict[str, list[str]] | None = None) -> pa.Table:
     """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` adds each
     record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`, numbered before any filter):
     what its links pair."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
+    if rows and identity:
+        raise ValueError("record identities are numbered before any filter: read them unfiltered")
     import pegasus_data as pg
     import pyarrow.compute as pc
 
@@ -748,7 +751,9 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     dups = bool(rule)
     flag = (rule.get("flag") or {}).get("column")
     select = None if "except" in rule else wanted + ([flag] if flag else [])
-    kwargs = {"root": config.data_root(), "max_download": 8 * 1024**3, **({"provenance": "all"} if identity else {})}
+    # ``rows`` ({column: code prefixes}): only those records, filtered in the lake's scan (pegasus_data `query(rows=)`)
+    kwargs = {"root": config.data_root(), "max_download": 8 * 1024**3, **({"provenance": "all"} if identity else {}),
+              **({"rows": rows} if rows else {})}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
@@ -1075,11 +1080,11 @@ COMPOSITION_BATCH = 4
 
 
 def _composition_key(dataset: str, event: str, year: int, column: str, missing, classifier: str | None,
-                     places: pa.Array | None) -> dict:
+                     places: pa.Array | None, codes=None) -> dict:
     return {"what": "composition_counts", "code": config.code_key(composition_counts, _composition_tables),
             **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
             "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
-            "data": config.data_version(), **_df_key(dataset, year)}
+            **({"codes": sorted(codes)} if codes else {}), "data": config.data_version(), **_df_key(dataset, year)}
 
 
 def _composition_cached(key: dict) -> EventCounts | None:
@@ -1089,13 +1094,17 @@ def _composition_cached(key: dict) -> EventCounts | None:
 
 
 def composition_counts(dataset: str, event: str, year: int, column: str, missing: tuple[str, ...] | list = (),
-                       classifier: str | None = None, places: pa.Array | None = None) -> EventCounts:
+                       classifier: str | None = None, places: pa.Array | None = None,
+                       codes: list[str] | tuple[str, ...] | None = None) -> EventCounts:
     """A category column's composition per (u, year, sex, age, code, value): the events carrying each value. A value
     among the column's declared ``missing`` codes (pegasus_data roles) is unallocated as 'value not recorded', a blank
     one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
     stage E, S4.3). One read serves every share of the column (`share_moments`), and up to `COMPOSITION_BATCH` of the
-    event type's group columns not yet counted for the year are counted from the same read, each stored on its own."""
-    key = _composition_key(dataset, event, year, column, missing, classifier, places)
+    event type's group columns not yet counted for the year are counted from the same read, each stored on its own.
+    ``codes`` (prefixes of the ``classifier``) reads only a code set's records, filtered in the lake: B58's few hundred
+    admissions a year, not a table of 6.9 million cells per column and year filtered afterwards (2026-10-11)."""
+    codes = tuple(codes) if codes and classifier else None
+    key = _composition_key(dataset, event, year, column, missing, classifier, places, codes)
     hit = _composition_cached(key)
     if hit is not None:
         return hit
@@ -1109,12 +1118,13 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     for col, miss in siblings.items():
         if len(batch) >= COMPOSITION_BATCH:
             break
-        if col not in batch and _composition_cached(_composition_key(dataset, event, year, col, miss, classifier, places)) is None:
+        if col not in batch and _composition_cached(_composition_key(dataset, event, year, col, miss, classifier, places,
+                                                                     codes)) is None:
             batch[col] = tuple(miss)
     strata = _strata(dataset, event)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + ([classifier] if classifier else [])
     con = duckdb.connect()
-    raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), rows={classifier: list(codes)} if codes else None)
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
@@ -1124,7 +1134,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     del raw
     out = None
     for i, (col, miss) in enumerate(batch.items()):
-        k = _composition_key(dataset, event, year, col, miss, classifier, places)
+        k = _composition_key(dataset, event, year, col, miss, classifier, places, codes)
         ec = _composition_tables(con, f"x_{i}", year, miss, k, dataset, col)
         if col == column:
             out = ec
@@ -1184,12 +1194,13 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
 
 
 def share_moments(dataset: str, event: str, year: int, indicator: str, success: tuple[str, ...] = (), classifier: str | None = None,
-                  places: pa.Array | None = None, missing: tuple[str, ...] | list = (), quality: bool = False) -> EventCounts:
+                  places: pa.Array | None = None, missing: tuple[str, ...] | list = (), quality: bool = False,
+                  codes: list[str] | tuple[str, ...] | None = None) -> EventCounts:
     """A share's states per (u, year, sex, age, code): n events with ``indicator`` recorded and k of them with a value
     among ``success`` (SIH ``MORTE`` = 1: died in hospital), from the column's composition (`composition_counts`).
     ``quality``: the column's quality field (ARCHITECTURE §5.3) instead: n every event, k those whose value is blank or
     among the column's declared ``missing`` codes ('ignorado'); a code not declared missing is a value, never guessed."""
-    comp = composition_counts(dataset, event, year, indicator, missing, classifier, places)
+    comp = composition_counts(dataset, event, year, indicator, missing, classifier, places, codes=codes)
     con = duckdb.connect()
     if quality:
         con.register("c", comp.counts)

@@ -204,7 +204,7 @@ class Session:
         sorted_places = np.asarray(d.places, dtype=np.int64)[order]
         frames = []
         for t, year in enumerate(np.asarray(d.years)):
-            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary)
+            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary, codes=codes)
             for tab, value in ((c.counts, None), (c.missing, "not recorded")):
                 if tab is None or tab.num_rows == 0:
                     continue
@@ -996,7 +996,7 @@ class Session:
         out: dict[str, list] = {"u": [], "t": [], "code": [], "m": []}
         for y in d.years:
             ec = gateway.composition_counts(self.dataset, self.event, int(y), src["indicator"],
-                                            tuple(src.get("missing") or ()), src.get("classifier"))
+                                            tuple(src.get("missing") or ()), src.get("classifier"), codes=src.get("codes"))
             mt = ec.missing
             if mt is None or mt.num_rows == 0:
                 continue
