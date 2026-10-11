@@ -1504,6 +1504,52 @@ def token_rule(dataset: str, column: str) -> dict | None:
     raise LookupError(f"{dataset}.{column}: pegasus_data describes no such field")
 
 
+@functools.cache
+def column_name(dataset: str, column: str) -> str:
+    """A column's name as its source documents it (pegasus_data `describe`: the official name, else the curated
+    English one), else the column itself."""
+    import re
+
+    import pegasus_data as pg
+
+    parts = re.split(r"[-.]", dataset, maxsplit=1)
+    for args in ((parts[0], parts[1] if len(parts) > 1 else None), (parts[0], None)):
+        try:
+            d = pg.describe(*args, field=column, root=config.data_root())
+        except Exception:  # noqa: BLE001 - a spelling the catalog does not know: try the next
+            continue
+        return str(d.official_name or d.translated_name or column)
+    return column
+
+
+@functools.cache
+def value_labels(dataset: str, event: str, column: str, years: tuple[int, ...]) -> dict[str, str]:
+    """``code -> label`` for a group column (a composition or the race stratum), labelled as pegasus_data labels a
+    query (`pg.levels`), weighed on every value the column holds in ``years``: a subset can choose another table
+    (SINAN-TOXC's CRITERIO with one stray code read as meningitis's criteria). A code no table decodes is absent."""
+    import pegasus_data as pg
+
+    from .tools import group_columns
+
+    missing = group_columns(dataset, event).get(column)
+    codes: set[str] = set()
+    if missing is not None and column != _strata(dataset, event).get("race"):
+        primary = next((c["column"] for c in event_type(dataset, event).get("classifiers") or []
+                        if c["role"] == "primary"), None)
+        for y in years:
+            try:
+                c = composition_counts(dataset, event, int(y), column, missing, primary)
+            except Exception:  # noqa: BLE001 - a year that does not hold the column labels nothing
+                continue
+            if c.counts is not None and "value" in c.counts.column_names:
+                codes |= {str(v) for v in pc.unique(c.counts.column("value")).to_pylist() if v is not None}
+    else:
+        codes = {str(k) for k in range(10)}       # the race stratum's codes: one digit
+    if not codes:
+        return {}
+    return pg.levels(dataset, column, sorted(codes), root=config.data_root())
+
+
 def has_code_structure(name: str) -> bool:
     """Whether pegasus_data serves a code tree of this name (`_TREES`)."""
     return name in _TREES

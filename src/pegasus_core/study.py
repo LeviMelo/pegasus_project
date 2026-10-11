@@ -1812,7 +1812,7 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         "places": ", ".join(places[:20]) + (f" (+{len(places) - 20})" if len(places) > 20 else ""),
         "place_names": ", ".join(f"{(names.get(p) or {}).get('name', p)}/{(names.get(p) or {}).get('uf_sigla', '')}"
                                  for p in places[:8]) + (f" (+{len(places) - 8})" if len(places) > 8 else ""),
-        "n_places": len(places), "groups": ", ".join(x.locus.get("groups") or []) or None,
+        "n_places": len(places), "groups": _group_text(it, x.locus.get("groups") or []) or None,
         "first_year": int(years[0]) if years else None,
         "last_year": int(years[-1]) if years else None,
         "effect": float(x.effect), "effect_unit": x.scale.replace("_", " "),
@@ -1824,6 +1824,29 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": corr.get("reason"),
         "status": x.status, **(_COMPOSITION if x.locus.get("groups_by") and x.locus.get("groups_by") != gateway._strata(
             it.dataset, it.event).get("race") else _reliability(x.provenance.get("methods") or [x.estimand]))}
+
+
+def _group_text(it: Item, groups: list[str]) -> str:
+    """A finding's groups as a reader names them: "Evolução do Caso: Vivo (1)" for "EVOLUCAO=1", the code kept beside
+    its label (`gateway.value_labels`, weighed on every value the column holds over the item's years); a code no table
+    decodes stays a code, said undecoded."""
+    out = []
+    for g in groups:
+        column, _, value = str(g).partition("=")
+        if not value:
+            out.append(str(g))
+            continue
+        try:
+            name = gateway.column_name(it.dataset, column)
+            labels = gateway.value_labels(it.dataset, it.event, column, tuple(int(y) for y in it.years))
+        except Exception:  # noqa: BLE001 - a column pegasus_data cannot describe is named as recorded
+            name, labels = column, {}
+        if value in ("not recorded", "value missing") or value in labels:
+            shown = f"{labels[value]} ({value})" if value in labels else value
+        else:
+            shown = f"{value} (undecoded)"
+        out.append(f"{name}: {shown}")
+    return ", ".join(out)
 
 
 #: a composition's group answer: read against Brazil's mix of the value at the place's age and sex, so it restates the
@@ -2114,6 +2137,18 @@ def _stories(rows: list[dict]) -> list[list[dict]]:
     return out
 
 
+def _n(k: int, noun: str) -> str:
+    return f"{k:,} {noun}" + ("" if k == 1 else "s")
+
+
+def _direction(r: dict) -> str:
+    """Whether a rate-ratio finding is above or below its expectation, in words (a deficit cluster read "effect 0.35
+    rate ratio" with nothing saying it was one)."""
+    if str(r.get("effect_unit")) != "rate ratio" or r.get("effect") is None:
+        return ""
+    return " (above expectation)" if float(r["effect"]) > 1 else " (below expectation)"
+
+
 def _story_html(k: int, rows: list[dict], e) -> str:
     """One story: where, when, what departs, in how many fields and sources, and its strongest findings."""
     lead = rows[0]
@@ -2123,13 +2158,13 @@ def _story_html(k: int, rows: list[dict], e) -> str:
     span = f"{min(years)}–{max(years)}" if years else ""
     items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
                     + (f" in {e(r['groups'])}" if r.get("groups") else "")
-                    + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
+                    + _direction(r) + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
                     + (", corroborated" if r.get("corroborated") else "")
                     + (f" (method not calibrated: {e(r['reliability'])})" if r.get("uncalibrated") else "") + "</li>"
                     for r in rows[:6])
     excess = sum(max(r.get("excess") or 0.0, 0.0) for r in rows)
-    return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{len(rows)} findings in "
-            f"{len(fields_)} fields from {len(sources)} sources ({e(', '.join(sources))})"
+    return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{_n(len(rows), 'finding')} in "
+            f"{_n(len(fields_), 'field')} from {_n(len(sources), 'source')} ({e(', '.join(sources))})"
             + (f"; {excess:,.0f} events above expectation" if excess else "") + f".</p><ul>{items}</ul>")
 
 
