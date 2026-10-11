@@ -44,6 +44,16 @@ through 2023, 6 weeks each, those in 2023; `ctl/delay_eval2.py`, `delay_eval3.py
 year-end slowed beyond what the year's own triangle had shown. A week of age 0 is sometimes worse with the triangle
 (week 43 as of 2023-10-28: +15.7 % against +5.4 %), since its F rests on the shortest delays, where the weekday of
 onset and of registration matter and neither is modelled.
+A weekday factor was tried and not kept (`ctl/weekday_diag.py`, `weekday_diag2.py`). The model was
+p(d | onset weekday) ∝ b(d)·ρ(registering weekday), fitted on 2022 by iterative proportional fitting.
+
+- 98 % of 2022's registrations fall Monday to Friday, and the fit reproduces each onset weekday's short-delay F within
+  0.01–0.02.
+- Nationally it brings an age-0 week's F closer on 3 of 5 dates (age-0 error 9.8 % against 12 %).
+- Summed over places, as the evaluation reads it, the error grew from 5.2 % to 5.7 %, and the age-0 weeks reached
+  +25–33 %.
+
+What it would need is the per-place delay with weekday and week of year modelled jointly, not as independent factors.
 
 **Alarms** (`Session.alarms`, SIM IX, R = 260, c = 0.5) after the change:
 - as of 2023-07-01: 44 alarms (54 before);

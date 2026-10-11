@@ -1228,7 +1228,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                 desc.extend(_descriptive(it, s, f, label))
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
-                rows.extend({**_finding(x, it, label, names), "_places": [int(q) for q in x.locus.get("places") or []],
+                rows.extend({**_finding(x, it, label, names), "_event": it.event,
+                             "_places": [int(q) for q in x.locus.get("places") or []],
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
                                                      | ({str(f_)} if (f_ := ((x.robustness.get("triage") or {}).get("facility")
                                                                              or {}).get("one_institution")) else set()))}
@@ -1264,6 +1265,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     for r in rows:
         r.pop("_places", None)
         r.pop("_institutions", None)
+        r.pop("_event", None)
     findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
     pq.write_table(pa.Table.from_pylist(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
@@ -1703,6 +1705,33 @@ def _institution_facts(rows: list[dict], log) -> None:
                          f"neonatal unit {short(f_.get('CENTRNEO'))}"
                          + ("" if c in first else f"; opened after {r['first_year']}"))
         r["institution_facts"] = " | ".join(parts) or None
+        r["institution_volume"] = _institution_volume(r, codes, log)
+
+
+def _institution_volume(r: dict, codes: list[str], log) -> str | None:
+    """Each institution's events of every code, the year before the finding and in its last (`facility.facility_cube`):
+    a ward whose whole activity grew reads as a departure of any one code there (BACKLOG 7.1's other-chapter volume)."""
+    import pyarrow.compute as pc
+
+    from . import facility
+
+    dataset, event = r.get("dataset"), r.get("_event")
+    first, last = r.get("first_year"), r.get("last_year")
+    if not (dataset and event and first and last):
+        return None
+    published = gateway.published_years(dataset)
+    base = int(first) - 1 if int(first) - 1 in published else int(first)
+    try:
+        cubes = {y: facility.facility_cube(dataset, event, y) for y in sorted({base, int(last)})}
+    except Exception as exc:  # noqa: BLE001 - a volume that cannot be read leaves the finding without it, said
+        log(f"study: institution volume {dataset} {codes}: {type(exc).__name__}: {exc}")
+        return None
+    parts = []
+    for c in codes:
+        n = {y: int(pc.sum(t.filter(pc.equal(t.column("facility"), c)).column("y")).as_py() or 0) for y, t in cubes.items()}
+        ratio = f" (×{n[int(last)] / n[base]:.2f})" if n.get(base) else ""
+        parts.append(f"{c}: {n[base]:,} {event} events of every code in {base}, {n[int(last)]:,} in {last}{ratio}")
+    return " | ".join(parts) or None
 
 
 def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) -> list[dict]:
@@ -2017,7 +2046,8 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              "centre, a new service, a screening programme), read with the establishment's registration.</p>",
              table(institutional, [("label", "field"), ("dataset", "source"), ("component", "component"),
                                    ("first_year", "from"), ("last_year", "to"), ("effect", "effect"), ("q", "q"),
-                                   ("institution_facts", "establishment (CNES)")], cap=30),
+                                   ("institution_facts", "establishment (CNES)"),
+                                   ("institution_volume", "its whole activity")], cap=30),
              "<h2>3a. Data quality</h2><p>Places and periods where a column's blank or 'ignored' share departs from its "
              "expectation: where the records of this topic are least complete, and where a recording practice changed.</p>",
              table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
