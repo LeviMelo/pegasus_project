@@ -682,7 +682,41 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
             print(f"study {decl_study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}", flush=True)
         if device:
             steps[step]["device"] = device
+        steps[step]["peak_gb"] = _peak_gb()              # the lane's peak so far: what the next study admits it by
     return steps
+
+
+def _peak_gb() -> float:
+    """This process's peak resident memory in GB (the peak working set on Windows, the maximum RSS elsewhere)."""
+    import psutil
+
+    info = psutil.Process().memory_info()
+    peak = getattr(info, "peak_wset", None)
+    if peak is None:
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+    return round(peak / 2**30, 2)
+
+
+#: a lane's expected peak when no earlier study measured its dataset: SIH's lanes peaked at 13.5-14.2 GB
+#: (2026-10-11), so unmeasured means large
+LANE_DEFAULT_GB = float(os.environ.get("PEGASUS_LANE_DEFAULT_GB", "12"))
+
+
+def _lane_estimates(decl: Declaration) -> dict[str, float]:
+    """Each dataset's largest measured lane peak (``peak_gb``) in the provenance of the studies beside this one."""
+    out: dict[str, float] = {}
+    for path in decl.path.parent.glob("*/provenance.json"):
+        try:
+            steps = json.loads(path.read_text(encoding="utf-8")).get("steps") or {}
+        except (OSError, ValueError):
+            continue
+        for step, v in steps.items():
+            if isinstance(v, dict) and v.get("peak_gb"):
+                ds = step.split(" ", 1)[0]
+                out[ds] = max(out.get(ds, 0.0), float(v["peak_gb"]))
+    return out
 
 
 #: lanes a study may run at once (``PEGASUS_STUDY_LANES``), the free memory a new lane needs before it starts
@@ -716,22 +750,32 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
 
     gpu = torch.cuda.is_available() and not os.environ.get("PEGASUS_DEVICE")
     per_lane = max(2, (os.cpu_count() or 4) // lanes)
+    known = _lane_estimates(decl)
+    need = {g[0].dataset: known.get(g[0].dataset, LANE_DEFAULT_GB) for g in order}
+    me = psutil.Process()
+
+    def room() -> float:
+        # available memory less what the running lanes may still take: each up to its dataset's measured peak
+        held = sum(c.memory_info().rss for c in me.children(recursive=True)) / 2**30
+        expect = sum(need[g[0].dataset] for _, g in running.values())
+        return psutil.virtual_memory().available / 2**30 - max(expect - held, 0.0)
+
     steps: dict = {}
     pending, running, lost = list(order), {}, []
     with cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn")) as pool:
         while pending or running:
-            free_gb = psutil.virtual_memory().available / 2**30
-            while pending and len(running) < lanes and (not running or free_gb >= LANE_FREE_GB):
+            free_gb = room()
+            while pending and len(running) < lanes and (not running or free_gb >= max(LANE_FREE_GB, need[pending[0][0].dataset])):
                 gpu_busy = any(dev == "cuda" for dev, _ in running.values())
                 device = "cuda" if gpu and not gpu_busy else "cpu"
                 group = pending.pop(0)
                 log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
-                    f"{free_gb:.1f} GB free")
+                    f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
                 try:
                     running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
                 except cf.process.BrokenProcessPool:
                     lost.append(group)
-                free_gb = psutil.virtual_memory().available / 2**30
+                free_gb = room()
             done, _ = cf.wait(list(running), timeout=30, return_when=cf.FIRST_COMPLETED)
             for f in done:
                 _device, group = running.pop(f)

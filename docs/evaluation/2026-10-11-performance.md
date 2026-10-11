@@ -21,6 +21,8 @@ on single calls. Drivers are in the session scratchpad (`ctl/`).
 | Robust refits never reused (`robust_stored`) | looked up under its tag (v 11) but saved under `robust`'s own stamp (v 9): every session recomputed every block's robust refit (a SIH chapter's is about 15 min) | saved under the key it is looked up by | SIH A00–A09's model with its refit: 26.4 s the first time, 9.4 s the next, the same φ and P |
 | Group question on a code set (`Session.by_composition`) | a cold SIH item (pneumonia J12–J18, 2014–2023) still in its group question after an hour: a Python pass per row of each composition table | the rows filtered in Arrow; a code set's own codes kept (see below) | SIH A00–A09, one column: 12.5 s; its composition total 2,086,422 = the field's events |
 
+**Lane admission by measured peaks.** In the survey, admission on free memory alone let lanes grow past it: SIH's lanes peaked at 13.5 and 14.2 GB after being admitted with 9 GB free, and the machine fell to 2.3 GB free. Each lane now records its peak per item (`peak_gb` in provenance). A dataset is admitted by its largest measured peak, or 12 GB when unmeasured (`PEGASUS_LANE_DEFAULT_GB`), against the available memory less what the running lanes may still take. Three small items peaked at 2.46–2.54 GB.
+
 ## Found on the way
 
 - **A code set's group question counted every event of its dataset.** A code-set field's node is `*`, and the filter
