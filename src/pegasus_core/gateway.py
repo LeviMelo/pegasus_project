@@ -1240,6 +1240,41 @@ def mark_facility_moments(dataset: str, event: str, year: int, mark: str, bounds
     return out
 
 
+def cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds: list[str]) -> pa.Table:
+    """Code co-occurrence on the same record (BACKLOG 4.2): per stratum (sex × age band) and ICD category, the records
+    carrying the category (``n_code``) and those of them also carrying a seed code (``n_both``), with the stratum's
+    records (``n``) and its records carrying a seed (``n_seed``). A record's codes are every code its ``columns`` hold
+    (a certificate's lines, an admission's diagnoses, a birth's anomaly list), the seeds matched on the full code (P37.1
+    is not P37) and the related codes read at their category; the seed's own categories are left out."""
+    seeds = sorted({s_.replace(".", "").upper() for s_ in seeds})
+    key = {"what": "cooccurrence", "code": config.code_key(cooccurrence), "dataset": dataset, "event": event,
+           **_declared_key(dataset, event), "year": year, "columns": list(columns), "seeds": seeds,
+           "data": config.data_version()}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    strata = _strata(dataset, event, year)
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *columns] + ([strata["sex"]] if strata["sex"] else [])
+    con = duckdb.connect()
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
+    con.register("r", raw)
+    text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
+    seed_hit = " OR ".join(f"list_contains(list_transform(codes, x -> starts_with(x, '{s_}')), true)" for s_ in seeds) or "false"
+    seed_cat = ", ".join(f"'{s_[:3]}'" for s_ in seeds) or "''"
+    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)},
+            list_distinct(regexp_extract_all(upper({text}), '[A-Z][0-9]{{2}}[0-9X]?')) AS codes FROM r""")
+    con.execute(f"""CREATE TEMP TABLE f AS SELECT sex, CAST(least(age // 10, 8) AS SMALLINT) AS band, codes,
+            ({seed_hit}) AS seed FROM e WHERE sex IS NOT NULL AND age IS NOT NULL AND age >= 0""")
+    table = con.execute(f"""
+        WITH s AS (SELECT sex, band, count(*) AS n, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_seed FROM f GROUP BY ALL),
+             c AS (SELECT sex, band, cat, count(*) AS n_code, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_both
+                   FROM (SELECT sex, band, seed, unnest(list_distinct(list_transform(codes, x -> left(x, 3)))) AS cat FROM f)
+                   WHERE cat NOT IN ({seed_cat}) GROUP BY ALL)
+        SELECT c.sex, c.band, c.cat AS code, c.n_code, c.n_both, s.n, s.n_seed FROM c JOIN s USING (sex, band)""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"co-occurrence of {seeds} in {dataset} {columns} {year}"})
+    return table
+
+
 def code_list_counts(dataset: str, event: str, year: int, column: str | list[str],
                      places: pa.Array | None = None, classifier: str | None = None) -> EventCounts:
     """Events per (u, year, sex, age, ICD category) for a column that holds several codes

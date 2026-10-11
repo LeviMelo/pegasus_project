@@ -95,3 +95,10 @@ three-list spina bifida data (upstate New York, 1969–1974, Hook, Albright & Cr
 - the averaged N̂ is 734.8 [660.5, 809.1];
 - the lists' completeness is birth certificates 69%, death certificates 28%, rehabilitation 25%, against the authors'
   68%, 27% and 25%.
+
+**Related codes from records (4.2).** `cooccur.related_codes` reads every code a record carries, here the certificate
+lines of SIM 2015–2023 deaths with B58 or P37.1. Each category's records with a seed are compared with their expectation
+under independence within sex × ten-year age strata (exact Poisson, BH at 0.05). 88 categories are related. HIV
+leads: B24 on 7,816 certificates at 27.6 times expected [27.0, 28.2], B20 at 23.1. AIDS's opportunistic infections
+follow: pneumocystosis (B59, 16.2), cytomegalovirus (B25, 22.5), CNS tuberculosis (A17, 25.3), candidiasis (B37, 16.3).
+That is the known clinical picture of cerebral toxoplasmosis in AIDS. The read takes 7 s once the counts are cached.

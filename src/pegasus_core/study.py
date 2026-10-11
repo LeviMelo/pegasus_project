@@ -160,12 +160,13 @@ class Scope:
     excluded: list[dict]                 # what a seed named and the study does not read, with why
     contexts: list[str]
     budget_gb: float
+    related: list[dict] = field(default_factory=list)   # codes found with the seeds on the same records (`cooccur`)
 
     def to_dict(self) -> dict:
         return {"study": self.study, "depth": self.depth, "download_budget_gb": self.budget_gb,
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
-                "not_read": self.excluded, "contexts": self.contexts,
+                "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
                 "estimated_minutes": round(sum(i.est_seconds or 0 for i in self.items if i.status == "in") / 60, 1)}
 
 
@@ -263,6 +264,32 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
             else:
                 fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
         it.est_seconds = round(fit + questions, 1)
+
+
+def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:
+    """The codes related to the seeds on the same records (BACKLOG 4.2, `cooccur.related_codes`), wherever a read item's
+    records carry several codes (`fields.declared_mentions`: certificate lines, all diagnoses, anomaly lists), over the
+    item's years in the lake; each with its strength (lift and interval) and FDR."""
+    from . import cooccur
+
+    if not seeds:
+        return []
+    out, seen = [], set()
+    for it in (i for i in items if i.status == "in" and i.mentions):
+        if (it.dataset, it.event) in seen:
+            continue
+        seen.add((it.dataset, it.event))
+        for d in fields.declared_mentions(it.dataset):
+            src = fields.mentions_source(it.dataset, d.column)
+            cols = src["column"] if isinstance(src["column"], list) else [src["column"]]
+            try:
+                rows = cooccur.related_codes(it.dataset, it.event, list(it.years), cols, seeds, q=decl.q)
+            except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said, not hidden
+                log(f"study: related codes in {it.dataset} {d.column}: {type(exc).__name__}: {exc}")
+                continue
+            out += [{"dataset": it.dataset, "event": it.event, "where": d.column, "years": [it.years[0], it.years[-1]],
+                     **r} for r in rows if r["related"]]
+    return sorted(out, key=lambda r: -r["lift"])
 
 
 def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items: list[Item], excluded: list[dict],
@@ -438,7 +465,14 @@ def resolve(decl: Declaration, log=print) -> Scope:
         it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
     _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
-    return Scope(decl.study, decl.depth, items, excluded, contexts, budget)
+    related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
+    if decl.depth != "survey":
+        # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
+        for r in (r for r in related if r["related"]):
+            items.append(Item(r["dataset"], r["event"], ["*"], None, list(r["years"]),
+                              f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the "
+                              f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
+    return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related)
 
 
 # ---------------------------------------------------------------------- the run
@@ -1108,6 +1142,11 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",
              "<h3>Deferred</h3><ul>" + "".join(f"<li>{e(i.dataset)}: {e(i.note)}</li>"
                                                for i in scope.items if i.status != "in") + "</ul>",
+             "<h3>Codes found with the topic's on the same records</h3>"
+             + (table(scope.related, [("code", "code"), ("label", "condition"), ("dataset", "source"), ("where", "on"),
+                                      ("observed", "records with both"), ("expected", "expected"), ("lift", "lift"),
+                                      ("low", "95% from"), ("high", "to"), ("q", "q")], cap=25)
+                if scope.related else "<p>None at q.</p>"),
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>5. Hypotheses</h2>",
