@@ -791,7 +791,8 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
             if fid == r["field"]:
                 continue
             ui = np.flatnonzero(np.isin(pl, list(places)))
-            ti = np.flatnonzero((yrs // (100 if yrs.max() > 9999 else 1) >= lo_y) & (yrs // (100 if yrs.max() > 9999 else 1) <= hi_y))
+            year_of = yrs // 100 if yrs.max() > 9999 else yrs          # YYYYMM periods at the monthly grain
+            ti = np.flatnonzero((year_of >= lo_y) & (year_of <= hi_y))
             if not len(ui) or not len(ti):
                 continue
             o, e_ = float(y[np.ix_(ui, ti)].sum()), float(mu[np.ix_(ui, ti)].sum())
