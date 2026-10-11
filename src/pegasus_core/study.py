@@ -504,7 +504,14 @@ def resolve(decl: Declaration, log=print) -> Scope:
                                       f"holds {c} ({tree[c]['label']}), read as a field of its own (its category "
                                       f"{tree[c]['parent']} holds other conditions)", source={"codes": [c]}))
                 held = [n for n in nodes if n in reg.level]
-                if held:
+                if held and decl.depth == "survey":
+                    # a survey reads the topic's codes as one field of their own: its node inside a fitted chapter
+                    # (every infectious disease in 5,570 places over 16 years, for B58) was most of the survey's hours,
+                    # and the chapter's context is standard depth's (2026-10-11)
+                    items.append(Item(ds, et["name"], ["*"], None, [], f"its primary classifier ({prim['column']}) "
+                                      f"holds {', '.join(held)}, read as a field of its own at survey depth",
+                                      source={"codes": held}))
+                elif held:
                     mentions = [d.column for d in fields.declared_mentions(ds)] or None
                     items.append(Item(ds, et["name"], sorted({reg.chapter(n) for n in held}), held, [],
                                       f"its primary classifier ({prim['column']}) holds {', '.join(held)}"

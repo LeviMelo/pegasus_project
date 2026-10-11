@@ -30,6 +30,17 @@ now makes every item's lakes and link runs once, serially, before the lanes star
 `store` in provenance). Its scope lists the runs the store lacks (`link_runs_to_compute`), priced by the measured wall
 time that pegasus_data now writes into each run's report (`seconds`).
 
+**Where the survey's five hours went** (`study_toxo_survey9`, 17,850 s; item times overlap across lanes):
+- **National link runs inside the lanes, about 2.5 h.** `ciha_deaths_to_sim` 2023–2025 ran twice, in two lanes at once
+  (about 3,300 s). `sih_deaths_to_sim` 2024–2025 took 840 s, and `sinan_toxc_to_sih_admission` 2025 took 4,600 s.
+  Fixed by the store step above.
+- **Paging.** Three lanes held 42 GB on 31.6 GB, and the pagefile grew to 47 GB. Fixed by pausing lanes under
+  pressure.
+- **Whole chapters fitted for one code.** B58's node is read inside ICD chapter I, so a survey fitted every infectious
+  disease, in every place and year, for SIH, SIM, CIHA and SIA-ATD. CIHA I took 1,017 s and ATD I 1,606 s. SIM I and
+  SIH I ran an hour and more each before failing, and are uncounted. A survey now reads the topic's nodes as a code set
+  of their own; the chapter's context is standard depth's.
+
 ## Found on the way
 
 - **A code set's group question counted every event of its dataset.** A code-set field's node is `*`, and the filter
