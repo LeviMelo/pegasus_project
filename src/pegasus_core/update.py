@@ -345,6 +345,17 @@ def _ensure_links(plan: Plan, out: dict, log) -> None:
         unpublished = [z for z in need if any(z not in gateway.published_years(d) for d in sides)]
         for z in unpublished:
             out[f"link {link} {z}"] = "no publication on a side: not linked"
+        # a run reads its sides' records of its year and the padded ones: one that touches the confirmation reserve is
+        # a claim's to read, not a plan's (SIM 2024's deaths had been linked to SIH's admissions, 2026-10-11)
+        def side_years(sd, z):        # the years a run of ``z`` reads of a side: its own, padded (before, after)
+            before, after = tuple(getattr(sd, "pad_years", None) or (0, 0))
+            return set(range(z - before, z + after + 1))
+
+        reserved_runs = [z for z in need if z not in unpublished and link in specs and any(
+            set(control.reserved(sd.dataset)) & side_years(sd, z) for sd in (specs[link].left, specs[link].right))]
+        for z in reserved_runs:
+            out[f"link {link} {z}"] = "a side's year is in the confirmation reserve: not linked"
+        unpublished += reserved_runs
         need = [z for z in need if z not in unpublished]
         missing = []
         for z in need:

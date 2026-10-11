@@ -28,7 +28,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from . import config, fields, gateway, leads, questions, store
+from . import config, control, fields, gateway, leads, questions, store
 
 DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: gigabytes a depth may download (data not yet in the lake); years already in the lake are free (hand-set,
@@ -148,6 +148,7 @@ class Item:
     denominator: tuple | None = None     # a ratio's denominator dataset and lag (its exposure is in ``source``)
     est_seconds: float | None = None     # the run's predicted wall clock for this item (`_estimate`)
     extract: bool = False                # its codes read from an extract of the dataset, file by file (`_extract_or_lake`)
+    confirm_last: int | None = None      # stage E's later years: its leads selected on the years up to it, tested after
     note: str = ""
 
 
@@ -199,12 +200,14 @@ def _icd(code: str) -> str:
 
 
 def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | None]]:
-    """The years ``dataset`` publishes among ``years``, and the gigabytes each would download: 0 when in the lake, None
-    when the catalog does not size it (never read as free)."""
+    """The years ``dataset`` publishes among ``years`` outside the confirmation reserve (`control.reserved`: only a
+    claim reads it), and the gigabytes each would download: 0 when in the lake, None when the catalog does not size it
+    (never read as free)."""
     import pegasus_data as pg
 
     published = gateway.published_years(dataset)
-    ys = [y for y in years if not published or y in published]
+    held = set(control.reserved(dataset))
+    ys = [y for y in years if (not published or y in published) and y not in held]
     volume = _volumes(dataset, config.data_root())
     lake = pg.lake_coverage(dataset, root=config.data_root())        # not cached: a run's `ensure_lake` extends it
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
@@ -624,9 +627,19 @@ def resolve(decl: Declaration, log=print) -> Scope:
         extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
                   for it in _related_elsewhere(decl, [r for r in related if r["related"]], served)]
     items += _within_time(decl, items, extra)
+    if decl.depth in ("deep", "exhaustive"):
+        # replication in later years (ARCHITECTURE §8.3, acceptance item 6): selected on the years up to the last
+        # LATER_YEARS held out, tested once on them; the survey's findings stood at R0 with nothing to replicate them
+        for it in items:
+            if it.status == "in" and len(it.years) >= 2 * LATER_YEARS + 2:
+                it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
     overlap, overhead = _phase_record(decl)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+
+
+#: the later years a deep study holds out to replicate its leads in (`Item.confirm_last`)
+LATER_YEARS = 3
 
 
 #: the wall clock a depth may spend on the related codes' fields beyond the topic's own (minutes; the topic's items are
@@ -1151,7 +1164,8 @@ def _plan(it: Item, others: list | None = None):
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
                                                               **it.readers)],
-                       relations=False, triage=True, report=None, extra={"corroborators": others or []})
+                       relations=False, triage=True, report=None,
+                       extra={"corroborators": others or [], **({"confirm_last": it.confirm_last} if it.confirm_last else {})})
 
 
 def _session(it: Item, source: dict | None = None):

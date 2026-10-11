@@ -25,7 +25,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from . import config, store
+from . import config, control, store
 
 MAX_AGE = 80  # POPSVS closes at 80+
 _TREES = ("ICD10", "SIGTAP", "CBO2002", "CNAE20")  # pegasus_data's code_trees.parquet
@@ -591,6 +591,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     pegasus_data extract holds them whole for the year (`pegasus_data.extract`: a dataset larger than the lake, read
     file by file), the counts are of the extract's records, and only of those codes.
     """
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
@@ -731,6 +732,7 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` adds each
     record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`, numbered before any filter):
     what its links pair."""
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
     import pyarrow.compute as pc
 
@@ -837,6 +839,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     unallocated with that reason. ``code_list``: the classifier column holds several codes
     concatenated (SINASC's CODANOMAL, "Q02Q690"); an event counts once under each distinct
     category it carries (as `code_list_counts`), and events carrying none are not counted."""
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     strata = _strata(dataset, event)
     spec_class = classifier
     if spec_class is None:
@@ -1854,6 +1857,7 @@ def event_type(dataset: str, event: str) -> dict:
 
 def raw_event_counts(dataset: str, event: str, year: int, by: list[str]):
     """``count_events`` for a whole year, Brazil, by the given raw columns (complete: no partial answer, 8 GiB ceiling)."""
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
 
     with warnings.catch_warnings():
@@ -2035,6 +2039,11 @@ def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
     from pegasus_data.linkage import store as link_store
     from pegasus_data.linkage.engine import link_method, stored_key
 
+    spec = link_specs().get(link)
+    for sd in (spec.left, spec.right) if spec else ():
+        # a run's pairs carry its sides' records of its years: one touching the confirmation reserve is a claim's
+        before, after = tuple(getattr(sd, "pad_years", None) or (0, 0))
+        control.check_reserved(sd.dataset, range(year - before, year + after + 1))
     method = link_method(link)                 # probabilistic where declared; deterministic keys only otherwise
     settings = pg.load_settings(root=config.data_root())
     hit = link_store.load(settings, stored_key(link, method, year, "BR"))
@@ -2198,6 +2207,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     records the spec groups (the live births of one delivery) pairs one record per group, the smallest identity, as
     pegasus_data's engine chooses it: every member takes its group's partner. A side exploded into days pairs the
     record itself."""
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
 
     spec = link_specs()[link]
     sd = spec.left if side == "left" else spec.right
@@ -2264,6 +2274,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
 def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> tuple[pa.Table, pa.Array]:
     """One event type's records of ``year`` as persons (`tools.cohort`): on the lattice (u, sex, age class) with
     ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name)."""
+    control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     strata = _strata(dataset, event)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + columns
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)

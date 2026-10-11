@@ -32,7 +32,7 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
-from . import config, gateway, store
+from . import config, control, gateway, store
 
 
 def _system(dataset: str) -> str:
@@ -207,8 +207,9 @@ class Fields:
         if ("table", source) not in self._cache:
             parts = []
             published = gateway.published_years(source.dataset)
+            held = set(control.reserved(source.dataset))   # the confirmation reserve is a claim's, never corroboration's
             for y in self.years:
-                if published and int(y) not in published:      # not published for the year (TOXC before 2019): no events
+                if (published and int(y) not in published) or int(y) in held:   # not published (TOXC before 2019)
                     continue
                 try:
                     t = source_year(source, int(y))

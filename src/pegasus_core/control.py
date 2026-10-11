@@ -324,6 +324,10 @@ def event_sides(y: np.ndarray, seed_text: str, fractions: dict[str, float] | Non
 #: the later years are preliminary and incomplete (evaluation 2026-10-05, surveillance lags) and stay unreserved
 #: until final. Extending the list is the only way to enlarge the reserve; shrinking it spends it.
 RESERVED_PERIODS: dict[str, list[int]] = {"SIM.DO": [2024]}
+#: Reserved years read before any claim, and how: a confirmation on them is not on unseen data, and its record says so.
+#: SIM.DO 2024 was read by fits, fields, corroboration and SIM-SIH link runs of studies that spelled it SIM-DO, which
+#: the reserve did not recognise until 2026-10-11 (178 store entries quarantined, 80 leads retired).
+RESERVE_SEEN: dict[str, dict[int, str]] = {"SIM.DO": {2024: "read during selection by SIM-DO studies before 2026-10-11"}}
 
 _RESERVE = threading.local()
 
@@ -333,7 +337,26 @@ class ReservedPeriod(RuntimeError):
 
 
 def reserved(dataset: str) -> list[int]:
-    return list(RESERVED_PERIODS.get(dataset, []))
+    """The reserved years of ``dataset``, whatever its spelling: keyed by spelling, the reserve of SIM.DO did not stop
+    the studies, which spell it SIM-DO, from reading 2024 (2026-10-11)."""
+    from pegasus_data._request import parse_dataset
+
+    def canon(name: str) -> tuple:
+        try:
+            return parse_dataset(name)
+        except Exception:  # noqa: BLE001 - a name pegasus_data does not parse is compared as written
+            return (name, None)
+
+    want = canon(dataset)
+    return sorted({y for name, ys in RESERVED_PERIODS.items() if canon(name) == want for y in ys})
+
+
+def reserve_seen(dataset: str) -> dict[int, str]:
+    """The reserved years of ``dataset`` that were read before any claim (`RESERVE_SEEN`), with how."""
+    from pegasus_data._request import parse_dataset
+
+    want = parse_dataset(dataset)
+    return {y: why for name, ys in RESERVE_SEEN.items() if parse_dataset(name) == want for y, why in ys.items()}
 
 
 def check_reserved(dataset: str, years) -> None:

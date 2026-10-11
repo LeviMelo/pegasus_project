@@ -1531,6 +1531,7 @@ class Session:
         if not held:
             raise LookupError(f"{self.dataset} has no reserved period")
         last = max(self.years)
+        seen = {str(y): why for y, why in control.reserve_seen(self.dataset).items() if y in held}  # not unseen data
         spend, out, bp = [], [], {}
         with control.reserve_open():
             exp = surprise.Expectations(self.dataset, self.event, sorted(set(self.years) | set(held)), self.graph)
@@ -1540,11 +1541,12 @@ class Session:
                 res = replication.test_prospective(bp[node], lens, locus, -1 if locus.get("direction") == "down" else 1)
                 out.append(res)
                 if res["tested"]:
-                    spec = {"field": node, "lens": lens, "locus": locus, **({"caller": caller} if caller else {})}
+                    spec = {"field": node, "lens": lens, "locus": locus, **({"caller": caller} if caller else {}),
+                            **({"reserve_seen": seen} if seen else {})}
                     spend.append((control.Hypothesis("confirm", actor, spec),
                                   res["p"], res.get("effect"), {k: v for k, v in res.items() if k != "p"}))
         verdicts = iter(control.Reserve(self.ledger, q).spend(spend))
-        return [{**res, **next(verdicts)} if res["tested"] else res for res in out]
+        return [{**res, **next(verdicts), **({"reserve_seen": seen} if seen else {})} if res["tested"] else res for res in out]
 
 
 def kinds_of(x: leads.Lead) -> set[str]:

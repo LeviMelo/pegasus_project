@@ -482,7 +482,9 @@ def codes_source(dataset: str, column: str) -> dict:
     from . import gateway
 
     col = column.split(":", 1)[1]
-    r = next(x for x in gateway.roles(dataset) if x["column"] == col)
+    # the column's code-tree role, the one `declared_codes` read: another role of the same column (a plain code, no
+    # codelist) came first and failed the deep scope (2026-10-11)
+    r = next(x for x in gateway.roles(dataset) if x["column"] == col and x["kind"] == "code_tree" and x.get("codelists"))
     structure = r["codelists"][0]
     if gateway.token_rule(dataset, col):
         return {"source": "code_list", "column": [col], "classifier": column, "structure": structure}
