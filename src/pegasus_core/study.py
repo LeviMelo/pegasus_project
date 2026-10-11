@@ -163,6 +163,8 @@ class Scope:
     paths: list[dict] = field(default_factory=list)     # declared links touching the read sources, with their runs' verdicts
     link_runs: list[dict] = field(default_factory=list)  # national link runs the items read and the store lacks, priced
     medicines: list[dict] = field(default_factory=list)  # the topic's declared treatments: substances, use, citation, reads
+    lane_overlap: float = 1.0            # items' summed seconds over the lanes' wall clock, measured (`_phase_record`)
+    overhead_seconds: float = 0.0        # the measured scope, store and products phases of the last run at this depth
 
     def to_dict(self) -> dict:
         """The scope as plain values (numpy scalars from the counts made plain: YAML refuses them)."""
@@ -174,8 +176,9 @@ class Scope:
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
                 "person_paths": self.paths, "link_runs_to_compute": self.link_runs, "medicines": self.medicines,
-                "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in")
-                                            + sum(r["est_seconds"] or 0 for r in self.link_runs)) / 60, 1)}
+                "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in") / self.lane_overlap
+                                            + sum(r["est_seconds"] or 0 for r in self.link_runs)
+                                            + self.overhead_seconds) / 60, 1)}
 
 
 def _field_spec(text: str) -> tuple[str, str, list[str]]:
@@ -615,8 +618,25 @@ def resolve(decl: Declaration, log=print) -> Scope:
                               f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
     if decl.depth in ("deep", "exhaustive"):
         items += _related_elsewhere(decl, [r for r in related if r["related"]], served)
+    overlap, overhead = _phase_record(decl)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
-                 _link_runs_needed([i for i in items if i.status == "in"]), medicines)
+                 _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+
+
+def _phase_record(decl: Declaration) -> tuple[float, float]:
+    """From the last run of this study at this depth (its provenance's ``phases``): how many items' seconds one second
+    of the lanes held (their overlap), and the scope, store and products phases' seconds. (1, 0) before any run: the
+    estimate is then the items' serial sum alone, as survey9's 46.5 minutes against five hours showed it is not."""
+    path = folder_of(decl) / "provenance.json"
+    try:
+        prov = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 1.0, 0.0
+    ph = prov.get("phases") or {}
+    if prov.get("depth") != decl.depth or not ph.get("lanes"):
+        return 1.0, 0.0
+    summed = sum(float(v.get("seconds") or 0) for v in (prov.get("steps") or {}).values() if isinstance(v, dict))
+    return max(summed / float(ph["lanes"]), 1.0), float(ph.get("scope", 0) + ph.get("store", 0) + ph.get("products", 0))
 
 
 def _link_runs_needed(read: list[Item]) -> list[dict]:
@@ -840,13 +860,21 @@ def run(decl: Declaration, log=print) -> Path:
     out = folder_of(decl)
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(decl.path, out / "study.yml")
+    phases, t = {}, time.time()
     scope = resolve(decl, log=log)
+    phases["scope"] = round(time.time() - t, 1)
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
+    t = time.time()
     prepared = _prepare_store(decl, read, log)
+    phases["store"], t = round(time.time() - t, 1), time.time()
     steps = _run_items(decl, read, log)
+    phases["lanes"], t = round(time.time() - t, 1), time.time()
     tables = _write_products(decl, scope, out, log)
-    prov = {"study": decl.study, "written": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(time.time() - t0, 1),
+    phases["products"] = round(time.time() - t, 1)
+    # the wall clock of each phase against the scope's estimate (acceptance item 10), what the next estimate reads
+    prov = {"study": decl.study, "depth": decl.depth, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "seconds": round(time.time() - t0, 1), "phases": phases, "estimated_minutes": scope.to_dict()["estimated_minutes"],
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
             "steps": steps, "store_tables": tables}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
