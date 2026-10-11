@@ -354,8 +354,10 @@ class Session:
         every block: an already loaded model gives them (loading another block's model for them cost
         minutes and gigabytes, survey profile 2026-10-05)."""
         if self._edges is None:
-            block = next(iter(self.expectations._models), None) or next(iter(self._blocks()))
-            self._edges = graphs.edges(self.expectations.model(block).data.places, self.graph)
+            block = next(iter(self.expectations._models), None) or next(iter(self._blocks()), None)
+            places = (self.expectations.model(block).data.places if block is not None else
+                      np.unique(gateway.population(list(self.years)[-1:]).column("u").to_numpy()))
+            self._edges = graphs.edges(places, self.graph)
         return self._edges
 
     def scales(self, names: tuple[str, ...] | list[str] | None = None) -> list[scales_mod.Scale]:
@@ -380,8 +382,9 @@ class Session:
         mine = json.loads(json.dumps({f: self.source.get(f) for f in READER_FIELDS}))     # tuples as the key's lists
         found = {k["block"] for k in fitted(self.dataset, self.event, self.graph, self.years)
                  if all(k["key"].get(f) == mine[f] for f in READER_FIELDS)}
-        if self.expectations.registry.classifier != "*":
-            found.discard("*")      # a classified type's total is a share's denominator, not a block of its tree
+        if self.expectations.registry.classifier != "*" and not self.source.get("codes"):
+            found.discard("*")      # a classified type's total is a share's denominator, not a block of its tree; a
+                                    # code set's one block is "*" (CIHA P37.1's triage found no block, 2026-10-10)
         return sorted(found)
 
     # ---- scanning ----------------------------------------------------------------
@@ -1786,7 +1789,11 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     level) is an attribute, tested level by level against its most common one, adjusted for age class, sex and year
     with a shrunk place effect (`scans.cohort.scan`). Linkage uncertainty enters by ``draws`` plausible link sets
     (pegasus_data's: each edge kept with its p_match, the persons merged again), combined by Rubin's rules
-    (`linkage.uncertainty.combine`). Results enter the register as leads of kind "cohort"."""
+    (`linkage.uncertainty.combine`). Results enter the register as leads of kind "cohort".
+
+    An outcome on the person's own record needs no link (BACKLOG 6.1): ``("record", "COLUMN=v1,v2")`` (the column holds
+    one of the values: a birth's IDANOMAL 1) or ``("record", "COLUMN~C1,C2")`` (a code list holds a code starting with
+    one: a birth's CODANOMAL with Q90). With only such outcomes the scan reads the records alone, one draw."""
     from . import fields
     from .scans import cohort as cohort_mod
 
@@ -1794,10 +1801,18 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     if not attrs:
         raise ValueError(f"{dataset}: no modelled composition to read as an attribute (`fields.declared` says why)")
     kind = (gateway.data_code(dataset), role)
-    scopes = gateway.person_scopes(kind, year)
-    if not scopes:
+    same = [o for o in outcomes if o[0] == "record"]
+    linked = [o for o in outcomes if o[0] != "record"]
+    same_cols = []
+    for _, spec in same:
+        same_cols.append(_record_outcome(spec)[0])
+    attrs = [d for d in attrs if d.column not in same_cols]       # an outcome's column is not its own attribute
+    scopes = gateway.person_scopes(kind, year) if linked else []
+    if linked and not scopes:
         raise ValueError(f"{kind}: no declared link holds a person of this kind")
-    t, ids = gateway.cohort_records(dataset, event, year, [d.column for d in attrs])
+    if not linked:
+        draws = 1
+    t, ids = gateway.cohort_records(dataset, event, year, list(dict.fromkeys([d.column for d in attrs] + same_cols)))
     log(f"{dataset} {year}: {t.num_rows} persons; outcomes {outcomes} over the persons of {scopes}; {draws} draws")
     base = {"place": pa.array([str(u) for u in t["u"].to_pylist()]),
             "age_band": pa.array([str(a) for a in t["age"].to_pylist()]),
@@ -1817,13 +1832,19 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
             for name, st in links_.items()))
     id_list = ids.to_numpy(zero_copy_only=False)
     tables = []
+    on_record = {}
+    for o in same:                     # the person's own record: read once, the same in every draw
+        col, op, vals = _record_outcome(o[1])
+        raw = [str(x or "").strip().upper() for x in t[col].to_pylist()]
+        on_record[o] = np.array([(x in vals) if op == "=" else any(c in x for c in vals) for x in raw], dtype=float)
     for i in range(draws):
-        hit: dict[tuple[str, str], set[str]] = {o: set() for o in outcomes}
+        hit: dict[tuple[str, str], set[str]] = {o: set() for o in linked}
         for z in scopes:
             ent = gateway.persons(z, draw=i)
-            for o in outcomes:
+            for o in linked:
                 hit[o] |= gateway.person_records(ent, kind, o)
-        cols = {lab: pa.array(np.fromiter((x in hit[o] for x in id_list), dtype=float, count=len(id_list)))
+        cols = {lab: pa.array(on_record[o] if o in on_record else
+                              np.fromiter((x in hit[o] for x in id_list), dtype=float, count=len(id_list)))
                 for lab, o in zip(labels, outcomes, strict=True)}
         tables.append(pa.table({**base, **cols}))
         log(f"draw {i + 1}/{draws}: " + ", ".join(f"{lab} {int(cols[lab].to_numpy().sum())}" for lab in labels))
@@ -1852,6 +1873,16 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
         x.status, x.note = "retired", f"not selected by the cohort reading of {time.strftime('%Y-%m-%d')}"
     reg.add(stale + admitted)
     return admitted
+
+
+def _record_outcome(spec: str) -> tuple[str, str, tuple[str, ...]]:
+    """``COLUMN=v1,v2`` (one of the values) or ``COLUMN~C1,C2`` (a code list holding a code that starts with one):
+    the column, the operator and the values, upper-cased and stripped."""
+    for op in ("=", "~"):
+        if op in spec:
+            col, vals = spec.split(op, 1)
+            return col.strip(), op, tuple(v.strip().upper() for v in vals.split(",") if v.strip())
+    raise ValueError(f"record outcome {spec!r}: write COLUMN=values or COLUMN~codes")
 
 
 def disparity(dataset: str, event: str, node: str, years: list[int], races: tuple[str, ...] | None = None,

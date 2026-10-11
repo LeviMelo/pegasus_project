@@ -610,6 +610,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     related = _related(rows, series)
     pq.write_table(pa.Table.from_pylist(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
+    rel = _relations(scope, decl, log)
+    pq.write_table(pa.Table.from_pylist(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
+                   out / "relations.parquet")
     _institution_facts(rows, log)
     profile = _context_profiles(decl, scope, rows, log)
     pq.write_table(pa.Table.from_pylist(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
@@ -634,11 +637,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW groups AS SELECT * FROM read_parquet('{(out / 'groups.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW context_profile AS SELECT * FROM read_parquet('{(out / 'context_profile.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW related AS SELECT * FROM read_parquet('{(out / 'related.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW relations AS SELECT * FROM read_parquet('{(out / 'relations.parquet').as_posix()}')")
     con.close()
     hyp = _hypotheses(decl, scope)
     pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
-    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp)
+    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel)
     return views
 
 
@@ -847,6 +851,32 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
             if low > 1 or high < 1:
                 notes.append(f"{label} ({dataset}) {o / e_:.2f} [{low:.2f}, {high:.2f}]")
         r["related"] = "; ".join(notes[:4]) or None
+    return out
+
+
+def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
+    """Relations among the study's primary fields (ARCHITECTURE §8.1, acceptance item 4; BACKLOG 3.5 the estimator):
+    every pair of read items with a field of the default reader (its nodes, or the event type's own) is compared on the
+    years both hold (at least four) by `tools.compare`, the joint model over graph bands and lags; every row kept,
+    ``reported`` marking those at q."""
+    from . import tools
+
+    fields_ = []
+    for it in (i for i in scope.items if i.status == "in" and not i.source):
+        for node in _study_nodes(it, None):
+            fields_.append((it.dataset, it.event, node, set(it.years)))
+    out = []
+    for (a, b) in ((fields_[i], fields_[j]) for i in range(len(fields_)) for j in range(i + 1, len(fields_))):
+        years = sorted(a[3] & b[3])
+        if len(years) < 4 or (a[0], a[2]) == (b[0], b[2]):
+            continue
+        try:
+            rows = tools.compare(a[:3], b[:3], years, q=decl.q)
+        except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
+            log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
+            continue
+        out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))}, "pair": f"{a[0]}:{a[2]} ~ {b[0]}:{b[2]}",
+                 "years": f"{years[0]}-{years[-1]}"} for r in rows]
     return out
 
 
@@ -1090,7 +1120,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 
 
 def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
-            hyp: list[dict] | None = None) -> None:
+            hyp: list[dict] | None = None, relations: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     e = html.escape
     read = [i for i in scope.items if i.status == "in"]
@@ -1145,6 +1175,11 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                            ("class", "class"), ("class_reason", "why")], cap=30),
+             "<h2>3c. Relations among the study's fields</h2><p>Fields whose departures move together, at which spatial "
+             "scale and lag (the joint model over graph bands; a relation is statistical, never causal by itself).</p>",
+             (table(sorted([r for r in (relations or []) if r.get("reported")], key=lambda r: r.get("p", 1)),
+                    [("pair", "fields"), ("support", "scale"), ("lag", "lag"), ("rho", "ρ"), ("direct", "direct"),
+                     ("p", "p"), ("years", "years")], cap=25) if relations else "<p>No pair of fields shares four years.</p>"),
              "<h2>4. Scope</h2>", "<ul>" + "".join(
                  f"<li><b>{e(i.dataset)}</b> ({e(i.event)}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",
