@@ -13,6 +13,7 @@ changing the interface or the folder.
 
 from __future__ import annotations
 
+import functools
 import html
 import json
 import os
@@ -197,13 +198,22 @@ def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | 
 
     published = gateway.published_years(dataset)
     ys = [y for y in years if not published or y in published]
-    try:
-        volume = {int(r["year"]): float(r.get("gigabytes") or 0.0)
-                  for r in pg.explore(dataset, root=config.data_root()).rows}
-    except Exception:  # noqa: BLE001 - a dataset the catalog does not size: counted as free, said in the note
-        volume = {}
-    lake = pg.lake_coverage(dataset, root=config.data_root())
+    volume = _volumes(dataset, config.data_root())
+    lake = pg.lake_coverage(dataset, root=config.data_root())        # not cached: a run's `ensure_lake` extends it
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
+
+
+@functools.cache
+def _volumes(dataset: str, root: str) -> dict[int, float]:
+    """The catalog's gigabytes per year of ``dataset``, once per process: a scope prices many items of one dataset
+    (its classifier, code sets, mentions, related codes), and each `pg.explore` was a query of the 254 MB catalog
+    (79 % of a scope's resolution, py-spy 2026-10-11)."""
+    import pegasus_data as pg
+
+    try:
+        return {int(r["year"]): float(r.get("gigabytes") or 0.0) for r in pg.explore(dataset, root=root).rows}
+    except Exception:  # noqa: BLE001 - a dataset the catalog does not size: counted as free, said in the note
+        return {}
 
 
 def _records(it: Item, years: list[int]) -> int:
