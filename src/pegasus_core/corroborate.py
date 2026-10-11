@@ -91,9 +91,9 @@ def sources(dataset: str, served: list[tuple[str, str]]) -> list[Source]:
 
 
 def _covers(key: str, category: str) -> bool:
-    """An ICD-10 code or range (``X00-X09``) of a correspondence covers a 3-character category."""
+    """An ICD-10 code or range (``X00-X09``) of a correspondence covers a code (its 3-character category)."""
     lo, _, hi = key.partition("-")
-    return lo[:3] <= category <= (hi or lo)[:3]
+    return lo[:3] <= category[:3] <= (hi or lo)[:3]
 
 
 def typologies_for(source: Source, categories: list[str]) -> list[str]:
@@ -137,10 +137,10 @@ def field_events(name: str, harm: tuple[str, ...] = ()) -> pa.Table:
 
 
 def source_year(source: Source, year: int) -> pa.Table:
-    """A source's events of a year by residence × 3-character ICD-10 category: y, and k the expected number linked to
-    the lead's system (0 without a link)."""
+    """A source's events of a year by residence × ICD-10 code as recorded (a lead's codes select them by prefix,
+    `Fields.events`): y, and k the expected number linked to the lead's system (0 without a link)."""
     key = {"what": "source_year", "dataset": source.dataset, "event": source.event, "column": source.column,
-           "link": list(source.link or ()), "year": year, "data": config.data_version()}
+           "link": list(source.link or ()), "year": year, "codes": "recorded", "cell": False, "data": config.data_version()}
     hit = store.get_table("corroborate", key)
     if hit is not None:
         return hit
@@ -149,11 +149,12 @@ def source_year(source: Source, year: int) -> pa.Table:
                                   classifier=source.column).counts
         y, k = "n", "k"
     else:
-        t = gateway.event_counts(source.dataset, source.event, year, classifier=source.column).counts
+        # summed over sex and age below, so read without them: foetal deaths have no age, and every one was dropped
+        t = gateway.event_counts(source.dataset, source.event, year, classifier=source.column, cell=False).counts
         y, k = "y", "0"
     con = duckdb.connect()
     con.register("t", t)
-    out = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, left(upper(code), 3) AS code,
+    out = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, replace(upper(trim(code)), '.', '') AS code,
         CAST(sum({y}) AS DOUBLE) AS y, CAST(sum({k}) AS DOUBLE) AS k FROM t GROUP BY ALL""").fetch_arrow_table()
     store.put_table("corroborate", key, out, {"source": source.label, "year": year})
     return out
@@ -227,11 +228,11 @@ class Fields:
         key = ("codes", source)
         if key not in self._cache:
             t = self._table(source)
-            self._cache[key] = set() if t is None else set(t.column("code").to_pylist())
-        return bool(self._cache[key] & set(categories))
+            self._cache[key] = set() if t is None else {c for c in t.column("code").to_pylist() if c}
+        return any(c.startswith(tuple(categories)) for c in self._cache[key]) if categories else False
 
     def events(self, source: Source, categories: list[str]) -> tuple[np.ndarray, np.ndarray]:
-        """(events not linked to the lead's system, expected linked) [place, year] for the 3-character categories."""
+        """(events not linked to the lead's system, expected linked) [place, year] of the codes under ``categories``."""
         key = ("events", source, tuple(sorted(categories)))
         if key not in self._cache:
             t = self._table(source)
@@ -241,8 +242,8 @@ class Fields:
                 con = duckdb.connect()
                 con.register("s", t)
                 con.register("c", pa.table({"code": sorted(categories)}))
-                r = con.execute("SELECT u, year, sum(y) AS y, sum(k) AS k FROM s WHERE code IN (SELECT code FROM c) "
-                                "GROUP BY ALL").fetch_arrow_table()
+                r = con.execute("SELECT u, year, sum(y) AS y, sum(k) AS k FROM s WHERE EXISTS "
+                                "(SELECT 1 FROM c WHERE starts_with(s.code, c.code)) GROUP BY ALL").fetch_arrow_table()
                 ti = {int(y): j for j, y in enumerate(self.years)}
                 for a, b, v, k in zip(*(r.column(c).to_pylist() for c in ("u", "year", "y", "k")), strict=True):
                     i = self._index.get(int(a)) if a is not None else None
@@ -378,6 +379,13 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
     return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
 
 
-def categories_of(registry, node: str) -> list[str]:
-    """The distinct 3-character ICD-10 categories under a node of the SIM code tree."""
-    return sorted({c[:3] for c in registry.leaves(node) if re.match(r"^[A-Z]\d\d", c)})
+def categories_of(registry, node: str, dataset: str | None = None) -> list[str]:
+    """A lead's ICD-10 codes, as recorded, that a source's codes are read under (by prefix): the leaves under its node
+    of the code tree; for a field whose tree is not ICD-10 (a SINAN agravo, whose node is ``*``), the codes its
+    records carry as their condition (pegasus_data `condition_codes`: TOXC's P37.1, B58 and O98.6). Read as
+    3-character categories they were none for every SINAN lead ("no independent field holds its codes", the survey,
+    2026-10-11), and P37.1 would have taken every P37 (tuberculous, listerial, malarial)."""
+    codes = sorted({c.replace(".", "").upper() for c in registry.leaves(node) if re.match(r"^[A-Z]\d\d", c)})
+    if not codes and dataset:
+        codes = gateway.condition_codes(dataset)
+    return codes

@@ -1713,6 +1713,17 @@ def rated(contexts: list) -> list:
     return out
 
 
+def condition_codes(dataset: str) -> list[str]:
+    """The ICD-10 codes ``dataset``'s records carry as their condition (pegasus_data `condition_codes`: a SINAN
+    agravo's ID_AGRAVO), any year."""
+    import pegasus_data as pg
+
+    t = pg.condition_codes(root=config.data_root())
+    return sorted({str(c).replace(".", "").upper() for d, c in zip(t.column("dataset").to_pylist(),
+                                                                   t.column("code").to_pylist(), strict=True)
+                   if c and same_dataset(d, dataset)})
+
+
 def treatments(codes: list[str]) -> list[dict]:
     """pegasus_data's declared treatments of ICD-10 ``codes`` (`pegasus_data.treatments`): medicines an official
     document gives for them, each with the declared fields that count it."""
