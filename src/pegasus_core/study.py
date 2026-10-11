@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import shutil
 import time
 import traceback
@@ -624,8 +625,6 @@ def run(decl: Declaration, log=print) -> Path:
     years with the topic's nodes; the leads of those fields become the findings."""
     import yaml
 
-    from . import update
-
     t0 = time.time()
     out = folder_of(decl)
     out.mkdir(parents=True, exist_ok=True)
@@ -633,22 +632,7 @@ def run(decl: Declaration, log=print) -> Path:
     scope = resolve(decl, log=log)
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
-    steps = {}
-    for it in read:
-        others = [[o.dataset, o.event] for o in read if o.dataset != it.dataset]
-        plan = _plan(it, others)
-        log(f"study {decl.study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}")
-        # one step per item: a dataset read as a code set, a chapter and a ratio is three
-        step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
-        try:
-            t_item = time.time()
-            steps[step] = update.run(plan, log=log)
-            steps[step]["seconds"] = round(time.time() - t_item, 1)
-        except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
-            where = traceback.extract_tb(exc.__traceback__)[-3:]
-            steps[step] = {"error": f"{type(exc).__name__}: {exc}",
-                           "at": [f"{Path(w.filename).name}:{w.lineno} {w.name}" for w in where]}
-            log(f"study {decl.study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}")
+    steps = _run_items(decl, read, log)
     tables = _write_products(decl, scope, out, log)
     prov = {"study": decl.study, "written": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(time.time() - t0, 1),
             "code_version": config.code_version(), "data_version": config.data_version(), "steps": steps,
@@ -656,6 +640,99 @@ def run(decl: Declaration, log=print) -> Path:
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
     return out
+
+
+def _step_name(it: Item) -> str:
+    # one step per item: a dataset read as a code set, a chapter and a ratio is three
+    return f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
+
+
+def _run_group(decl_study: str, group: list[Item], others: list, device: str | None, threads: int | None) -> dict:
+    """One lane's work: a dataset's items in order (they share its fits and caches), on ``device`` with ``threads``.
+    A module function so a spawned process can run it."""
+    from . import jobs, update
+
+    if device:
+        os.environ["PEGASUS_DEVICE"] = device
+    if threads:
+        jobs.threads(threads)
+    steps = {}
+    for it in group:
+        print(f"study {decl_study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}"
+              + (f" [{device}]" if device else ""), flush=True)
+        step = _step_name(it)
+        try:
+            t_item = time.time()
+            steps[step] = update.run(_plan(it, [o for o in others if o[0] != it.dataset]), log=print)
+            steps[step]["seconds"] = round(time.time() - t_item, 1)
+        except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
+            where = traceback.extract_tb(exc.__traceback__)[-3:]
+            steps[step] = {"error": f"{type(exc).__name__}: {exc}",
+                           "at": [f"{Path(w.filename).name}:{w.lineno} {w.name}" for w in where]}
+            print(f"study {decl_study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}", flush=True)
+        if device:
+            steps[step]["device"] = device
+    return steps
+
+
+#: lanes a study may run at once (``PEGASUS_STUDY_LANES``), the free memory a new lane needs before it starts
+#: (``PEGASUS_LANE_FREE_GB``) and the memory kept for the rest of the machine; measured, not guessed: a lane starts only
+#: while the machine's available memory is above both
+STUDY_LANES = int(os.environ.get("PEGASUS_STUDY_LANES", "3"))
+LANE_FREE_GB = float(os.environ.get("PEGASUS_LANE_FREE_GB", "6"))
+
+
+def _run_items(decl: Declaration, read: list[Item], log) -> dict:
+    """The study's items, in lanes (BACKLOG 9.5): the items of one dataset form a group run in order in one lane (they
+    share its fits, caches and the share denominator: two lanes would fit one block twice and race on its key); groups
+    run in parallel processes, the largest first (by `_estimate`'s seconds), while the machine has `LANE_FREE_GB` of
+    available memory to start another, up to `STUDY_LANES`; at most one lane computes on the GPU (the largest group
+    still waiting when the card is free), the others on the CPU, and the cores are shared between lanes. One lane is
+    the sequential run. A failure in a lane is its items' errors; the others go on."""
+    import concurrent.futures as cf
+    import multiprocessing as mp
+
+    import psutil
+
+    others = [[o.dataset, o.event] for o in read]
+    groups: dict[str, list[Item]] = {}
+    for it in read:
+        groups.setdefault(it.dataset, []).append(it)
+    order = sorted(groups.values(), key=lambda g: -sum(i.est_seconds or 0 for i in g))
+    lanes = max(1, min(STUDY_LANES, len(order)))
+    if lanes == 1:
+        return _run_group(decl.study, read, others, None, None)
+    import torch
+
+    gpu = torch.cuda.is_available() and not os.environ.get("PEGASUS_DEVICE")
+    per_lane = max(2, (os.cpu_count() or 4) // lanes)
+    steps: dict = {}
+    pending, running, lost = list(order), {}, []
+    with cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn")) as pool:
+        while pending or running:
+            free_gb = psutil.virtual_memory().available / 2**30
+            while pending and len(running) < lanes and (not running or free_gb >= LANE_FREE_GB):
+                gpu_busy = any(dev == "cuda" for dev, _ in running.values())
+                device = "cuda" if gpu and not gpu_busy else "cpu"
+                group = pending.pop(0)
+                log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
+                    f"{free_gb:.1f} GB free")
+                try:
+                    running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
+                except cf.process.BrokenProcessPool:
+                    lost.append(group)
+                free_gb = psutil.virtual_memory().available / 2**30
+            done, _ = cf.wait(list(running), timeout=30, return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                _device, group = running.pop(f)
+                try:
+                    steps.update(f.result())
+                except Exception as exc:  # noqa: BLE001 - a lane that died: its groups run again below, in this process
+                    log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
+                    lost.append(group)
+    for group in lost:
+        steps.update(_run_group(decl.study, group, others, None, None))
+    return steps
 
 
 def _plan(it: Item, others: list | None = None):

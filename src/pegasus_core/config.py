@@ -306,6 +306,28 @@ def _git_version(path: Path) -> str:
         return "unknown"
 
 
+#: a model's device memory per non-empty cell and its fixed part (measured: SIH A00-A09 2014-2023, 565,938 cells, 139 MB
+#: peak on CUDA; TOXG, 19,094 cells, 68 MB), with a margin; the share of the card's free memory a model may take
+DEVICE_BYTES_PER_CELL, DEVICE_FIXED_BYTES, DEVICE_SHARE = 400, 200 * 2**20, 0.6
+
+
+def device(cells: int | None = None) -> str:
+    """Where a model computes: ``PEGASUS_DEVICE`` when set; else CUDA when the card is there and the block's estimated
+    memory fits within `DEVICE_SHARE` of its free memory now, else the CPU. The same fit on CUDA is 1.4-1.75 times
+    faster (SIH A00-A09 3.3 s against 4.6 s, TOXG 3.2 s against 5.6 s) with identical estimates (φ, P to 13 digits,
+    2026-10-11); a block too large for the card's free memory stays on the CPU, never fails there."""
+    forced = os.environ.get("PEGASUS_DEVICE")
+    if forced:
+        return forced
+    import torch
+
+    if not torch.cuda.is_available():
+        return "cpu"
+    free, _ = torch.cuda.mem_get_info()
+    need = DEVICE_FIXED_BYTES + DEVICE_BYTES_PER_CELL * int(cells or 0)
+    return "cuda" if need <= DEVICE_SHARE * free else "cpu"
+
+
 def seed(*parts: object) -> int:
     """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4)."""
     digest = hashlib.blake2b("|".join(map(str, parts)).encode(), digest_size=8).digest()

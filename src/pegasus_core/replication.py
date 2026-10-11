@@ -68,7 +68,7 @@ def deal(dataset: str, event: str, block: str, years: list[int]) -> tuple[monoli
     return full, sides
 
 
-def _a_model(full: monolith.BlockData, y_a: np.ndarray, graph: str, device: str = "cpu") -> monolith.Monolith:
+def _a_model(full: monolith.BlockData, y_a: np.ndarray, graph: str, device: str | None = None) -> monolith.Monolith:
     k = y_a > 0
     data = dataclasses.replace(full, e=full.e[k], u=full.u[k], t=full.t[k], g=full.g[k], y=y_a[k].astype(float),
                                key={**full.key, "split": "A"})
@@ -76,7 +76,7 @@ def _a_model(full: monolith.BlockData, y_a: np.ndarray, graph: str, device: str 
 
 
 def prepare(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
-            device: str = "cpu", log=print) -> monolith.Monolith:
+            device: str | None = None, log=print) -> monolith.Monolith:
     """Deal a block's events to the sides, fit the block on side A alone and store the fit. Without it side A reads
     the fit on all the events, scaled (`load_base`): its expectation then carries a little of side E's events."""
     full, sides = deal(dataset, event, block, years)
@@ -86,7 +86,7 @@ def prepare(dataset: str, event: str, block: str, years: list[int], graph: str =
     return model
 
 
-def load_base(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity", device: str = "cpu"
+def load_base(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity", device: str | None = None
               ) -> tuple[monolith.Monolith, monolith.BlockData, dict[str, np.ndarray], float]:
     """The fit the sides read: side A's own (if `prepare` ran for the block), else the fit on all the events.
     Returns it, the cell rows, every side's events, and the fraction of the events the fit saw."""

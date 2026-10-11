@@ -133,7 +133,7 @@ class Expectations:
     """The fitted monolith of one event type, read field by field and tier by tier."""
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
-                 structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str = "cpu",
+                 structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str | None = None,
                  center: str = "plugin", population: str | None = None,
                  exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False, rank: int = 0, robust: bool = True):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts

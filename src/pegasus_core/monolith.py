@@ -180,7 +180,7 @@ def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, s
 
 
 def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
-              device: str = "cpu", source: dict | None = None, warm: str | None = "auto", log=print):
+              device: str | None = None, source: dict | None = None, warm: str | None = "auto", log=print):
     """Assemble one block, fit its model and store it: the one fitting path (`pegasus-core fit`, `update`, and a reading
     that finds no stored fit, `load_or_fit`).
     ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
@@ -202,7 +202,7 @@ def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str
 
 
 def load_or_fit(cls, dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
-                device: str = "cpu", rank: int = 0, log=print, **reader):
+                device: str | None = None, rank: int = 0, log=print, **reader):
     """The stored fit of a block, fitted first when the store has none (ARCHITECTURE §6.6: fit on demand). A reading
     (a survey, a question, a prospective tier's training fit) never fails for want of a fit; the low-rank interaction
     (``rank``) is a model choice and is never fitted on demand."""
@@ -679,7 +679,7 @@ class Monolith:
     """One block's fitted model."""
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
-                 device: str = "cpu", rank: int = 0, prior: str = "gaussian", likelihood: str = "poisson"):
+                 device: str | None = None, rank: int = 0, prior: str = "gaussian", likelihood: str = "poisson"):
         if prior not in ("gaussian", "horseshoe"):
             raise ValueError(f"tree prior {prior!r}: gaussian or horseshoe")
         if likelihood not in ("poisson", "nb"):
@@ -698,7 +698,7 @@ class Monolith:
         self.ix_on = False
         self.graph_kind = graph_kind
         self.graph = graph
-        self.device = torch.device(device)
+        self.device = torch.device(device or config.device(len(data.y)))     # None: by the block's size (`config.device`)
         self.dtype = torch.float64
         nU, nT, nG = data.N.shape
         nE, nGrp = len(data.leaves), len(data.groups)
@@ -2219,7 +2219,7 @@ class Monolith:
 
     @classmethod
     def load(cls, dataset: str, event: str, block: str, years: range | list[int],
-             graph_kind: str = "contiguity", profile: str = "block", device: str = "cpu", rank: int = 0,
+             graph_kind: str = "contiguity", profile: str = "block", device: str | None = None, rank: int = 0,
              geography: str | None = "group", geo_pool: float = GEO_POOL,
              prior: str = "gaussian", **source) -> Monolith:
         """A fitted block from the store (its data re-assembled from the gateway's cache). ``rank`` is the
@@ -2268,7 +2268,7 @@ class MarkModel(Monolith):
     shrunk = 1e6
 
     def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str,
-                 device: str = "cpu"):
+                 device: str | None = None):
         if data.n is None:
             raise ValueError("a mark model needs mark data (assemble(..., source='mark'))")
         super().__init__(data, graph, graph_kind, device)
@@ -2391,7 +2391,7 @@ class _CellMark(MarkModel):
     disp = 0.0                 # the family's dispersion; 0 until the first outer iteration
     mu_c = None                # each cell's mean at the previous outer iteration
 
-    def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str, device: str = "cpu"):
+    def __init__(self, data: BlockData, graph: tuple[np.ndarray, np.ndarray], graph_kind: str, device: str | None = None):
         super().__init__(data, graph, graph_kind, device)
         self.total_t = torch.as_tensor(data.y * data.n, dtype=self.dtype, device=self.device)   # Σ m (a count) or k (successes)
         self.mu_c = torch.full_like(self.n_t, float(data.y @ data.n / data.n.sum()))

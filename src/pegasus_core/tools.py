@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 from scipy import stats
 
 from . import (
@@ -192,22 +193,40 @@ class Session:
             (c["column"] for c in gateway.event_type(self.dataset, self.event).get("classifiers") or [] if c["role"] == "primary"), None)
         edges = gateway.age_edges(d.population, self.dataset, self.event)
         nB = d.N.shape[2] // 2
-        index = {int(p_): i for i, p_ in enumerate(d.places)}
+        # the field's events: a code set's codes (prefixes, as its counts read them: a code-set field's node is "*", and
+        # keeping every code counted all of SIH's admissions against pneumonia's expectation, 2026-10-11), else the
+        # node's leaves; filtered in Arrow (a Python pass per row took most of an SIH item's hour)
+        codes = (self.source or {}).get("codes")
+        order = np.argsort(np.asarray(d.places, dtype=np.int64))
+        sorted_places = np.asarray(d.places, dtype=np.int64)[order]
         frames = []
         for t, year in enumerate(np.asarray(d.years)):
             c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary)
             for tab, value in ((c.counts, None), (c.missing, "not recorded")):
                 if tab is None or tab.num_rows == 0:
                     continue
-                code = np.asarray(tab.column("code").to_pylist(), dtype=object)
-                keep = np.ones(len(code), bool) if f.node == "*" else np.array([str(x)[:3] in leaves or str(x) in leaves for x in code])
-                u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
-                keep &= u >= 0
+                code = pc.cast(tab.column("code"), pa.string())
+                if codes:
+                    hit = pc.starts_with(code, str(codes[0]))
+                    for cc in codes[1:]:
+                        hit = pc.or_(hit, pc.starts_with(code, str(cc)))
+                    tab = tab.filter(pc.fill_null(hit, False))
+                elif f.node != "*":
+                    lv = pa.array(sorted(map(str, leaves)), pa.string())
+                    hit = pc.or_(pc.is_in(pc.utf8_slice_codeunits(code, 0, 3), value_set=lv), pc.is_in(code, value_set=lv))
+                    tab = tab.filter(pc.fill_null(hit, False))
+                if tab.num_rows == 0:
+                    continue
+                uu = tab.column("u").to_numpy().astype(np.int64)
+                pos = np.clip(np.searchsorted(sorted_places, uu), 0, len(sorted_places) - 1)
+                u = np.where(sorted_places[pos] == uu, order[pos], -1)
+                keep = u >= 0
                 # under an events exposure (a ratio, live births) the block's expectation stands in one cell: the
                 # value's share is then the year's national one, not cell 0's
                 g_true = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
                 g = np.zeros(tab.num_rows, dtype=np.int64) if collapsed else g_true
-                vals = np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None else np.full(len(code), value, object)
+                vals = (np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None
+                        else np.full(tab.num_rows, value, object))
                 n = tab.column("n" if value is None else "m").to_numpy().astype(float)
                 frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep], g_true[keep]))
         values = sorted({v for *_, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
@@ -216,7 +235,7 @@ class Session:
         y = np.zeros((U, T, K))
         cell, true = np.zeros((T, G, K)), np.zeros((T, G, K))
         for u, t, g, vals, n, gt in frames:
-            k = np.array([vi[v] for v in vals], dtype=np.int64)
+            k = np.fromiter((vi[v] for v in vals), dtype=np.int64, count=len(vals))
             np.add.at(y, (u, t, k), n)
             np.add.at(cell, (t, g, k), n)
             np.add.at(true, (t, gt, k), n)

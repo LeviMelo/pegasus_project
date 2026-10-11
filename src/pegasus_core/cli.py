@@ -28,7 +28,7 @@ def _session(dataset: str, event: str, years: str, graph: str, grain: str = "yea
 
 @app.command()
 def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
-        device: str = "cpu",
+        device: str | None = None,
         source: str = typer.Option(None, help="a non-default reader as JSON, e.g. a declared field's "
                                                "(`fields.measure_source`); block * is the event type without its tree"),
         cold: bool = typer.Option(False, help="start from nothing, not from the best related stored fit")) -> None:
@@ -442,7 +442,7 @@ def ledger(family: str = typer.Option(None)) -> None:
 
 @app.command("split-fit")
 def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
-              device: str = "cpu") -> None:
+              device: str | None = None) -> None:
     """Deal the events of blocks to the sides A, E and fit each block on side A alone (§8.3)."""
     from . import replication
 

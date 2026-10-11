@@ -216,7 +216,7 @@ def triage_lead(model: monolith.MarkModel, reader: dict, years: list[int], place
     return out
 
 
-def fit_chapter(name: str, block: str, years: list[int], graph: str = "contiguity", device: str = "cpu", rounds: int = 2,
+def fit_chapter(name: str, block: str, years: list[int], graph: str = "contiguity", device: str | None = None, rounds: int = 2,
                 dataset: str = "SIH-RD", event: str = "hospitalisation", outer: tuple[int, int] = (40, 12), log=print) -> dict:
     """One declared measure (``name``: its column, `fields.declared`) of one chapter: the location fitted, the facility effects estimated from its residuals and taken out
     (a log-normal mark with a facility: ``rounds`` = 2), the location refitted from the first fit (``outer``: the outer
