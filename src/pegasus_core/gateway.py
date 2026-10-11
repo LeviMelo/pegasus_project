@@ -1868,7 +1868,9 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     ``report`` date (SINAN's data entry, DT_DIGITA; SIH's processing month; SIM's registration). Rows with either
     date missing or a negative delay are left out and counted in the table's metadata. ``codes``: only the events whose
     ``classifier`` code (default the primary) starts with one of them, a field's (SIM chapter IX's known deaths, not
-    every death against IX's baseline: 3.5 times the alarms, 2026-10-10). Columns: u, year, week, delay, n."""
+    every death against IX's baseline: 3.5 times the alarms, 2026-10-10). Columns: u, the onset day ``onset``, its
+    epidemiological ``year`` and ``week``, ``delay_days``, ``delay`` (whole weeks) and n: days, so a reading as of any
+    day counts what was reported by then (a Wednesday as-of had discarded four days, 2026-10-11)."""
     when = onset or _when(dataset)
     codes = sorted({str(c).replace(".", "").upper() for c in codes})
     if codes and classifier is None:
@@ -1892,11 +1894,12 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     d1 = t.column("d1").to_numpy(zero_copy_only=False).astype("datetime64[D]")
     u = t.column("u").to_numpy(zero_copy_only=False)
     ok = ~np.isnat(d0) & ~np.isnat(d1) & (d1 >= d0) & np.isfinite(u.astype(float))
-    ey, ew = epi_week(d0[ok])
-    delay = ((d1[ok] - d0[ok]).astype(np.int64) // 7).astype(np.int64)
-    df = pd.DataFrame({"u": u[ok].astype(np.int64), "year": ey, "week": ew, "delay": delay})
-    out = pa.Table.from_pandas(df.groupby(["u", "year", "week", "delay"]).size().rename("n").reset_index(),
-                               preserve_index=False)
+    days = (d1[ok] - d0[ok]).astype(np.int64)
+    df = pd.DataFrame({"u": u[ok].astype(np.int64), "onset": d0[ok], "delay_days": days})
+    df = df.groupby(["u", "onset", "delay_days"]).size().rename("n").reset_index()
+    ey, ew = epi_week(df["onset"].to_numpy().astype("datetime64[D]"))
+    df["year"], df["week"], df["delay"] = ey, ew, df["delay_days"] // 7
+    out = pa.Table.from_pandas(df[["u", "onset", "year", "week", "delay_days", "delay", "n"]], preserve_index=False)
     store.put_table("gateway", key, out, {**key, "left_out": int((~ok).sum()), "records": int(len(ok))})
     return out
 

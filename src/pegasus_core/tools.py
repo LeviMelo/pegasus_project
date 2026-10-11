@@ -525,7 +525,8 @@ class Session:
         the date ``as_of`` (ISO; `surveillance.window`) for every place of a field. The events known by then are the
         records of the files holding those weeks (a window crossing a year reads both, a week straddling two files
         reads both parts) whose ``report`` date (`gateway.entry_date`) falls within the week's age
-        (`gateway.delay_counts`); each place's reporting delay comes from the last closed year before the window;
+        (`gateway.delay_counts`, to the day); each place's reporting delay, by the onset's week of year, comes from the
+        last closed year before the window;
         each week's baseline is the alarm tier (BPA, ADR-0012) fitted on the years before the week's own epidemiological
         year, at its own grain and allocated to weeks in proportion to their days (stated: a weekly alarm fit replaces
         it), and is also the prior on the week's total (`surveillance.nowcast`). Returns one row per place-week that
@@ -553,9 +554,10 @@ class Session:
         codes = tuple(self.source.get("codes") or ()) or (() if node == "*" else tuple(reg.leaves(node)))
         cur = pd.concat([gateway.delay_counts(self.dataset, self.event, y, report, codes=codes,
                                               classifier=self.source.get("classifier")).to_pandas() for y in files])
-        cur = cur.merge(pd.DataFrame({k: win[k] for k in ("year", "week", "age")}), on=["year", "week"])
-        cur = cur[cur["delay"] <= cur["age"]]                                  # known by as_of, in whole weeks
-        known = cur.groupby(["u", "year", "week", "age"], as_index=False)["n"].sum()
+        cur = cur.merge(pd.DataFrame({k: win[k] for k in ("year", "week", "age", "start")}), on=["year", "week"])
+        reported = cur["onset"].to_numpy().astype("datetime64[D]") + cur["delay_days"].to_numpy().astype("timedelta64[D]")
+        cur = cur[reported <= np.datetime64(as_of, "D")]                       # known by as_of, to the day
+        known = cur.groupby(["u", "year", "week", "age", "start"], as_index=False)["n"].sum()
         out, field_id, test = [], None, None
         for y in sorted(set(map(int, ayear))):
             s = self.surprise(node, "BPA", train_last=y - 1)
@@ -583,8 +585,8 @@ class Session:
                 i = index.get_indexer(k["u"].to_numpy())
                 k, i = k[i >= 0], i[i >= 0]
                 y_known = k["n"].to_numpy(float)
-                a = surveillance.alarm(y_known, closed.F(k["u"].to_numpy(), k["age"].to_numpy()), mu_week[i], phi[i],
-                                       recurrence, confidence)
+                F = closed.F_week(k["u"].to_numpy(), k["week"].to_numpy(), k["start"].to_numpy(), as_of)
+                a = surveillance.alarm(y_known, F, mu_week[i], phi[i], recurrence, confidence)
                 for r in np.flatnonzero(a["alarm"]):
                     out.append({"place": int(k["u"].iloc[r]), "year": int(win["year"][j]), "week": int(win["week"][j]),
                                 "known": int(y_known[r]), "nowcast": float(a["nowcast"][r]),

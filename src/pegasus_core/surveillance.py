@@ -40,51 +40,75 @@ from .gateway import epi_week  # noqa: F401 - the week rule is the data's (gatew
 
 @dataclass
 class Delays:
-    """Each place's reporting-delay distribution: ``places`` [U], ``pmf`` [U, D + 1] (the last cell the delays of
-    ``max_delay`` weeks and more), ``cdf`` F(d) [U, D + 1], the national pmf, and the Dirichlet concentration of the
-    places around it."""
+    """Reporting delays in days, log-linear in the place and the onset's week of year: ``places`` [U] and their pmf
+    [U, D + 1] (the last cell the delays of D days and more), each shrunk toward the national ``national`` [D + 1]
+    with the Dirichlet ``concentration``; ``week_ratio`` [54, D + 1], each week of year's national pmf (shrunk toward
+    the pooled one with ``week_concentration``) over the pooled one. Registration slows at the turn of the year (SIM:
+    28 % of deaths registered within their week, 17 % and 12 % in week 52 of 2023 and 2024), so a pooled delay
+    nowcast the boundary's weeks high."""
     places: np.ndarray
     pmf: np.ndarray
-    cdf: np.ndarray
     national: np.ndarray
     concentration: float
+    week_ratio: np.ndarray
+    week_concentration: float
 
-    def F(self, place, age):
-        """P(known within ``age`` weeks of onset) at ``place`` (the national F for a place with no history); arrays
-        of places and ages give an array."""
-        place, age = np.broadcast_arrays(np.asarray(place), np.asarray(age))
+    def F(self, place, week, elapsed):
+        """P(reported within ``elapsed`` days of onset) for events of ``place`` with onset in ``week`` of the year (the
+        national pmf for a place with no history); arrays broadcast."""
+        place, week, elapsed = np.broadcast_arrays(np.asarray(place), np.asarray(week), np.asarray(elapsed))
         i = np.minimum(np.searchsorted(self.places, place), len(self.places) - 1)
         known = self.places[i] == place
-        rows = np.where(known[..., None], self.cdf[i], np.cumsum(self.national))
-        a = np.clip(age, 0, rows.shape[-1] - 1)
-        out = np.take_along_axis(rows, a[..., None], axis=-1)[..., 0]
+        rows = np.where(known[..., None], self.pmf[i], self.national) * self.week_ratio[np.clip(week, 0, 53)]
+        cdf = np.cumsum(rows, -1) / rows.sum(-1, keepdims=True)
+        a = np.clip(elapsed, 0, rows.shape[-1] - 1)
+        out = np.where(elapsed < 0, 0.0, np.take_along_axis(cdf, a[..., None], axis=-1)[..., 0])
         return out if place.ndim else float(out)
 
+    def F_week(self, place, week, start, as_of):
+        """The share of a week's events reported by the day ``as_of``: its seven onset days (from ``start``, its
+        Sunday) taken as equally likely, each at its own elapsed days."""
+        place, week = np.asarray(place), np.asarray(week)
+        start = np.asarray(start, dtype="datetime64[D]")
+        lag = (np.datetime64(as_of, "D") - start).astype(np.int64)
+        return np.mean([self.F(place, week, lag - k) for k in range(7)], axis=0)
 
-def delays(table, max_delay: int = 26) -> Delays:
-    """`Delays` from a closed year's delay counts (`gateway.delay_counts`: u, delay, n): each place's pmf is its
-    counts plus the national pmf times a concentration α, normalised (the posterior mean under a Dirichlet prior
-    centred on the nation). α by the method of moments: the places' between-place variance of the delay shares
-    against the multinomial variance their counts would give (Mosimann 1962)."""
-    u = np.asarray(table.column("u").to_numpy(zero_copy_only=False)).astype(np.int64)
-    d = np.minimum(np.asarray(table.column("delay").to_numpy(zero_copy_only=False)).astype(np.int64), max_delay)
-    n = np.asarray(table.column("n").to_numpy(zero_copy_only=False)).astype(float)
-    places, inv = np.unique(u, return_inverse=True)
-    C = np.zeros((len(places), max_delay + 1))
-    np.add.at(C, (inv, d), n)
-    nat = C.sum(0) / max(C.sum(), 1.0)
+
+def _concentration(C: np.ndarray, centre: np.ndarray) -> float:
+    """The Dirichlet concentration α of the rows of counts ``C`` around ``centre`` by the method of moments: the rows'
+    between-row variance of their shares against the multinomial variance their totals would give (Mosimann 1962)."""
     tot = C.sum(1)
     big = tot >= 20
-    alpha = 50.0
-    if big.sum() >= 10:
-        share = C[big] / tot[big, None]
-        between = float(np.average(((share - nat) ** 2).sum(1), weights=tot[big]))
-        multinomial = float(np.average((nat * (1 - nat)).sum() / tot[big], weights=tot[big]))
-        # Var(share) = (1 − nat)nat · (1/N + (1 − 1/N)/(α + 1)) under the Dirichlet–multinomial: solve for α
-        excess = between - multinomial
-        alpha = float(np.clip((nat * (1 - nat)).sum() / max(excess, 1e-9) - 1.0, 1.0, 1e5)) if excess > 0 else 1e5
-    pmf = (C + alpha * nat) / (tot + alpha)[:, None]
-    return Delays(places, pmf, np.cumsum(pmf, 1), nat, alpha)
+    if big.sum() < 10:
+        return 50.0
+    share = C[big] / tot[big, None]
+    between = float(np.average(((share - centre) ** 2).sum(1), weights=tot[big]))
+    multinomial = float(np.average((centre * (1 - centre)).sum() / tot[big], weights=tot[big]))
+    # Var(share) = (1 − c)c · (1/N + (1 − 1/N)/(α + 1)) under the Dirichlet–multinomial: solve for α
+    excess = between - multinomial
+    return float(np.clip((centre * (1 - centre)).sum() / max(excess, 1e-9) - 1.0, 1.0, 1e5)) if excess > 0 else 1e5
+
+
+def delays(table, max_days: int = 26 * 7 + 6) -> Delays:
+    """`Delays` from a closed year's delay counts (`gateway.delay_counts`: u, week, delay_days, n): each place's pmf is
+    its counts plus the national pmf times a concentration α, normalised (the posterior mean under a Dirichlet prior
+    centred on the nation), and each week of year's likewise around the pooled national pmf."""
+    u = np.asarray(table.column("u").to_numpy(zero_copy_only=False)).astype(np.int64)
+    w = np.asarray(table.column("week").to_numpy(zero_copy_only=False)).astype(np.int64)
+    d = np.minimum(np.asarray(table.column("delay_days").to_numpy(zero_copy_only=False)).astype(np.int64), max_days)
+    n = np.asarray(table.column("n").to_numpy(zero_copy_only=False)).astype(float)
+    places, inv = np.unique(u, return_inverse=True)
+    C = np.zeros((len(places), max_days + 1))
+    np.add.at(C, (inv, d), n)
+    nat = C.sum(0) / max(C.sum(), 1.0)
+    alpha = _concentration(C, nat)
+    pmf = (C + alpha * nat) / (C.sum(1) + alpha)[:, None]
+    W = np.zeros((54, max_days + 1))
+    np.add.at(W, (np.clip(w, 0, 53), d), n)
+    beta = _concentration(W, nat)
+    week_pmf = (W + beta * nat) / (W.sum(1) + beta)[:, None]
+    ratio = np.divide(week_pmf, nat, out=np.ones_like(week_pmf), where=nat > 0)
+    return Delays(places, pmf, nat, alpha, ratio, beta)
 
 
 def _pending(known, F, mu, phi) -> tuple:

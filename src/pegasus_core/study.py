@@ -1033,6 +1033,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con = duckdb.connect(str(db))
     for name, path in views.items():
         con.execute(f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{path}')")
+    # the folder's own tables by absolute path: DuckDB reads a relative path from the reader's working directory, and
+    # the survey's folder opened only from the directory the study ran in (2026-10-11)
+    out = out.resolve()
     con.execute(f"CREATE VIEW findings AS SELECT * FROM read_parquet('{(out / 'findings.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW descriptive AS SELECT * FROM read_parquet('{(out / 'descriptive.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW groups AS SELECT * FROM read_parquet('{(out / 'groups.parquet').as_posix()}')")
@@ -1906,8 +1909,8 @@ def export(folder: str | Path, to: str | Path, tables: list[str] | None = None, 
     names = [r[0] for r in con.execute("SELECT view_name FROM duckdb_views() WHERE NOT internal").fetchall()]
     (to / "tables").mkdir(exist_ok=True)
     for name in names:
-        if tables and name not in tables:
-            continue
+        if (tables and name not in tables) or (folder / f"{name}.parquet").exists():
+            continue                     # a view of the folder's own file: copied above, wherever the folder was made
         target = to / "tables" / f"{name}.{fmt}"
         con.execute(f"COPY (SELECT * FROM {name}) TO '{target.as_posix()}' "
                     f"(FORMAT {'parquet' if fmt == 'parquet' else 'csv, HEADER'})")
