@@ -574,9 +574,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.note = (f"{gb:.1f} GB to download against the {decl.depth} budget of {budget:g} GB"
                        + (f"; {unknown} not sized by the catalog" if unknown else ""))
             continue
-        if it.extract or it.download_gb:
+        if it.extract or any(cost.get(y) != 0.0 for y in it.years):
             # counted when its data is there (`_prepare_store` builds its lake or extract): pricing a scope downloads
-            # nothing (the standard scope fetched SIA-AD's 2.5 GB to count it, before its cost was shown, 2026-10-11)
+            # nothing (the standard scope fetched SIA-AD's 2.5 GB to count it, before its cost was shown, 2026-10-11);
+            # a year another item of the dataset pays for is not in the lake either
             continue
         try:
             it.records = _records(it, it.years)
