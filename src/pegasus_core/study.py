@@ -163,6 +163,10 @@ class Scope:
     related: list[dict] = field(default_factory=list)   # codes found with the seeds on the same records (`cooccur`)
 
     def to_dict(self) -> dict:
+        """The scope as plain values (numpy scalars from the counts made plain: YAML refuses them)."""
+        return json.loads(json.dumps(self._dict(), default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+
+    def _dict(self) -> dict:
         return {"study": self.study, "depth": self.depth, "download_budget_gb": self.budget_gb,
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
