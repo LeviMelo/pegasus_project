@@ -33,8 +33,8 @@ its reliability line states this null.
 Acre's TPAUTOCTO=3 deficit (Rio Branco, effect 0.0026, survey story 2) does not survive: Rio Branco reports "indeterminado"
 almost never in any year, so it is its usual mix, not a departure from Brazil's practice. What remains are changes of
 recording within a place: Vitória da Conquista (293330) 2019, where all 56 TPAUTOCTO were "not recorded" (expected 12) and
-"Sim" was 0 against 43.7, the same year in CRITERIO ("Laboratorial" 0 of the usual) and EVOLUCAO ("Vivo"); Campo Grande
-MS (500270) EVOLUCAO from 2021: "not recorded" 0 a year against 5–9 expected after 42 in 2019; Pará 150570 TPAUTOCTO 2019,
+"Sim" was 0 against 43.7, the same year in CRITERIO ("Laboratorial" 0 of the usual) and EVOLUCAO ("Vivo"); Campo Grande/MS
+(500270) EVOLUCAO from 2021: "not recorded" 0 a year against 5–9 expected after 42 in 2019; Ponta de Pedras/PA (150570) TPAUTOCTO 2019,
 206 cases all "not recorded" against an expected "Não" 42, "Indeterminado" 30 (the place's later years hold one case each, so its state's mix leads).
 
 **Power, and limits.** Planted in the 10 top places, a year's cases moved to "not recorded": 50 % found 1, 90 % found 2,
