@@ -402,6 +402,12 @@ class Session:
             out = lenses.group_disparity(y_g, mu_g, places, fid, self.ledger, **{"phi": phi, **kw})
             if self.source.get("source", "events") != "events" or str(self.source.get("population", "")).startswith("events:"):
                 return out
+            # a group dimension needs two groups the lens can test (each with its `min_expected` events): a field with
+            # fewer events tests none, and reading every composition of a national system for it is wasted (CIHA's 7
+            # O98.6 admissions read 19 M records a year per column, 2026-10-10)
+            min_expected = kw.get("min_expected", inspect.signature(lenses.group_disparity).parameters["min_expected"].default)
+            if float(y_g.sum()) < 2 * min_expected:
+                return out
             # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
             for column in group_columns(self.dataset, self.event):
                 y_c, mu_c, values = self.by_composition(node, column)
