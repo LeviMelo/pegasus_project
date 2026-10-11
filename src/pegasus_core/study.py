@@ -561,7 +561,55 @@ def resolve(decl: Declaration, log=print) -> Scope:
             items.append(Item(r["dataset"], r["event"], ["*"], None, list(r["years"]),
                               f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the "
                               f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
+    if decl.depth in ("deep", "exhaustive"):
+        items += _related_elsewhere(decl, [r for r in related if r["related"]], served)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths)
+
+
+def _chapter(tree: dict, code: str) -> str:
+    """The ICD-10 chapter holding ``code``, up its parents (the block a code's node is fitted in)."""
+    for _ in range(10):
+        if code not in tree or tree[code]["level"] == "chapter":
+            break
+        code = tree[code]["parent"]
+    return code if code in tree and tree[code]["level"] == "chapter" else "*"
+
+
+def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str]) -> list[Item]:
+    """A related code read in every other served source that records it (ARCHITECTURE §4.3, acceptance item 1: births
+    with the anomalies found beside the topic's codes in admissions or deaths): its ICD-10 classifiers, as a code set,
+    and its ICD-10 code columns (SINASC's anomaly list), as the code's node of that column's tree; over the study's years
+    already in the lake (a related code buys no download)."""
+    tree = {r["code"]: r for r in gateway.code_tree("ICD10").to_pylist()}
+    out, seen = [], set()
+    for r in related:
+        code = r["code"]
+        if code not in tree:
+            continue
+        for ds in sorted(served - {r["dataset"]}):
+            try:
+                ets = gateway.event_types(ds)
+                ys, cost = _cost(ds, decl.years)
+            except Exception:  # noqa: BLE001 - a source that cannot be listed is not read for it
+                continue
+            ys = [y for y in ys if cost.get(y) == 0.0]
+            if not ys:
+                continue
+            why = f"related code {code} ({r['label']}), found on {r['dataset']} records with the topic's codes"
+            for et in ets:
+                for c in et.get("classifiers") or []:
+                    if c.get("structure") == "ICD10" and (ds, et["name"], c["column"], code) not in seen:
+                        seen.add((ds, et["name"], c["column"], code))
+                        out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {c['column']}",
+                                        source={"classifier": c["column"], "codes": [code]}))
+                for d in fields.declared_codes(ds):
+                    src = fields.codes_source(ds, d.column)
+                    if d.reason or src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
+                        continue
+                    seen.add((ds, et["name"], d.column, code))
+                    out.append(Item(ds, et["name"], [_chapter(tree, code)], [code], ys,
+                                    f"{why}; read in its {d.column.split(':', 1)[1]}", source=src))
+    return out
 
 
 # ---------------------------------------------------------------------- the run

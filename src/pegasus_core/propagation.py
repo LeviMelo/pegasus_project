@@ -284,7 +284,12 @@ def window_of(s: surprise.Surprise, window: tuple[int, int]) -> surprise.Surpris
     periods before the window serve as the baseline and a place already departing at its first period is left-censored."""
     import dataclasses
 
-    keep = (s.years >= window[0]) & (s.years <= window[1])
+    lo, hi = int(window[0]), int(window[1])
+    if np.asarray(s.years).max() > 9999 and hi <= 9999:
+        lo, hi = lo * 100 + 1, hi * 100 + 12          # a window of years on a monthly field: those years' months
+    keep = (s.years >= lo) & (s.years <= hi)
+    if not keep.any():
+        raise ValueError(f"window {window} holds none of the field's periods {s.years[0]}-{s.years[-1]}")
     cut = {k: getattr(s, k)[:, keep] for k in ("y", "mu", "phi", "u", "z", "w", "flags")}
     return dataclasses.replace(s, years=s.years[keep], **cut)
 
