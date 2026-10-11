@@ -81,19 +81,22 @@ class Delays:
         return np.mean([self.F(place, week, lag - k) for k in range(7)], axis=0)
 
 
-def _concentration(C: np.ndarray, centre: np.ndarray) -> float:
-    """The Dirichlet concentration α of the rows of counts ``C`` around ``centre`` by the method of moments: the rows'
-    between-row variance of their shares against the multinomial variance their totals would give (Mosimann 1962)."""
+def concentration(C: np.ndarray, centre: np.ndarray) -> float:
+    """The Dirichlet concentration α of the rows of counts ``C`` around ``centre`` (one vector, or one per row) by the
+    method of moments: the rows' between-row variance of their shares against the multinomial variance their totals
+    would give (Mosimann 1962)."""
     tot = C.sum(1)
     big = tot >= 20
     if big.sum() < 10:
         return 50.0
     share = C[big] / tot[big, None]
-    between = float(np.average(((share - centre) ** 2).sum(1), weights=tot[big]))
-    multinomial = float(np.average((centre * (1 - centre)).sum() / tot[big], weights=tot[big]))
+    c = np.broadcast_to(centre, C.shape)[big]
+    spread = (c * (1 - c)).sum(1)
+    between = float(np.average(((share - c) ** 2).sum(1), weights=tot[big]))
+    multinomial = float(np.average(spread / tot[big], weights=tot[big]))
     # Var(share) = (1 − c)c · (1/N + (1 − 1/N)/(α + 1)) under the Dirichlet–multinomial: solve for α
     excess = between - multinomial
-    return float(np.clip((centre * (1 - centre)).sum() / max(excess, 1e-9) - 1.0, 1.0, 1e5)) if excess > 0 else 1e5
+    return float(np.clip(float(np.average(spread, weights=tot[big])) / max(excess, 1e-9) - 1.0, 1.0, 1e5)) if excess > 0 else 1e5
 
 
 def delays(table, max_days: int = 26 * 7 + 6) -> Delays:
@@ -108,11 +111,11 @@ def delays(table, max_days: int = 26 * 7 + 6) -> Delays:
     C = np.zeros((len(places), max_days + 1))
     np.add.at(C, (inv, d), n)
     nat = C.sum(0) / max(C.sum(), 1.0)
-    alpha = _concentration(C, nat)
+    alpha = concentration(C, nat)
     pmf = (C + alpha * nat) / (C.sum(1) + alpha)[:, None]
     W = np.zeros((54, max_days + 1))
     np.add.at(W, (np.clip(w, 0, 53), d), n)
-    beta = _concentration(W, nat)
+    beta = concentration(W, nat)
     week_pmf = (W + beta * nat) / (W.sum(1) + beta)[:, None]
     ratio = np.divide(week_pmf, nat, out=np.ones_like(week_pmf), where=nat > 0)
     return Delays(places, pmf, nat, alpha, ratio, beta)
@@ -128,7 +131,7 @@ def current(closed: Delays, table, as_of) -> Delays:
     g(d) = P(D = d | D ≤ d) is estimated among the events with D ≤ d ≤ T, which every event of onset d days or more
     before the as-of day could have joined, and F(d − 1) = F(d)(1 − g(d)) from F(D) = 1. Each day's hazard is shrunk
     toward the closed year's (a beta prior of weight κ centred on it, κ by the method of moments over the days, as
-    `_concentration`), so the delays the triangle cannot see yet, the long ones, stay the closed year's."""
+    `concentration`), so the delays the triangle cannot see yet, the long ones, stay the closed year's."""
     D = len(closed.national) - 1
     day = np.datetime64(as_of, "D")
     onset = np.asarray(table.column("onset").to_numpy(zero_copy_only=False)).astype("datetime64[D]")

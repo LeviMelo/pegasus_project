@@ -497,8 +497,9 @@ population).
   (`support:<column>`), its records without one unallocated by municipality, the exposure the place's residents.
 - **Grains:** year, month, epidemiological week (SINAN's own week, never recomputed).
 - **Groups:** every stratum (sex, age band, race) and every composition column (schooling, occupation, …) is a group
-  dimension a field can be split by (§7.2, component 8). Built for compositions: a value's expectation is each age–sex cell's B0
-  expectation times Brazil's share of the value in that cell and year; "not recorded" is a value.
+  dimension a field can be split by (§7.2, component 8). Built for compositions: a value's expectation is the place-year's events at the place's mix
+  in its other years (shrunk by empirical Bayes toward its state's and the nation's; the groups are the (year, value) pairs); race
+  is read against the place's own population by race; "not recorded" is a value.
 - **Denominators:** chosen by the event's population (births for congenital and birth outcomes; women 10–49 or
   pregnancies for gestational; the resident or SUS-dependent population otherwise; another field for ratios), with the
   population's uncertainty where it has one.
