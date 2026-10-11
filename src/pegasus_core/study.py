@@ -931,10 +931,14 @@ def run(decl: Declaration, log=print) -> Path:
     phases, t = {}, time.time()
     scope = resolve(decl, log=log)
     phases["scope"] = round(time.time() - t, 1)
+    estimate = scope.to_dict()["estimated_minutes"]            # made before running (acceptance item 10), kept as made
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
     t = time.time()
     prepared = _prepare_store(decl, read, log)
+    read = _count_prepared(scope, read, log)
+    (out / "scope.yml").write_text(yaml.safe_dump({**scope.to_dict(), "estimated_minutes": estimate}, sort_keys=False,
+                                                  allow_unicode=True), encoding="utf-8")
     phases["store"], t = round(time.time() - t, 1), time.time()
     steps = _run_items(decl, read, log)
     phases["lanes"], t = round(time.time() - t, 1), time.time()
@@ -942,12 +946,34 @@ def run(decl: Declaration, log=print) -> Path:
     phases["products"] = round(time.time() - t, 1)
     # the wall clock of each phase against the scope's estimate (acceptance item 10), what the next estimate reads
     prov = {"study": decl.study, "depth": decl.depth, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "seconds": round(time.time() - t0, 1), "phases": phases, "estimated_minutes": scope.to_dict()["estimated_minutes"],
+            "seconds": round(time.time() - t0, 1), "phases": phases, "estimated_minutes": estimate,
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
             "steps": steps, "store_tables": tables}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
     return out
+
+
+def _count_prepared(scope: Scope, read: list[Item], log) -> list[Item]:
+    """The items pricing admitted uncounted (their data was not in the lake: `resolve` downloads nothing), counted now
+    that `_prepare_store` built it, by the rule `resolve` applies: none of the topic's records, and no mentions to read
+    them through, is no field (SIA-AN's serology codes, 0 records in 2010–2014, had been fitted and failed, survey10)."""
+    keep = []
+    for it in read:
+        if it.records is None and not it.extract:
+            try:
+                it.records = _records(it, it.years)
+            except Exception as exc:  # noqa: BLE001 - counted by its own run then, which says why if it cannot
+                log(f"study: {it.dataset} {it.event}: records not counted after the store: {type(exc).__name__}: {exc}")
+            if it.records == 0 and not it.mentions:
+                it.status = "none"
+                held = ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
+                scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} but its "
+                                       f"records hold none in {it.years[0]}-{it.years[-1]} (counted once its lake was built)"})
+                continue
+        keep.append(it)
+    scope.items = [i for i in scope.items if i.status != "none"]
+    return keep
 
 
 def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
