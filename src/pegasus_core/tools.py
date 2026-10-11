@@ -46,6 +46,7 @@ from . import (
     replication,
     store,
     surprise,
+    surveillance,
 )
 from .scans import explain, lenses
 from .scans import scales as scales_mod
@@ -176,10 +177,12 @@ class Session:
 
     def by_composition(self, node: str, column: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
         """A composition column as a group dimension (ARCHITECTURE §5.3): observed counts by (place, year, value), the
-        value "not recorded" among them (blank or a declared missing code), and the expected ones: each age–sex cell's
-        B0 expectation (`by_group`, re-levelled to the observed national totals) times the national share of the value
-        in that cell and year. A place's schooling mix is so read against Brazil's at its own age–sex structure, and a
-        place that stops recording schooling departs in "not recorded". Returns (y [U, T, K], μ [U, T, K], values)."""
+        value "not recorded" among them (blank or a declared missing code), and the expected ones. Race is read against
+        the place's own population by race (`_race_expected`). Any other composition is read against the place's own
+        usual mix (`own_mix`): its mix in its other years, shrunk toward its state's and the nation's, times the
+        place-year's observed events, so the question is whether the place's cases departed from their own usual mix
+        and needs no population (Brazil's mix restated every place whose people differ from Brazil's, OPEN_QUESTIONS
+        17). A place that stops recording a column departs in "not recorded". Returns (y [U, T, K], μ [U, T, K], values)."""
         f = self.expectations.field(node)
         m = self.expectations.model(f.block)
         d = m.data
@@ -221,34 +224,59 @@ class Session:
                 pos = np.clip(np.searchsorted(sorted_places, uu), 0, len(sorted_places) - 1)
                 u = np.where(sorted_places[pos] == uu, order[pos], -1)
                 keep = u >= 0
-                # under an events exposure (a ratio, live births) the block's expectation stands in one cell: the
-                # value's share is then the year's national one, not cell 0's
                 g_true = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
-                g = np.zeros(tab.num_rows, dtype=np.int64) if collapsed else g_true
                 vals = (np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None
                         else np.full(tab.num_rows, value, object))
                 n = tab.column("n" if value is None else "m").to_numpy().astype(float)
-                frames.append((u[keep], np.full(int(keep.sum()), t), g[keep], vals[keep], n[keep], g_true[keep]))
+                frames.append((u[keep], np.full(int(keep.sum()), t), vals[keep], n[keep], g_true[keep]))
         if not frames and float(np.sum(y_g)) > 0:
             # events, none in an age-sex cell: SIM-DOFET's foetal deaths carry no age, so a composition read against the
             # field's age-sex structure has nothing to read, and an empty answer would look like no departure
             raise ValueError(f"{self.dataset}: its events carry no age or sex (every one unallocated by them): a group "
                              f"question at the age-sex structure does not apply to {column}")
-        values = sorted({v for *_, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
+        values = sorted({v for _, _, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
         vi = {v: k for k, v in enumerate(values)}
         U, T, G, K = len(d.places), len(d.years), d.N.shape[2], len(values)
         y = np.zeros((U, T, K))
-        cell, true = np.zeros((T, G, K)), np.zeros((T, G, K))
-        for u, t, g, vals, n, gt in frames:
+        race = self._is_race(column, values)
+        true = np.zeros((T, G, K)) if race else None
+        for u, t, vals, n, gt in frames:
             k = np.fromiter((vi[v] for v in vals), dtype=np.int64, count=len(vals))
             np.add.at(y, (u, t, k), n)
-            np.add.at(cell, (t, g, k), n)
-            np.add.at(true, (t, gt, k), n)
-        if column == gateway._strata(self.dataset, self.event).get("race") and set(values) - {"not recorded"} <= set(gateway.RACE):
+            if race:
+                np.add.at(true, (t, gt, k), n)
+        if race:
             return y, self._race_expected(d, mu_g, true, y, values, edges, nB, collapsed), values
-        share = np.divide(cell, cell.sum(2, keepdims=True), out=np.zeros_like(cell), where=cell.sum(2, keepdims=True) > 0)
-        mu = np.einsum("utg,tgk->utk", mu_g, share)
-        return y, mu, values
+        return y, own_mix(y, np.asarray(d.places, dtype=np.int64) // 10000), values
+
+    def _is_race(self, column: str, values: list[str]) -> bool:
+        """Whether a composition column is the subject's race stratum, read against its own population by race."""
+        return column == gateway._strata(self.dataset, self.event).get("race") and set(values) - {"not recorded"} <= set(gateway.RACE)
+
+    def composition_null(self, node: str, column: str, worlds: int = 30, seed: int = 0, **kw) -> list[list[lenses.Finding]]:
+        """The group lens's findings on ``worlds`` null worlds of a composition column: each place-year's events drawn
+        as a multinomial of its observed total over the place's one mix (`own_mix` pooling its years, shrunk as the
+        reading shrinks it: the hypothesis the reading tests, that the mix does not move), the mix then re-estimated
+        from the drawn counts (the reference's own noise is part of the null) and read by the same lens as the real
+        one. One list of findings per world; a clean null finds about q of them at most."""
+        f = self.expectations.field(node)
+        d = self.expectations.model(f.block).data
+        y, _, values = self.by_composition(node, column)
+        places = np.asarray(d.places, dtype=np.int64)
+        phi = float(self.expectations.model(f.block).phi)
+        ledger = control.Ledger(config.home() / "ledger_null")
+        rng = np.random.default_rng(seed)
+        pooled = own_mix(y, places // 10000, leave_out=False)
+        share = np.divide(pooled, pooled.sum(2, keepdims=True), out=np.zeros_like(pooled), where=pooled.sum(2, keepdims=True) > 0)
+        n = y.sum(2)
+        out = []
+        for w in range(worlds):
+            yw = np.zeros_like(y)
+            for u, t in zip(*np.nonzero(n > 0), strict=True):
+                yw[u, t] = rng.multinomial(int(n[u, t]), share[u, t] / share[u, t].sum())
+            out.append(read_composition(yw, own_mix(yw, places // 10000), values, False, np.asarray(d.years), places,
+                                        f"{f.id}|null:{column}:{w}", column, ledger, **{"phi": phi, **kw}))
+        return out
 
     def _race_expected(self, d, mu_g, true, y, values, edges, nB, collapsed) -> np.ndarray:
         """A race's expected events in a place: the field's age–sex expectation times the place's own population share
@@ -444,10 +472,8 @@ class Session:
             # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
             for column in group_columns(self.dataset, self.event):
                 y_c, mu_c, values = self.by_composition(node, column)
-                found = lenses.group_disparity(y_c, mu_c, places, f"{fid}|by:{column}", self.ledger, **{"phi": phi, **kw})
-                for x in found:
-                    x.locus = {**x.locus, "groups_by": column, "group_value": values[x.locus["groups"][0]]}
-                out.extend(found)
+                out.extend(read_composition(y_c, mu_c, values, self._is_race(column, values), np.asarray(self.expectations.model(self.expectations.field(node).block).data.years),
+                                            places, f"{fid}|by:{column}", column, self.ledger, **{"phi": phi, **kw}))
             return out
         if lens == "institution_step":               # one institution against its catchment (E_i, §4.5)
             from scipy import stats as st
@@ -1577,6 +1603,51 @@ def kinds_of(x: leads.Lead) -> set[str]:
 #: the population a race's expected share is read from: the account's tensor with race slices over the widest years
 #: (1991-2030; ARCHITECTURE §12.3)
 RACE_POPULATION = "account-6"
+
+
+def read_composition(y: np.ndarray, mu: np.ndarray, values: list[str], race: bool, years: np.ndarray, places: np.ndarray,
+                     field_id: str, column: str, ledger: control.Ledger, **kw) -> list[lenses.Finding]:
+    """A composition's group lens. Race (expected from the place's population, whole-span) has the values as groups;
+    any other composition has the (year, value) pairs, so a place-year whose mix departs from the place's usual one is
+    not averaged away by the years that do not (each year's expectation leaves it out of the place's reference, so
+    summed over years the departures nearly cancel). A finding names the value and, for the latter, the year."""
+    U, T, K = y.shape
+    if race:
+        found = lenses.group_disparity(y, mu, places, field_id, ledger, **kw)
+        for x in found:
+            x.locus = {**x.locus, "groups_by": column, "group_value": values[x.locus["groups"][0]]}
+        return found
+    found = lenses.group_disparity(y.reshape(U, 1, T * K), mu.reshape(U, 1, T * K), places, field_id, ledger, **kw)
+    for x in found:
+        t, k = divmod(x.locus["groups"][0], K)
+        x.locus = {**x.locus, "groups_by": column, "group_value": values[k], "years": [int(years[t])] * 2}
+    return found
+
+
+def own_mix(y: np.ndarray, state: np.ndarray, leave_out: bool = True) -> np.ndarray:
+    """[U, T, K] the expected events of each value of a composition in each place-year: the place-year's observed total
+    times the place's own mix in its other years (leave-one-year-out), shrunk toward the rest of its state's mix, that
+    toward the nation's, by empirical Bayes (a Dirichlet–multinomial prior per level, its concentration by the method
+    of moments, `surveillance.concentration`, over every place-year's or state-year's reference counts). ``y`` is the
+    observed counts [U, T, K]; ``state`` each place's state. A single year has no other year: the place falls back on
+    its state's and the nation's mix, the nation's including the year itself. ``leave_out=False`` pools every year
+    (one mix per place, the null hypothesis of `Session.composition_null`'s worlds)."""
+    U, T, K = y.shape
+    ids, inv = np.unique(state, return_inverse=True)
+    S = np.zeros((len(ids), T, K))
+    np.add.at(S, inv, y)
+    out = (lambda a: a.sum(1, keepdims=True) - a) if leave_out else (lambda a: np.broadcast_to(a.sum(1, keepdims=True), a.shape))
+    Rp, Rs = out(y), out(S)
+    nat_t = y.sum(0)                                                          # [T, K]
+    Rn = nat_t.sum(0)[None] - nat_t if T > 1 and leave_out else np.broadcast_to(nat_t.sum(0)[None], nat_t.shape) if T > 1 else nat_t
+    nat = np.divide(Rn, Rn.sum(1, keepdims=True), out=np.zeros_like(Rn), where=Rn.sum(1, keepdims=True) > 0)
+    a_n = surveillance.concentration(Rs.reshape(-1, K), np.broadcast_to(nat[None], Rs.shape).reshape(-1, K))
+    rest = np.maximum(Rs[inv] - Rp, 0.0)                                      # the state's other places, other years
+    prior = (rest + a_n * nat[None]) / (rest.sum(2, keepdims=True) + a_n)
+    big = Rp.sum(2) >= 20
+    a_s = surveillance.concentration(Rp[big], prior[big])
+    share = (Rp + a_s * prior) / (Rp.sum(2, keepdims=True) + a_s)
+    return y.sum(2, keepdims=True) * share
 
 
 def group_columns(dataset: str, event: str) -> dict[str, tuple[str, ...]]:

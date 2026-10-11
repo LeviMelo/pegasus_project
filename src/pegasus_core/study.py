@@ -1467,7 +1467,7 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
 
 def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     """A count field split by each composition column (`tools.Session.by_composition`), observed and expected by value,
-    nationally and by state per year: the expectation is the place's age–sex expectation at Brazil's mix of the value."""
+    nationally and by state per year: the expectation is the place's observed events at its own usual mix of the value (race: at its population's)."""
     if (it.source or {}).get("population"):
         return []
     out = []
@@ -1849,11 +1849,12 @@ def _group_text(it: Item, groups: list[str]) -> str:
     return ", ".join(out)
 
 
-#: a composition's group answer: read against Brazil's mix of the value at the place's age and sex, so it restates the
-#: population's own mix (OPEN_QUESTIONS 17); drawn worlds hold no compositions, so its null rate is not measured. The
-#: race stratum is read against the place's own population by race (`Session._race_expected`) and is not flagged
-_COMPOSITION = {"uncalibrated": True, "reliability": "a composition read against Brazil's mix, not the place's "
-                "population's (OPEN_QUESTIONS 17); no null measured"}
+#: a non-race composition's group answer: read against the place's own mix in its other years (`tools.own_mix`), so it
+#: needs no population and does not restate demography (OPEN_QUESTIONS 17). Its null is its own (`Session.composition_null`:
+#: 4 of 210 column-worlds with any finding, 1.9 %, within q), not the generic `group_disparity` record, whose worlds
+#: hold no compositions. The race stratum is read against the place's own population by race and keeps that record
+_COMPOSITION = {"uncalibrated": False, "reliability": "a composition read against the place's own usual mix (leave-one-"
+                "year-out, shrunk to its state's and Brazil's); null worlds: findings in 4 of 210 column-worlds (1.9 %)"}
 
 
 @functools.cache
