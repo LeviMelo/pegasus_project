@@ -1044,31 +1044,73 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
     return EventCounts(counts, unallocated, key)
 
 
+#: composition columns counted from one read of a year's records: one column a read went over SIH's 11 million admissions
+#: of a year once per column (12 s each; over an hour for 2010-2023 at the first code set, 2026-10-11), all at once held
+#: every column (26 s, and the machine's free memory to zero beside the other jobs); a few at a time bounds both
+COMPOSITION_BATCH = 4
+
+
+def _composition_key(dataset: str, event: str, year: int, column: str, missing, classifier: str | None,
+                     places: pa.Array | None) -> dict:
+    return {"what": "composition_counts", "code": config.code_key(composition_counts, _composition_tables),
+            **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
+            "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
+            "data": config.data_version(), **_df_key(dataset, year)}
+
+
+def _composition_cached(key: dict) -> EventCounts | None:
+    parts = [store.get_table("gateway", key), store.get_table("gateway", {**key, "part": "unallocated"}),
+             store.get_table("gateway", {**key, "part": "missing"})]
+    return None if any(x is None for x in parts) else EventCounts(parts[0], parts[1], key, parts[2])
+
+
 def composition_counts(dataset: str, event: str, year: int, column: str, missing: tuple[str, ...] | list = (),
                        classifier: str | None = None, places: pa.Array | None = None) -> EventCounts:
     """A category column's composition per (u, year, sex, age, code, value): the events carrying each value. A value
     among the column's declared ``missing`` codes (pegasus_data roles) is unallocated as 'value not recorded', a blank
     one as 'value missing'; their count by cell is kept too (``missing``: what a share's 'not recorded' level reads in
-    stage E, S4.3). One read serves every share of the column (`share_moments`)."""
+    stage E, S4.3). One read serves every share of the column (`share_moments`), and up to `COMPOSITION_BATCH` of the
+    event type's group columns not yet counted for the year are counted from the same read, each stored on its own."""
+    key = _composition_key(dataset, event, year, column, missing, classifier, places)
+    hit = _composition_cached(key)
+    if hit is not None:
+        return hit
+    from .tools import group_columns
+
+    batch = {column: tuple(missing)}
+    try:
+        siblings = group_columns(dataset, event)
+    except Exception:  # noqa: BLE001 - without the list of siblings the column is counted alone
+        siblings = {}
+    for col, miss in siblings.items():
+        if len(batch) >= COMPOSITION_BATCH:
+            break
+        if col not in batch and _composition_cached(_composition_key(dataset, event, year, col, miss, classifier, places)) is None:
+            batch[col] = tuple(miss)
     strata = _strata(dataset, event)
-    key = {"what": "composition_counts", "code": config.code_key(composition_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
-           "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
-           "data": config.data_version(), **_df_key(dataset, year)}
-    cached = store.get_table("gateway", key)
-    cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
-    cached_m = store.get_table("gateway", {**key, "part": "missing"})
-    if cached is not None and cached_un is not None and cached_m is not None:
-        return EventCounts(cached, cached_un, key, cached_m)
-    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), column] + ([strata["sex"]] if strata["sex"] else []) +         ([classifier] if classifier else [])
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + ([classifier] if classifier else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
     valid = places if places is not None else population([year]).column("u").unique()
     con.register("v", pa.table({"u": valid}))
     code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    xs = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "x_{i}"' for i, c in enumerate(batch))
+    con.execute(f"""CREATE TEMP TABLE e0 AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code, {xs} FROM r""")
+    del raw
+    out = None
+    for i, (col, miss) in enumerate(batch.items()):
+        k = _composition_key(dataset, event, year, col, miss, classifier, places)
+        ec = _composition_tables(con, f"x_{i}", year, miss, k, dataset, col)
+        if col == column:
+            out = ec
+    return out
+
+
+def _composition_tables(con, x: str, year: int, missing, key: dict, dataset: str, column: str) -> EventCounts:
+    """One column's counts, unallocated and missing cells from the read table ``e0`` (`composition_counts`), stored."""
     miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
-    con.execute(f"""CREATE TEMP TABLE e AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code,
-            trim(CAST("{column}" AS VARCHAR)) AS x FROM r""")
+    con.execute(f'CREATE OR REPLACE TEMP VIEW e AS SELECT *, "{x}" AS x FROM e0')
     reason = f"""CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality'
                      WHEN sex IS NULL THEN 'sex' WHEN age IS NULL OR age < 0 THEN 'age'
                      WHEN code IS NULL OR code = '' THEN 'code' WHEN x IS NULL OR x = '' THEN 'value missing'
