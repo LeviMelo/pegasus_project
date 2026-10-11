@@ -1064,19 +1064,20 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
     spec = gateway.declared_fields()
     contexts = [c for c in scope.contexts if (spec.get(c) or {}).get("over")]
     out = []
-    for it in (i for i in scope.items if i.status == "in" and not i.source):
+    for it in (i for i in scope.items if i.status == "in" and "population" not in (i.source or {})):
         for node in _study_nodes(it, None):
             if len(it.years) < 4:
                 continue
             x = (it.dataset, it.event, node)
-            key = {"what": "study_determinants", "x": list(x), "years": it.years, "contexts": contexts, "q": decl.q,
+            key = {"what": "study_determinants", "x": list(x), "source": it.source, "years": it.years,
+                   "contexts": contexts, "q": decl.q,
                    "data": config.data_version(), "code": config.code_key(tools.determinants)}
             hit = store.get_table("study_table", key)
             if hit is not None:
                 rows = hit.to_pylist()
             else:
                 try:
-                    rows = tools.determinants(x, contexts, list(it.years), q=decl.q, log=log)
+                    rows = tools.determinants(x, contexts, list(it.years), q=decl.q, log=log, source=it.source)
                 except Exception as exc:  # noqa: BLE001 - a field that cannot be related is said, the others run
                     log(f"study: determinants of {x}: {type(exc).__name__}: {exc}")
                     continue

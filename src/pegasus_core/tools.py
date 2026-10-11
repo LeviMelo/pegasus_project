@@ -1771,7 +1771,7 @@ def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], 
 
 
 def determinants(x: tuple[str, str, str], contexts: list, years: list[int], graph: str = "contiguity", lags: int = 2,
-                 q: float = 0.05, log=print) -> list[dict]:
+                 q: float = 0.05, log=print, source: dict | None = None) -> list[dict]:
     """A field against its time-varying contexts (ARCHITECTURE §8.2): each context as a series with its own predictive
     (`gateway.context_series`, `relations.context_innovations`), entered jointly with the field's B1 innovations in
     the relation map, so every association is over graph bands and lags and partial on the other contexts; the
@@ -1781,7 +1781,7 @@ def determinants(x: tuple[str, str, str], contexts: list, years: list[int], grap
     from . import multiscale, relations
 
     ds, ev, node = x
-    s = Session(ds, ev, years, graph)
+    s = Session(ds, ev, years, graph, source=source)          # ``source``: the field's reader (a code set, a ratio)
     surp = s.surprise(node, "B1")
     cds = []
     for entry in contexts:
