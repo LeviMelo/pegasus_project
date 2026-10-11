@@ -52,6 +52,7 @@ class GraphSpectrum:
     _eig: tuple = field(default=None, repr=False)      # (λ, Q) as numpy, from the store (`spectrum`), or computed
     _scales: dict = field(default_factory=dict, repr=False)
     _footprints: dict = field(default_factory=dict, repr=False)
+    _kernels: dict = field(default_factory=dict, repr=False)      # s -> K_s, formed once per graph and scale
 
     def __post_init__(self):
         torch, dev = _torch()
@@ -72,11 +73,15 @@ class GraphSpectrum:
         self.neighbours = A
 
     def kernel(self, s: float):
-        """K_s = exp(−sL) [n, n] on the device (float32)."""
-        torch, _ = _torch()
-        lam, _ = self._eig
-        Q = self._q32
-        return (Q * torch.exp(-s * lam).float()) @ Q.T
+        """K_s = exp(−sL) [n, n] on the device (float32), formed once per scale: it depends on the graph and s alone,
+        and a dense n³ product per scale, pass and field was 98 % of a CPU lane's excess question (5,570 places, the
+        quick deep study, 2026-10-11). Callers never write into it."""
+        if s not in self._kernels:
+            torch, _ = _torch()
+            lam, _ = self._eig
+            Q = self._q32
+            self._kernels[s] = (Q * torch.exp(-s * lam).float()) @ Q.T
+        return self._kernels[s]
 
     def footprint(self, s: float) -> float:
         """The median over centres of the effective number of places in K_s's row: (Σ K)² / Σ K² (once per s)."""

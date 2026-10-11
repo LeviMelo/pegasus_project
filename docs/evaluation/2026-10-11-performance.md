@@ -101,3 +101,8 @@ reads only the code set's records (pegasus_data `query(rows=)`), and so do `by_c
 code-set field. SIH 2017, schooling, B58: 971 rows in 2.9 s against 6,717,778 in 16.5 s, the same counts and the same
 unrecorded cells.
 
+**The excess question's kernels.** A 60 s sample of the quick deep study's CPU lane was 97.6 % in
+`GraphSpectrum.kernel`: the dense exp(−sL) over 5,570 places was formed again for every scale, pass and field (0.87 s
+each). It is now formed once per graph and scale. A repeat costs nothing and returns a matrix identical to a fresh
+product.
+
