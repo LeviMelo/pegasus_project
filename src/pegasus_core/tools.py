@@ -1277,9 +1277,12 @@ class Session:
         # survey share the counts' ledger and register (survey 2026-10-07)
         reader = {k: v for k, v in self.source.items() if k != "grain"}
         tag = f"_{config.seed('reader', json.dumps(reader, sort_keys=True, default=str)):x}"[:13] if reader else ""
+        # and every dataset and event its own: one home per last year let a study's lanes, each another dataset, test
+        # each other's leads against their own fits and write one register at once (review 2026-10-11)
+        own = "".join(c if c.isalnum() else "_" for c in f"{self.dataset}_{self.event}")
         return Session(self.dataset, self.event, [y for y in self.years if y <= last], self.graph, self.supply,
-                       self.rank, dict(self.source), ledger=control.Ledger(home / f"ledger_T{last}{tag}"),
-                       register=leads.Register(home / f"leads_T{last}{tag}"))
+                       self.rank, dict(self.source), ledger=control.Ledger(home / f"ledger_T{last}_{own}{tag}"),
+                       register=leads.Register(home / f"leads_T{last}_{own}{tag}"))
 
     def temporal_confirm(self, last: int, q: float = 0.05, level: str = "state", log=print) -> list[leads.Lead]:
         """The leads the survey selected on the years up to ``last`` (`train`), each tested once at its fixed places on the
@@ -1303,8 +1306,9 @@ class Session:
         for i, (node, group) in enumerate(sorted(by_node.items())):
             try:
                 sp = self.expectations.prospective(node, last, course=False)
-            except LookupError as exc:
-                tested += [(x, {"tested": False, "reason": str(exc)}) for x in group]
+            except (LookupError, NotImplementedError) as exc:
+                # a field with no prospective form (a linked share's or a count's cell model): untested, said why
+                tested += [(x, {"tested": False, "reason": str(exc) or type(exc).__name__}) for x in group]
                 continue
             tested += [(x, self._ledgered("prospective", x, lambda x=x, sp=sp: replication.test_lead(sp, x, level),
                                           last=last, level=level) if replication.lasting(x) else

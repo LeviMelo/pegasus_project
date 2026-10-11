@@ -186,9 +186,12 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
         try:
             t.expectations.model(block)
         except LookupError:
-            monolith.fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, log=log)
+            monolith.fit_block(sys_.dataset, sys_.event, block, t.years, plan.graph, source=sys_.source, log=log)
+    # the item's own nodes, as its survey asked them (`run`): the whole chapter's fields put every lead of it in the
+    # later years' family
     t.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
-                       levels=tuple(sys_.levels) if sys_.levels else None, log=log)
+                       levels=tuple(sys_.levels) if sys_.levels else None, log=log,
+                       nodes=tuple(sys_.nodes) if sys_.nodes else None)
     selected = s.temporal_confirm(last, log=log)
     s.register.add(s.retier(answers, selected))
     stood = sum((x.replications.get("prospective") or {}).get("ok") is True for x in answers)
@@ -345,14 +348,8 @@ def _ensure_links(plan: Plan, out: dict, log) -> None:
         unpublished = [z for z in need if any(z not in gateway.published_years(d) for d in sides)]
         for z in unpublished:
             out[f"link {link} {z}"] = "no publication on a side: not linked"
-        # a run reads its sides' records of its year and the padded ones: one that touches the confirmation reserve is
-        # a claim's to read, not a plan's (SIM 2024's deaths had been linked to SIH's admissions, 2026-10-11)
-        def side_years(sd, z):        # the years a run of ``z`` reads of a side: its own, padded (before, after)
-            before, after = tuple(getattr(sd, "pad_years", None) or (0, 0))
-            return set(range(z - before, z + after + 1))
-
-        reserved_runs = [z for z in need if z not in unpublished and link in specs and any(
-            set(control.reserved(sd.dataset)) & side_years(sd, z) for sd in (specs[link].left, specs[link].right))]
+        # a run that touches the confirmation reserve is a claim's to read, not a plan's (`gateway.run_touches_reserve`)
+        reserved_runs = [z for z in need if z not in unpublished and gateway.run_touches_reserve(link, z)]
         for z in reserved_runs:
             out[f"link {link} {z}"] = "a side's year is in the confirmation reserve: not linked"
         unpublished += reserved_runs
@@ -481,7 +478,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                    blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years)
         if force or not _done(key):
             found = s.survey_questions(blocks, levels=tuple(sys_.levels) if sys_.levels else None, log=log,
-                                       train_last=int(t0))
+                                       train_last=int(t0), nodes=tuple(sys_.nodes) if sys_.nodes else None)
             _mark(key, {"answers": len(found)})
             out[f"prospective {sys_.dataset}"] = len(found)
         else:

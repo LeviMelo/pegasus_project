@@ -2356,6 +2356,25 @@ def data_code(dataset: str) -> str:
     return named.get(dataset_key(dataset), dataset.upper().replace(".", "-"))
 
 
+def run_touches_reserve(link: str, year: int) -> bool:
+    """Whether a run of ``link`` for ``year`` reads a side's year held in the confirmation reserve (`control.reserved`):
+    a run reads its own year and its padded ones (before, after) of each side. Such a run is a claim's to read, never a
+    plan's, a study's persons or a linked field's (SIM 2024's deaths reached SIH admissions and TOXC cohorts, 2026-10-11)."""
+    spec = link_specs().get(link)
+    if spec is None:
+        return False
+    for sd in (spec.left, spec.right):
+        before, after = tuple(getattr(sd, "pad_years", None) or (0, 0))
+        if set(control.reserved(sd.dataset)) & set(range(int(year) - before, int(year) + after + 1)):
+            return True
+    return False
+
+
+def reserved_links(year: int) -> frozenset[str]:
+    """The declared links whose run of ``year`` touches the confirmation reserve (`run_touches_reserve`)."""
+    return frozenset(name for name in link_specs() if run_touches_reserve(name, year))
+
+
 def persons(year: int, draw: int | None = None):
     """The persons of one scope: every viable stored national run of ``year`` merged (pegasus_data `build_entities`,
     strongest evidence first, under a person's constraints); ``draw`` merges one plausible link set (each edge kept
@@ -2365,7 +2384,8 @@ def persons(year: int, draw: int | None = None):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw)
+        return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw,
+                              exclude=reserved_links(year))
 
 
 def _scope_runs(year: int) -> list[str]:
@@ -2392,7 +2412,8 @@ def person_quality(year: int) -> dict:
     ent = persons(year)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        tri = triangles(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()))
+        tri = triangles(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()),
+                        exclude=reserved_links(year))
     out = {name: {**stats, "triangles": tri.get(name)} for name, stats in ent.by_spec.items()}
     store.put_table("gateway", key, pa.table({"json": [json.dumps(out)]}), {"source": "pegasus_data entities, triangles"})
     return out
@@ -2418,7 +2439,7 @@ def person_scopes(kind: tuple[str, str], year: int) -> list[int]:
         person = list((raw.get(name) or {}).get("person") or [])
         for k, (side, sd) in enumerate((("left", spec.left), ("right", spec.right))):
             if len(person) > k and (sd.dataset, person[k]) == kind:
-                out.update(covering_runs(name, side, year))
+                out.update(z for z in covering_runs(name, side, year) if not run_touches_reserve(name, z))
     return sorted(out)
 
 

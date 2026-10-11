@@ -199,6 +199,14 @@ def _icd(code: str) -> str:
     return code.replace(".", "").strip().upper()
 
 
+def _rows_table(rows: list[dict]) -> pa.Table:
+    """Rows as a table over the union of their keys, in first-seen order: pyarrow takes the columns of the first row
+    alone, so a column only some rows carry (an institution's facts, a cohort's estimate beside its notes) was dropped
+    whenever the first row lacked it (review 2026-10-11)."""
+    keys = list(dict.fromkeys(k for r in rows for k in r))
+    return pa.Table.from_pylist([{k: r.get(k) for k in keys} for r in rows])
+
+
 def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | None]]:
     """The years ``dataset`` publishes among ``years`` before its confirmation reserve (`control.reserved`: only a
     claim reads it; the years after it too are left out, since the fits read years by position, a trend and an AR(1)
@@ -331,8 +339,10 @@ def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) 
             except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said, not hidden
                 log(f"study: related codes in {it.dataset} {d.column}: {type(exc).__name__}: {exc}")
                 continue
+            # ``years`` is the span shown; ``item_years`` every year read, which the related code's own field reads (its
+            # span alone made a two-year field of fourteen, its fits taking 2010 and 2023 for consecutive, 2026-10-11)
             out += [{"dataset": it.dataset, "event": it.event, "where": d.column, "years": [it.years[0], it.years[-1]],
-                     **r} for r in rows if r["related"]]
+                     "item_years": [int(y) for y in it.years], **r} for r in rows if r["related"]]
     return sorted(out, key=lambda r: -r["lift"])
 
 
@@ -399,7 +409,9 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
                     continue
 
                 def usable(z: int, link: str = p["link"], method: str = method) -> bool:
-                    return verdicts.get((link, stored_key(link, method, z, "BR").stem)) in USABLE_LINKS
+                    # a run touching the confirmation reserve is a claim's, never a field's (`run_touches_reserve`)
+                    return (verdicts.get((link, stored_key(link, method, z, "BR").stem)) in USABLE_LINKS
+                            and not gateway.run_touches_reserve(link, z))
 
                 ys = [y for y in it.years if all(usable(z) for z in gateway.covering_runs(p["link"], side, y))]
                 if not ys:
@@ -620,7 +632,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
         for r in (r for r in related if r["related"]):
             extra.append((float(r.get("low") or 0.0), Item(
-                r["dataset"], r["event"], ["*"], None, list(r["years"]),
+                r["dataset"], r["event"], ["*"], None, list(r["item_years"]),
                 f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the topic's codes, "
                 f"{r['lift']:.1f} times expected", source={"codes": [r["code"]]})))
     if decl.depth in ("deep", "exhaustive"):
@@ -807,7 +819,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                          "reference": x.locus.get("reference"), "rr": float(x.effect),
                          "low": float(x.interval[0]) if x.interval else None,
                          "high": float(x.interval[1]) if x.interval else None, "q": float(x.q)} for x in found]
-                store.put_table("study_table", key, pa.Table.from_pylist(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
+                store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
                 out.extend(rows)
     return out
 
@@ -881,8 +893,10 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str])
                         out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {c['column']}",
                                         source={"classifier": c["column"], "codes": [code]}))
                 for d in fields.declared_codes(ds):
+                    if d.reason:            # a column refused with why (no codelist: `codes_source` has no tree to read)
+                        continue
                     src = fields.codes_source(ds, d.column)
-                    if d.reason or src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
+                    if src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
                         continue
                     seen.add((ds, et["name"], d.column, code))
                     out.append(Item(ds, et["name"], [_chapter(tree, code)], [code], ys,
@@ -1248,29 +1262,29 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
                     groups.extend(_groups(it, s, f, label, log))
     related = _related(rows, series)
-    pq.write_table(pa.Table.from_pylist(related) if related else pa.table({"finding": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
     rel = _relations(scope, decl, log) + (_determinants(scope, decl, log) if decl.depth in ("deep", "exhaustive") else []) \
         + (_screen(scope, decl, log) if decl.depth == "exhaustive" else [])
-    pq.write_table(pa.Table.from_pylist(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
     persons = _persons(decl, scope, log) if decl.depth in ("deep", "exhaustive") else []
-    pq.write_table(pa.Table.from_pylist(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
     profile = _context_profiles(decl, scope, rows, log)
-    pq.write_table(pa.Table.from_pylist(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
     _stories([r for r in rows if r.get("class") == "signal" and "quality:" not in str(r.get("label"))])  # `story` saved
     for r in rows:
         r.pop("_places", None)
         r.pop("_institutions", None)
         r.pop("_event", None)
-    findings = pa.Table.from_pylist(rows) if rows else pa.table({"id": pa.array([], pa.string())})
+    findings = _rows_table(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
-    pq.write_table(pa.Table.from_pylist(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
                    out / "descriptive.parquet")
-    pq.write_table(pa.Table.from_pylist(groups) if groups else pa.table({"field": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(groups) if groups else pa.table({"field": pa.array([], pa.string())}),
                    out / "groups.parquet")
     db = out / "study.duckdb"
     if db.exists():
@@ -1290,7 +1304,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
     con.close()
     hyp = _hypotheses(decl, scope)
-    pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
+    pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
     _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons)
     return views
@@ -1560,7 +1574,7 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
                 log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
                 continue
             flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
-            store.put_table("study_table", key, pa.Table.from_pylist(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
+            store.put_table("study_table", key, _rows_table(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
         out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))}, "pair": f"{a[0]}:{a[2]} ~ {b[0]}:{b[2]}",
                  "years": f"{years[0]}-{years[-1]}"} for r in rows]
     return out
@@ -1593,7 +1607,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
                     log(f"study: determinants of {x}: {type(exc).__name__}: {exc}")
                     continue
                 flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
-                store.put_table("study_table", key, pa.Table.from_pylist(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
+                store.put_table("study_table", key, _rows_table(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
             out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))},
                      "pair": f"{r.get('field')} ~ {r.get('leader')}", "years": f"{it.years[0]}-{it.years[-1]}"}
                     for r in rows if r.get("field") is not None]
@@ -1615,7 +1629,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
         except Exception as exc:  # noqa: BLE001 - the layer that cannot run is said; the time-varying rows stand
             log(f"study: place-level determinants: {type(exc).__name__}: {exc}")
             rows = []
-        store.put_table("study_table", key, pa.Table.from_pylist(rows) if rows else pa.table({"p": pa.array([], pa.float64())}))
+        store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"p": pa.array([], pa.float64())}))
     out += [{"support": "between places", "field": r["x"], "leader": r["y"], "lag": 0, "rho": r.get("rho"),
              "p": r.get("p"), "reported": bool(r.get("admitted")), "partial": r.get("rho_c"),
              "pair": f"{r['x']} ~ {r['y']}", "years": "study period"} for r in rows if r.get("x")]
