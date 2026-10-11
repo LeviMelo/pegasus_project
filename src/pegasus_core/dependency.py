@@ -223,6 +223,56 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                                           if groups[i] == "context"}})
 
 
+def field_map(fields: list[tuple[str, str, str, dict | None, list[int]]], contexts: list,
+              ledger=None) -> list[dict]:
+    """The place-level layer of ARCHITECTURE §8.2 for a study: each topic field (dataset, event, node, reader, years)
+    as its shrunk place effect over its years against B0 (`place_effect`, as `build` reads a chapter), the ``contexts``
+    as normal scores over the same years (`gateway.context_value`), in one map (`maps.dependency_map`: the marginal and
+    the conditional layer, the Moran spectral null, error control over the map). Topic fields are not tested against
+    one another (their events overlap); every field-context pair is. Municipalities with the most E. coli-positive
+    water samples have 3.8 times the diarrhoea admission rate of those with the fewest (2014-2023, Spearman 0.17),
+    while the year-to-year relation of the two is null: this layer, not the time-varying one, carries that."""
+    from . import control, tools
+    from . import fields as fields_mod
+    from .scans import maps, pairs
+
+    span = sorted({y for *_, ys in fields for y in ys})
+    places = np.sort(gateway.population([span[-1]]).column("u").unique().to_numpy())
+    names, groups, labels, B, SD = [], [], [], [], []
+    for ds, ev, node, source, years in fields:
+        s = tools.Session(ds, ev, list(years), source=source)
+        su = s.surprise(node, "B0")
+        y, mu, _, _ = _window(su, list(years), places)
+        if y.sum() <= 0:
+            continue
+        b, sd, _ = place_effect(y, mu)
+        names.append(f"{ds}:{node}" + (f"|{fields_mod.reader_tag(source)}" if source else ""))
+        groups.append("topic")
+        labels.append(names[-1])
+        B.append(b)
+        SD.append(sd)
+    topic = len(names)
+    for entry in contexts:
+        try:
+            v, label = gateway.context_value(entry, span, places)
+        except (ValueError, LookupError, FileNotFoundError, KeyError):
+            continue
+        names.append(f"ctx:{entry['field'] if isinstance(entry, dict) else entry}")
+        groups.append("context")
+        labels.append(label)
+        z = normal_scores(v)
+        B.append(z)
+        SD.append(np.where(np.isfinite(z), CONTEXT_SD, np.nan))
+    if not topic or len(names) == topic:
+        return []
+    F = len(names)
+    overlap = np.zeros((F, F))
+    overlap[:topic, :topic] = 1.0           # the topic's fields share events: never tested as independent
+    inp = maps.MapInputs(places, names, groups, labels, np.stack(B, 1), np.stack(SD, 1), overlap, {"years": span})
+    dm = maps.dependency_map(inp, pairs.MoranBasis(places), ledger or control.Ledger(), tag="study")
+    return [r for r in dm.edges.to_pylist() if not (str(r.get("x")).startswith("ctx:") and str(r.get("y")).startswith("ctx:"))]
+
+
 def dependency_map(systems: list[tuple[str, str, list[str]]], contexts: list | tuple = (),
                    years: list[int] | None = None, ledger=None) -> dict:
     """A dependency map (§7.6) of every fitted field of ``systems`` ((dataset, event, blocks), a plan's) and the

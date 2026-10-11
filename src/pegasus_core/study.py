@@ -1086,6 +1086,28 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
             out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))},
                      "pair": f"{r.get('field')} ~ {r.get('leader')}", "years": f"{it.years[0]}-{it.years[-1]}"}
                     for r in rows if r.get("field") is not None]
+    # the place-level layer (§8.2 "cross-sectionally"): every topic field's place effect against the contexts in one
+    # map, marginal and conditional on the others, Moran null (`dependency.field_map`)
+    from . import dependency
+
+    topic = [(it.dataset, it.event, node, it.source, list(it.years))
+             for it in scope.items if it.status == "in" and "population" not in (it.source or {}) and len(it.years) >= 4
+             for node in _study_nodes(it, None)]
+    key = {"what": "study_field_map", "fields": topic, "contexts": contexts, "data": config.data_version(),
+           "code": config.code_key(dependency.field_map)}
+    hit = store.get_table("study_table", key)
+    if hit is not None:
+        rows = hit.to_pylist()
+    else:
+        try:
+            rows = dependency.field_map(topic, contexts)
+        except Exception as exc:  # noqa: BLE001 - the layer that cannot run is said; the time-varying rows stand
+            log(f"study: place-level determinants: {type(exc).__name__}: {exc}")
+            rows = []
+        store.put_table("study_table", key, pa.Table.from_pylist(rows) if rows else pa.table({"p": pa.array([], pa.float64())}))
+    out += [{"support": "between places", "field": r["x"], "leader": r["y"], "lag": 0, "rho": r.get("rho"),
+             "p": r.get("p"), "reported": bool(r.get("admitted")), "partial": r.get("rho_c"),
+             "pair": f"{r['x']} ~ {r['y']}", "years": "study period"} for r in rows if r.get("x")]
     return out
 
 
