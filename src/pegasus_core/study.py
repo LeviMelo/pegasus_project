@@ -147,6 +147,7 @@ class Item:
     readers: dict = field(default_factory=dict)   # the declared readers the depth adds (`update.System`'s keys)
     denominator: tuple | None = None     # a ratio's denominator dataset and lag (its exposure is in ``source``)
     est_seconds: float | None = None     # the run's predicted wall clock for this item (`_estimate`)
+    extract: bool = False                # its codes read from an extract of the dataset, file by file (`_extract_or_lake`)
     note: str = ""
 
 
@@ -217,6 +218,26 @@ def _volumes(dataset: str, root: str) -> dict[int, float]:
         return {int(r["year"]): float(r.get("gigabytes") or 0.0) for r in pg.explore(dataset, root=root).rows}
     except Exception:  # noqa: BLE001 - a dataset the catalog does not size: counted as free, said in the note
         return {}
+
+
+#: the share of the data root's free disk a lake may take for one item; a code set needing more is read as an extract
+EXTRACT_DISK_SHARE = 0.5
+
+
+def _extract_or_lake(it: Item, gb: float) -> None:
+    """A code set whose download would not fit the disk as a lake (more than `EXTRACT_DISK_SHARE` of the data root's
+    free space: SIA-PA 2010-2025 is 175 GB against under 180 GB free) is read as an extract of its codes: the dataset's
+    files downloaded and read one by one, only its records kept (`pegasus_data.extract`). The download is the same."""
+    import shutil
+
+    if not (it.source or {}).get("codes"):
+        return
+    free = shutil.disk_usage(config.data_root()).free / 2**30
+    if gb > EXTRACT_DISK_SHARE * free:
+        it.extract = True
+        it.note = (it.note + "; " if it.note else "") + (
+            f"read as an extract of its codes: {gb:.0f} GB downloaded file by file against {free:.0f} GB free, only its "
+            "records kept")
 
 
 def _records(it: Item, years: list[int]) -> int:
@@ -529,6 +550,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.years, it.download_gb = ys, round(gb, 2)
             spent += gb
             bought |= {(it.dataset, y) for y in paid}
+            _extract_or_lake(it, gb)
         elif free and not paid:
             it.years = ys
         elif free:
@@ -542,6 +564,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.note = (f"{gb:.1f} GB to download against the {decl.depth} budget of {budget:g} GB"
                        + (f"; {unknown} not sized by the catalog" if unknown else ""))
             continue
+        if it.extract:
+            continue                     # counted from its extract, which `_prepare_store` makes
         try:
             it.records = _records(it, it.years)
         except Exception as exc:  # noqa: BLE001 - a source that cannot be counted is deferred with why
@@ -759,6 +783,11 @@ def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
     t0 = time.time()
     others = [[o.dataset, o.event] for o in read]
     out: dict = {}
+    for ds in dict.fromkeys(i.dataset for i in read if i.extract):
+        try:
+            _ensure_extract([i for i in read if i.extract and i.dataset == ds], out, log)
+        except Exception as exc:  # noqa: BLE001 - the items' own runs fail on it and record why
+            out[f"extract {ds}"] = f"failed: {type(exc).__name__}: {exc}"
     for it in read:
         plan = _plan(it, [o for o in others if o[0] != it.dataset])
         try:
@@ -769,6 +798,23 @@ def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
     out["seconds"] = round(time.time() - t0, 1)
     log(f"study {decl.study}: store prepared in {out['seconds']:.0f} s")
     return out
+
+
+def _ensure_extract(items: list[Item], out: dict, log) -> None:
+    """The records of a dataset's extract items, in one pass over its files (`pegasus_data.build_extract`): each
+    item's codes on its classifier (its own, else the event type's primary); resumes where an earlier run stopped."""
+    import pegasus_data as pg
+
+    filters: dict[str, set[str]] = {}
+    for it in items:
+        column = (it.source or {}).get("classifier") or next(
+            c["column"] for c in gateway.event_type(it.dataset, it.event).get("classifiers") or [] if c["role"] == "primary")
+        filters.setdefault(column, set()).update(it.source["codes"])
+    years = sorted({y for it in items for y in it.years})
+    m = pg.build_extract(items[0].dataset, years, {c: sorted(v) for c, v in filters.items()}, root=config.data_root(),
+                         log=log)
+    kept = sum(v["kept"] for v in m["files"].values())
+    out[f"extract {items[0].dataset}"] = f"{len(m['files'])} files read, {kept:,} records kept, {len(m['failed'])} failed"
 
 
 def _step_name(it: Item) -> str:
@@ -957,7 +1003,8 @@ def _plan(it: Item, others: list | None = None):
     from . import update
 
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
-                                                              mentions=it.mentions, source=it.source, **it.readers)],
+                                                              mentions=it.mentions, source=it.source, extract=it.extract,
+                                                              **it.readers)],
                        relations=False, triage=True, report=None, extra={"corroborators": others or []})
 
 

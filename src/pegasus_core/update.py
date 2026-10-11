@@ -52,6 +52,7 @@ class System:
     source: dict | None = None                   # the counts' reader (`monolith.assemble`): e.g. {"codes": ["P371"]}
     quality: list[str] | str | None = None       # "all", or columns: each one's blank or "ignored" share (`fields.quality_sources`)
     supports: list[str] | str | None = None      # "all", or place columns: the counts at another support (`fields.support_sources`)
+    extract: bool = False                        # its code set is read from a pegasus_data extract, not the lake (`study`)
 
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
@@ -309,7 +310,7 @@ def _ensure_lake(plan: Plan, out: dict, log) -> None:
     year before, which a padded link side reads), as a step of its own: a raw read then scans Parquet instead of
     decoding the DBC files in every process (`gateway.ensure_lake`)."""
     specs = gateway.link_specs()
-    datasets = [s.dataset for s in plan.systems]
+    datasets = [s.dataset for s in plan.systems if not s.extract]     # an extract's dataset is read file by file instead
     for link, _side in plan_links(plan):
         spec = specs.get(link)
         if spec is not None:

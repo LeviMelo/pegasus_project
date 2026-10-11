@@ -436,6 +436,11 @@ class Session:
             min_expected = kw.get("min_expected", inspect.signature(lenses.group_disparity).parameters["min_expected"].default)
             if float(y_g.sum()) < 2 * min_expected:
                 return out
+            # a drawn world (`harness.grid`) holds no compositions: they are read from the real records, so against a
+            # world's expectation they were the 40 of 40 null worlds' findings (TOXG, 2026-10-11); the world's own
+            # sex-age groups are its question
+            if getattr(self, "drawn", False):
+                return out
             # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
             for column in group_columns(self.dataset, self.event):
                 y_c, mu_c, values = self.by_composition(node, column)

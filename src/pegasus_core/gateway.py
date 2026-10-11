@@ -571,7 +571,7 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
 
 def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
                  places: pa.Array | None = None, race: str | None = None, cell: bool = True,
-                 support: str | None = None) -> EventCounts:
+                 support: str | None = None, codes: tuple[str, ...] | list[str] = ()) -> EventCounts:
     """One event type's counts for one year, by residence × sex × age × the classifier's code.
 
     The columns come from pegasus_data's roles (the subject's residence, sex and age as
@@ -587,6 +587,9 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     ``support``: another municipality column of the event read in place of the residence (ARCHITECTURE §5.3: the
     place of infection, the notifying municipality, the hospital's, the place of death; `fields.support_sources`);
     a record without it is unallocated by 'municipality'.
+    ``codes``: the events whose classifier code starts with one of them are all the caller keeps (a code set); where a
+    pegasus_data extract holds them whole for the year (`pegasus_data.extract`: a dataset larger than the lake, read
+    file by file), the counts are of the extract's records, and only of those codes.
     """
     import pegasus_data as pg
 
@@ -606,7 +609,15 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
         if race:
             raise ValueError("a race group is a stratum: cell=False reads none")
         strata = {**strata, "age": None, "sex": None, "implied_sex": 1, "implied_age": 0}
+    records = None
+    if codes and column:
+        try:
+            records, made = pg.extract_table(dataset, column, list(codes), [int(year)], root=config.data_root())
+        except LookupError:
+            records = None
     key = {"what": "event_counts", **({"cell": False} if not cell else {}), **({"support": support} if support else {}), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
+           **({"extract": {"codes": sorted(made["codes"]), "files": len(made["files"])}, "codes": sorted(codes)}
+              if records is not None else {}),
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
     cached = store.get_table("gateway", key)
@@ -621,7 +632,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         raw = pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
-                              allow_partial=False, max_download=8 * 1024**3)
+                              allow_partial=False, max_download=8 * 1024**3, records=records)
     con = duckdb.connect()
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)

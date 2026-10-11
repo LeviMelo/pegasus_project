@@ -786,6 +786,7 @@ def grid(session: Any, node: str, kinds: tuple[str, ...] = GRID_KINDS, shapes: t
     U, T = mu_ut.shape
     sess = tools.Session(session.dataset, session.event, session.years, session.graph, source=session.source,
                          ledger=control.Ledger(config.home() / "harness" / "grid_ledger"))
+    sess.drawn = True                   # what a world draws is all it holds: no composition read from the records
     s_orig = session.surprise(node, "B1")                                 # the field's noise structure (N1)
     phi_field = np.broadcast_to(np.asarray(s_orig.phi, dtype=float), (U, T))
     rows, false_rows = [], []

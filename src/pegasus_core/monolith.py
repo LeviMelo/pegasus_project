@@ -486,7 +486,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
 
     parts, unallocated, in_tree = [], {}, []
     for year in years:
-        ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args)
+        # a code set's codes go to the event counts, which read them from an extract where one holds them whole
+        extra = {"codes": subset} if subset and readers[source] is gateway.event_counts else {}
+        ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args, **extra)
         tab = ec.counts
         if subset:
             keep = pc.starts_with(tab.column("code"), subset[0])
