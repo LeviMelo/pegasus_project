@@ -1747,11 +1747,13 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         if isinstance(x.provenance.get("methods"), list) else str(x.provenance.get("methods") or ""),
         "class": tri.get("class"), "class_reason": tri.get("reason"), "class_grade": tri.get("grade"),
         "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": corr.get("reason"),
-        "status": x.status, **(_COMPOSITION if x.locus.get("groups_by") else _reliability(x.provenance.get("methods") or [x.estimand]))}
+        "status": x.status, **(_COMPOSITION if x.locus.get("groups_by") and x.locus.get("groups_by") != gateway._strata(
+            it.dataset, it.event).get("race") else _reliability(x.provenance.get("methods") or [x.estimand]))}
 
 
 #: a composition's group answer: read against Brazil's mix of the value at the place's age and sex, so it restates the
-#: population's own mix (OPEN_QUESTIONS 17); drawn worlds hold no compositions, so its null rate is not measured
+#: population's own mix (OPEN_QUESTIONS 17); drawn worlds hold no compositions, so its null rate is not measured. The
+#: race stratum is read against the place's own population by race (`Session._race_expected`) and is not flagged
 _COMPOSITION = {"uncalibrated": True, "reliability": "a composition read against Brazil's mix, not the place's "
                 "population's (OPEN_QUESTIONS 17); no null measured"}
 
