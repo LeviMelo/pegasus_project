@@ -57,6 +57,28 @@ def age_band(age: np.ndarray, edges: list[int] | None = None) -> np.ndarray:
 # ---------------------------------------------------------------------- data
 
 
+def _leaf_expected(m, E: int, U: int, T: int) -> np.ndarray:
+    """Each leaf's expectation [E, U, T], filled in place: stacking a list of them held the block twice."""
+    mu = np.empty((E, U, T))
+    for e in range(E):
+        mu[e] = m.expected(np.array([e]))[0]
+    return mu
+
+
+def _flag_upper(obs: np.ndarray, mu: np.ndarray, k: float, trim: float) -> np.ndarray:
+    """Cells beyond the upper ``trim`` tail of NB(μ, k): P(Y ≥ obs) < trim where obs > μ. The tail is computed on
+    the cells above their expectation only, the only ones that can be flagged: over the whole [E, U, T] block its
+    temporaries were several copies of a chapter (SIM-DO I's robust refit held 23 GB, 2026-10-11)."""
+    from scipy import stats as st
+
+    cand = np.nonzero(obs > mu)
+    o, m_ = obs[cand], mu[cand]
+    p = st.nbinom.sf(o - 1, k, k / (k + np.maximum(m_, 1e-12)))
+    flag = np.zeros(obs.shape, bool)
+    flag[tuple(c[p < trim] for c in cand)] = True
+    return flag
+
+
 def _nbp_profile(parts: dict, ref: float, device) -> tuple[float, float, float, float, float]:
     """The NB-P dispersion's maximum likelihood (ADR-0032), (log φ0, P) jointly: the binned likelihood of
     `_nb_loglik_binned` (the non-empty cells exactly, every cell's φ·log(1 + μ/φ) through 8,192 bins of log μ) in
@@ -1918,8 +1940,6 @@ class Monolith:
         observed outside 2018–19, and every stage-C method missed it."""
         import dataclasses
 
-        from scipy import stats as st
-
         d = self.data
         E, (U, T) = len(d.leaves), d.N.shape[:2]
         obs = np.zeros((E, U, T))
@@ -1938,13 +1958,13 @@ class Monolith:
         # (evaluation 2026-10-07, robust expectation)
         for r in range(0 if courses else 1, rounds + 1):
             if not courses:
-                mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)])        # [E, U, T]
+                mu = _leaf_expected(m, E, U, T)                                        # [E, U, T]
                 live = (mu >= min_expected) | (obs > 0)
                 o, mm = obs[live][:, None], mu[live][:, None]
+                del live
                 phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
                 k = float(phi_x) if np.isfinite(phi_x) else 1e12
-                p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
-                flag = (p < trim) & (obs > mu)
+                flag = _flag_upper(obs, mu, k, trim)
                 info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()),
                              "events_flagged": float(obs[flag].sum()), "expected_there": float(mu[flag].sum())})
                 log(f"robust round {r}: φ_x {k:.3g}, {int(flag.sum())} leaf-place-periods flagged "
@@ -1957,15 +1977,15 @@ class Monolith:
                 log("robust round 0: structure (category courses) on the observed counts")
             else:
                 y_new = None
-            mu = np.stack([m.expected(np.array([e]))[0] for e in range(E)]) if r else None   # [E, U, T]
+            mu = _leaf_expected(m, E, U, T) if r else None                              # [E, U, T]
             flag = None
             if r:
                 live = (mu >= min_expected) | (obs > 0)
                 o, mm = obs[live][:, None], mu[live][:, None]
+                del live
                 phi_x = place_year_phi(o, mm, np.full(o.shape, np.inf), trim=trim)
                 k = float(phi_x) if np.isfinite(phi_x) else 1e12
-                p = st.nbinom.sf(obs - 1, k, k / (k + np.maximum(mu, 1e-12)))
-                flag = (p < trim) & (obs > mu)
+                flag = _flag_upper(obs, mu, k, trim)
                 cells = int(flag.sum())
                 dw = m._impute(d, flag, obs, mu)
                 info.append({"round": r, "phi_x": round(k, 3), "cells_flagged": int(flag.sum()), "by_cell": cells,
@@ -2122,11 +2142,17 @@ class Monolith:
         if obs is not None and mu is not None:
             # the pool is the block's unflagged leaves in the same place and period: a recoding crosses groups (Fortaleza's
             # I10 against I50; the group's leaves alone left the largest places' PIT KS at 0.055, the block's at 0.018)
-            excess = np.where(flag, np.maximum(obs - mu, 0.0), 0.0).sum(0)        # [U, T]
-            deficit = np.where(flag, 0.0, np.maximum(mu - obs, 0.0))              # [E, U, T]
+            # in place over the [E, U, T] arrays (a chapter's are 0.7 GB each): the same values as the dense forms
+            fe, fu, ft = np.nonzero(flag)
+            excess = np.zeros(flag.shape[1:])                                     # [U, T]
+            np.add.at(excess, (fu, ft), np.maximum(obs[fe, fu, ft] - mu[fe, fu, ft], 0.0))
+            deficit = np.subtract(mu, obs)                                        # [E, U, T]
+            np.maximum(deficit, 0.0, out=deficit)
+            deficit[flag] = 0.0
             pool = deficit.sum(0)
             moved = np.minimum(excess, pool)                                      # what a recoding accounts for
-            add = deficit * np.divide(moved, pool, out=np.zeros_like(pool), where=pool > 0)   # back to the siblings
+            add = deficit
+            add *= np.divide(moved, pool, out=np.zeros_like(pool), where=pool > 0)   # back to the siblings
             self.recoded = float(moved.sum())
             for e in np.unique(np.nonzero(add > 1e-9)[0]):
                 uu, tt = np.nonzero(add[e] > 1e-9)

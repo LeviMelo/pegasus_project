@@ -37,7 +37,9 @@ from . import config, store, surprise
 def _torch():
     import torch
 
-    return torch, ("cuda" if torch.cuda.is_available() else "cpu")
+    from . import config
+
+    return torch, config.array_device()
 
 
 @dataclass

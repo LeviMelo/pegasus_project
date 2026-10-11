@@ -59,7 +59,7 @@ def minimum_effect_p(rho: np.ndarray, n_eff: np.ndarray, delta: float) -> np.nda
 
 
 def _device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(config.array_device())
 
 
 def _gram(A: np.ndarray) -> np.ndarray:

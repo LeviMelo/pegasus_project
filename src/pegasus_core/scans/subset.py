@@ -346,7 +346,7 @@ def _torch_score(Y, M, kind: str):
 def _device():
     import torch
 
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(config.array_device())
 
 
 def _alternate(scanner: Scanner, Y, M):

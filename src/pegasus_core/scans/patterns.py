@@ -44,7 +44,7 @@ def _dev(y: torch.Tensor, lam: torch.Tensor) -> float:
 
 def fit(y: np.ndarray, mu: np.ndarray, rank: int, iterations: int = 500, tol: float = 1e-7,
         seed_parts: tuple = ("cp_apr",)) -> Factorisation:
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev = torch.device(config.array_device())
     Y = torch.as_tensor(y, dtype=torch.float64, device=dev)
     M = torch.as_tensor(mu, dtype=torch.float64, device=dev)
     U, T, F = y.shape

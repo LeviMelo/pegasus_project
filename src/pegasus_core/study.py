@@ -160,6 +160,7 @@ class Scope:
     budget_gb: float
     related: list[dict] = field(default_factory=list)   # codes found with the seeds on the same records (`cooccur`)
     paths: list[dict] = field(default_factory=list)     # declared links touching the read sources, with their runs' verdicts
+    link_runs: list[dict] = field(default_factory=list)  # national link runs the items read and the store lacks, priced
 
     def to_dict(self) -> dict:
         """The scope as plain values (numpy scalars from the counts made plain: YAML refuses them)."""
@@ -170,8 +171,9 @@ class Scope:
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
-                "person_paths": self.paths,
-                "estimated_minutes": round(sum(i.est_seconds or 0 for i in self.items if i.status == "in") / 60, 1)}
+                "person_paths": self.paths, "link_runs_to_compute": self.link_runs,
+                "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in")
+                                            + sum(r["est_seconds"] or 0 for r in self.link_runs)) / 60, 1)}
 
 
 def _field_spec(text: str) -> tuple[str, str, list[str]]:
@@ -574,7 +576,46 @@ def resolve(decl: Declaration, log=print) -> Scope:
                               f"topic's codes, {r['lift']:.1f} times expected", source={"codes": [r["code"]]}))
     if decl.depth in ("deep", "exhaustive"):
         items += _related_elsewhere(decl, [r for r in related if r["related"]], served)
-    return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths)
+    return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
+                 _link_runs_needed([i for i in items if i.status == "in"]))
+
+
+def _link_runs_needed(read: list[Item]) -> list[dict]:
+    """The national link runs the items' plans read (`update.plan_links`: their person fields and the links through
+    which corroboration removes shared records) that the store lacks, each priced by the stored runs' measured wall
+    time (the link's own, else every link's median; None when none was measured): `_prepare_store` computes them."""
+    from . import update
+
+    others = [[o.dataset, o.event] for o in read]
+    specs = gateway.link_specs()
+    want: dict[tuple[str, int], None] = {}
+    published: dict[str, frozenset[int]] = {}
+    for it in read:
+        plan = _plan(it, [o for o in others if o[0] != it.dataset])
+        try:
+            links = update.plan_links(plan)
+        except Exception:  # noqa: BLE001 - an item whose links cannot be listed computes none here; its run says why
+            continue
+        for link, side in links:
+            if link not in specs:
+                continue
+            sides = (specs[link].left.dataset, specs[link].right.dataset)
+            for z in sorted({z for y in it.years for z in gateway.covering_runs(link, side, y) if z <= max(it.years)}):
+                if all(z in published.setdefault(d, gateway.published_years(d)) for d in sides):
+                    want[(link, z)] = None
+    missing = [(link, z) for link, z in want if gateway.link_report(link, z) is None]
+    if not missing:
+        return []
+    timed: dict[str, list[float]] = {}
+    for link in {k for k, _ in missing}:
+        for report in (Path(config.data_root()) / "lake" / "links" / link).glob("*.json"):
+            sec = json.loads(report.read_text(encoding="utf-8")).get("seconds")
+            if sec:
+                timed.setdefault(link, []).append(float(sec))
+    every = [x for v in timed.values() for x in v]
+    return [{"link": link, "year": z,
+             "est_seconds": float(np.median(timed.get(link) or every)) if (timed.get(link) or every) else None}
+            for link, z in missing]
 
 
 def _chapter(tree: dict, code: str) -> str:
@@ -642,13 +683,37 @@ def run(decl: Declaration, log=print) -> Path:
     scope = resolve(decl, log=log)
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
+    prepared = _prepare_store(decl, read, log)
     steps = _run_items(decl, read, log)
     tables = _write_products(decl, scope, out, log)
     prov = {"study": decl.study, "written": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": round(time.time() - t0, 1),
-            "code_version": config.code_version(), "data_version": config.data_version(), "steps": steps,
-            "store_tables": tables}
+            "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
+            "steps": steps, "store_tables": tables}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
+    return out
+
+
+def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
+    """The store products the items share, made once, here, before the lanes: every item's lake (its own dataset's and
+    its links' sides) and the national link runs its plan reads (`update._ensure_lake`, `update._ensure_links`). Made
+    inside the lanes, a link run (8-12 min and 11 GB a year for CIHA's deaths, 2026-10-11) held a lane's memory and
+    its group, and two lanes reading one link both computed it. Serial: one FTP connection, and a link run's memory is
+    the largest a study holds; an item's own run then finds them stored."""
+    from . import update
+
+    t0 = time.time()
+    others = [[o.dataset, o.event] for o in read]
+    out: dict = {}
+    for it in read:
+        plan = _plan(it, [o for o in others if o[0] != it.dataset])
+        try:
+            update._ensure_lake(plan, out, log)
+            update._ensure_links(plan, out, log)
+        except Exception as exc:  # noqa: BLE001 - the item's own run tries again and records its failure
+            out[f"store {_step_name(it)}"] = f"failed: {type(exc).__name__}: {exc}"
+    out["seconds"] = round(time.time() - t0, 1)
+    log(f"study {decl.study}: store prepared in {out['seconds']:.0f} s")
     return out
 
 

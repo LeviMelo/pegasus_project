@@ -205,7 +205,9 @@ def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float =
     Initialised by the leading eigenvectors of the precision-weighted departures' covariance."""
     import torch
 
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    from . import config
+
+    dev = config.array_device()
     F, U, T = d.r.shape
     n = U * T
     K = min(K, F)        # no more factors than stacked series (two fields with their lags are 6 against K 16, 2026-10-10)

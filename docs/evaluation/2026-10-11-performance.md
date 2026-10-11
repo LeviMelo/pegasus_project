@@ -23,6 +23,13 @@ on single calls. Drivers are in the session scratchpad (`ctl/`).
 
 **Lane admission by measured peaks.** In the survey, admission on free memory alone let lanes grow past it: SIH's lanes peaked at 13.5 and 14.2 GB after being admitted with 9 GB free, and the machine fell to 2.3 GB free. Each lane now records its peak per item (`peak_gb` in provenance). A dataset is admitted by its largest measured peak, or 12 GB when unmeasured (`PEGASUS_LANE_DEFAULT_GB`), against the available memory less what the running lanes may still take. Three small items peaked at 2.46–2.54 GB.
 
+**Link runs before the lanes.** The survey stalled for half an hour: a lane was computing national link runs for
+corroboration (`update._ensure_links`; CIHA's deaths to SIM 2023–2025 took 152–723 s each, and SIH's 2024–2025 took 394–444 s), with
+11.4 GB held. That lane's group waited behind them, and two lanes reading one link would both have computed it. A study
+now makes every item's lakes and link runs once, serially, before the lanes start (`study._prepare_store`, recorded as
+`store` in provenance). Its scope lists the runs the store lacks (`link_runs_to_compute`), priced by the measured wall
+time that pegasus_data now writes into each run's report (`seconds`).
+
 ## Found on the way
 
 - **A code set's group question counted every event of its dataset.** A code-set field's node is `*`, and the filter
@@ -34,6 +41,23 @@ on single calls. Drivers are in the session scratchpad (`ctl/`).
 - **Robust refits.** A fresh robust refit's index tensors are of the imputed cells (SIH A00–A09: 573,280), while its
   `data` is reset to the real block's (565,938). A cell-level likelihood paired the two. It now reads `fit_data`. No
   production path had called it after the reset.
+- **Corroboration read years a source does not publish.** A source whose link was not stored that year fell back to its
+  unlinked events, and that read raised `NothingPublished` for TOXC before 2019. SIM-DO's O98.6 and P37.1 items failed
+  on it. Unpublished years are now skipped before either read.
+- **Lanes pinned to the CPU still computed on the GPU.** The multiscale kernels, the scans and the relation map's
+  factors each chose CUDA whenever a card existed, ignoring `PEGASUS_DEVICE`, so every lane's excess question shared the
+  card with the lane that held it. On TOXG, warm and with the GPU lane busy, 55 % of the excess question sat in
+  `multiscale.peaks`, its hot lines synchronisation points. They now follow `config.array_device()`: the lane's pin,
+  else the card. Beside the survey's GPU lane, TOXG's excess question took 209–213 s on the CPU and 287–455 s on the
+  card, with the same 44 answers and p-values.
+- **The robust refit's dense arrays.** A survey lane in SIM-DO chapter I's robust refit held 23 GB committed with
+  0.7 GB resident: it was paging. `robust` built each leaf's expectation as a list and then stacked it; it took the NB
+  tail and `_impute`'s excess and deficit over the whole [leaf, place, period] block, several temporaries of it at once.
+  These are now filled in place, with the tail computed on the cells above their expectation only. Results are
+  identical on TOXG (1 leaf), SIH A00–A09 (one code set) and SIM-DO XVI 2015–2019 (59 leaves): the same flags, φ, the
+  same 1,923.5 recoded deaths and the same μ hash. On XVI the arrays are 13 MB and the peak is unchanged (1.5 GB
+  traced, 0.68 GB of it the refit's arrowhead solver). Chapter I's are of the order of 0.7 GB each; its peak has not
+  been measured yet.
 - **A lane crash.** The first lane run lost all three workers abruptly, while another process held the GPU. The rerun
   was clean, and a dead lane's items now run again in the parent.
 

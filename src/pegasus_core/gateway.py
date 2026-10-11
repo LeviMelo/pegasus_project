@@ -1965,6 +1965,20 @@ def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
         return pg.link(link, period=year, geography="BR", method=method, root=config.data_root()).pairs
 
 
+def link_report(link: str, year: int) -> dict | None:
+    """The report of ``link``'s stored national run for ``year`` without reading its pairs (None when not stored): what
+    a scope checks and prices a run by (`study._link_runs_needed`)."""
+    import json
+
+    import pegasus_data as pg
+    from pegasus_data.linkage import store as link_store
+    from pegasus_data.linkage.engine import link_method, stored_key
+
+    key = stored_key(link, link_method(link), year, "BR")
+    path = link_store.links_dir(pg.load_settings(root=config.data_root())) / key.spec / f"{key.stem}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() and path.with_suffix(".parquet").exists() else None
+
+
 def covering_runs(link: str, side: str, year: int) -> list[int]:
     """The years of the runs whose scope holds ``side``'s records of ``year``: a side padded by (before, after) years
     is read by run z for its years z − before … z + after, so its records of ``year`` by runs year − after … year +

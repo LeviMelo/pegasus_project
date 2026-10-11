@@ -328,6 +328,19 @@ def device(cells: int | None = None) -> str:
     return "cuda" if need <= DEVICE_SHARE * free else "cpu"
 
 
+def array_device() -> str:
+    """Where the array work outside a model's fit runs (graph kernels, scans, the relation map's factors):
+    ``PEGASUS_DEVICE`` when set, else CUDA when there is a card. Fixed for the process, so tensors made apart stay on
+    one device. Each module had chosen CUDA by itself: a study lane pinned to the CPU still computed its multiscale
+    kernels on the card beside the lane that held it (2026-10-11)."""
+    forced = os.environ.get("PEGASUS_DEVICE")
+    if forced:
+        return forced
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def seed(*parts: object) -> int:
     """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4)."""
     digest = hashlib.blake2b("|".join(map(str, parts)).encode(), digest_size=8).digest()

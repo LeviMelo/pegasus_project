@@ -205,7 +205,10 @@ class Fields:
     def _table(self, source: Source) -> pa.Table | None:
         if ("table", source) not in self._cache:
             parts = []
+            published = gateway.published_years(source.dataset)
             for y in self.years:
+                if published and int(y) not in published:      # not published for the year (TOXC before 2019): no events
+                    continue
                 try:
                     t = source_year(source, int(y))
                 except gateway.nothing_published():      # not published for the year (chikungunya before 2015): no events
