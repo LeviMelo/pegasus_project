@@ -2178,7 +2178,7 @@ class Monolith:
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
         else made and stored."""
-        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 11, "courses": False}   # v11: recodings moved within the block
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 12, "courses": False}   # v12: a recoding's share in its most expected group
         key = {**self.key(), "robust": tag}
         arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
         if arrays is not None and meta is not None:
