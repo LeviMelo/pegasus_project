@@ -664,6 +664,75 @@ def _medicines(codes: list[str]) -> list[dict]:
     return out
 
 
+#: the latest years a study reads persons in (each a cohort scan over every person of the year), and the link draws
+PERSON_YEARS = 3
+PERSON_DRAWS = {"deep": 10, "exhaustive": 20}
+
+
+def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
+    """The cohort scan (`tools.cohort`, ARCHITECTURE §7.8, acceptance item 5) for every read source whose records are the
+    topic's persons (an agravo's own notifications, or a source whose records carry the topic's related codes) and a
+    person on a usable declared link (`USABLE_LINKS`; pegasus_data links' ``person``): its persons of the latest
+    `PERSON_YEARS` years whose scopes hold them, against every person kind they reach through those links, and against
+    the study's related codes on the source's own code lists (a birth's anomalies). A source with no usable link, or
+    whose persons carry no attribute, is said, not scanned."""
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    from . import tools
+
+    raw = read_yaml(links_file()).get("links") or {}
+    usable = [p for p in scope.paths if p.get("verdict") in USABLE_LINKS]
+    kinds: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for p in usable:
+        roles = list((raw.get(p["link"]) or {}).get("person") or [])
+        if len(roles) != 2:
+            continue
+        a, b = (gateway.data_code(p["left"]), roles[0]), (gateway.data_code(p["right"]), roles[1])
+        kinds.setdefault(a, set()).add(b)
+        kinds.setdefault(b, set()).add(a)
+    out, done = [], set()
+    for it in (i for i in scope.items if i.status == "in"):
+        for kind, reach in kinds.items():
+            if not gateway.same_dataset(kind[0], it.dataset) or (it.dataset, kind) in done:
+                continue
+            done.add((it.dataset, kind))
+            same = [("record", f"{r['where']}~{r['code']}") for r in scope.related
+                    if r.get("related") and gateway.same_dataset(r["dataset"], it.dataset) and r.get("where")]
+            # the persons must be the topic's: an agravo's own notifications (every record is the topic), or a source
+            # whose own records carry the topic's related codes (a birth's anomalies); every admission of SIH is not
+            if not (it.reason.startswith("seed sinan:") or same):
+                continue
+            outcomes = [(d, role) for d, role in sorted(reach)] + same
+            years = [y for y in sorted(it.years)[::-1] if gateway.person_scopes(kind, y)][:PERSON_YEARS]
+            label = f"{it.dataset} {kind[1]}"
+            if not years:
+                out.append({"cohort": label, "note": "no year of the study holds its persons' link runs"})
+                continue
+            for y in years:
+                key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
+                       "draws": PERSON_DRAWS[decl.depth], "q": decl.q, "data": config.data_version(),
+                       "code": config.code_key(tools.cohort)}
+                hit = store.get_table("study_table", key)
+                if hit is not None:
+                    out.extend(hit.to_pylist())
+                    continue
+                try:
+                    found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=PERSON_DRAWS[decl.depth],
+                                         q=decl.q, log=log)
+                except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
+                    out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
+                    continue
+                rows = [{"cohort": label, "year": y, "outcome": x.fields[1].removeprefix("person:"),
+                         "attribute": x.locus.get("attribute"), "level": x.locus.get("level"),
+                         "reference": x.locus.get("reference"), "rr": float(x.effect),
+                         "low": float(x.interval[0]) if x.interval else None,
+                         "high": float(x.interval[1]) if x.interval else None, "q": float(x.q)} for x in found]
+                store.put_table("study_table", key, pa.Table.from_pylist(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
+                out.extend(rows)
+    return out
+
+
 def _capture_note(scope: Scope) -> str:
     """Whether the read systems can estimate each other's completeness (capture–recapture, ARCHITECTURE §5.2): three
     systems linked pairwise by viable runs, from the scope's person paths; otherwise which links stand in the way. Every
@@ -1093,6 +1162,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     pq.write_table(pa.Table.from_pylist(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
+    persons = _persons(decl, scope, log) if decl.depth in ("deep", "exhaustive") else []
+    pq.write_table(pa.Table.from_pylist(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
+                   out / "persons.parquet")
     profile = _context_profiles(decl, scope, rows, log)
     pq.write_table(pa.Table.from_pylist(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
@@ -1121,11 +1193,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW context_profile AS SELECT * FROM read_parquet('{(out / 'context_profile.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW related AS SELECT * FROM read_parquet('{(out / 'related.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW relations AS SELECT * FROM read_parquet('{(out / 'relations.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
     con.close()
     hyp = _hypotheses(decl, scope)
     pq.write_table(pa.Table.from_pylist(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
-    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel)
+    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons)
     return views
 
 
@@ -1657,7 +1730,13 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         if isinstance(x.provenance.get("methods"), list) else str(x.provenance.get("methods") or ""),
         "class": tri.get("class"), "class_reason": tri.get("reason"), "class_grade": tri.get("grade"),
         "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": corr.get("reason"),
-        "status": x.status, **_reliability(x.provenance.get("methods") or [x.estimand])}
+        "status": x.status, **(_COMPOSITION if x.locus.get("groups_by") else _reliability(x.provenance.get("methods") or [x.estimand]))}
+
+
+#: a composition's group answer: read against Brazil's mix of the value at the place's age and sex, so it restates the
+#: population's own mix (OPEN_QUESTIONS 17); drawn worlds hold no compositions, so its null rate is not measured
+_COMPOSITION = {"uncalibrated": True, "reliability": "a composition read against Brazil's mix, not the place's "
+                "population's (OPEN_QUESTIONS 17); no null measured"}
 
 
 @functools.cache
@@ -1774,7 +1853,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 
 
 def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
-            hyp: list[dict] | None = None, relations: list[dict] | None = None) -> None:
+            hyp: list[dict] | None = None, relations: list[dict] | None = None, persons: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     from pegasus_data.linkage.engine import CAUTION, VIABLE
 
@@ -1837,6 +1916,15 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              (table(sorted([r for r in (relations or []) if r.get("reported")], key=lambda r: r.get("p", 1)),
                     [("pair", "fields"), ("support", "scale"), ("lag", "lag"), ("rho", "ρ"), ("direct", "direct"),
                      ("p", "p"), ("years", "years")], cap=25) if relations else "<p>No pair of fields shares four years.</p>"),
+             "<h2>3d. Persons</h2><p>The cohort scan over linked persons (ARCHITECTURE §7.8): each attribute of the "
+             "persons of a source against each outcome they reach, on their own record or through the viable links "
+             "of any route, adjusted for age, sex and place; linkage uncertainty by plausible link sets.</p>"
+             + (table(sorted([r for r in persons if r.get("q") is not None], key=lambda r: r["q"]),
+                      [("cohort", "persons"), ("year", "year"), ("outcome", "outcome"), ("attribute", "attribute"),
+                       ("level", "level"), ("reference", "against"), ("rr", "RR"), ("low", "95 % from"), ("high", "to"),
+                       ("q", "q")], cap=40)
+                + "".join(f"<p>{e(r['cohort'])} {r.get('year') or ''}: {e(r['note'])}</p>" for r in persons if r.get("note"))
+                if persons else f"<p>{'Not read at this depth.' if decl.depth not in ('deep', 'exhaustive') else 'No source read holds persons on a usable link.'}</p>"),
              "<h2>4. Scope</h2>", "<ul>" + "".join(
                  f"<li><b>{e(i.dataset)}</b> ({e(i.event)}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",

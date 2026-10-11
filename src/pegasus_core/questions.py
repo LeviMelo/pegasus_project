@@ -301,6 +301,7 @@ def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
     from scipy.stats import beta
 
     from . import store
+    from .tools import LENS_TIERS as LENS_TIER
 
     events: dict[tuple, tuple] = {}             # (method, positive) -> (written, found)
     grids: dict[tuple, tuple] = {}              # (method, field) -> (written, rows)
@@ -347,10 +348,15 @@ def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
             r["planted_detected"] = r.get("planted_detected", 0) + bool(row.get("detected"))
             if row.get("theta0") is not None:
                 r.setdefault("theta0", set()).add(row["theta0"])
+        # a lens is judged on the null of its tier (OPEN_QUESTIONS 16): a B0 lens on worlds drawn without place effects
+        # (``null_b0``), the others on worlds keeping every place's level (``null``); B1 worlds had counted as
+        # group_disparity's null (60 of 125 with findings), where its own worlds give none (TOXG 0 of 40, 2026-10-11)
+        own = "null_b0" if LENS_TIER.get(m) == "B0" else "null"
         for row in rows:
-            if row["kind"] == "null":
-                r["null_worlds"] = r.get("null_worlds", 0) + 1
-                r["null_worlds_with_findings"] = r.get("null_worlds_with_findings", 0) + (row["findings"] > 0)
+            if row["kind"] in ("null", "null_b0"):
+                if row["kind"] == own:
+                    r["null_worlds"] = r.get("null_worlds", 0) + 1
+                    r["null_worlds_with_findings"] = r.get("null_worlds_with_findings", 0) + (row["findings"] > 0)
             elif row["findings"]:
                 r["planted_findings"] = r.get("planted_findings", 0) + row["findings"]
                 r["planted_false"] = r.get("planted_false", 0) + row["false"]
