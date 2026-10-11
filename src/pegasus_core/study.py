@@ -1610,7 +1610,30 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         if isinstance(x.provenance.get("methods"), list) else str(x.provenance.get("methods") or ""),
         "class": tri.get("class"), "class_reason": tri.get("reason"), "class_grade": tri.get("grade"),
         "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": corr.get("reason"),
-        "status": x.status}
+        "status": x.status, **_reliability(x.provenance.get("methods") or [x.estimand])}
+
+
+@functools.cache
+def _method_records() -> dict:
+    """The methods' records (`tools.method_status`: null worlds, planted signals), read once per study."""
+    from . import tools
+
+    return tools.method_status()
+
+
+def _reliability(methods) -> dict:
+    """A finding's methods as measured on null worlds: ``uncalibrated`` when every method that raised it finds
+    departures in null worlds beyond its error rate (calibrated False), with the measured share in ``reliability``. A
+    finding is never removed for it (validation characterises, it does not gate): the report says it, and a story made
+    only of such findings ranks after the others. `institution_step` had findings in 20 of 20 null worlds and
+    `group_disparity` in 60 of 125 (STATUS), and the survey printed 122 of their answers as signals (2026-10-11)."""
+    names = [m for m in (methods if isinstance(methods, list) else str(methods).replace("+", ",").split(",")) if m]
+    recs = [(m, _method_records().get(m.strip()) or {}) for m in names]
+    bad = [(m, r) for m, r in recs if r.get("calibrated") is False]
+    if not bad or len(bad) < len(recs):
+        return {"uncalibrated": False, "reliability": None}
+    return {"uncalibrated": True, "reliability": "; ".join(
+        f"{m}: findings in {r.get('null_worlds_with_findings')} of {r.get('null_worlds')} null worlds" for m, r in bad)}
 
 
 def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
@@ -1848,8 +1871,10 @@ def _stories(rows: list[dict]) -> list[list[dict]]:
         groups.setdefault(find(i), []).append(r)
     # ranked by evidence (independent sources), burden (excess events at the stories' loci), then the strongest q
     # (ARCHITECTURE §9, BACKLOG 7.3)
-    out = sorted((sorted(g, key=lambda r: r["q"]) for g in groups.values()),
-                 key=lambda g: (-len({r["dataset"] for r in g}), -sum(max(r.get("excess") or 0.0, 0.0) for r in g), g[0]["q"]))
+    # a story whose findings all come from methods that fail their null worlds ranks after every other (`_reliability`)
+    out = sorted((sorted(g, key=lambda r: (bool(r.get("uncalibrated")), r["q"])) for g in groups.values()),
+                 key=lambda g: (all(r.get("uncalibrated") for r in g), -len({r["dataset"] for r in g}),
+                                -sum(max(r.get("excess") or 0.0, 0.0) for r in g), g[0]["q"]))
     for k, g in enumerate(out, 1):
         for r in g:
             r["story"] = k
@@ -1866,7 +1891,9 @@ def _story_html(k: int, rows: list[dict], e) -> str:
     items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
                     + (f" in {e(r['groups'])}" if r.get("groups") else "")
                     + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
-                    + (", corroborated" if r.get("corroborated") else "") + "</li>" for r in rows[:6])
+                    + (", corroborated" if r.get("corroborated") else "")
+                    + (f" (method not calibrated: {e(r['reliability'])})" if r.get("uncalibrated") else "") + "</li>"
+                    for r in rows[:6])
     excess = sum(max(r.get("excess") or 0.0, 0.0) for r in rows)
     return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{len(rows)} findings in "
             f"{len(fields_)} fields from {len(sources)} sources ({e(', '.join(sources))})"
