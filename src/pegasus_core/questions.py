@@ -49,6 +49,7 @@ class Question:
     methods: tuple[Method, ...]
     shapes: tuple[str, ...] = ()                # the courses in time that answer it (`departures.attribute`); () any
     prospective: bool = False                   # asked of the years after a training period (``train_last``) only
+    grain: str = ""                             # the grain it is asked at ("": any; "month": the monthly fits only)
 
 
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
@@ -108,6 +109,20 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                         lens="trend_divergence",
                         settings=(("scales", ("municipality", "region", "state")), ("reference", "national"))),
              )),
+    # component 5 (ARCHITECTURE §7.2): the cycle against the field's season, at the monthly grain. One lens read two
+    # ways, the departure averaged over the years and its change over them, are two methods
+    Question("seasonality", "C", "a unit's annual cycle (amplitude and phase of the seasonal harmonic) departing from "
+             "the field's season, and the cycle changing over the period; units at the municipality, the immediate "
+             "region and the state", "B1", "area × window", "rate ratio", (
+                 Method("season_level", "NB harmonic regression per unit and calendar year against B1's season, the "
+                                        "years combined by a random-effects meta-regression (DerSimonian–Laird, "
+                                        "Hartung–Knapp), minimum-effect F test; BH per scale",
+                        lens="season_departure",
+                        settings=(("scales", ("municipality", "region", "state")), ("estimand", "level"))),
+                 Method("season_change", "the same, the slope of the yearly departure over the period",
+                        lens="season_departure",
+                        settings=(("scales", ("municipality", "region", "state")), ("estimand", "change"))),
+             ), grain="month"),
     Question("prospective", "C", "counts in the periods after the training years above what a fit on the years up "
              "to them expects (ADR-0012: the alarm baseline for epidemics, the calibrated expectation otherwise)",
              "BP/BPA", "area × period", "rate ratio", (

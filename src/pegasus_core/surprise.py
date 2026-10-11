@@ -1219,11 +1219,12 @@ def refit_place_season(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: floa
 
 def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarray, iterations: int = 30,
                 outer: int = 20, tau: np.ndarray | None = None, variance: bool = False,
-                X_new: np.ndarray | None = None) -> tuple:
+                X_new: np.ndarray | None = None, covariance: bool = False) -> tuple:
     """Per place u, log μ'_ut = log μ_ut + X_t·b_u with b_u ~ N(0, diag(1/τ)): exact p×p Newton per
     place under NB working weights, the τ's by Fellner–Schall. Returns (μ', b, posterior sd, τ);
     with ``variance`` also Var(X_t·b_u) per cell, and with ``X_new`` (the design at later periods) the
-    course's forecast X_new·b_u and its variance X_new H⁻¹ X_newᵀ, both [places, periods]."""
+    course's forecast X_new·b_u and its variance X_new H⁻¹ X_newᵀ, both [places, periods]; with ``covariance``
+    (instead) (μ', b, sd, τ, H⁻¹), the posterior covariance [places, k, k] of the coefficients."""
     live = mu.sum(axis=1) > 0
     U, k = mu.shape[0], X.shape[1]
     pois = np.isinf(phi_agg)
@@ -1255,6 +1256,8 @@ def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarra
             break
     Hinv = np.linalg.inv(H)
     sd = np.sqrt(np.clip(np.einsum("uii->ui", Hinv), 0, None))
+    if covariance:
+        return mu * np.exp(b @ X.T), b, sd, tau, Hinv
     if variance:   # Var(X_t . b_u): the refit's own contribution to the uncertainty of log mu'
         out = (mu * np.exp(b @ X.T), b, sd, tau, np.einsum("ti,uij,tj->ut", X, Hinv, X))
         if X_new is not None:
