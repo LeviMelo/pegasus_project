@@ -14,6 +14,9 @@ Early alarms on recent, incomplete data, for every place of a field. Three piece
   Bayesian nowcasts of Höhle & an der Heiden 2014 and McGough et al. 2020): with the Poisson–gamma form of that
   prior the events to come are NegBin(φ + y, (φ/μ + F) / (φ/μ + 1)). A flat prior on the total would read 1 death
   known at F = 0.26 as a week of 7 and alarm everywhere (2026-10-10).
+- **The year's own pace** (`current`). Registration speeds up and slows down from year to year, so the closed
+  year's delays are corrected by the current year's reporting triangle up to the as-of day, read in reverse time
+  for its right truncation (Lawless 1994) and shrunk toward the closed year's where it is thin.
 - **The alarm** (`alarm`). The ADR's design is a false-alarm rate per place over time, a recurrence interval, not an
   FDR over one search. With the alarm baseline's predictive NB(μ, φ) (tier BPA, ADR-0012), a week's alarm threshold
   is its upper quantile at 1 − 1/R, R the declared recurrence in place-weeks (5 years: R = 260). A week alarms when the nowcast puts its eventual count at
@@ -52,6 +55,8 @@ class Delays:
     concentration: float
     week_ratio: np.ndarray
     week_concentration: float
+    year_ratio: np.ndarray | None = None        # [D + 1] the current year's national pmf over ``national`` (`current`)
+    year_concentration: float | None = None
 
     def F(self, place, week, elapsed):
         """P(reported within ``elapsed`` days of onset) for events of ``place`` with onset in ``week`` of the year (the
@@ -60,6 +65,8 @@ class Delays:
         i = np.minimum(np.searchsorted(self.places, place), len(self.places) - 1)
         known = self.places[i] == place
         rows = np.where(known[..., None], self.pmf[i], self.national) * self.week_ratio[np.clip(week, 0, 53)]
+        if self.year_ratio is not None:
+            rows = rows * self.year_ratio
         cdf = np.cumsum(rows, -1) / rows.sum(-1, keepdims=True)
         a = np.clip(elapsed, 0, rows.shape[-1] - 1)
         out = np.where(elapsed < 0, 0.0, np.take_along_axis(cdf, a[..., None], axis=-1)[..., 0])
@@ -109,6 +116,54 @@ def delays(table, max_days: int = 26 * 7 + 6) -> Delays:
     week_pmf = (W + beta * nat) / (W.sum(1) + beta)[:, None]
     ratio = np.divide(week_pmf, nat, out=np.ones_like(week_pmf), where=nat > 0)
     return Delays(places, pmf, nat, alpha, ratio, beta)
+
+
+def current(closed: Delays, table, as_of) -> Delays:
+    """``closed`` with the current year's own delay (``year_ratio``), read from its reporting triangle up to the day
+    ``as_of`` (`gateway.delay_counts` of the as-of's files, with onset days). Registration speeds up and slows down from
+    year to year (SIM 2023 was faster than 2022: weeks aged 3-5 nowcast 4-9 % high from 2022's delays alone, 2026-10-11).
+
+    The triangle (onsets in the last D days, the delays' own horizon) is right truncated: an event of onset t is seen only if its delay is at most T = as_of − t, so its
+    delays are read in reverse time (Lagakos, Barraj & De Gruttola 1988; Lawless 1994): the reverse hazard
+    g(d) = P(D = d | D ≤ d) is estimated among the events with D ≤ d ≤ T, which every event of onset d days or more
+    before the as-of day could have joined, and F(d − 1) = F(d)(1 − g(d)) from F(D) = 1. Each day's hazard is shrunk
+    toward the closed year's (a beta prior of weight κ centred on it, κ by the method of moments over the days, as
+    `_concentration`), so the delays the triangle cannot see yet, the long ones, stay the closed year's."""
+    D = len(closed.national) - 1
+    day = np.datetime64(as_of, "D")
+    onset = np.asarray(table.column("onset").to_numpy(zero_copy_only=False)).astype("datetime64[D]")
+    d = np.asarray(table.column("delay_days").to_numpy(zero_copy_only=False)).astype(np.int64)
+    n = np.asarray(table.column("n").to_numpy(zero_copy_only=False)).astype(float)
+    T = (day - onset).astype(np.int64)
+    # onsets within the model's horizon only: the pace drifts within a year too (SIM IX 2023: error 5.4 % from the
+    # whole year's onsets, 5.2 % from the last D days')
+    seen = (T >= 0) & (T <= D) & (d <= T) & (d >= 0)
+    d, T, n = d[seen], T[seen], n[seen]
+    a = np.bincount(d, n, D + 1)                                         # events of delay d (all could be seen at d)
+    # b_d = Σ n [d_i ≤ d ≤ T_i]: +n from d_i, −n after T_i
+    b = np.cumsum(np.bincount(d, n, D + 2) - np.bincount(T + 1, n, D + 2))[: D + 1]
+    cdf = np.cumsum(closed.national)
+    g0 = np.divide(closed.national, cdf, out=np.ones_like(cdf), where=cdf > 0)
+    g0[0] = 1.0
+    # κ: Var(a/b) = g(1 − g)(1/b + (1 − 1/b)/(κ + 1)) under the beta-binomial, solved over the days held by 20 or more
+    ok = (b >= 20) & (g0 > 0) & (g0 < 1)
+    if ok.sum() >= 10:
+        w = b[ok]
+        v = g0[ok] * (1 - g0[ok])
+        excess = np.sum(w * ((a[ok] / b[ok] - g0[ok]) ** 2 - v / b[ok])) / np.sum(w * v * (1 - 1 / b[ok]))
+        kappa = float(np.clip(1.0 / excess - 1.0, 1.0, 1e7)) if excess > 0 else 1e7
+    else:
+        kappa = 1e7                                                      # nothing to read: the closed year's
+    g = (a + kappa * g0) / (b + kappa)
+    g[0] = 1.0
+    F = np.ones(D + 1)
+    for k in range(D, 0, -1):
+        F[k - 1] = F[k] * (1.0 - g[k])
+    pmf = np.diff(F, prepend=0.0)
+    ratio = np.divide(pmf, closed.national, out=np.ones_like(pmf), where=closed.national > 0)
+    from dataclasses import replace
+
+    return replace(closed, year_ratio=ratio, year_concentration=kappa)
 
 
 def _pending(known, F, mu, phi) -> tuple:

@@ -553,6 +553,9 @@ class Session:
                         .astype("datetime64[Y]").astype(int) + 1970})
         control.check_reserved(self.dataset, files)                       # the events read here are the session's too
         closed = surveillance.delays(gateway.delay_counts(self.dataset, self.event, files[0] - 1, report))
+        # the year's own pace, from its reporting triangle up to the as-of day (right truncated: `surveillance.current`)
+        closed = surveillance.current(closed, pa.concat_tables(
+            [gateway.delay_counts(self.dataset, self.event, y, report) for y in files], promote_options="default"), as_of)
         # the known events are the field's own (its leaves, or the session's code set), against the field's baseline;
         # the delay distribution above is the event type's (reporting is the system's, and the field's alone is sparse)
         reg = self.expectations.registry

@@ -200,14 +200,15 @@ def _icd(code: str) -> str:
 
 
 def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | None]]:
-    """The years ``dataset`` publishes among ``years`` outside the confirmation reserve (`control.reserved`: only a
-    claim reads it), and the gigabytes each would download: 0 when in the lake, None when the catalog does not size it
-    (never read as free)."""
+    """The years ``dataset`` publishes among ``years`` before its confirmation reserve (`control.reserved`: only a
+    claim reads it; the years after it too are left out, since the fits read years by position, a trend and an AR(1)
+    over consecutive years, and would take 2023 to 2025 for one step), and the gigabytes each would download: 0 when
+    in the lake, None when the catalog does not size it (never read as free)."""
     import pegasus_data as pg
 
     published = gateway.published_years(dataset)
-    held = set(control.reserved(dataset))
-    ys = [y for y in years if (not published or y in published) and y not in held]
+    held = control.reserved(dataset)
+    ys = [y for y in years if (not published or y in published) and (not held or y < min(held))]
     volume = _volumes(dataset, config.data_root())
     lake = pg.lake_coverage(dataset, root=config.data_root())        # not cached: a run's `ensure_lake` extends it
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}

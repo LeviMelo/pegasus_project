@@ -26,10 +26,24 @@ leak. The comparison below applies the old F to what was really known.
 | days, pooled over the year | 8.3 % | — | −34.4 % |
 | days and week of year (shipped) | 7.0 % | 9.3 % | −23.7 % |
 
-**Left.** Weeks aged 3–5 are overestimated by 4–9 % in every model: registration was faster in 2023 than in 2022,
-the closed year the delays come from. The remedy is a delay read from the current year's own reporting triangle, with
-right truncation (a reverse-time hazard: Lawless 1994). The boundary's first weeks are still nowcast 18–24 % low: 2023's
-year-end slowed more than 2022's.
+**The year's own pace (added the same day).** Weeks aged 3–5 were overestimated by 4–9 % in every model above:
+registration was faster in 2023 than in 2022, the closed year the delays come from. `surveillance.current` now reads
+the as-of year's own reporting triangle (onsets in the last D = 188 days, delays seen by the as-of day). It reads it in
+reverse time for the right truncation (Lawless 1994): g(d) = P(D = d | D ≤ d) among the events with D ≤ d ≤ T. Each
+day's hazard is shrunk toward the closed year's, with a beta weight κ ≈ 2,000–3,600 by the method of moments. The
+result enters F as a national year ratio beside the week-of-year one. Measured on 48 week-estimates (8 as-of days
+through 2023, 6 weeks each, those in 2023; `ctl/delay_eval2.py`, `delay_eval3.py`):
+
+| delay model | mean absolute error | weeks aged 3–5, mean | weeks aged 0–2, MAE |
+|---|---|---|---|
+| days and week of year | 6.8 % | +5.2 % | 8.0 % |
+| … and the year's triangle, whole year's onsets | 5.4 % | +3.0 % | 7.3 % |
+| … onsets in the last D days (shipped) | 5.2 % | +2.7 % | 7.3 % |
+
+**Left.** The boundary's first weeks are still nowcast 14–16 % low as of 2023-12-30 (24 % and 18 % before): 2023's
+year-end slowed beyond what the year's own triangle had shown. A week of age 0 is sometimes worse with the triangle
+(week 43 as of 2023-10-28: +15.7 % against +5.4 %), since its F rests on the shortest delays, where the weekday of
+onset and of registration matter and neither is modelled.
 
 **Alarms** (`Session.alarms`, SIM IX, R = 260, c = 0.5) after the change:
 - as of 2023-07-01: 44 alarms (54 before);
@@ -37,3 +51,5 @@ year-end slowed more than 2022's.
 - as of Wednesday 2023-07-05: 55.
 
 The alarms left have known counts at or above their thresholds (353060: 40 known, threshold 39).
+With the year's triangle (`ctl/alarm_run.py`, SIM-DO 2010–2023) the counts are the same, 44, 25 and 55: those alarms
+are already certain from their known counts, so the triangle moves only the nowcasts of weeks below their thresholds.
