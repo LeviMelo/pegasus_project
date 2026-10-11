@@ -157,6 +157,8 @@ FAC_P = 1e-3              # one-sided binomial p of that share against the facil
 FAC_VOLUME = 1.6          # the facilities' volume (without the lead's events) moving by more than this: opened, closed, entered or left the data
 FAC_CATCH = 30            # events of the lead's codes among the facilities' other residents, under which they say nothing
 FAC_STEP = 3.0            # z of the lead-code share's step among those other residents
+STATE_SHARE = 0.8         # a lead whose places hold this share of their states' events in its window ...
+STATE_MIN_PLACES = 5      # ... over at least this many places is state-wide: the state is its conserved level
 RESIDUAL_WORDS = ("não especificad", "sem outra especifica", "inespecífic", "mal definid", "outras ", "outros ")
 
 
@@ -191,6 +193,7 @@ class Evidence:
     y_g: np.ndarray | None = None   # the lead's field by age-sex group [places, years, groups]
     siblings_g: np.ndarray | None = None   # the siblings by age-sex group
     pop_g: np.ndarray | None = None        # person-years by age-sex group [places, years, groups]
+    state: np.ndarray | None = None        # each row's state (its IBGE code's first two digits)
 
 
 @dataclass
@@ -357,6 +360,18 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
     national_peak = spike and direction > 0 and nat[win].max() >= 2 * max(np.median(nat[base]), 1.0)   # the nation peaks there too: an event
     if not national_peak and max(first, last) >= 20 and (ratio >= DRIFT or ratio <= 1 / DRIFT):
         return Triage(SYSTEM, f"recording: the code's national level moves x{ratio:.2g} over the period", info, CONSISTENT)
+    # a state-wide lead: its places are (nearly) the whole of their state's events in the window, so the state, not the
+    # places, is the level it is conserved at; a state's surveillance or coding change and a state-wide event look the
+    # same there (TOXG 2019, the system's first year: 853 of Minas Gerais's places at 1.4 times; SIH P37.1 in São
+    # Paulo 2010, 645 places at 3.2 times, 2026-10-11). Stated at the state, never taken out of the running
+    if ev.state is not None and windowed and direction != 0 and len(rows) >= STATE_MIN_PLACES:
+        states = np.unique(ev.state[rows])
+        held = float(ev.y[rows][:, win].sum()) / max(float(ev.y[np.isin(ev.state, states)][:, win].sum()), 1.0)
+        if held >= STATE_SHARE:
+            info["state_share"], info["states"] = round(held, 3), [int(x) for x in states]
+            return Triage(SYSTEM, f"state-wide: its places hold {held:.0%} of their state's events in the window; the "
+                          "state is its level (a surveillance or coding change there, or a state-wide event: the places "
+                          "cannot tell)", info, CONSISTENT)
     if direction < 0 and windowed:
         rest = y_rows[~win_a]
         if rest.size >= 4 and rest.max() >= SURGE * max(np.median(rest), 1.0) and rest.max() - np.median(rest) >= 20:

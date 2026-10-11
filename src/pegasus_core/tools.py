@@ -1173,7 +1173,7 @@ class Session:
                                 residual=explain.residual_label(reg.label.get(node, "")), per_year=self._per_year,
                                 y_g=self._counts(d, leaves, by_group=True) if by_g else None,
                                 siblings_g=self._counts(d, sl, by_group=True) if by_g else None,
-                                pop_g=d.N if by_g else None)
+                                pop_g=d.N if by_g else None, state=(np.asarray(self._grid_places) // 10000).astype(int))
 
     def _by_group_cells(self, node: str) -> tuple[np.ndarray, np.ndarray]:
         d, leaves = self._leaves(node)

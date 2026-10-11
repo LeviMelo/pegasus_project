@@ -30,3 +30,10 @@ leak. The comparison below applies the old F to what was really known.
 the closed year the delays come from. The remedy is a delay read from the current year's own reporting triangle, with
 right truncation (a reverse-time hazard: Lawless 1994). The boundary's first weeks are still nowcast 18–24 % low: 2023's
 year-end slowed more than 2022's.
+
+**Alarms** (`Session.alarms`, SIM IX, R = 260, c = 0.5) after the change:
+- as of 2023-07-01: 44 alarms (54 before);
+- as of 2023-12-31: 25 (28 before);
+- as of Wednesday 2023-07-05: 55.
+
+The alarms left have known counts at or above their thresholds (353060: 40 known, threshold 39).
