@@ -156,11 +156,12 @@ class Scope:
     depth: str
     items: list[Item]
     excluded: list[dict]                 # what a seed named and the study does not read, with why
-    contexts: list[str]
+    contexts: list                       # declared field names, and entries {field, where, over, name, reason}
     budget_gb: float
     related: list[dict] = field(default_factory=list)   # codes found with the seeds on the same records (`cooccur`)
     paths: list[dict] = field(default_factory=list)     # declared links touching the read sources, with their runs' verdicts
     link_runs: list[dict] = field(default_factory=list)  # national link runs the items read and the store lacks, priced
+    medicines: list[dict] = field(default_factory=list)  # the topic's declared treatments: substances, use, citation, reads
 
     def to_dict(self) -> dict:
         """The scope as plain values (numpy scalars from the counts made plain: YAML refuses them)."""
@@ -171,7 +172,7 @@ class Scope:
                 "read": [asdict(i) for i in self.items if i.status == "in"],
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
-                "person_paths": self.paths, "link_runs_to_compute": self.link_runs,
+                "person_paths": self.paths, "link_runs_to_compute": self.link_runs, "medicines": self.medicines,
                 "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in")
                                             + sum(r["est_seconds"] or 0 for r in self.link_runs)) / 60, 1)}
 
@@ -567,6 +568,11 @@ def resolve(decl: Declaration, log=print) -> Scope:
         _linked_items(items, paths, runs, excluded)     # a survey lists the paths; each linked share is a fit of its own
     _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
+    medicines = [{"substance": sub["name"], "use": sub.get("use", ""), "conditions": t["conditions"], "source": t["source"],
+                  "note": t["note"], "catmat": sub.get("catmat"),
+                  "contexts": [f"{sub['name']} ({r['field']})" for r in sub.get("reads") or ()]}
+                 for t in (gateway.treatments(nodes + codes) if nodes or codes else []) for sub in t["substances"]]
+    contexts += _medicines(nodes + codes)
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
     if decl.depth != "survey":
         # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
@@ -577,7 +583,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
     if decl.depth in ("deep", "exhaustive"):
         items += _related_elsewhere(decl, [r for r in related if r["related"]], served)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
-                 _link_runs_needed([i for i in items if i.status == "in"]))
+                 _link_runs_needed([i for i in items if i.status == "in"]), medicines)
 
 
 def _link_runs_needed(read: list[Item]) -> list[dict]:
@@ -616,6 +622,22 @@ def _link_runs_needed(read: list[Item]) -> list[dict]:
     return [{"link": link, "year": z,
              "est_seconds": float(np.median(timed.get(link) or every)) if (timed.get(link) or every) else None}
             for link, z in missing]
+
+
+def _medicines(codes: list[str]) -> list[dict]:
+    """The topic's medicines as context entries (acceptance item 1: "BNAFAR/SNGPC for those medicines"): every
+    substance an official document gives for the seed codes (`gateway.treatments`), read through each declared field
+    that counts it, with its filter and denominator, and the document as its reason. Retail sales are a context of the
+    topic, never its count: SUS dispenses the strategic component outside them."""
+    out = []
+    for t in gateway.treatments(codes) if codes else []:
+        for sub in t["substances"]:
+            for read in sub.get("reads") or ():
+                out.append({"field": read["field"], "where": dict(read["where"]), **({"over": read["over"]} if read.get("over") else {}),
+                            "name": f"{sub['name']} ({read['field']})",
+                            "reason": f"{sub['name']}: {sub.get('use', '')}; treatment of {', '.join(t['conditions'])} "
+                                      f"({t['source']})"})
+    return out
 
 
 def _chapter(tree: dict, code: str) -> str:
@@ -1257,8 +1279,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
     table; rows are associations with their adjustment set, never effects."""
     from . import tools
 
-    spec = gateway.declared_fields()
-    contexts = [c for c in scope.contexts if (spec.get(c) or {}).get("over")]
+    contexts = gateway.rated(scope.contexts)
     out = []
     for it in (i for i in scope.items if i.status == "in" and "population" not in (i.source or {})):
         for node in _study_nodes(it, None):
@@ -1407,10 +1428,10 @@ def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) ->
     # a context is a rate over its declared denominator; a count with none would rank places by size alone (every
     # capital at p100), so size enters once, as the residents
     values = {"population (residents)": np.asarray(pop.column("n_sum").to_numpy(), dtype=float)}
-    spec = gateway.declared_fields()
-    for name in (c for c in scope.contexts if (spec.get(c) or {}).get("over")):
+    for entry in gateway.rated(scope.contexts):
+        name = gateway.context_name(entry)
         try:
-            v, _ = gateway.context_value(name, list(decl.years), places)
+            v, _ = gateway.context_value(entry, list(decl.years), places)
         except Exception as exc:  # noqa: BLE001 - a context without data for the period is skipped, said
             log(f"study: context {name}: {type(exc).__name__}: {exc}")
             continue
@@ -1680,6 +1701,14 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                       [("link", "link"), ("left", "from"), ("right", "to"), ("verdict", "verdict"),
                        ("best", "best stored run (period: pairs, chance %)"), ("what", "what it pairs")], cap=40)
                 if scope.paths else "<p>No declared link touches the sources read.</p>"),
+             "<h3>Medicines</h3><p>The treatments an official document gives for the topic's codes (pegasus_data "
+             "<code>treatments.yml</code>), each read as a context of the topic through the declared fields that count "
+             "it: retail sales are not the topic's count.</p>"
+             + (table([{**m, "contexts": ", ".join(m["contexts"]) or "none declared"} for m in scope.medicines],
+                      [("substance", "substance"), ("use", "use"), ("contexts", "read as"), ("catmat", "CATMAT (BNAFAR)"),
+                       ("source", "source")], cap=20)
+                + "".join(f"<p>{e(n)}</p>" for n in dict.fromkeys(m["note"] for m in scope.medicines if m["note"]))
+                if scope.medicines else "<p>No treatment is declared for the topic's codes.</p>"),
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>5. Hypotheses</h2>",

@@ -1680,10 +1680,43 @@ def _context_entry(entry: str | dict) -> tuple[list[str], dict | None, str | Non
     spec_of = declared_fields()
     names = entry["field"].split("+") if isinstance(entry, dict) else entry.split("+")
     where = entry.get("where") if isinstance(entry, dict) else None
-    over = {spec_of[n].get("over") for n in names}
+    if isinstance(entry, dict) and "over" in entry:
+        # an entry's own denominator: a stratum of a field (a medicine's sales of all medicines sold) is a rate of
+        # something the whole field is not
+        over = {entry["over"]}
+    else:
+        over = {spec_of[n].get("over") for n in names}
     if len(over) != 1:
         raise ValueError(f"{entry}: the summed fields declare different denominators {sorted(map(str, over))}")
     return names, where, over.pop(), sorted(set(_years(str(spec_of[names[0]]["years"]))))
+
+
+def context_name(entry: str | dict) -> str:
+    """A context entry's name in tables and reports: its own ``name``, else its fields (and their filter)."""
+    if isinstance(entry, str):
+        return entry
+    return entry.get("name") or entry["field"] + (f" [{entry['where']}]" if entry.get("where") else "")
+
+
+def rated(contexts: list) -> list:
+    """The context entries that are rates (a declared or an entry's own denominator): a count with none would rank
+    places by their size alone."""
+    out = []
+    for c in contexts:
+        try:
+            if _context_entry(c)[2]:
+                out.append(c)
+        except (KeyError, ValueError):
+            continue
+    return out
+
+
+def treatments(codes: list[str]) -> list[dict]:
+    """pegasus_data's declared treatments of ICD-10 ``codes`` (`pegasus_data.treatments`): medicines an official
+    document gives for them, each with the declared fields that count it."""
+    import pegasus_data as pg
+
+    return pg.treatments(codes)
 
 
 def _context_counts(names: list[str], where: dict | None, over: str | None, year: int,
@@ -1695,6 +1728,13 @@ def _context_counts(names: list[str], where: dict | None, over: str | None, year
     def values(name: str, rows_where=None) -> np.ndarray:
         out = np.full(len(places), np.nan)
         if rows_where is not None:
+            # a stratum is 0 where the field has rows that year and none of the stratum's: SNGPC's pharmacies of a
+            # municipality sold no spiramycin. Left NaN, the mean was of the 2,097 places that sold any (2026-10-11).
+            # A place the field has no rows for that year stays unknown.
+            for u in context_sum(name, year).column("u").to_pylist():
+                i = index.get(int(u))
+                if i is not None:
+                    out[i] = 0.0
             t = context_sum(name, year, rows_where)
             pairs_ = zip(t.column("u").to_pylist(), t.column("value").to_pylist(), strict=True)
         else:
@@ -1739,7 +1779,7 @@ def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tu
     with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         value = np.nanmean(np.stack(per_year), axis=0)
-    label = "+".join(names) + (f" [{where}]" if where else "") + (f" over {over}" if over else "") +         f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
+    label = context_name(entry) + (f" over {over}" if over else "") +         f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
     return value, label
 
 
@@ -1754,6 +1794,12 @@ def context_series(entry: str | dict, years: list[int], places: np.ndarray) -> t
     if not over or len(inside) < 3:
         raise ValueError(f"{entry}: no denominator or fewer than three years in {years[0]}-{years[-1]}: not a series")
     parts = [_context_counts(names, where, over, y, places) for y in inside]
+    # a declared year the lake holds nothing of is not a year of the series (SNGPC is declared 2014-2026 and built for
+    # 2019-2021): its columns would be all unknown
+    held = [j for j, p in enumerate(parts) if np.isfinite(p[0]).any()]
+    if len(held) < 3:
+        raise ValueError(f"{entry}: data in {len(held)} of its years in {years[0]}-{years[-1]}: not a series")
+    inside, parts = [inside[j] for j in held], [parts[j] for j in held]
     k, n = np.stack([p[0] for p in parts], 1), np.stack([p[1] for p in parts], 1)
     ok = np.isfinite(k) & np.isfinite(n) & (n > 0)
     family = "binomial" if over != "population" and ok.any() and bool((k[ok] <= n[ok] + 1e-9).all()) else "poisson"

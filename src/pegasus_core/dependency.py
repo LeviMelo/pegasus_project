@@ -191,7 +191,7 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
     for entry in contexts or ():
         v, label = gateway.context_value(entry, years, places)
         z = normal_scores(v)
-        name = entry["field"] if isinstance(entry, dict) else entry
+        name = gateway.context_name(entry)
         add(f"ctx:{name}", "context", label, z, np.where(np.isfinite(z), CONTEXT_SD, np.nan), set())
     F = len(names)
     overlap = np.zeros((F, F))
@@ -257,7 +257,7 @@ def field_map(fields: list[tuple[str, str, str, dict | None, list[int]]], contex
             v, label = gateway.context_value(entry, span, places)
         except (ValueError, LookupError, FileNotFoundError, KeyError):
             continue
-        names.append(f"ctx:{entry['field'] if isinstance(entry, dict) else entry}")
+        names.append(f"ctx:{gateway.context_name(entry)}")      # two strata of one field are two contexts
         groups.append("context")
         labels.append(label)
         z = normal_scores(v)

@@ -1809,7 +1809,7 @@ def determinants(x: tuple[str, str, str], contexts: list, years: list[int], grap
     surp = s.surprise(node, "B1")
     cds = []
     for entry in contexts:
-        name = entry if isinstance(entry, str) else entry["field"]
+        name = gateway.context_name(entry)
         try:
             k, n, ys, family = gateway.context_series(entry, years, surp.places)
             cds.append(relations.context_innovations(f"context:{name}", k, n, surp.places, np.asarray(ys), family))
