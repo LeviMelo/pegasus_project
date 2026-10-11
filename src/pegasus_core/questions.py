@@ -36,6 +36,8 @@ class Method:
     lens: str | None = None
     settings: tuple = ()        # (name, value) pairs passed to the lens: one lens read two ways is two methods
     maturity: str = "v0"        # ARCHITECTURE's levels: v0 runs, v1 the established method, v2 v1 measured (§13.1)
+    component: str = ""         # its ARCHITECTURE §7.2 component where it is not its question's (a cluster's Poisson
+                                # scan answers spatial coherence; its multiscale peaks, level)
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,8 @@ class Question:
     shapes: tuple[str, ...] = ()                # the courses in time that answer it (`departures.attribute`); () any
     prospective: bool = False                   # asked of the years after a training period (``train_last``) only
     grain: str = ""                             # the grain it is asked at ("": any; "month": the monthly fits only)
+    component: str = ""                         # the ARCHITECTURE §7.2 component it answers (BACKLOG 3.1); the
+                                                # question's name stays its id, so no former question is lost
 
 
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
@@ -62,17 +66,17 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
                  Method("space_time", "expectation-based Poisson scan over graph-connected place sets and windows of "
                                       "up to four years, Monte Carlo null; the v0 lens (restored 2026-10-07, S0.4)"),
-             ), ("spike", "transient")),
+             ), ("spike", "transient"), component="transient"),
     Question("step", "C", "a lasting rise in level from some period to the series' end", "B1",
              "area × window", "rate ratio", (
                  Method("excess_step", "multiscale graph peaks of suffix sums; N1's correlation over periods",
                         kinds=("count", "mark")),
                  Method("step", "Bayesian single change point per place, tempered by N1's correlation"),
                  Method("change_point", "trailing-window NB tails against the place's past course; the v0 lens"),
-             ), ("step",)),
+             ), ("step",), component="step"),
     Question("trend", "C", "a course bending upward from some period", "B1", "area × window", "rate ratio", (
         Method("excess_trend", "multiscale graph peaks of hinge contrasts", kinds=("count", "mark")),
-    ), ("trend",)),
+    ), ("trend",), component="trend"),
     # the questions the declared positives also ask (harness.POSITIVES), answered for now by their v0 lenses alone:
     # a question is kept while its departure model (ARCHITECTURE §12, O6: BYM2 exceedance, the group interaction) is
     # built, never dropped with its lens (CLAUDE.md)
@@ -80,8 +84,9 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
              "rate ratio", (
                  Method("excess_level", "multiscale graph peaks of the whole period's excess against B0 (no place "
                                         "effects), STEM; a cluster at its own scale, no zoning", kinds=("count", "mark")),
-                 Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens"),
-             )),
+                 Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens",
+                        component="spatial coherence"),
+             ), component="level"),
     Question("propagation", "C", "the periods at which places first depart from the expectation ordered in space: a source, "
              "the speed and direction of spread (a wave), and the field's emergence where it was absent", "B1",
              "area × period", "km per month", (
@@ -89,22 +94,22 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                                        "and Theil-Sen speed of onset against distance, tested by Moran spectral randomisation "
                                        "of the onsets with the source search inside the null; successive waves, fixed-sequence "
                                        "at q"),
-             ), ("propagation",)),
+             ), ("propagation",), component="propagation"),
     Question("share", "C", "a field's share of all events departing from its expectation in a place and period: "
              "recording practice (the ill-defined share) or composition", "B1", "area × period", "share ratio", (
                  Method("share_excess", "beta-binomial on the observed total, the share expected from stage B, "
                                         "θ by central matching; two-sided"),
-             )),
+             ), component="transient (ratio field)"),
     Question("institution", "C", "one institution's events departing, over a window, from its catchment's expectation "
              "(a step specific to it, or the volume of all its chapters)", "B1", "institution × window", "rate ratio", (
                  Method("institution_step", "best window's likelihood ratio against the facility's constant ratio to "
                                             "its catchment; Bonferroni over the T(T+1)/2 windows; the v0 lattice's gates"),
-             )),
+             ), component="step (facility support)"),
     Question("group", "C", "a place whose excess differs across groups from the national pattern: sex × age, and "
              "each composition column (schooling, outcome, …) at the place's age–sex structure", "B0",
              "area × group", "rate ratio", (
                  Method("group_disparity", "likelihood-ratio heterogeneity of the groups' SIRs; the v0 lens"),
-             )),
+             ), component="group heterogeneity"),
     # restored 2026-10-07 (work plan S0.4): the v0 survey asked them, and its removal left them unasked
     Question("divergence", "C", "a unit's trend over the period departing from its neighbours' trends or from the "
              "field's national course, at the municipality, the immediate region and the state", "B2", "area",
@@ -116,7 +121,7 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("divergence_national", "B2's place trend against the field's national course",
                         lens="trend_divergence",
                         settings=(("scales", ("municipality", "region", "state")), ("reference", "national"))),
-             )),
+             ), component="trend (against neighbours or nation)"),
     # component 5 (ARCHITECTURE §7.2): the cycle against the field's season, at the monthly grain. One lens read two
     # ways, the departure averaged over the years and its change over them, are two methods
     Question("seasonality", "C", "a unit's annual cycle (amplitude and phase of the seasonal harmonic) departing from "
@@ -130,14 +135,14 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("season_change", "the same, the slope of the yearly departure over the period",
                         lens="season_departure",
                         settings=(("scales", ("municipality", "region", "state")), ("estimand", "change"))),
-             ), grain="month"),
+             ), grain="month", component="seasonality"),
     Question("prospective", "C", "counts in the periods after the training years above what a fit on the years up "
              "to them expects (ADR-0012: the alarm baseline for epidemics, the calibrated expectation otherwise)",
              "BP/BPA", "area × period", "rate ratio", (
-                 Method("outbreak", "each cell's NB tail against the alarm baseline (BPA), BH"),
-                 Method("change_point", "trailing-window NB tails against the place's past course (BP)"),
-                 Method("space_time", "expectation-based Poisson space-time scan against BP"),
-             ), prospective=True),
+                 Method("outbreak", "each cell's NB tail against the alarm baseline (BPA), BH", component="transient"),
+                 Method("change_point", "trailing-window NB tails against the place's past course (BP)", component="step"),
+                 Method("space_time", "expectation-based Poisson space-time scan against BP", component="transient"),
+             ), prospective=True, component="prospective"),
 )}
 
 
@@ -239,6 +244,20 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     out.failed = failed
     out.k = k                   # the methods that read this field's kind: the answer's Bonferroni factor
     return out
+
+
+def components(question: str, methods: list[str] | None = None) -> str:
+    """The ARCHITECTURE §7.2 components an answer of ``question`` stands for: those of the methods that found it (a
+    method's own, else its question's), joined; a prospective answer is that component against BP/BPA (§7.2: alarms
+    are a mode, not a component). An id the registry does not hold (a relation, a cohort) is its own name."""
+    qn = QUESTIONS.get(question)
+    if qn is None:
+        return question
+    own = {m.id: m.component or qn.component for m in qn.methods}
+    found = sorted({own[m] for m in methods or () if m in own}) or [qn.component]
+    if qn.prospective:
+        return "prospective: " + " + ".join(c for c in found if c != "prospective")
+    return " + ".join(found)
 
 
 class AnswerList(list):

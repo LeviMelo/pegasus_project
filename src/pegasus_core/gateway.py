@@ -1620,12 +1620,9 @@ def declared_fields() -> dict:
     return declared()
 
 
-def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, str]:
-    """A context on ``places`` over the window ``years`` (`dependency`): a declared field's value over its declared
-    denominator (pegasus_data `fields.yml` ``over``: another field, or ``population``, the residents), the mean of its
-    years in the window, or of the declared year nearest the window's end when it has none there (a census). ``entry``
-    is a field's name, numerators of one denominator summed (``a+b``), or {field, where} for a field whose rows are
-    strata (`context_sum`). Returns the values (NaN where a place has none) and a label."""
+def _context_entry(entry: str | dict) -> tuple[list[str], dict | None, str | None, list[int]]:
+    """A context entry's numerator fields (``a+b`` summed), its strata filter, its one denominator (pegasus_data
+    `fields.yml` ``over``: another field, or ``population``) and its declared years."""
     from pegasus_data.fields import _years
 
     spec_of = declared_fields()
@@ -1634,13 +1631,16 @@ def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tu
     over = {spec_of[n].get("over") for n in names}
     if len(over) != 1:
         raise ValueError(f"{entry}: the summed fields declare different denominators {sorted(map(str, over))}")
-    over = over.pop()
-    declared = sorted(set(_years(str(spec_of[names[0]]["years"]))))
-    inside = [y for y in declared if years[0] <= y <= years[-1]]
-    chosen = inside or [min(declared, key=lambda y: (abs(y - years[-1]), -y))]
+    return names, where, over.pop(), sorted(set(_years(str(spec_of[names[0]]["years"]))))
+
+
+def _context_counts(names: list[str], where: dict | None, over: str | None, year: int,
+                    places: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """One year of a context on ``places``: its numerator and its denominator (residents for ``population``, the
+    ``over`` field, else 1), NaN where a place has none."""
     index = {int(u): i for i, u in enumerate(places)}
 
-    def values(name: str, year: int, rows_where=None) -> np.ndarray:
+    def values(name: str, rows_where=None) -> np.ndarray:
         out = np.full(len(places), np.nan)
         if rows_where is not None:
             t = context_sum(name, year, rows_where)
@@ -1656,27 +1656,56 @@ def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tu
                 out[i] = float(v)
         return out
 
+    num = sum(values(n, where) for n in names)
+    if over == "population":
+        tot = population([year]).group_by("u").aggregate([("n", "sum")])     # once: group order is not stable
+        den = np.full(len(places), np.nan)
+        for u, n in zip(tot.column("u").to_pylist(), tot.column("n_sum").to_pylist(), strict=True):
+            if int(u) in index:
+                den[index[int(u)]] = n
+    elif over:
+        den = values(over)
+    else:
+        den = np.ones(len(places))
+    return num, den
+
+
+def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, str]:
+    """A context on ``places`` over the window ``years`` (`dependency`): a declared field's value over its declared
+    denominator (pegasus_data `fields.yml` ``over``: another field, or ``population``, the residents), the mean of its
+    years in the window, or of the declared year nearest the window's end when it has none there (a census). ``entry``
+    is a field's name, numerators of one denominator summed (``a+b``), or {field, where} for a field whose rows are
+    strata (`context_sum`). Returns the values (NaN where a place has none) and a label."""
+    names, where, over, declared = _context_entry(entry)
+    inside = [y for y in declared if years[0] <= y <= years[-1]]
+    chosen = inside or [min(declared, key=lambda y: (abs(y - years[-1]), -y))]
     per_year = []
     for year in chosen:
-        num = sum(values(n, year, where) for n in names)
-        if over == "population":
-            tot = population([year]).group_by("u").aggregate([("n", "sum")])     # once: group order is not stable
-            den = np.full(len(places), np.nan)
-            for u, n in zip(tot.column("u").to_pylist(), tot.column("n_sum").to_pylist(), strict=True):
-                if int(u) in index:
-                    den[index[int(u)]] = n
-        elif over:
-            den = values(over, year)
-        else:
-            den = np.ones(len(places))
+        num, den = _context_counts(names, where, over, year, places)
         with np.errstate(all="ignore"):
             per_year.append(np.where(den > 0, num / den, np.nan))
     with np.errstate(all="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore")
         value = np.nanmean(np.stack(per_year), axis=0)
-    label = "+".join(names) + (f" [{where}]" if where else "") + (f" over {over}" if over else "") + \
-        f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
+    label = "+".join(names) + (f" [{where}]" if where else "") + (f" over {over}" if over else "") +         f", {chosen[0]}" + (f"-{chosen[-1]}" if len(chosen) > 1 else "")
     return value, label
+
+
+def context_series(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[int], str]:
+    """A time-varying context on ``places`` year by year (ARCHITECTURE §8.2): its numerator and denominator [U, T] over
+    the declared years inside ``years``, and its family: ``binomial`` where the denominator is a field the numerator
+    is part of (samples with E. coli present of those assessed: never above it), ``poisson`` on residents or on a
+    field it is a rate of. A context with no denominator, or with fewer than three declared years in the window, has
+    no series (a census is read by `context_value`)."""
+    names, where, over, declared = _context_entry(entry)
+    inside = [y for y in declared if years[0] <= y <= years[-1]]
+    if not over or len(inside) < 3:
+        raise ValueError(f"{entry}: no denominator or fewer than three years in {years[0]}-{years[-1]}: not a series")
+    parts = [_context_counts(names, where, over, y, places) for y in inside]
+    k, n = np.stack([p[0] for p in parts], 1), np.stack([p[1] for p in parts], 1)
+    ok = np.isfinite(k) & np.isfinite(n) & (n > 0)
+    family = "binomial" if over != "population" and ok.any() and bool((k[ok] <= n[ok] + 1e-9).all()) else "poisson"
+    return k, n, inside, family
 
 
 

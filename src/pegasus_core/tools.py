@@ -1770,6 +1770,35 @@ def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], 
     return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q, ledger=first.ledger)["rows"]
 
 
+def determinants(x: tuple[str, str, str], contexts: list, years: list[int], graph: str = "contiguity", lags: int = 2,
+                 q: float = 0.05, log=print) -> list[dict]:
+    """A field against its time-varying contexts (ARCHITECTURE §8.2): each context as a series with its own predictive
+    (`gateway.context_series`, `relations.context_innovations`), entered jointly with the field's B1 innovations in
+    the relation map, so every association is over graph bands and lags and partial on the other contexts; the
+    field's expectation already holds age, sex, population and the national course, and spatial dependence is in the
+    null. Rows involving the field are returned, ``reported`` marking those at q; a context that cannot be read as a
+    series is said and skipped."""
+    from . import multiscale, relations
+
+    ds, ev, node = x
+    s = Session(ds, ev, years, graph)
+    surp = s.surprise(node, "B1")
+    cds = []
+    for entry in contexts:
+        name = entry if isinstance(entry, str) else entry["field"]
+        try:
+            k, n, ys, family = gateway.context_series(entry, years, surp.places)
+            cds.append(relations.context_innovations(f"context:{name}", k, n, surp.places, np.asarray(ys), family))
+        except (ValueError, LookupError, FileNotFoundError, KeyError) as exc:
+            log(f"determinants {ds}:{node}: context {name} not a series: {exc}")
+    if not cds:
+        return []
+    spectrum = multiscale.spectrum(s.edges(), len(surp.places))
+    rows = relations.relation_map([surp], spectrum, lags=lags, K=2, q=q, ledger=s.ledger, courses=False,
+                                  contexts=cds)["rows"]
+    return [r for r in rows if surp.field.id in (r.get("field"), r.get("leader"))]
+
+
 def records(dataset: str, event: str, year: int, columns: list[str], places: list[int] | None = None):
     """The records of one event type and year through pegasus_data, the event type's status applied
     (`gateway._records`), raw-coded; ``places`` keeps the residences given (six-digit IBGE codes). Personal

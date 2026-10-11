@@ -309,6 +309,54 @@ def innovations(surprises: list) -> Departures:
     return Departures([s.field.id for s in surprises], places, periods, r, np.ones(r.shape))
 
 
+def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndarray, periods: np.ndarray,
+                        family: str, iterations: int = 50) -> Departures:
+    """A time-varying context's departures on the same footing as a field's (`innovations`; ARCHITECTURE §8.2): its own
+    predictive, the context's numerator k [U, T] against its denominator n (``binomial``: k of n, the samples with E. coli
+    present of those assessed; ``poisson``: k on the exposure n, beds per resident) with a place and a period effect on
+    the link scale (the place's level and the nation's course are the expectation, as B1 is a field's), a
+    quasi-likelihood dispersion φ, and the within-place serial correlation of the Pearson residuals as an AR(1) pooled
+    over places, whitened as a field's frailty is. A cell with no denominator carries no information (v infinite).
+    What remains is the place-period departure from its own level and the national course, which a field's departures
+    are related to over lags and graph bands (`relation_map`): an association with that adjustment set, never an effect."""
+    from scipy.special import expit
+
+    obs = np.isfinite(k) & np.isfinite(n) & (n > 0)
+    k0, n0 = np.where(obs, k, 0.0), np.where(obs, n, 0.0)
+    T = k.shape[1]
+    rate = k0.sum() / max(n0.sum(), 1e-12)
+    a = np.zeros(k.shape[0])
+    b = np.full(T, np.log(rate / (1 - rate)) if family == "binomial" and 0 < rate < 1 else np.log(max(rate, 1e-12)))
+    ridge = 1.0               # places with a few samples shrink toward the national level, not to their raw share
+
+    def score(a_: np.ndarray, b_: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        eta = a_[:, None] + b_[None, :]
+        if family == "binomial":
+            p = expit(eta)
+            E, V = n0 * p, n0 * p * (1 - p)
+        else:
+            E = n0 * np.exp(eta)
+            V = E
+        return k0 - E, V, E, V
+
+    for _ in range(iterations):
+        g, h, _, _ = score(a, b)
+        a += (g.sum(1) - ridge * a) / (h.sum(1) + ridge)
+        g, h, _, _ = score(a, b)
+        b += g.sum(0) / np.maximum(h.sum(0), 1e-12)
+    _, _, E, V = score(a, b)
+    ok = obs & (V > 1e-12)
+    x = np.where(ok, (k0 - E) / np.sqrt(np.where(ok, V, 1.0)), 0.0)
+    dof = max(int(ok.sum()) - int(ok.any(1).sum()) - T, 1)
+    phi = max(float((x ** 2).sum()) / dof, 1.0)
+    x = x / np.sqrt(phi)
+    both = ok[:, 1:] & ok[:, :-1]
+    rho = float(np.clip((x[:, 1:] * x[:, :-1])[both].sum() / max((x[:, :-1] ** 2)[both].sum(), 1e-12), -0.9, 0.9))
+    L = np.linalg.cholesky(rho ** np.abs(np.subtract.outer(np.arange(T), np.arange(T))))
+    e = np.linalg.solve(L, x[..., None])[..., 0]
+    return Departures([name], places, periods, e[None], np.where(ok, 1.0, np.inf)[None])
+
+
 def lagged(d: Departures, lags: int) -> Departures:
     """The departures augmented by each field's own past (the stacked form of a dynamic factor model): field f at lag
     ℓ is ``f@ℓ``, r_{f@ℓ}(u, t) = r_f(u, t − ℓ), over the periods with every lag observed. A factor loaded by A@0 and
@@ -529,7 +577,7 @@ def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) 
 
 
 def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, courses: bool = True,
-                 direct: bool = True, ledger=None, log=None) -> dict:
+                 direct: bool = True, ledger=None, log=None, contexts: list[Departures] | None = None) -> dict:
     """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
     frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
     stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
@@ -542,6 +590,18 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
 
     ledger = ledger if ledger is not None else control.Ledger()
     d = innovations(surprises)
+    for c in contexts or ():
+        # a context's innovations (`context_innovations`) on the fields' lattice; a place or period it lacks is no
+        # information, never a zero departure
+        ui, ti = np.searchsorted(c.places, d.places), np.searchsorted(c.periods, d.periods)
+        hu = (ui < len(c.places)) & (c.places[np.minimum(ui, len(c.places) - 1)] == d.places)
+        ht = (ti < len(c.periods)) & (c.periods[np.minimum(ti, len(c.periods) - 1)] == d.periods)
+        r = np.zeros((1, len(d.places), len(d.periods)))
+        v = np.full_like(r, np.inf)
+        sub = np.ix_(np.nonzero(hu)[0], np.nonzero(ht)[0])
+        r[0][sub] = c.r[0][np.ix_(ui[hu], ti[ht])]
+        v[0][sub] = c.v[0][np.ix_(ui[hu], ti[ht])]
+        d = Departures(d.fields + c.fields, d.places, d.periods, np.concatenate([d.r, r]), np.concatenate([d.v, v]))
     T = len(d.periods)
     min_cells = int(np.ceil((lags + 1) * len(d.fields) * T / max(T - lags, 1)))   # lagged cells ≥ lagged fields
     unanswered: list[str] = []

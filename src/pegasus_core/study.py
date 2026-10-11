@@ -26,7 +26,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from . import config, fields, gateway, leads, store
+from . import config, fields, gateway, leads, questions, store
 
 DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: gigabytes a depth may download (data not yet in the lake); years already in the lake are free (hand-set,
@@ -40,10 +40,6 @@ TOPIC_KEYS = {"seeds", "include", "exclude"}
 #: measure, composition, interval and care flow pegasus_data's roles declare for the source's records
 _ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all", "supports": "all"}
 DEPTH_READERS = {"survey": {}, "standard": dict(_ALL), "deep": dict(_ALL), "exhaustive": dict(_ALL)}
-#: the question registry's names read as the components of ARCHITECTURE §7.2 (BACKLOG 3.1 re-cuts the registry)
-COMPONENT = {"excess": "transient", "step": "step", "trend": "trend", "cluster": "level", "share": "ratio (share)",
-             "institution": "facility support", "group": "group heterogeneity", "divergence": "trend (reference)",
-             "prospective": "prospective"}
 
 
 # ---------------------------------------------------------------------- the declaration
@@ -700,7 +696,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     related = _related(rows, series)
     pq.write_table(pa.Table.from_pylist(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
-    rel = _relations(scope, decl, log) + (_screen(scope, decl, log) if decl.depth == "exhaustive" else [])
+    rel = _relations(scope, decl, log) + (_determinants(scope, decl, log) if decl.depth in ("deep", "exhaustive") else []) \
+        + (_screen(scope, decl, log) if decl.depth == "exhaustive" else [])
     pq.write_table(pa.Table.from_pylist(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
@@ -982,6 +979,39 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
     return out
 
 
+def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
+    """The topic's fields against every time-varying context (ARCHITECTURE §8.2, acceptance item 4): each primary field
+    with all the scope's rated contexts jointly, over graph bands and lags (`tools.determinants`), cached as a study
+    table; rows are associations with their adjustment set, never effects."""
+    from . import tools
+
+    spec = gateway.declared_fields()
+    contexts = [c for c in scope.contexts if (spec.get(c) or {}).get("over")]
+    out = []
+    for it in (i for i in scope.items if i.status == "in" and not i.source):
+        for node in _study_nodes(it, None):
+            if len(it.years) < 4:
+                continue
+            x = (it.dataset, it.event, node)
+            key = {"what": "study_determinants", "x": list(x), "years": it.years, "contexts": contexts, "q": decl.q,
+                   "data": config.data_version(), "code": config.code_key(tools.determinants)}
+            hit = store.get_table("study_table", key)
+            if hit is not None:
+                rows = hit.to_pylist()
+            else:
+                try:
+                    rows = tools.determinants(x, contexts, list(it.years), q=decl.q, log=log)
+                except Exception as exc:  # noqa: BLE001 - a field that cannot be related is said, the others run
+                    log(f"study: determinants of {x}: {type(exc).__name__}: {exc}")
+                    continue
+                flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
+                store.put_table("study_table", key, pa.Table.from_pylist(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
+            out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))},
+                     "pair": f"{r.get('field')} ~ {r.get('leader')}", "years": f"{it.years[0]}-{it.years[-1]}"}
+                    for r in rows if r.get("field") is not None]
+    return out
+
+
 def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     """The data-space screen (ARCHITECTURE §8.3, BACKLOG 10.1), at exhaustive depth: every system the store has fitted
     over the topic's years (the window chosen to read the most data), read with the topic's own systems in one joint model (`tools.relation_survey`: the
@@ -1169,7 +1199,7 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
     tri = x.robustness.get("triage") or {}
     corr = (x.replications or {}).get("corroboration") or {}
     return {
-        "id": x.id, "component": COMPONENT.get(x.estimand, x.estimand), "question": x.estimand,
+        "id": x.id, "component": questions.components(x.estimand, x.provenance.get("methods")), "question": x.estimand,
         "field": x.fields[0], "label": label, "dataset": it.dataset, "tier": x.tier,
         "places": ", ".join(places[:20]) + (f" (+{len(places) - 20})" if len(places) > 20 else ""),
         "place_names": ", ".join(f"{(names.get(p) or {}).get('name', p)}/{(names.get(p) or {}).get('uf_sigla', '')}"
