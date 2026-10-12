@@ -1046,9 +1046,10 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 if hit is not None:
                     out.extend(hit.to_pylist())
                     continue
+                notes: list[dict] = []
                 try:
                     found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=decl.draws or PERSON_DRAWS[decl.depth],
-                                         q=decl.q, log=log, datasets=mine)
+                                         q=decl.q, log=log, datasets=mine, notes=notes)
                 except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
                     out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
                     continue
@@ -1057,6 +1058,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                          "reference": x.locus.get("reference"), "rr": float(x.effect),
                          "low": float(x.interval[0]) if x.interval else None,
                          "high": float(x.interval[1]) if x.interval else None, "q": float(x.q)} for x in found]
+                rows += [{"cohort": label, "year": y, **n} for n in notes]     # an outcome no direct link reached
                 store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
                 out.extend(rows)
     return out
@@ -1187,11 +1189,13 @@ def run(decl: Declaration, log=print) -> Path:
     phases["store"], t = round(time.time() - t, 1), time.time()
     steps = _run_items(decl, read, log)
     phases["lanes"], t = round(time.time() - t, 1), time.time()
-    tables = _write_products(decl, scope, out, log)
+    products = _Lap()
+    tables = _write_products(decl, scope, out, log, products)
     phases["products"] = round(time.time() - t, 1)
     # the wall clock of each phase against the scope's estimate (acceptance item 10), what the next estimate reads
     prov = {"study": decl.study, "depth": decl.depth, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "seconds": round(time.time() - t0, 1), "phases": phases, "estimated_minutes": estimate,
+            "seconds": round(time.time() - t0, 1), "phases": phases, "products_seconds": dict(products),
+            "estimated_minutes": estimate,
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
             "steps": steps, "store_tables": tables}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
@@ -1534,9 +1538,26 @@ def _study_nodes(it: Item, s) -> list[str]:
     return list(it.nodes) if it.nodes else ["*"]
 
 
-def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str, str]:
-    """Findings, descriptive tables, the expectation tables (in the store, viewed), figures, the report."""
+class _Lap(dict):
+    """Seconds per product, each the time since the previous lap: the products phase took 19 of the smoke study's 32
+    minutes and nothing said which product (2026-10-12)."""
+
+    def __init__(self):
+        super().__init__()
+        self._t = time.time()
+
+    def __call__(self, name: str) -> None:
+        now = time.time()
+        self[name] = round(self.get(name, 0.0) + now - self._t, 1)
+        self._t = now
+
+
+def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap | None = None) -> dict[str, str]:
+    """Findings, descriptive tables, the expectation tables (in the store, viewed), figures, the report; each product's
+    seconds into ``lap``."""
     import duckdb
+
+    lap = _Lap() if lap is None else lap
 
     names = gateway.municipality_names()
     rows, desc, views, figs, groups = [], [], {}, [], []
@@ -1589,22 +1610,33 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                                                 str(d.population)))
                     except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
+                    lap("fields: tables, figures, maps")
                     groups.extend(_groups(it, s, f, label, log))
+                    lap("fields: groups")
     related = _related(rows, series)
     pq.write_table(_rows_table(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
-    rel = _relations(scope, decl, log) + (_determinants(scope, decl, log) if decl.depth in ("deep", "exhaustive") else []) \
-        + (_screen(scope, decl, log) if decl.depth == "exhaustive" else [])
+    lap("related")
+    rel = _relations(scope, decl, log)
+    lap("relations")
+    rel += _determinants(scope, decl, log) if decl.depth in ("deep", "exhaustive") else []
+    lap("determinants")
+    rel += _screen(scope, decl, log) if decl.depth == "exhaustive" else []
+    lap("screen")
     pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
+    lap("institutions")
     persons = _persons(decl, scope, log) if decl.depth in ("deep", "exhaustive") else []
+    lap("persons")
     pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
     profile = _context_profiles(decl, scope, rows, log)
+    lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
     _stories([r for r in rows if r.get("class") == "signal" and "quality:" not in str(r.get("label"))])  # `story` saved
+    lap("stories")
     for r in rows:
         r.pop("_places", None)
         r.pop("_institutions", None)
@@ -1632,10 +1664,13 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
     con.execute(f"CREATE VIEW relations AS SELECT * FROM read_parquet('{(out / 'relations.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
     con.close()
+    lap("tables")
     hyp = _hypotheses(decl, scope)
     pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
+    lap("hypotheses")
     _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons)
+    lap("report")
     return views
 
 

@@ -2471,6 +2471,34 @@ def person_records(entities, kind: tuple[str, str], other: tuple[str, str]) -> s
     return set(person_pairs(entities, kind, other).column("l").to_pylist())
 
 
+def direct_reach(kind: tuple[str, str], other: tuple[str, str], year: int) -> list[dict]:
+    """The declared links pairing ``kind``'s persons with ``other``'s directly, each with its runs covering ``year``
+    and their verdicts: a run stored "not viable" merges no pair (pegasus_data `build_entities`), so the outcome is then
+    reached only through other routes, and a cohort says so rather than count it as zero (SINAN-TOXC's deaths in SIM,
+    2022: chance pairs up to 29%, 2026-10-12)."""
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    raw = read_yaml(links_file()).get("links") or {}
+    out = []
+    for name, spec in link_specs().items():
+        person = list((raw.get(name) or {}).get("person") or [])
+        if len(person) != 2:
+            continue
+        sides = [(spec.left.dataset, person[0]), (spec.right.dataset, person[1])]
+        if sides not in ([kind, other], [other, kind]):
+            continue
+        side = "left" if sides[0] == kind else "right"
+        runs = []
+        for z in covering_runs(name, side, year):
+            rep = link_report(name, z)
+            runs.append({"run": z, "verdict": "reserved" if run_touches_reserve(name, z) else
+                         (rep or {}).get("verdict", "not stored"),
+                         "chance_upper95_percent": (rep or {}).get("chance_upper95_percent")})
+        out.append({"link": name, "runs": runs})
+    return out
+
+
 def person_scopes(kind: tuple[str, str], year: int) -> list[int]:
     """The scopes whose runs hold ``kind``'s records of ``year``: every declared link with a person of that kind on a
     side, over the runs that cover the side's year (`covering_runs`: a birth's infant death is in its year's run or

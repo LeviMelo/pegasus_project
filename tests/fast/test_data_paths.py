@@ -106,3 +106,11 @@ def test_triage_inside_an_area(monkeypatch):
     s = tools.Session("SINAN-TOXC", "notification", list(range(2019, 2024)))
     s.triage()
     assert len(s._grid_places) == 497
+
+
+def test_an_outcome_no_direct_link_reaches_is_said():
+    # SINAN-TOXC -> SIM 2022 is stored "not viable" (chance pairs up to 28.9%) and 2023 touches the reserve: the RS
+    # cohort read "deceased 0" in every draw as if no notified child had died
+    reach = {y: gateway.direct_reach(("SINAN-TOXC", "patient"), ("SIM-DO", "deceased"), y)[0]["runs"][0]["verdict"]
+             for y in (2021, 2022, 2023)}
+    assert reach == {2021: "use with caution", 2022: "not viable", 2023: "reserved"}

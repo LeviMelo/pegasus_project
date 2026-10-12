@@ -1981,7 +1981,7 @@ def records(dataset: str, event: str, year: int, columns: list[str], places: lis
 
 
 def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]], year: int, draws: int = 10,
-           q: float = 0.05, log=print, datasets=None) -> list[leads.Lead]:
+           q: float = 0.05, log=print, datasets=None, notes: list | None = None) -> list[leads.Lead]:
     """The cohort scan (ARCHITECTURE §7.8) on persons: every event of ``dataset`` in ``year`` is a person in ``role``
     (a birth's baby); each outcome is that person having a record of another kind (pegasus_data dataset code, person
     role: an infant death certificate, a newborn admission) through any route of the linked persons (`gateway.persons`:
@@ -1994,7 +1994,11 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
 
     An outcome on the person's own record needs no link (BACKLOG 6.1): ``("record", "COLUMN=v1,v2")`` (the column holds
     one of the values: a birth's IDANOMAL 1) or ``("record", "COLUMN~C1,C2")`` (a code list holds a code starting with
-    one: a birth's CODANOMAL with Q90). With only such outcomes the scan reads the records alone, one draw."""
+    one: a birth's CODANOMAL with Q90). With only such outcomes the scan reads the records alone, one draw.
+
+    An outcome whose direct links merge no pair in the year (every covering run "not viable", reserved or not stored:
+    `gateway.direct_reach`) is reached through other routes alone; that is said in ``notes`` (outcome, note) and in
+    the log, so its count is not read as the persons' outcome."""
     from . import fields
     from .scans import cohort as cohort_mod
 
@@ -2033,6 +2037,17 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
             + (f", triangles {st['triangles']['agree']}/{st['triangles']['with_route']}"
                if st.get("triangles") and st["triangles"]["with_route"] else "")
             for name, st in links_.items()))
+    for o in linked:
+        reach = gateway.direct_reach(kind, o, year)
+        blocked = [f"{r['link']} run {x['run']} {x['verdict']}" + (f" (chance pairs up to {x['chance_upper95_percent']}%)"
+                                                                     if x.get("chance_upper95_percent") else "")
+                   for r in reach for x in r["runs"] if x["verdict"] in ("not viable", "reserved", "not stored")]
+        if reach and len(blocked) == sum(len(r["runs"]) for r in reach):
+            text = (f"no direct link merges a pair in {year}: {'; '.join(blocked)}; its count is the persons reached "
+                    "through other routes only")
+            log(f"{o[0]}:{o[1]}: {text}")
+            if notes is not None:
+                notes.append({"outcome": f"{o[0]}:{o[1]}", "note": text})
     id_list = ids.to_numpy(zero_copy_only=False)
     tables = []
     on_record = {}
