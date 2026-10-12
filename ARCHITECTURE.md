@@ -266,14 +266,17 @@ download: 10                          # GB the study may download (default: the 
 related: 5                            # how many related codes are read as fields of their own, strongest first (0, N or all; default: the depth's)
 chapters: true                        # the topic's codes inside their fitted chapters, or as code sets (default: beyond a survey)
 questions: [excess, group]            # the questions asked of every field (default: all eleven)
-readers: [compositions, intervals]    # the field kinds the depth adds (default: the depth's: measures, compositions, intervals, flows, quality, supports)
+readers: [compositions, intervals]    # the field kinds read beyond counts: measures, compositions, intervals, flows, quality, supports, linked
+relations: [fields, contexts]         # among the study's fields, with every context, the data-space screen
+persons: true                         # the cohort scan over linked persons
+replicate: true                       # leads tested once on the later years they were not selected on
 nulls: standard                       # quick | standard | precise: every test's replicate null worlds (×0.25, ×1, ×4)
 draws: 10                             # plausible link sets the persons step averages linkage uncertainty over
 ```
 
 Every key has a default except `study` and `topic.seeds`. **How much a study ingests is the declaration's to set**
-(author, 2026-10-11): `where`, `only`, `exclude`, `period`, `download`, `related`, `contexts`, `chapters`, `questions`,
-`readers`, `nulls` and `draws` cut a study to the sources, years, fits and questions it needs, and a source whose latest year holds none of the topic's records is left out
+(author, 2026-10-11): `where`, `only`, `exclude`, `period`, `download`, `related`, `relations`, `contexts`, `chapters`, `questions`,
+`readers`, `persons`, `replicate`, `nulls` and `draws` cut a study to the sources, years, fits and questions it needs, and a source whose latest year holds none of the topic's records is left out
 before its other years are fetched (`study._probe`). `studies/toxoplasmosis_quick.yml` is the reference study cut to
 its own four sources and nine years at deep depth: the debugging loop, minutes not hours. A topic may also be a whole system or the whole data space
 ("all of SIM" is a study; §3.8).
@@ -314,6 +317,23 @@ Every depth fills **the same study folder**; a deeper run adds to it and recompu
 
 Depth is a budget, not a filter of meaning: a field too sparse for a fine support is lifted to a coarser one at every
 depth (§5.4), never dropped.
+
+**A depth is a preset of the declaration's own choices** (`study.PRESETS`; author, 2026-10-12: choices a person
+understands, not budgets). Each key the declaration sets overrides its depth's:
+
+| key | survey | standard | deep | exhaustive |
+|---|---|---|---|---|
+| `readers` | none | measures, compositions, intervals, flows, quality, supports, linked | same | same |
+| `related` (codes read, strongest first) | 0 | 5 | 15 | 30 |
+| `relations` | fields | fields | + contexts | + screen |
+| `chapters` | false | true | true | true |
+| `persons` (cohort scan) | false | false | true | true |
+| `replicate` (later years) | false | false | true | true |
+| `download` (GB) | 2 | 10 | 40 | unbounded |
+| `draws` | 1 | 1 | 10 | 20 |
+
+Every related code stays listed with its strength in `scope.yml` whatever `related` reads, and `minutes_by_choice`
+there prices each choice before a run (§3.2).
 
 ### 3.4 The study folder
 

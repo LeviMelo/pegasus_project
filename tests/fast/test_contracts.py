@@ -95,3 +95,16 @@ def test_related_reads_the_strongest_n_and_prices_the_next(monkeypatch, tmp_path
         p.write_text(f"study: s\ntopic: {{seeds: {{icd10: [B58]}}}}\nrelated: {bad}\n", encoding="utf-8")
         with pytest.raises(study.DeclarationError, match="related"):
             study.load(p)
+
+
+def test_a_depth_is_a_preset_of_the_declarations_choices(tmp_path):
+    keys = set(study.PRESETS["survey"])
+    assert all(set(v) == keys for v in study.PRESETS.values()) and keys <= study.KEYS
+    p = tmp_path / "s.yml"
+    p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\ndepth: deep\npersons: false\nrelations: [fields]\n",
+                 encoding="utf-8")
+    d = study.load(p)
+    assert d.choice("persons") is False and d.choice("relations") == ["fields"] and d.choice("replicate") is True
+    p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\nrelations: [everything]\n", encoding="utf-8")
+    with pytest.raises(study.DeclarationError, match="relations"):
+        study.load(p)

@@ -2069,9 +2069,12 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     family = f"cohort|{kind[0]}:{kind[1]}|{dataset}|{year}"
     res = cohort_mod.scan(tables[0], [d.column for d in attrs], labels, control.Ledger(), family, draws=tables)
     log(f"{family}: {len(res)} contrasts over {len(attrs)} attributes and {len(labels)} outcomes, {t.num_rows} persons")
+    qv = control.adjusted(np.array([r.p for r in res])) if res else np.array([])
+    if notes is not None:              # what was tested, so a cohort with nothing at q is not read as one never scanned
+        notes.append({"outcome": ", ".join(labels), "note": f"{len(res)} contrasts over {len(attrs)} attributes and "
+                      f"{len(labels)} outcomes, {t.num_rows} persons, {draws} link draws: {int((qv <= q).sum())} at q {q:g}"})
     if not res:
         return []
-    qv = control.adjusted(np.array([r.p for r in res]))
     admitted = [leads.Lead(kind="cohort", estimand="rate_ratio_vs_reference", tier="cohort",
                            fields=[f"{dataset}:{event}", f"person:{r.outcome}"],
                            locus={"attribute": r.attribute, "level": r.level, "reference": r.reference,

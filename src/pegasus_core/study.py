@@ -31,17 +31,30 @@ import pyarrow.parquet as pq
 from . import config, control, fields, gateway, leads, questions, store
 
 DEPTHS = ("survey", "standard", "deep", "exhaustive")
-#: gigabytes a depth may download (data not yet in the lake); years already in the lake are free (hand-set,
-#: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
-DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "related", "download", "chapters", "questions", "readers", "nulls", "draws"}
+#: the field kinds a study reads beyond counts (ARCHITECTURE §5.2): the declared readers pegasus_data's roles give every
+#: source (`update.System`'s keys), and ``linked``, each usable person path's linked share as a field of its own
+READERS = ("measures", "compositions", "intervals", "flows", "quality", "supports", "linked")
+#: the relations a study reads (ARCHITECTURE §8): among its own and related fields, with every context (time-varying,
+#: over lags and distances), and the data-space screen against every fitted field
+RELATIONS = ("fields", "contexts", "screen")
+#: every depth is a preset of the declaration's own choices (author, 2026-10-12: choices a person understands, not
+#: budgets); a key the declaration sets overrides its depth's. ``download`` in gigabytes (years in the lake are free),
+#: ``related`` a count of related codes read strongest first, ``draws`` plausible link sets for the persons
+PRESETS = {
+    "survey": {"readers": [], "related": 0, "relations": ["fields"], "chapters": False, "persons": False,
+               "replicate": False, "download": 2.0, "draws": 1},
+    "standard": {"readers": list(READERS), "related": 5, "relations": ["fields"], "chapters": True, "persons": False,
+                 "replicate": False, "download": 10.0, "draws": 1},
+    "deep": {"readers": list(READERS), "related": 15, "relations": ["fields", "contexts"], "chapters": True,
+             "persons": True, "replicate": True, "download": 40.0, "draws": 10},
+    "exhaustive": {"readers": list(READERS), "related": 30, "relations": list(RELATIONS), "chapters": True,
+                   "persons": True, "replicate": True, "download": float("inf"), "draws": 20},
+}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "questions",
+        "nulls", *PRESETS["survey"]}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
-#: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
-#: measure, composition, interval and care flow pegasus_data's roles declare for the source's records
-_ALL = {"measures": "all", "compositions": "all", "intervals": "all", "flows": "all", "quality": "all", "supports": "all"}
-DEPTH_READERS = {"survey": {}, "standard": dict(_ALL), "deep": dict(_ALL), "exhaustive": dict(_ALL)}
 
 
 # ---------------------------------------------------------------------- the declaration
@@ -63,18 +76,22 @@ class Declaration:
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
-    related: float | None = None  # how many related codes are read as fields of their own, strongest first (None: the
-                                  # depth's `RELATED`; inf: all)
-    download: float | None = None  # gigabytes the study may download, in place of the depth's `DOWNLOAD_BUDGET_GB`
-    chapters: bool | None = None   # the topic's nodes read inside their fitted chapters (None: beyond a survey)
     questions: list[str] | None = None  # the questions asked of every field (None: all, `questions.QUESTIONS`)
-    readers: list[str] | None = None    # the field kinds the depth adds (None: its `DEPTH_READERS`)
     nulls: float = 1.0                   # replicate null worlds per test, as a factor on each method's own (`NULLS`)
-    draws: int | None = None             # plausible link sets the persons step averages over (None: `PERSON_DRAWS`)
+    # the choices each depth presets (`PRESETS`), None where the declaration leaves them to its depth (`choice`)
+    readers: list[str] | None = None     # the field kinds read beyond counts (`READERS`)
+    related: float | None = None         # how many related codes are read as fields of their own, strongest first
+    relations: list[str] | None = None   # the relations read (`RELATIONS`)
+    chapters: bool | None = None         # the topic's nodes read inside their fitted chapters, or as code sets
+    persons: bool | None = None          # the cohort scan over linked persons
+    replicate: bool | None = None        # leads selected on the earlier years and tested once on the last `LATER_YEARS`
+    download: float | None = None        # gigabytes the study may download
+    draws: int | None = None             # plausible link sets the persons step averages over
 
-    @property
-    def in_chapters(self) -> bool:
-        return self.depth != "survey" if self.chapters is None else self.chapters
+    def choice(self, key: str):
+        """The declaration's ``key``, or its depth's preset (`PRESETS`)."""
+        v = getattr(self, key)
+        return PRESETS[self.depth][key] if v is None else v
 
 
 #: the precision of every Monte Carlo test, in words: a factor on each method's own replicate null worlds (a p-value's
@@ -159,7 +176,7 @@ def load(path: str | Path) -> Declaration:
                         "topic.only restricts the study to datasets or systems, topic.exclude leaves them out")
     from .questions import QUESTIONS
     names = [getattr(q, "name", q) for q in QUESTIONS]
-    for k, allowed in (("questions", names), ("readers", list(_ALL))):
+    for k, allowed in (("questions", names), ("readers", list(READERS)), ("relations", list(RELATIONS))):
         v = doc.get(k)
         if v is not None and (not isinstance(v, list) or set(v) - set(allowed)):
             problems.append(f"{k} {v!r}: a list among {', '.join(allowed)}")
@@ -171,6 +188,10 @@ def load(path: str | Path) -> Declaration:
     if doc.get("chapters") is not None and not isinstance(doc["chapters"], bool):
         problems.append(f"chapters {doc['chapters']!r}: true (the topic's codes inside their fitted chapters) or false "
                         "(as code sets of their own)")
+    for k, what in (("persons", "the cohort scan over linked persons"),
+                    ("replicate", "leads tested once on the later years they were not selected on")):
+        if doc.get(k) is not None and not isinstance(doc[k], bool):
+            problems.append(f"{k} {doc[k]!r}: true or false ({what})")
     if doc.get("download") is not None and (not isinstance(doc["download"], (int, float)) or doc["download"] < 0):
         problems.append(f"download {doc['download']!r}: gigabytes the study may download, 0 or more")
     rel = doc.get("related")
@@ -194,6 +215,7 @@ def load(path: str | Path) -> Declaration:
                        related=(float("inf") if rel == "all" else float(rel)) if rel is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
                        chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
+                       relations=doc.get("relations"), persons=doc.get("persons"), replicate=doc.get("replicate"),
                        nulls=float(NULLS.get(nulls, nulls)) if nulls in NULLS or isinstance(nulls, (int, float)) else 1.0,
                        draws=doc.get("draws"))
 
@@ -662,7 +684,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
                                       f"holds {c} ({tree[c]['label']}), read as a field of its own (its category "
                                       f"{tree[c]['parent']} holds other conditions)", source={"codes": [c]}))
                 held = [n for n in nodes if n in reg.level]
-                if held and not decl.in_chapters:
+                if held and not decl.choice("chapters"):
                     # the topic's codes as one field of their own (a survey's default, or `chapters: false`): its node
                     # inside a fitted chapter (every infectious disease in 5,570 places over 16 years, for B58) was most
                     # of the survey's hours, and the chapter's context is standard depth's (2026-10-11)
@@ -693,7 +715,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
     items = _declared_only(decl, items, excluded)
     # the cost: years in the lake are free, the rest download; the budget is spent cheapest first, and a source
     # whose tree holds the topic but whose records hold none is not read (its tree is not its records)
-    budget = DOWNLOAD_BUDGET_GB[decl.depth] if decl.download is None else decl.download      # the declaration's, if set
+    budget = decl.choice("download")
     priced = []
     for it in items:
         ys, cost = _cost(it.dataset, decl.years)
@@ -761,16 +783,16 @@ def resolve(decl: Declaration, log=print) -> Scope:
     for it in items:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
         # readers would read every event of the type against the population
-        it.readers = {} if it.source else {k: v for k, v in DEPTH_READERS[decl.depth].items()
-                                           if decl.readers is None or k in decl.readers}
+        chosen = decl.choice("readers")
+        it.readers = {} if it.source else {k: "all" for k in chosen if k != "linked"}
         it.questions = decl.questions
         coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
-        if coded and "supports" in DEPTH_READERS[decl.depth] and (decl.readers is None or "supports" in decl.readers):
-            it.readers = {"supports": DEPTH_READERS[decl.depth]["supports"]}     # the code set at its other places
+        if coded and "supports" in chosen:
+            it.readers = {"supports": "all"}     # the code set at its other places
     runs = _link_runs()
     paths = _person_paths(items, runs)
-    if decl.depth != "survey":
-        _linked_items(items, paths, runs, excluded)     # a survey lists the paths; each linked share is a fit of its own
+    if "linked" in decl.choice("readers"):
+        _linked_items(items, paths, runs, excluded)     # else the paths are listed; each linked share is a fit of its own
     _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
     medicines = [{"substance": sub["name"], "use": sub.get("use", ""), "conditions": t["conditions"], "source": t["source"],
@@ -779,15 +801,15 @@ def resolve(decl: Declaration, log=print) -> Scope:
                  for t in (gateway.treatments(nodes + codes) if nodes or codes else []) for sub in t["substances"]]
     contexts += _medicines(nodes + codes)
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
-    extra: list[tuple[float, Item]] = []            # (strength, item): the related codes' fields, read within the depth's time
-    if decl.depth != "survey":
+    extra: list[tuple[float, Item]] = []            # (strength, item): the related codes' fields, the strongest read
+    if decl.choice("related") > 0:
         # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
         for r in (r for r in related if r["related"]):
             extra.append((float(r.get("low") or 0.0), Item(
                 r["dataset"], r["event"], ["*"], None, list(r["item_years"]),
                 f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the topic's codes, "
                 f"{r['lift']:.1f} times expected", source={"codes": [r["code"]]})))
-    if decl.depth in ("deep", "exhaustive"):
+        # and where else a related code is recorded (a code list, another source's classifier)
         strength = {r["code"]: float(r.get("low") or 0.0) for r in related if r["related"]}
         extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
                   for it in _related_elsewhere(decl, [r for r in related if r["related"]], served,
@@ -797,7 +819,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
     # took a place among the strongest and was then dropped (`_one_per_field`), and the next ones listed it thrice
     kept = [it for it in _one_per_field(items + kept) if any(it is k for k in kept)]
     items += _strongest(decl, [(w, it) for w, it in extra if any(it is k for k in kept)])
-    if decl.depth in ("deep", "exhaustive"):
+    if decl.choice("replicate"):
         # replication in later years (ARCHITECTURE §8.3, acceptance item 6): selected on the years up to the last
         # LATER_YEARS held out, tested once on them; the survey's findings stood at R0 with nothing to replicate them
         for it in items:
@@ -870,10 +892,6 @@ def _declared_only(decl: Declaration, items: list[Item], excluded: list[dict]) -
 LATER_YEARS = 3
 
 
-#: how many related codes a depth reads as fields of their own, strongest first (the topic's own fields are always read):
-#: the standard scope once held 240 related fields beside 36 of the topic's, about 16 hours, and the light deep scope
-#: deferred 5,808 (2026-10-11); a count is what a person can choose, where a time budget was not (author, 2026-10-12)
-RELATED = {"survey": 0, "standard": 5, "deep": 15, "exhaustive": float("inf")}
 #: the next strongest related fields the scope prices beyond those read, so it shows what reading more would cost
 #: (every related code stays listed with its strength in ``related_codes``)
 RELATED_SHOWN = 10
@@ -883,7 +901,7 @@ def _strongest(decl: Declaration, extra: list[tuple[float, Item]]) -> list[Item]
     """The related fields ``extra`` (strength, item): the declaration's ``related`` strongest (the lower bound of the
     code's lift) read, the next `RELATED_SHOWN` deferred with their cost. The rest are neither priced nor items: each
     stays in the scope's ``related_codes`` with its strength."""
-    n = RELATED[decl.depth] if decl.related is None else decl.related
+    n = decl.choice("related")
     ranked = sorted(extra, key=lambda p: -p[0])[:int(min(n, len(extra))) + RELATED_SHOWN]
     added = [it for _, it in ranked]
     _estimate(decl, added)
@@ -990,7 +1008,6 @@ def _medicines(codes: list[str]) -> list[dict]:
 
 #: the latest years a study reads persons in (each a cohort scan over every person of the year), and the link draws
 PERSON_YEARS = 3
-PERSON_DRAWS = {"deep": 10, "exhaustive": 20}
 
 
 def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
@@ -1040,7 +1057,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
             for y in years:
                 mine = sorted({o.dataset for o in scope.items if o.status == "in"})   # the persons of its own links
                 key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
-                       "draws": decl.draws or PERSON_DRAWS[decl.depth], "q": decl.q, "data": config.data_version(),
+                       "draws": decl.choice("draws"), "q": decl.q, "data": config.data_version(),
                        "code": config.code_key(tools.cohort), "datasets": mine}
                 hit = store.get_table("study_table", key)
                 if hit is not None:
@@ -1048,7 +1065,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                     continue
                 notes: list[dict] = []
                 try:
-                    found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=decl.draws or PERSON_DRAWS[decl.depth],
+                    found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=decl.choice("draws"),
                                          q=decl.q, log=log, datasets=mine, notes=notes)
                 except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
                     out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
@@ -1144,7 +1161,7 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str],
                     if not mine and src.get("source") != "code_list":
                         continue            # outside the topic's sources, a code list only (a birth's anomalies)
                     seen.add((ds, et["name"], d.column, code))
-                    if not decl.in_chapters and "source" not in src:     # a code set on that column, no chapter fit
+                    if not decl.choice("chapters") and "source" not in src:     # a code set on that column, no chapter fit
                         out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {d.column.split(':', 1)[1]}",
                                         source={"classifier": src["classifier"], "codes": [code]}))
                         continue
@@ -1617,17 +1634,18 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     pq.write_table(_rows_table(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
     lap("related")
-    rel = _relations(scope, decl, log)
+    chosen = decl.choice("relations")
+    rel = _relations(scope, decl, log) if "fields" in chosen else []
     lap("relations")
-    rel += _determinants(scope, decl, log) if decl.depth in ("deep", "exhaustive") else []
+    rel += _determinants(scope, decl, log) if "contexts" in chosen else []
     lap("determinants")
-    rel += _screen(scope, decl, log) if decl.depth == "exhaustive" else []
+    rel += _screen(scope, decl, log) if "screen" in chosen else []
     lap("screen")
     pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
     lap("institutions")
-    persons = _persons(decl, scope, log) if decl.depth in ("deep", "exhaustive") else []
+    persons = _persons(decl, scope, log) if decl.choice("persons") else []
     lap("persons")
     pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
@@ -2455,7 +2473,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                        ("level", "level"), ("reference", "against"), ("rr", "RR"), ("low", "95 % from"), ("high", "to"),
                        ("q", "q")], cap=40)
                 + "".join(f"<p>{e(r['cohort'])} {r.get('year') or ''}: {e(r['note'])}</p>" for r in persons if r.get("note"))
-                if persons else f"<p>{'Not read at this depth.' if decl.depth not in ('deep', 'exhaustive') else 'No source read holds persons on a usable link.'}</p>"),
+                if persons else f"<p>{'Not read (persons: false).' if not decl.choice('persons') else 'No source read holds persons on a usable link.'}</p>"),
              "<h2>4. Scope</h2>", "<ul>" + "".join(
                  f"<li><b>{e(i.dataset)}</b> ({e(i.event)}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",
@@ -2627,7 +2645,7 @@ def _limitations(decl: Declaration, scope: Scope) -> str:
             cite = f" <span class=meta>({e(sn['source'])})</span>" if sn.get("source") else ""
             notes.append(f"<li><b>{e(it.dataset)}</b> ({e(it.event)}){cite}<ul>"
                          + "".join(f"<li>{b}</li>" for b in bits) + "</ul></li>")
-    readers = sorted(DEPTH_READERS[decl.depth])
+    readers = sorted(decl.choice("readers"))
     methods = ("<li>Expectations: hierarchical negative-binomial models per block (ARCHITECTURE §6); findings against "
                "tier B1 unless stated; Benjamini–Hochberg/Bogomolov per question family at the study's q.</li>"
                f"<li>Fields read at depth {e(decl.depth)}: counts" + ("".join(f", {e(r)}" for r in readers))
