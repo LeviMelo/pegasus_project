@@ -301,7 +301,9 @@ def _records(it: Item, years: list[int]) -> int:
     total = 0
     prefixes = list(it.nodes or []) + list((it.source or {}).get("codes") or [])
     for y in years:
-        c = gateway.event_counts(it.dataset, it.event, y, classifier=(it.source or {}).get("classifier")).counts
+        # every event, whatever its cell: a foetal death has no age, and counted by cells SIM-DOFET held no P37.1
+        # (the Santa Maria hypothesis's own source left out, 2026-10-11)
+        c = gateway.event_counts(it.dataset, it.event, y, classifier=(it.source or {}).get("classifier"), cell=False).counts
         if prefixes:
             hit = pc.starts_with(c.column("code"), prefixes[0])
             for n in prefixes[1:]:
@@ -648,13 +650,16 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.note = (f"{gb:.1f} GB to download against the study's budget of {budget:g} GB"
                        + (f"; {unknown} not sized by the catalog" if unknown else ""))
             continue
-        if it.extract or any(cost.get(y) != 0.0 for y in it.years):
-            # counted when its data is there (`_prepare_store` builds its lake or extract): pricing a scope downloads
-            # nothing (the standard scope fetched SIA-AD's 2.5 GB to count it, before its cost was shown, 2026-10-11);
-            # a year another item of the dataset pays for is not in the lake either
+        held = [y for y in it.years if cost.get(y) == 0.0]
+        if it.extract or not held:
+            # counted when its data is there (`_prepare_store` builds its lake or extract; `_probe` reads one year
+            # first): pricing a scope downloads nothing (the standard scope fetched SIA-AD's 2.5 GB to count it,
+            # 2026-10-11)
             continue
         try:
-            it.records = _records(it, it.years)
+            # over the years the lake holds, free: counted only when every year was held, CIHA (2009–2023 in the
+            # lake, 2024–2025 not) went to a probe of its preliminary 2025 and was left out (2026-10-11)
+            it.records = _records(it, held)
         except Exception as exc:  # noqa: BLE001 - a source that cannot be counted is deferred with why
             it.status, it.note = "deferred", f"its records could not be counted: {type(exc).__name__}: {exc}"
             continue
@@ -662,9 +667,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.note = (it.note + "; " if it.note else "") + "no record has the topic as its primary code: read through its mentions"
         elif it.records == 0:
             it.status = "none"
-            held = ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
-            excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} "
-                             f"but its records hold none in {it.years[0]}-{it.years[-1]}"})
+            excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} "
+                             f"but its records hold none in {held[0]}-{held[-1]}, the years the lake holds"})
     items = [i for i in items if i.status != "none"]
     for it in items:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
@@ -1053,6 +1057,10 @@ def run(decl: Declaration, log=print) -> Path:
     return out
 
 
+def held_codes(it: Item) -> str:
+    return ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
+
+
 def _probe(scope: Scope, read: list[Item], log) -> list[Item]:
     """Before a source's years are fetched to count the topic in them, its latest year alone: an item priced without a
     count (its data not in the lake) whose probe year holds none of the topic's records, and that has no mentions to
@@ -1063,7 +1071,10 @@ def _probe(scope: Scope, read: list[Item], log) -> list[Item]:
         if it.records is not None or it.extract or it.mentions or not it.years or it.denominator:
             keep.append(it)
             continue
-        year = max(it.years)
+        # its largest published year: the most records and the most complete (the newest is often preliminary, a
+        # fraction of a year: CIHA's 2025 held none of the topic, its 2009–2023 do)
+        volume = _volumes(it.dataset, config.data_root())
+        year = max(it.years, key=lambda y: (volume.get(y) or 0.0, y))
         try:
             gateway.ensure_lake(it.dataset, [year], log=log)
             n = _records(it, [year])
