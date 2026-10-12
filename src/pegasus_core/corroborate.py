@@ -334,7 +334,7 @@ def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, repli
 
 
 def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.ndarray, years: list[int],
-                direction: int, seed_text: str, replicates: int = 4999, connected: bool = True) -> Corroboration:
+                direction: int, replicates: int = 4999, connected: bool = True) -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
     replicates = config.replicates(replicates)          # the study's `nulls`
     sid = f"{source.kind}:{source.dataset}:{source.event}"
@@ -342,7 +342,6 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
         return Corroboration(False, sid, source.label, detail={"reason": "a deficit is not corroborated by a field"})
     cols = (fields.years >= years[0]) & (fields.years <= years[-1])
     other = ~cols
-    rng = np.random.default_rng(config.seed(seed_text))
     detail: dict[str, Any] = {}
 
     # one statistic for every kind of source (S4.1): the window's count at the places against their own median year,
@@ -374,13 +373,63 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
     detail["unit"] = "log (window count + ½) / (the places' median year × years + ½)"
     detail["observed_count"] = float(y[rows][:, cols].sum())
     chunk = max(1, min(replicates, int(2e7 // max(len(rows) * int(cols.sum()), 1))))      # bounded memory at any replicate count
-    null = np.concatenate([null_of(_null_sets(fields, rows, rng, min(chunk, replicates - i), connected))
-                           for i in range(0, replicates, chunk)])
-    p = float((1 + np.sum(null >= obs)) / (1 + len(null)))
+    sets = _lead_null_sets(fields, rows, replicates, connected)       # one draw of the lead's places for every source
+    null = np.concatenate([null_of(sets[i:i + chunk]) for i in range(0, replicates, chunk)])
+    p, detail["p_method"] = tail_p(null, obs)
     if detail["observed_count"] == 0:
         p = 1.0                                   # nothing at the places in the window corroborates nothing
     detail["replicates"] = replicates
     return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
+
+
+#: the null place sets of the leads read last (`_lead_null_sets`): a lead is asked of every source on the same draws
+_NULLS: dict[tuple, np.ndarray] = {}
+
+
+def _lead_null_sets(fields: Fields, rows: np.ndarray, replicates: int, connected: bool) -> np.ndarray:
+    """The lead's null place sets (`_null_sets`), drawn once for all its sources from a seed of its places: grown again
+    for each source, a TOXG lead's corroboration was 84 % of its lane (2026-10-12)."""
+    key = (id(fields), np.asarray(rows, dtype=np.int64).tobytes(), int(replicates), bool(connected))
+    hit = _NULLS.get(key)
+    if hit is None:
+        rng = np.random.default_rng(config.seed("null|" + key[1].hex()))
+        hit = _NULLS[key] = _null_sets(fields, rows, rng, replicates, connected)
+        while len(_NULLS) > 32:
+            _NULLS.pop(next(iter(_NULLS)))
+    return hit
+
+
+#: a permutation p-value with fewer exceedances than this is read from the null's fitted tail (`tail_p`)
+TAIL_EXCEEDANCES = 10
+
+
+def tail_p(null: np.ndarray, observed: float, top: int = 250) -> tuple[float, str]:
+    """A permutation p-value, with the tail approximated where the null holds too few exceedances to resolve it
+    (Knijnenburg et al. 2009, "Fewer permutations, more accurate P-values"): a generalized Pareto distribution fitted
+    to the ``top`` largest null values above the next, its survival at the observed statistic scaled by their share.
+    It replaces redrawing a promising lead's null at 99,999 replicates so Benjamini-Hochberg could reject. A fit that
+    fails or extrapolates nothing keeps the empirical (b + 1)/(n + 1)."""
+    from scipy import stats
+
+    null = np.asarray(null, dtype=float)
+    n = len(null)
+    b = int(np.sum(null >= observed))
+    empirical = float((1 + b) / (1 + n))
+    if b >= TAIL_EXCEEDANCES or n < 4 * top:
+        return empirical, "permutation"
+    order = np.sort(null)
+    threshold = order[-top - 1]
+    excess = order[-top:] - threshold
+    if observed <= threshold or not np.any(excess > 0):
+        return empirical, "permutation"
+    try:
+        shape, _, scale = stats.genpareto.fit(excess, floc=0.0)
+        p = float(top / n * stats.genpareto.sf(observed - threshold, shape, loc=0.0, scale=scale))
+    except Exception:  # noqa: BLE001 - a tail that cannot be fitted keeps the permutation's bound
+        return empirical, "permutation"
+    if not np.isfinite(p) or p <= 0:
+        return empirical, "permutation"
+    return min(p, empirical), "permutation, tail fitted (generalized Pareto)"
 
 
 def categories_of(registry, node: str, dataset: str | None = None, codes: list[str] | None = None) -> list[str]:

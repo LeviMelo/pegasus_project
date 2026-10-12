@@ -155,3 +155,17 @@ def test_a_quality_field_is_asked_of_recording_only():
 
     out = questions._ask(S(), "propagation", "*")
     assert out == [] and "quality field" in out.failed["*"] and set(questions.QUALITY_QUESTIONS) <= set(questions.QUESTIONS)
+
+
+def test_a_small_corroboration_p_is_read_from_the_tail():
+    # a promising lead was redrawn at 99,999 replicates for Benjamini-Hochberg to reach it; its null's fitted tail
+    # gives the small p (Knijnenburg et al. 2009) and matches the exact one where the null is known
+    import numpy as np
+    from scipy import stats
+
+    from pegasus_core import corroborate
+
+    null = np.random.default_rng(1).standard_normal(4999)
+    p, how = corroborate.tail_p(null, 4.0)
+    assert "tail" in how and 0.2 < p / stats.norm.sf(4.0) < 5
+    assert corroborate.tail_p(null, 1.0)[1] == "permutation"

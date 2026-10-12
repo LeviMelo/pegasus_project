@@ -756,7 +756,7 @@ class Session:
         # an earlier answer of the same families and fields that this pass no longer selects is retired (the data,
         # the model or the code changed), never left open beside the current answers; a person's verdict keeps it
         new = {x.id for x in admitted}
-        stale = [x for x in self.register.current(kind="answer") if x.family in asked_families
+        stale = [x for x in self.register.current(family=set(asked_families), kind="answer") if x.family in asked_families
                  and x.fields and x.fields[0] in asked_fields and x.id not in new
                  and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
         when = time.strftime("%Y-%m-%d")
@@ -1477,14 +1477,13 @@ class Session:
         return selected
 
     def corroborate(self, register: list[leads.Lead], served: list[tuple[str, str]] | None = None,
-                    only_signals: bool = True, replicates: int = 4999, q: float = 0.05, log=print,
-                    refine_p: float = 0.01, refine_replicates: int = 99999) -> list[leads.Lead]:
+                    only_signals: bool = True, replicates: int = 4999, q: float = 0.05, log=print) -> list[leads.Lead]:
         """Ask every independent field (`corroborate.sources` over the ``served`` event types, and the context fields
         with a declared ICD-10 correspondence) that holds a lead's codes whether its places and years are unusual
         there, against that field's own null (random same-size place sets of the same state and population quintile;
         a cluster of touching places is replaced by connected sets grown on the graph, `corroborate._null_sets`).
-        Leads with p < ``refine_p`` are redrawn at ``refine_replicates`` so that Benjamini-Hochberg over many tests can
-        reject. Benjamini-Hochberg within each source. Written to ``lead.replications["corroboration"]``: the best
+        A small p is read from the null's fitted tail (`corroborate.tail_p`), so that Benjamini-Hochberg over many tests
+        can reject without redrawing the lead at 99,999 replicates. Benjamini-Hochberg within each source. Written to ``lead.replications["corroboration"]``: the best
         source's test, ``ok`` when any source rejects, and every source's test under ``sources``."""
         self._prepare_grid()
         pop = self._pop.sum(1)
@@ -1512,13 +1511,7 @@ class Session:
             batch = self._ledger_open("corroboration", [(x, {"source": src.label}) for src in held])
             for src in held:
                 def run(x=x, src=src, cats=cats, rows=rows, span=span, direction=direction):
-                    c = corroborate.corroborate(grid, src, cats, rows, span, direction, f"corroborate|{x.id}|{src.label}",
-                                                replicates)
-                    # a permutation p-value cannot fall below 1 / (replicates + 1), and Benjamini-Hochberg over m tests
-                    # needs the best to reach q / m: the promising ones are redrawn with many more replicates
-                    if c.tested and c.p < refine_p:
-                        c = corroborate.corroborate(grid, src, cats, rows, span, direction,
-                                                    f"corroborate-refine|{x.id}|{src.label}", refine_replicates)
+                    c = corroborate.corroborate(grid, src, cats, rows, span, direction, replicates)
                     run.result = c
                     return {"tested": c.tested, "p": c.p, "effect": c.observed, "reason": (c.detail or {}).get("reason")}
 
@@ -1809,26 +1802,29 @@ def method_status() -> dict[str, Any]:
     return {m: {**r, "tier": LENS_TIERS.get(m)} for m, r in questions.method_records().items()}
 
 
-def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], graph: str = "contiguity",
+def relation_survey(plan: list[tuple], years: list[int], graph: str = "contiguity",
                     min_events: int = 2000, levels: tuple[str, ...] = ("group",), q: float = 0.05, log=print
                     ) -> list[leads.Lead]:
     """Stage D across systems (`relations.relation_map`, the relation estimator): every field of the ``levels`` of each (dataset, event,
-    blocks) in ``plan`` with at least ``min_events`` events, read at B1; the reported relations enter the register as
+    blocks[, fit years]) in ``plan`` with at least ``min_events`` events, read at B1 over its fit's years (``years``
+    when none is named) and cut to ``years`` (`surprise.window`); the reported relations enter the register as
     leads of kind "relation" (fields: the follower and the leader; locus: the support and the lag; effect: the implied
     correlation). Each system's fits are released before the next is loaded. Statistical relations only (P16)."""
     import gc
 
     from . import multiscale, relations
+    from . import surprise as surprise_mod
 
     surps, edges, n_places, excluded = [], None, None, []
-    for ds, ev, blocks in plan:
-        s = Session(ds, ev, years, graph)
+    for entry in plan:
+        ds, ev, blocks = entry[:3]
+        s = Session(ds, ev, list(entry[3]) if len(entry) > 3 and entry[3] else years, graph)
         for b in blocks:
             m = s.expectations.model(b)
             for f in s.fields(b):
                 if f.level not in levels and not (b == "*" and f.node == "*"):
                     continue
-                x = s.surprise(f.node, "B1")
+                x = surprise_mod.window(s.surprise(f.node, "B1"), years)
                 if x.y.sum() < min_events:
                     continue
                 if x.calibration.get("calibrated") is False:

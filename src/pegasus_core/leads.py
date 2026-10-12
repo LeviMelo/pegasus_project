@@ -134,9 +134,10 @@ class Register:
                     out[r["id"]] = v
         return out
 
-    def current(self, family: str | None = None, kind: str | None = None) -> list[Lead]:
-        """The latest state of every lead, best rank first; of one ``family`` or ``kind`` only, filtered before any
-        body is parsed (a cohort retiring its own stale leads parsed the register's 100,000 bodies: 10 s, 2026-10-12)."""
+    def current(self, family: str | list[str] | set[str] | None = None, kind: str | None = None) -> list[Lead]:
+        """The latest state of every lead, best rank first; of one ``family`` (or any of several) or ``kind`` only,
+        filtered before any body is parsed (a cohort retiring its own stale leads parsed the register's 100,000
+        bodies: 10 s; a question pass retiring its answers, 12 % of a lane, 2026-10-12)."""
         import pyarrow.compute as pc
 
         files = sorted(self.path.glob("part-*.parquet"))
@@ -146,8 +147,11 @@ class Register:
         for f in files:
             tab = pq.read_table(f)
             for col, want in (("family", family), ("kind", kind)):
-                if want is not None:
+                if isinstance(want, str):
                     tab = tab.filter(pc.equal(tab.column(col), want))
+                elif want is not None:
+                    tab = tab.filter(pc.fill_null(pc.is_in(tab.column(col), value_set=pa.array(sorted(want),
+                                                                                                pa.string())), False))
             tabs.append(tab)
         rows = pa.concat_tables(tabs, promote_options="default").to_pylist()   # parts differ in nullability
         latest: dict[str, dict] = {}

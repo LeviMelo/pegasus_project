@@ -126,6 +126,22 @@ class Surprise:
                          "flags": self.flags.ravel().astype(np.int8)})
 
 
+def window(s: Surprise, years: list[int]) -> Surprise:
+    """``s`` on some of its periods: every [U, T] array cut to ``years``. The expectation of a fit over a longer period
+    is an expectation of each of its years, and the noise structure's parameters (κ, ρ, ω) are stationary, so a field
+    fitted over 2010-2023 reads 2019-2023 without a fit of its own (the data-space screen refitted every stored block
+    for the topic's window, 2026-10-12)."""
+    import dataclasses
+
+    keep = np.isin(np.asarray(s.years), np.asarray(years))
+    if keep.all():
+        return s
+    if not keep.any():
+        raise ValueError(f"{s.field.id}: none of {years} among its periods")
+    cut = {k: getattr(s, k)[:, keep] for k in ("y", "mu", "phi", "u", "z", "w", "flags")}
+    return dataclasses.replace(s, years=np.asarray(s.years)[keep], **cut)
+
+
 EXPOSURE_RHO = 0.0   # correlation of log N between the sex-age cells of a place-year (monolith.exposure_variance)
 
 

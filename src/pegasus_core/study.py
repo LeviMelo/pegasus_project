@@ -2153,8 +2153,8 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
 
 def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     """The data-space screen (ARCHITECTURE §8.3, BACKLOG 10.1), at exhaustive depth: every system the store has fitted
-    over the topic's years (the window chosen to read the most data), read with the topic's own systems in one joint model (`tools.relation_survey`: the
-    factor model over graph bands and lags, one BH over everything), so a field anywhere in the data that moves with the
+    over the topic's years (the window chosen to read the most data), read with the topic's own systems (`tools.relation_survey`: the
+    relation estimator over graph bands and lags, one BH over everything), so a field anywhere in the data that moves with the
     topic is found without being named. The relations involving a topic field are kept; each is a lead, never a cause."""
     from . import store, tools
 
@@ -2167,25 +2167,33 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
         return []
     # every system the store has fitted over at least four of the topic's years; the window is the run of the topic's
     # years from its first that maximises systems × years read (the fits on it are made on demand)
+    # each block's stored fits: read over a fit's own years and cut to the window (`surprise.window`), a fit on the
+    # window's years alone is never made (the screen had asked every stored block for one)
     cover: dict[tuple[str, str, str], set[int]] = {}
+    fits: dict[tuple[str, str, str], list[list[int]]] = {}
     for m in store.manifests("monolith"):
         k = m["key"]
-        if k.get("codes") or k.get("source") or not k.get("block") or not k.get("event"):
+        if k.get("codes") or k.get("source") or not k.get("block") or not k.get("event") or k.get("area"):
             continue
         cover.setdefault((k["dataset"], k["event"], k["block"]), set()).update(k.get("years") or [])
+        fits.setdefault((k["dataset"], k["event"], k["block"]), []).append(sorted(k.get("years") or []))
     best = (0, topic_years[:4])
     for e in range(3, len(topic_years)):
         window = topic_years[:e + 1]
         n = sum(1 for ys in cover.values() if set(window) <= ys)
         best = max(best, (n * len(window), window))
     years = best[1]
-    plan: dict[tuple[str, str], set[str]] = {}
+    plan: dict[tuple, set[str]] = {}
     for it in topic:
-        plan.setdefault((it.dataset, it.event), set()).update(it.blocks)
-    for (ds, ev, block), ys in cover.items():
-        if set(years) <= ys:
-            plan.setdefault((ds, ev), set()).add(block)
-    spec = [(ds, ev, sorted(bl)) for (ds, ev), bl in plan.items()]
+        plan.setdefault((it.dataset, it.event, tuple(it.years)), set()).update(it.blocks)
+    topic_keys = {(i.dataset, i.event) for i in topic}
+    for (ds, ev, block), _ys in cover.items():
+        if (ds, ev) in topic_keys:
+            continue
+        held = [f for f in fits[(ds, ev, block)] if set(years) <= set(f)]
+        if held:
+            plan.setdefault((ds, ev, tuple(min(held, key=len))), set()).add(block)
+    spec = [(ds, ev, sorted(bl), list(ys)) for (ds, ev, ys), bl in plan.items()]
     log(f"study: screen over {len(spec)} systems, {sum(len(b) for *_, b in spec)} blocks, {years[0]}-{years[-1]}")
     try:
         found = tools.relation_survey(spec, years, q=decl.q, log=log)

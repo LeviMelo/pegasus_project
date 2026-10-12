@@ -155,3 +155,13 @@ def test_years_an_extract_holds_whole_are_free():
     # SIA-PA's serology for 2010-2018 sat extracted on disk while the scope priced it as 175 GB to download
     it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2009, 2015], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
     assert study._extract_held(it, [2009, 2015]) == [2015]          # the extract starts in 2010
+
+
+def test_a_fit_read_on_a_window_of_its_years():
+    # the screen refitted every stored block on the topic's window; a longer fit's expectation is the window's
+    from pegasus_core import surprise
+
+    s = tools.Session("SINAN-TOXC", "notification", list(range(2019, 2024))).surprise("*", "B1")
+    w = surprise.window(s, [2020, 2021])
+    assert list(w.years) == [2020, 2021] and w.y.shape == (s.y.shape[0], 2)
+    assert (w.mu == s.mu[:, 1:3]).all() and (w.y == s.y[:, 1:3]).all()
