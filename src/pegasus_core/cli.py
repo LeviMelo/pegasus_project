@@ -532,6 +532,17 @@ def study_command(declaration: str) -> None:
     console.print(f"study folder: {out}")
 
 
+@app.command("audit")
+def audit_command(folder: str) -> None:
+    """A study folder against the win condition's acceptance items 1-10: each met, partial or not met, with evidence."""
+    from . import study
+
+    t = Table("item", "what", "status", "evidence", "missing")
+    for r in study.audit(folder):
+        t.add_row(str(r["item"]), r["what"], r["status"], r["evidence"], r["missing"])
+    console.print(t)
+
+
 @app.command("export")
 def export_command(folder: str, to: str = typer.Option(..., help="the directory to write"),
                    tables: str = typer.Option(None, help="comma-separated views of study.duckdb; default all"),

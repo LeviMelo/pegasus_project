@@ -383,13 +383,17 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
     return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
 
 
-def categories_of(registry, node: str, dataset: str | None = None) -> list[str]:
-    """A lead's ICD-10 codes, as recorded, that a source's codes are read under (by prefix): the leaves under its node
-    of the code tree; for a field whose tree is not ICD-10 (a SINAN agravo, whose node is ``*``), the codes its
-    records carry as their condition (pegasus_data `condition_codes`: TOXC's P37.1, B58 and O98.6). Read as
-    3-character categories they were none for every SINAN lead ("no independent field holds its codes", the survey,
-    2026-10-11), and P37.1 would have taken every P37 (tuberculous, listerial, malarial)."""
-    codes = sorted({c.replace(".", "").upper() for c in registry.leaves(node) if re.match(r"^[A-Z]\d\d", c)})
-    if not codes and dataset:
-        codes = gateway.condition_codes(dataset)
-    return codes
+def categories_of(registry, node: str, dataset: str | None = None, codes: list[str] | None = None) -> list[str]:
+    """A lead's ICD-10 codes, as recorded, that a source's codes are read under (by prefix): a code set's own
+    ``codes``; else the leaves under its node of the code tree; for a field whose tree is not ICD-10 (a SINAN agravo,
+    whose node is ``*``), the codes its records carry as their condition (pegasus_data `condition_codes`: TOXC's
+    P37.1, B58 and O98.6). Read as 3-character categories they were none for every SINAN lead ("no independent field
+    holds its codes", the survey, 2026-10-11), and P37.1 would have taken every P37 (tuberculous, listerial,
+    malarial). A code set's node is ``*`` too, and the condition codes of SIH are every diagnosis it records: SIH's
+    P37.1 admissions were corroborated against every death (2026-10-12)."""
+    if codes:
+        return sorted({c.replace(".", "").upper() for c in codes})
+    out = sorted({c.replace(".", "").upper() for c in registry.leaves(node) if re.match(r"^[A-Z]\d\d", c)})
+    if not out and dataset:
+        out = gateway.condition_codes(dataset)
+    return out

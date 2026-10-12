@@ -1506,7 +1506,8 @@ class Session:
             if rows.size == 0 or not span:
                 continue
             seen.append(x)
-            cats = corroborate.categories_of(reg, node, self.dataset)
+            cats = corroborate.categories_of(reg, node, self.dataset,
+                                             (self.source or {}).get("codes") if node == "*" else None)
             held = [src for src in fields_ if grid.holds(src, cats)]
             batch = self._ledger_open("corroboration", [(x, {"source": src.label}) for src in held])
             for src in held:

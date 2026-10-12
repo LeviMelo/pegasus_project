@@ -134,3 +134,13 @@ def test_a_paused_lane_resumes_when_nothing_else_computes():
     assert study._may_resume(8.4, 6.1, others_working=False)
     assert not study._may_resume(8.4, 6.1, others_working=True)
     assert study._may_resume(14.0, 6.1, others_working=True)
+
+
+def test_a_code_sets_categories_are_its_codes():
+    # a code set's node is "*": SIH's P37.1 admissions had been corroborated under every code SIH records
+    from pegasus_core import corroborate
+
+    assert corroborate.categories_of(None, "*", "SIHSUS-RD", ["P37.1", "B58"]) == ["B58", "P371"]
+    assert study._corroboration_text({"tested": False, "reason": "no independent field holds its codes"}).startswith("no")
+    assert "p 0.001" in study._corroboration_text({"tested": True, "label": "SIM-DO death", "observed": 3.0,
+                                                  "null_median": 1.0, "p": 0.001, "q": 0.02})

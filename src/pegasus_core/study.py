@@ -327,6 +327,19 @@ def _icd(code: str) -> str:
     return code.replace(".", "").strip().upper()
 
 
+def _corroboration_text(corr: dict) -> str | None:
+    """What another system said of a finding: its best source's test (observed against the null's median, p, and the
+    q over every lead when tested), or why it was not tested; None when it was not asked (only signals are). The
+    table had kept the reason alone, empty for every lead that was tested (the smoke study's 67 signals)."""
+    if not corr:
+        return None
+    if not corr.get("tested"):
+        return corr.get("reason") or "not tested"
+    q = f", q {corr['q']:.2g}" if corr.get("q") is not None else ""
+    return (f"{corr.get('label') or corr.get('source')}: {corr.get('observed', float('nan')):.3g} against "
+            f"{corr.get('null_median', float('nan')):.3g} expected, p {corr.get('p', 1.0):.2g}{q}")
+
+
 def _rows_table(rows: list[dict]) -> pa.Table:
     """Rows as a table over the union of their keys, in first-seen order: pyarrow takes the columns of the first row
     alone, so a column only some rows carry (an institution's facts, a cohort's estimate beside its notes) was dropped
@@ -2350,7 +2363,7 @@ def _finding(x: leads.Lead, it: Item, label: str, names: dict) -> dict:
         "q": float(x.q), "family": x.family, "methods": ", ".join(sorted(x.provenance.get("methods") or []))
         if isinstance(x.provenance.get("methods"), list) else str(x.provenance.get("methods") or ""),
         "class": tri.get("class"), "class_reason": tri.get("reason"), "class_grade": tri.get("grade"),
-        "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": corr.get("reason"),
+        "replication": x.replication, "corroborated": bool(corr.get("ok")), "corroboration": _corroboration_text(corr),
         "status": x.status, **(_COMPOSITION if x.locus.get("groups_by") and x.locus.get("groups_by") != gateway._strata(
             it.dataset, it.event).get("race") else _reliability(x.provenance.get("methods") or [x.estimand]))}
 
@@ -2772,6 +2785,116 @@ def _fmt(v: Any) -> str:
 
 
 # ---------------------------------------------------------------------- export
+
+
+def audit(folder: str | Path) -> list[dict]:
+    """A study folder against the win condition's acceptance items 1–10 (BACKLOG): each item met, partial or not met,
+    with the evidence read from the folder's own files, so a study is certified by what it holds, not by a reading of
+    its log. Item 8's export and item 10's machine are checked on the folder as it stands."""
+    import yaml
+
+    folder = Path(folder)
+
+    def table(name):
+        path = folder / f"{name}.parquet"
+        return pq.read_table(path).to_pylist() if path.exists() else []
+
+    scope = yaml.safe_load((folder / "scope.yml").read_text(encoding="utf-8")) if (folder / "scope.yml").exists() else {}
+    prov = json.loads((folder / "provenance.json").read_text(encoding="utf-8")) if (folder / "provenance.json").exists() else {}
+    read = scope.get("read") or []
+    findings, relations, persons = table("findings"), table("relations"), table("persons")
+    hyp, captured, profile = table("hypotheses"), table("capture"), table("context_profile")
+    out: list[dict] = []
+
+    def item(n, what, checks):
+        met = [c for c, ok in checks if ok]
+        missing = [c for c, ok in checks if not ok]
+        out.append({"item": n, "what": what, "status": "met" if not missing else ("partial" if met else "not met"),
+                    "evidence": "; ".join(met), "missing": "; ".join(missing)})
+
+    def reads(ds, pred=lambda i: True):
+        return [i for i in read if gateway.same_dataset(i["dataset"], ds) and pred(i)]
+
+    sources = (i.get("source") or {} for i in read)
+    sigtap = any(s_.get("structure") == "SIGTAP" for s_ in sources)
+    contexts = [str(c) for c in scope.get("contexts") or []]
+    item(1, "scope", [
+        ("SINAN-TOXG and TOXC read", bool(reads("SINAN-TOXG")) and bool(reads("SINAN-TOXC"))),
+        ("SIH with the codes in any diagnosis", any(i.get("mentions") or (i.get("source") or {}).get("classifier") in
+                                                    ("DIAG_SECUN", "mentions:admission.diagnoses") for i in reads("SIHSUS-RD"))
+         or any(r.get("dataset") in ("SIHSUS-RD", "SIH-RD") for r in scope.get("related_codes") or [])),
+        ("SIM with them on any certificate line", any(i.get("mentions") for i in reads("SIM-DO"))
+         or any(r.get("dataset") == "SIM-DO" and "mentions" in str(r.get("where")) for r in scope.get("related_codes") or [])),
+        ("SINASC births with related anomalies", bool(reads("SINASC-DN"))),
+        ("SIA serology procedures read", sigtap and bool(reads("SIASUS-PA") or reads("SIASUS-BI"))),
+        (f"medicines {len(scope.get('medicines') or [])}", bool(scope.get("medicines"))),
+        ("BNAFAR/SNGPC for them", any("sngpc" in c.lower() or "bnafar" in c.lower() for c in contexts)),
+        ("SISAGUA among the contexts", any("sisagua" in c.lower() for c in contexts)),
+        (f"related codes with strength {len(scope.get('related_codes') or [])}",
+         any(r.get("lift") is not None for r in scope.get("related_codes") or [])),
+        (f"person paths with viability {len(scope.get('person_paths') or [])}",
+         any(p_.get("verdict") for p_ in scope.get("person_paths") or [])),
+    ])
+    fields_ = " ".join(str(f.get("field")) for f in findings) + " " + " ".join(json.dumps(i.get("source") or {}) for i in read)
+    item(2, "fields", [
+        ("counts", bool(read)),
+        ("measures", "measure" in fields_ or any("measures" in (i.get("readers") or {}) for i in read)),
+        ("compositions", "share" in fields_ or any("compositions" in (i.get("readers") or {}) for i in read)),
+        ("infection away from residence", "away" in fields_),
+        ("intervals", "interval" in fields_ or any("intervals" in (i.get("readers") or {}) for i in read)),
+        ("ratios", "population" in fields_),
+        ("linked shares", "linked" in fields_),
+        ("a capture of TOXC × SIH × SIM", any(r.get("estimate") and str(r.get("lists", "")).count("×") >= 2 for r in captured)),
+        ("quality fields", any("quality:" in str(f.get("label")) for f in findings)
+         or any("quality" in (i.get("readers") or {}) for i in read)),
+    ])
+    asked = {f.get("question") for f in findings}
+    item(3, "components", [
+        (f"questions answered: {', '.join(sorted(a for a in asked if a))}", len(asked - {None}) >= 5),
+        ("the declared hypothesis answered", any(h.get("answer") in ("supported", "not supported at q") for h in hyp)),
+    ])
+    ctx_rel = [r for r in relations if any(c.lower() in str(r.get("field", "")).lower() + str(r.get("leader", "")).lower()
+                                           + str(r.get("pair", "")).lower() for c in contexts)]
+    item(4, "relations", [
+        (f"among fields: {len(relations)} rows", bool(relations)),
+        (f"with contexts: {len(ctx_rel)} rows", bool(ctx_rel)),
+        ("SISAGUA as a context with lags", any("sisagua" in json.dumps(r, default=str).lower() for r in ctx_rel)),
+        ("the data-space screen", any(r.get("screen") for r in relations)),
+    ])
+    item(5, "persons", [
+        (f"cohort contrasts {sum(1 for r in persons if r.get('rr') is not None)}", any(r.get("rr") is not None for r in persons)
+         or any("contrasts" in str(r.get("note")) for r in persons)),
+        (f"capture–recapture {len([r for r in captured if r.get('estimate')])} populations", any(r.get("estimate") for r in captured)),
+    ])
+    def share(k):
+        return sum(1 for f in findings if f.get(k) not in (None, "", [], {})) / max(len(findings), 1)
+
+    signals = [f for f in findings if f.get("class") == "signal"]
+    asked_corr = sum(1 for f in signals if f.get("corroboration")) / max(len(signals), 1)
+    item(6, "interpretation", [
+        (f"recording class on {share('class'):.0%}", share("class") > 0.9),
+        (f"graded {share('class_grade'):.0%}", share("class_grade") > 0.5),
+        (f"replication on {share('replication'):.0%}", share("replication") > 0.9),
+        (f"corroboration on {asked_corr:.0%} of the signals (only signals are asked)", asked_corr > 0.9),
+        (f"context profiles {len(profile)}", bool(profile)),
+        (f"stories {share('story'):.0%}", share("story") > 0),
+        ("institutional findings with CNES facts", any(f.get("institution_facts") for f in findings)),
+    ])
+    files = ["findings", "descriptive", "relations", "persons", "capture", "groups"]
+    item(7, "products", [(f"{f}.parquet", (folder / f"{f}.parquet").exists()) for f in files] + [
+        ("figures", any((folder / "figures").glob("*.png")) if (folder / "figures").exists() else False),
+        ("report.html", (folder / "report.html").exists()), ("provenance.json", bool(prov))])
+    size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) / 2**20
+    item(8, "storage", [(f"the folder holds {size:.1f} MB", size < 200), ("study.duckdb views", (folder / "study.duckdb").exists())])
+    sm = [f for f in findings if 431690 in [int(x) for x in (f.get("places") or []) if str(x).isdigit()]
+          and (f.get("first_year") or 0) <= 2018 <= (f.get("last_year") or 9999)]
+    item(9, "documented event", [(f"Santa Maria 2018 found by discovery: {len(sm)} findings "
+                                  + ", ".join(sorted({str(f.get('label'))[:40] for f in sm}))[:300], bool(sm))])
+    minutes = (prov.get("seconds") or 0) / 60
+    est = prov.get("estimated_minutes") or scope.get("estimated_minutes")
+    item(10, "cost", [(f"{minutes:.0f} min against an estimate of {est} made before running",
+                       bool(prov) and est is not None and minutes <= float(est))])
+    return out
 
 
 def export(folder: str | Path, to: str | Path, tables: list[str] | None = None, fmt: str = "parquet") -> Path:
