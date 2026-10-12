@@ -1657,13 +1657,8 @@ def own_mix(y: np.ndarray, state: np.ndarray, leave_out: bool = True) -> np.ndar
 def group_columns(dataset: str, event: str) -> dict[str, tuple[str, ...]]:
     """The category columns a field is split by as group dimensions (ARCHITECTURE §5.3, component 8), with their
     declared missing codes: every modelled composition and the subject's race stratum (its 'ignorado' a value of its
-    own, "not recorded"). A column whose declared fact is administrative (pegasus_data roles' ``fact_domain``: billing,
-    financing, management, record type) is no group of people or of disease: SIH's 35 group columns held 26 such, and a
-    study reported "group heterogeneity in COBRANCA" (2026-10-11). Person, clinical and process columns stay; a column
-    without a declared domain stays too, and is said undeclared by pegasus_data."""
-    admin = {r["column"] for r in gateway.roles(dataset) if r.get("fact_domain") == "administrative"}
-    out = {d.column: tuple(d.missing) for d in fields.declared(dataset)
-           if d.kind == "composition" and not d.reason and d.column not in admin}
+    own, "not recorded"). An administrative column is none (`fields.declared` gives it a reason)."""
+    out = {d.column: tuple(d.missing) for d in fields.declared(dataset) if d.kind == "composition" and not d.reason}
     race = gateway._strata(dataset, event).get("race")
     if race and race not in out:
         out[race] = tuple(next((r.get("missing") or () for r in gateway.roles(dataset) if r["column"] == race), ()))

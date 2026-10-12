@@ -265,11 +265,13 @@ ratios:                               # optional ratio fields (§5.2): DATASET[:
 download: 10                          # GB the study may download (default: the depth's)
 time: 240                             # minutes for the related codes' fields (default: the depth's)
 chapters: true                        # the topic's codes inside their fitted chapters, or as code sets (default: beyond a survey)
+questions: [excess, group]            # the questions asked of every field (default: all eleven)
+readers: [compositions, intervals]    # the field kinds the depth adds (default: the depth's: measures, compositions, intervals, flows, quality, supports)
 ```
 
 Every key has a default except `study` and `topic.seeds`. **How much a study ingests is the declaration's to set**
-(author, 2026-10-11): `only`, `exclude`, `period`, `download`, `time`, `contexts` and `chapters` cut a study to the
-sources, years and fits a question needs, and a source whose latest year holds none of the topic's records is left out
+(author, 2026-10-11): `only`, `exclude`, `period`, `download`, `time`, `contexts`, `chapters`, `questions` and
+`readers` cut a study to the sources, years, fits and questions it needs, and a source whose latest year holds none of the topic's records is left out
 before its other years are fetched (`study._probe`). `studies/toxoplasmosis_quick.yml` is the reference study cut to
 its own four sources and nine years at deep depth: the debugging loop, minutes not hours. A topic may also be a whole system or the whole data space
 ("all of SIM" is a study; §3.8).

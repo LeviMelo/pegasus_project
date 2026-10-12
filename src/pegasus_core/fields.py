@@ -12,7 +12,7 @@ numerator and denominator, a level never lifts below its own grain.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 
 import numpy as np
@@ -349,7 +349,17 @@ def declared(dataset: str) -> list[Declared]:
                 else "a place finer than the residence, or a residence with no code system")))
         else:
             out.append(Declared(**base, kind="", reason=f"kind {r['kind']} not yet read"))
+        if r.get("fact_domain") in ADMINISTRATIVE and not out[-1].reason:
+            # a fact about the record's billing, financing or management, not about people or disease (pegasus_data
+            # roles' ``fact_domain``): no field of it, said why. SIH read 19 billing values as measures and 26 billing
+            # marks as groups ("group heterogeneity in COBRANCA", 2026-10-11)
+            out[-1] = replace(out[-1], reason=f"an administrative fact ({r.get('property') or r['role']}), not a "
+                                              "field of people or disease")
     return out
+
+
+#: the fact domains no field is read from (pegasus_data roles' ``fact_domain``)
+ADMINISTRATIVE = ("administrative",)
 
 
 def measure_source(dataset: str, event: str, column: str) -> dict:

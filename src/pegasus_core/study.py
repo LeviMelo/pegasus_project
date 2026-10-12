@@ -35,7 +35,7 @@ DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
 DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters"}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters", "questions", "readers"}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 #: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
@@ -66,6 +66,8 @@ class Declaration:
     time: float | None = None    # minutes for the related codes' fields, in place of the depth's `TIME_BUDGET_MIN`
     download: float | None = None  # gigabytes the study may download, in place of the depth's `DOWNLOAD_BUDGET_GB`
     chapters: bool | None = None   # the topic's nodes read inside their fitted chapters (None: beyond a survey)
+    questions: list[str] | None = None  # the questions asked of every field (None: all, `questions.QUESTIONS`)
+    readers: list[str] | None = None    # the field kinds the depth adds (None: its `DEPTH_READERS`)
 
     @property
     def in_chapters(self) -> bool:
@@ -127,6 +129,12 @@ def load(path: str | Path) -> Declaration:
     if topic.get("include"):
         problems.append("topic.include (fields forced in, ARCHITECTURE §3.1) is not built yet: it would be ignored; "
                         "topic.only restricts the study to datasets or systems, topic.exclude leaves them out")
+    from .questions import QUESTIONS
+    names = [getattr(q, "name", q) for q in QUESTIONS]
+    for k, allowed in (("questions", names), ("readers", list(_ALL))):
+        v = doc.get(k)
+        if v is not None and (not isinstance(v, list) or set(v) - set(allowed)):
+            problems.append(f"{k} {v!r}: a list among {', '.join(allowed)}")
     if doc.get("chapters") is not None and not isinstance(doc["chapters"], bool):
         problems.append(f"chapters {doc['chapters']!r}: true (the topic's codes inside their fitted chapters) or false "
                         "(as code sets of their own)")
@@ -146,7 +154,7 @@ def load(path: str | Path) -> Declaration:
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
                        time=float(doc["time"]) if doc.get("time") is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
-                       chapters=doc.get("chapters"))
+                       chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"))
 
 
 # ---------------------------------------------------------------------- the scope
@@ -171,6 +179,7 @@ class Item:
     est_seconds: float | None = None     # the run's predicted wall clock for this item (`_estimate`)
     extract: bool = False                # its codes read from an extract of the dataset, file by file (`_extract_or_lake`)
     confirm_last: int | None = None      # stage E's later years: its leads selected on the years up to it, tested after
+    questions: list[str] | None = None   # the declaration's questions (None: every question)
     note: str = ""
 
 
@@ -329,11 +338,16 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
     else:
         a, b = 3.0, 0.3
     questions = float(np.median(per_item)) if per_item else 120.0
+    from .questions import QUESTIONS
+
+    # the declaration's questions only: their share of the eleven (a measured step asked them all)
+    share = len(decl.questions) / len(QUESTIONS) if decl.questions is not None else 1.0
+    questions *= share
     for it in items:
         if it.status != "in" or not it.years:
             continue
         step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
-        if step in measured:
+        if step in measured and share == 1.0:
             it.est_seconds = round(measured[step], 1)
             continue
         fit = 0.0
@@ -655,9 +669,11 @@ def resolve(decl: Declaration, log=print) -> Scope:
     for it in items:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
         # readers would read every event of the type against the population
-        it.readers = {} if it.source else dict(DEPTH_READERS[decl.depth])
+        it.readers = {} if it.source else {k: v for k, v in DEPTH_READERS[decl.depth].items()
+                                           if decl.readers is None or k in decl.readers}
+        it.questions = decl.questions
         coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
-        if coded and "supports" in DEPTH_READERS[decl.depth]:
+        if coded and "supports" in DEPTH_READERS[decl.depth] and (decl.readers is None or "supports" in decl.readers):
             it.readers = {"supports": DEPTH_READERS[decl.depth]["supports"]}     # the code set at its other places
     runs = _link_runs()
     paths = _person_paths(items, runs)
@@ -691,6 +707,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
         for it in items:
             if it.status == "in" and len(it.years) >= 2 * LATER_YEARS + 2:
                 it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
+    for it in items:
+        it.questions = decl.questions          # every item, the related codes' and the linked shares' too
     overlap, overhead = _phase_record(decl)
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
@@ -1317,7 +1335,7 @@ def _plan(it: Item, others: list | None = None):
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
                                                               **it.readers)],
-                       relations=False, triage=True, report=None,
+                       relations=False, triage=True, report=None, questions=it.questions,
                        extra={"corroborators": others or [], **({"confirm_last": it.confirm_last} if it.confirm_last else {})})
 
 
