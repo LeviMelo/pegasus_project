@@ -98,3 +98,11 @@ def test_an_areas_graph_and_register_are_its_own(monkeypatch):
     s = tools.Session("SINAN-TOXC", "notification", list(range(2019, 2024)))
     assert int(s.edges().max()) < 497                     # the graph over the area's 497 places, not Brazil's 5,570
     assert leads.Register().path.name == "leads_area_43" and config.area_suffix() == "_area_43"
+
+
+def test_triage_inside_an_area(monkeypatch):
+    # the evidence grid was Brazil's while the blocks were the area's: a place's index ran past 497
+    monkeypatch.setenv("PEGASUS_AREA", "43")
+    s = tools.Session("SINAN-TOXC", "notification", list(range(2019, 2024)))
+    s.triage()
+    assert len(s._grid_places) == 497

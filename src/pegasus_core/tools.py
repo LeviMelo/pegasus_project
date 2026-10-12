@@ -1091,7 +1091,9 @@ class Session:
             import pyarrow.compute as pc
 
             # an object of the state: the event type's totals per place-year, read once (14 s a process on SIH)
+            area = config.study_area()
             key = {"what": "evidence_grid", "dataset": self.dataset, "event": self.event, "years": list(self.years),
+                   **({"area": sorted(area)} if area else {}),
                    "data": config.data_version(), "code": config.code_key("pegasus_core.tools:Session._prepare_grid")}
             hit = store.get_arrays("tools", key)
             if hit is not None:
@@ -1099,6 +1101,8 @@ class Session:
                 self._total, self._ill, self._pop = hit["total"], hit["ill"], hit["pop"]
                 return
             pop_t = gateway.population(list(self.years)).group_by(["u", "year"]).aggregate([("n", "sum")])
+            # the study's area, as its blocks: triage indexes both by place (RS's grid held Brazil's 5,570)
+            pop_t = pop_t.filter(pa.array(config.in_area(pop_t.column("u").to_numpy())))
             places = np.unique(pop_t.column("u").to_numpy())
             years = np.asarray(self.years)
             pop = np.zeros((len(places), len(years)))
