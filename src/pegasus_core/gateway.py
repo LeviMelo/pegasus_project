@@ -617,7 +617,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
         except LookupError:
             records = None
     key = {"what": "event_counts", **({"cell": False} if not cell else {}), **({"support": support} if support else {}), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": column,
-           **({"extract": {"codes": sorted(made["codes"]), "files": len(made["files"])}, "codes": sorted(codes)}
+           **({"extract": {"filters": made["filters"], "files": len(made["files"])}, "codes": sorted(codes)}
               if records is not None else {}),
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_df_key(dataset, year), **({"race": race} if race else {})}
