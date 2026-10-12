@@ -347,8 +347,9 @@ class Session:
 
     def relation(self, node: str, exposure: np.ndarray, max_lag: int, scale: str = "ibge_immediate_region",
                  within: list[int] | None = None, reverse: bool = False) -> relations.LagCurve:
-        """The distributed-lag relation of an exposure [U, T] (`exposure`) to field ``node``'s rate (ARCHITECTURE §7.5,
-        `relations.distributed_lag`): both aggregated to ``scale`` (the exposure as a resident-weighted rate), the
+        """The distributed-lag effect of an exposure [U, T] (`exposure`) on field ``node``'s rate (ARCHITECTURE §7.5,
+        `relations.distributed_lag`; the effect size in rate-ratio units and the smooth joint lag shape, which the
+        relation estimator's per-lag ρ (`relate`) does not give, and its pairwise confirmation, never its search): both aggregated to ``scale`` (the exposure as a resident-weighted rate), the
         outcome read against its B1 expectation, NB at its block's dispersion. ``within`` keeps the units whose places
         lie in these macro-regions (1–5); ``reverse`` reverses time, so the regressor at lag ℓ is the exposure ℓ periods
         later (a negative control: the outcome leading its exposure)."""
@@ -1785,9 +1786,9 @@ def method_status() -> dict[str, Any]:
 def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], graph: str = "contiguity",
                     min_events: int = 2000, levels: tuple[str, ...] = ("group",), q: float = 0.05, log=print
                     ) -> list[leads.Lead]:
-    """Stage D across systems (`relations.relation_map`): every field of the ``levels`` of each (dataset, event,
+    """Stage D across systems (`relations.relation_map`, the relation estimator): every field of the ``levels`` of each (dataset, event,
     blocks) in ``plan`` with at least ``min_events`` events, read at B1; the reported relations enter the register as
-    leads of kind "relation" (fields: the follower and the leader; locus: the band and the lag; effect: the implied
+    leads of kind "relation" (fields: the follower and the leader; locus: the support and the lag; effect: the implied
     correlation). Each system's fits are released before the next is loaded. Statistical relations only (P16)."""
     import gc
 
@@ -1826,7 +1827,7 @@ def relation_survey(plan: list[tuple[str, str, list[str]]], years: list[int], gr
     admitted = [leads.Lead(kind="relation", estimand="co-movement", tier="B1", fields=[r["field"], r["leader"]],
                            locus={"band": r["support"], "lag": r["lag"]}, effect=float(r["rho"]), scale="rho",
                            interval=None, p=float(r["p"]), q=qmap[id(r)], family=family,
-                           null="independent fields' innovations (factor model per band)",
+                           null="the leader's circular shifts (spectrum and spatial structure kept), a Student-t tail",
                            calibrated=record.get("calibrated") is True, method={"relation_map": record},
                            provenance={"z": float(r["z"]), "unanswered": out["unanswered"] + excluded,
                                        **({"partial": r["partial"], "direct": bool(r["direct"])} if "direct" in r else {})})
@@ -1863,22 +1864,52 @@ def joint(fields: list[tuple[str, str, str]], years: list[int], graph: str = "co
     return found
 
 
-def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
-            lags: int = 2, q: float = 0.05) -> list[dict]:
-    """Do two fields move together, at which spatial scale and lag (ARCHITECTURE §9.3, `compare`)? The relation map
-    of the two (`relations.relation_map`: N1 innovations by graph band, the factor model, directness, and the national
-    and macro-regional courses where the bands cannot be identified), each field as (dataset, event, node) at B1.
-    Every row is returned, ``reported`` marking the relations at q."""
+def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "contiguity", lags: int = 2,
+           q: float = 0.05, grain: str = "year", window: tuple[int, int] | None = None, macro: list[int] | None = None,
+           sources: list[dict | None] | None = None, calibrated_only: bool = True, profiles: bool = False, log=None
+           ) -> list[dict] | dict:
+    """Do fields move together, at which spatial support and lag (ARCHITECTURE §8.1)? The relation estimator
+    (`relations.relation_map`) over the B1 innovations of ``fields`` ((dataset, event, node) each, read by ``sources``
+    where not the event type's own, e.g. `fields.codes_source`): every graph band, the macro-regional and the national
+    courses, lags 0..``lags`` periods (``grain`` "month": months), one BH at q over everything, the partial and direct
+    read of the reported ones. ``window`` (first, last period label) and ``macro`` (macro-regions 1-5) cut the fitted
+    innovations to a window and a part of the country, whose graph then is the spectrum. A field whose predictive is
+    miscalibrated at B1 is left out and said (``calibrated_only``; invariant 8: it never enters a pair scan, its
+    relations are unanswered). Every row is returned, ``reported`` marking the relations at q; the rows of one pair and
+    support over the lag are its lag profile, and with ``profiles`` the result is {"rows", "profiles"}, the profile of
+    each ordered pair and support as one cumulative test over lags 1..L (`relations.relation_estimate`)."""
     from . import multiscale, relations
 
     sessions: dict = {}
     surps = []
-    for ds, ev, node in (x, y):
-        s = sessions.setdefault((ds, ev), Session(ds, ev, years, graph))
+    for i, (ds, ev, node) in enumerate(fields):
+        src = {**((sources[i] if sources else None) or {}), **({"grain": "month"} if grain == "month" else {})}
+        s = sessions.setdefault((ds, ev, json.dumps(src, sort_keys=True)), Session(ds, ev, years, graph, source=src))
         surps.append(s.surprise(node, "B1"))
     first = next(iter(sessions.values()))
-    spectrum = multiscale.spectrum(first.edges(), len(surps[0].places))
-    return relations.relation_map(surps, spectrum, lags=lags, K=2, q=q, ledger=first.ledger)["rows"]
+    if calibrated_only:
+        for x in (x for x in surps if x.calibration.get("calibrated") is False):
+            (log or print)(f"relate: {x.field.id} is miscalibrated at B1 (KS {x.calibration.get('ks', float('nan')):.3f}): "
+                           "left out, its relations are unanswered")
+        surps = [x for x in surps if x.calibration.get("calibrated") is not False]
+        if len(surps) < 2:
+            return {"rows": [], "profiles": []} if profiles else []
+    edges, n = first.edges(), len(surps[0].places)
+    if macro is not None:             # the cut places' own graph: their edges, reindexed
+        keep = np.isin(np.asarray(surps[0].places).astype(np.int64) // 100000, macro)
+        index = np.cumsum(keep) - 1
+        edges = index[edges[keep[edges].all(1)]]
+        n = int(keep.sum())
+    out = relations.relation_map(surps, multiscale.spectrum(edges, n), lags=lags, q=q, ledger=first.ledger,
+                                 periods=window, macro=macro, log=log)
+    return {"rows": out["rows"], "profiles": out["profiles"]} if profiles else out["rows"]
+
+
+def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
+            lags: int = 2, q: float = 0.05, grain: str = "year") -> list[dict]:
+    """Do two fields move together, at which spatial support and lag? `relate` of the two (the CLI's ``compare``, a
+    study's pairs)."""
+    return relate([x, y], years, graph, lags, q, grain)
 
 
 def determinants(x: tuple[str, str, str], contexts: list, years: list[int], graph: str = "contiguity", lags: int = 2,
@@ -1905,7 +1936,7 @@ def determinants(x: tuple[str, str, str], contexts: list, years: list[int], grap
     if not cds:
         return []
     spectrum = multiscale.spectrum(s.edges(), len(surp.places))
-    rows = relations.relation_map([surp], spectrum, lags=lags, K=2, q=q, ledger=s.ledger, courses=False,
+    rows = relations.relation_map([surp], spectrum, lags=lags, q=q, ledger=s.ledger, courses=False,
                                   contexts=cds)["rows"]
     return [r for r in rows if surp.field.id in (r.get("field"), r.get("leader"))]
 

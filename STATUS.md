@@ -39,7 +39,7 @@ leads.Register (Parquet parts) -- Lead(kind, estimand, tier, fields, locus, effe
    |
    +--> stage E on demand / in `update`:  Session.triage (scans.explain, facility, marks)  ->  replication (later years, other jurisdictions)
    |                                       corroborate (other systems)  ->  verdicts, replication tier
-   +--> stage D:  relations.relation_map (N1 innovations in graph bands, factor model)  /  dependency (between-place map, scans.maps, scans.pairs)
+   +--> stage D:  relations.relation_map (N1 innovations, the one relation estimator over graph bands and courses, circular-shift null)  /  dependency (between-place map, scans.maps, scans.pairs)
    +--> persons:  scans.cohort on gateway.persons / linked_counts
    +--> use:  report.report / report.dossier / report.record_verdict ; tools.find_leads / explain_lead ; mcp_server ; cli
 harness: planted worlds, null worlds, known positives -> store `harness` -> questions.method_records -> every lead's method record
@@ -94,7 +94,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `scans/lenses` | 795 | the v0 lenses, kept as methods of questions: outbreak, change point, space-time, spatial cluster, trend divergence (3 scales), group disparity, burden/mean cell tests; **season departure** (monthly grain, 3 scales: yearly NB harmonics against the rest of the field's season, random-effects over the years; the `seasonality` question's two methods, level and change) | `spatial_cluster`, `space_time`, `outbreak`, `change_point`, `group_disparity`, `trend_divergence`, `unit_trends`, `season_departure`, `year_harmonics`, `mean_cell`, `burden_ratio`, `burden_shift`, `minimum_effect`, `Finding` | control, surprise, scans.scales, scans.subset |
 | `scans/subset` | 461 | expectation-based Poisson subset scanning over graph-connected neighbourhoods and windows, with Monte Carlo null | `Scanner`, `scan`, `score`, `neighbourhoods`, `windows`, `Null`, `null`, `replicate`, `Subset` | config, surprise |
 | `scans/scales` | 63 | the unit a per-place lens reads (municipality, immediate region, state) | `Scale`, `municipality`, `standard` | gateway |
-| `relations` | 712 | stage D: N1-whitened innovations in graph-frequency bands, lagged stacking, EM factor model with ARD (`factor_model`), `relation_table` under one BH, directness by the graphical lasso, national/macro-regional course relations with phase surrogates; the penalised distributed-lag curve (`distributed_lag`) as pairwise confirmation | `relation_map`, `factor_model`, `innovations`, `lagged`, `bands`, `relation_table`, `course_relations`, `direct_relations`, `distributed_lag`, `lag_matrix`, `LagCurve`, `Factors`, `SpectralFactors`, `spectral_factor_model` (not wired), `Departures` | control, surprise |
+| `relations` | 608 | stage D: the relation estimator (`relation_estimate`, `relation_map`): N1-whitened innovations (`innovations`, `context_innovations`), projected on supports (graph-frequency bands, macro-regional and national courses), lagged cross-covariance of every pair against the leader's circular shifts with a Student-t tail (`_cross`, `_null_moments`), one BH, a cumulative lag profile per pair and support (`profiles`), the partial and direct read of the reported ones (`_direct`, ridge-GCV residual); `restrict` cuts a window and macro-regions; the penalised distributed-lag curve (`distributed_lag`) as the effect-size confirmation | `relation_map`, `relation_estimate`, `restrict`, `innovations`, `context_innovations`, `distributed_lag`, `lag_matrix`, `LagCurve`, `Departures`, `BAND_EDGES` | control, surprise |
 | `dependency` | 271 | the dependency map over a plan's systems: place effects of every fitted field plus context fields, marginal and conditional edges under one control (`scans/maps`) | `dependency_map`, `build`, `place_effect`, `gaussian_effect`, `normal_scores` | config, control, fields, gateway, leads, scans, scans.maps, scans.pairs, store, surprise, tools |
 | `scans/maps` | 280 | map inputs and the map: every field against every other between places, two layers (E_b marginal, conditional on contexts), utilization factors | `MapInputs`, `DependencyMap`, `dependency_map`, `exclude_miscalibrated`, `care`, `factors`, `testable` | control, fields, scans.pairs, store |
 | `scans/pairs` | 291 | dependence between two fields at their common support: Moran-basis spectral randomisation null, minimum-effect p | `Pair`, `MoranBasis`, `statistics`, `between`, `within`, `minimum_effect_p` | config, control, graphs, store |
@@ -261,8 +261,8 @@ Counts of a classifier node (ICD-10 chapters/blocks/3-character categories, SIGT
 | `survey DATASET EVENT` | the scheduled pass: every field x every question |
 | `triage DATASET EVENT [--stale]` | classify open leads and replicate them |
 | `relations DATASET:EVENT:BLOCK,...` | stage D across systems |
-| `relation DATASET EVENT NODE EXPOSURE...` | distributed-lag relation of an exposure to a field |
-| `compare X Y`, `joint FIELDS...` | do two fields move together (scale, lag); where several fields depart together |
+| `relation DATASET EVENT NODE EXPOSURE...` | distributed-lag effect (rate ratio) of an exposure on a field |
+| `compare X Y [--lags --grain --window --macro]`, `joint FIELDS...` | the relation estimator on two fields (support, lag, partial); where several fields depart together (locus) |
 | `map [--years --negatives --plan]` | the dependency map of a plan's systems and contexts |
 | `cohort DATASET EVENT ROLE YEAR --outcome D:ROLE...` | cohort scan on linked persons |
 | `disparity DATASET EVENT NODE` | race disparities of a field by indirect standardisation |
@@ -362,8 +362,8 @@ Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on dema
 
 ## 9. Stale, dead and orphaned code
 
-`scripts/codehealth.py` (2026-10-10): 40 modules, 0 import cycles, 9 definitions referenced nowhere: `fields.common_support`, `harness.recovery`, `harness.group_world`, `relations.spectral_factor_model`, `scans.patterns.temporal_stability`, `scans.patterns.spatial_stability`, `scans.utilization.parallel_analysis`, `scans.utilization.rank1_share`, `surveillance.expected_false_alarms`. Beyond that list:
-- `scans/patterns.py` and `scans/utilization.py` are imported by no production path (only by `data/` scripts); `relations.spectral_factor_model` likewise by `data/o7_*` scripts; the production relation map uses `bands` + `factor_model`.
+`scripts/codehealth.py` (2026-10-10): 40 modules, 0 import cycles, 9 definitions referenced nowhere (2026-10-10; `relations.spectral_factor_model` since removed): `fields.common_support`, `harness.recovery`, `harness.group_world`, `scans.patterns.temporal_stability`, `scans.patterns.spatial_stability`, `scans.utilization.parallel_analysis`, `scans.utilization.rank1_share`, `surveillance.expected_false_alarms`. Beyond that list:
+- `scans/patterns.py` and `scans/utilization.py` are imported by no production path (only by `data/` scripts); the factor model, `spectral_factor_model`, `relation_table`, `course_relations` and `direct_relations` were replaced by the relation estimator (BACKLOG 3.5, 2026-10-11) and `scans.pairs.within` (E_w) removed with them.
 - `scans/lenses` v0 lenses are live as methods of questions, not dead.
 - Store kind `triage_block` and the `_archive/` registers have no reader or writer in `src/`.
 - `data/` holds ~190 experiment scripts that import the package; none is on a production path. `data/handoffs/` keeps only two build logs (the notes moved to `history/2026-10-handoffs/data/`).

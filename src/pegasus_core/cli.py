@@ -341,16 +341,27 @@ def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g.
 
 @app.command()
 def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = typer.Argument(..., help="DATASET:EVENT:NODE"),
-            years: str = Years, q: float = 0.05) -> None:
-    """Do two fields move together, at which spatial scale and lag?"""
+            years: str = Years, q: float = 0.05, lags: int = 2, grain: str = typer.Option("year", help="year or month"),
+            window: str = typer.Option(None, help="first,last period label, e.g. 201401,201712"),
+            macro: str = typer.Option(None, help="macro-regions, e.g. 2 for the Northeast"),
+            x_source: str = typer.Option(None, help="x's reader as JSON, e.g. '{\"source\": \"code_list\", \"column\": \"CODANOMAL\"}'"),
+            y_source: str = typer.Option(None, help="y's reader as JSON")) -> None:
+    """Do two fields move together, at which spatial support and lag? The relation estimator: every graph band and the
+    regional and national courses, lags 0..LAGS periods, circular-shift nulls, one BH; the partial and direct read of
+    the reported ones."""
     from . import tools
 
-    rows = tools.compare(tuple(x.split(":", 2)), tuple(y.split(":", 2)), _years(years), q=q)
-    t = Table("support", "follower", "leader", "lag", "ρ", "direct", "p", "reported")
+    sources = [json.loads(s) if s else None for s in (x_source, y_source)]
+    rows = tools.relate([tuple(x.split(":", 2)), tuple(y.split(":", 2))], _years(years), lags=lags, q=q, grain=grain,
+                        window=tuple(int(w) for w in window.split(",")) if window else None,
+                        macro=[int(m) for m in macro.split(",")] if macro else None,
+                        sources=sources if any(sources) else None)
+    t = Table("support", "follower", "leader", "lag", "ρ", "z", "direct", "p", "reported")
     for r in sorted(rows, key=lambda r: r["p"])[:30]:
         t.add_row(r["support"], r["field"].split(":")[0] + ":" + r["field"].split(":")[-1],
                   r["leader"].split(":")[0] + ":" + r["leader"].split(":")[-1], str(r["lag"]), f"{r['rho']:+.3f}",
-                  {True: "direct", False: "shared driver"}.get(r.get("direct"), ""), f"{r['p']:.1e}", str(r["reported"]))
+                  f"{r['z']:+.1f}", {True: "direct", False: "shared driver"}.get(r.get("direct"), ""), f"{r['p']:.1e}",
+                  str(r["reported"]))
     console.print(t)
 
 

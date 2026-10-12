@@ -15,8 +15,8 @@ Effective sample sizes respect each field's own dependence:
   treat the weights as part of the spatial pattern, and with concentrated weights (the effective
   sample size of √(w_X w_Y) is 385 of 5,570) it understates σ two- to fivefold: 0.019 against a true
   0.092 for two outcomes (evaluation 2026-10-05);
-- within places (E_w): AR(1) per field, n_eff,u = T (1 − a_X a_Y)/(1 + a_X a_Y),
-  summed over places and divided by the design effect 1 + (U−1) ρ̄_space.
+
+The relations over time (within places, lagged) are `relations.relation_estimate`'s, with a phase-surrogate null.
 
 Every pair is tested against its minimum relevant effect: H0 |ρ| ≤ δ, with δ_E from the harness
 (ARCHITECTURE §8.4).
@@ -34,8 +34,8 @@ from scipy import special, stats
 from .. import config, control, graphs, store
 
 # Minimum effects δ_E (ARCHITECTURE §8.4): H0 is |ρ| ≤ δ_E. E_b and E_b|Z are the smallest δ at which the false-lead
-# rate on the harness's negative controls is ≤ q (evaluation 2026-10-05); E_w is provisional.
-MIN_EFFECT = {"E_b": 0.03, "E_b|Z": 0.05, "E_w": 0.1}
+# rate on the harness's negative controls is ≤ q (evaluation 2026-10-05).
+MIN_EFFECT = {"E_b": 0.03, "E_b|Z": 0.05}
 BASIS_GRAPH = "contiguity01"  # the place graph whose Moran basis tests E_b
 
 
@@ -68,14 +68,6 @@ def _gram(A: np.ndarray) -> np.ndarray:
     G = t.T @ t
     d = torch.sqrt(torch.clamp(torch.diag(G), min=1e-30))
     return (G / d[:, None] / d[None, :]).double().cpu().numpy()
-
-
-def _weighted(x: np.ndarray, w: np.ndarray) -> np.ndarray:
-    """√w ⊙ (x − x̄_w), column by column; non-finite entries carry no weight."""
-    w = np.where(np.isfinite(x) & np.isfinite(w), w, 0.0)
-    x = np.where(np.isfinite(x), x, 0.0)
-    mean = (w * x).sum(0) / np.maximum(w.sum(0), 1e-300)
-    return np.sqrt(w) * (x - mean)
 
 
 # ---------------------------------------------------------------------- the Moran basis
@@ -198,83 +190,10 @@ def between(effects: dict[str, tuple[np.ndarray, np.ndarray]], basis: MoranBasis
     return _test(estimand, names, R, n_eff, MIN_EFFECT[estimand] if delta is None else delta, ledger, family, testable, 0)
 
 
-def within(surprises: dict, ledger: control.Ledger, family: str, lag: int = 0, delta: float = MIN_EFFECT["E_w"],
-           rank: bool = False, testable=None, excluded: dict | None = None, prewhiten: int = 0) -> list[Pair]:
-    """E_w at lag ℓ (Y follows X by ℓ periods) on calibrated surprises z with their weights w. A surprise whose
-    calibration failed at its tier is left out (ARCHITECTURE §11.4) and named in ``excluded`` (name → KS record).
-
-    ``prewhiten`` = p filters each field's z by its own AR(p), pooled over places, before correlating (Haugh's
-    double prewhitening): two series that each carry one slow wave correlate at every lag inside the wave's width,
-    whatever their relation, and the residuals do not. Without it a lag cannot be located (dengue → microcephaly,
-    2015–16: ρ flat over lags 0–6 at the unit-month grain, evaluation 2026-10-05). The caller chooses the grain: a
-    rare outcome is lifted to coarse units first (`surprise.lift`), where its counts are not mostly zero."""
-    failed = {k: {"tier": v.tier, "ks": v.calibration.get("ks"),
-                   "worst_region": max(v.calibration.get("ks_by_macroregion", {}).values(), default=None)}
-              for k, v in surprises.items() if v.calibration.get("calibrated") is False}
-    if excluded is not None:
-        excluded.update(failed)
-    surprises = {k: v for k, v in surprises.items() if k not in failed}
-    names = list(surprises)
-    if len(names) < 2:
-        return []
-    zs = {k: np.where(np.isfinite(surprises[k].z), surprises[k].z, 0.0) for k in names}
-    ws = {k: surprises[k].w for k in names}
-    if prewhiten:
-        zs = {k: _ar_residuals(z, prewhiten) for k, z in zs.items()}
-        ws = {k: w[:, prewhiten:] for k, w in ws.items()}
-    U, T = zs[names[0]].shape
-    Tl = T - lag
-    if Tl < 3:
-        raise ValueError(f"lag {lag} leaves {Tl} periods")
-    Zx = np.stack([zs[k][:, :Tl].ravel() for k in names], axis=1)
-    Zy = np.stack([zs[k][:, lag:].ravel() for k in names], axis=1)
-    Wx = np.stack([ws[k][:, :Tl].ravel() for k in names], axis=1)
-    Wy = np.stack([ws[k][:, lag:].ravel() for k in names], axis=1)
-    if rank:
-        Zx, Zy = (np.apply_along_axis(stats.rankdata, 0, z) for z in (Zx, Zy))
-    Ax, Ay = _weighted(Zx, Wx), _weighted(Zy, Wy)
-    tx = torch.as_tensor(Ax, dtype=torch.float32, device=_device())
-    ty = torch.as_tensor(Ay, dtype=torch.float32, device=_device())
-    R = ((tx.T @ ty) / torch.outer(torch.linalg.norm(tx, dim=0), torch.linalg.norm(ty, dim=0)).clamp(min=1e-30)
-         ).double().cpu().numpy()
-    # AR(1) per field (pooled over places) and cross-place correlation at equal t
-    a1 = np.array([_lag1(zs[k]) for k in names])
-    rho_space = np.array([_space(zs[k]) for k in names])
-    per_place = Tl * (1 - np.outer(a1, a1)) / (1 + np.outer(a1, a1))
-    deff = 1 + (U - 1) * np.clip((rho_space[:, None] + rho_space[None, :]) / 2, 0, 1)
-    n_eff = np.clip(U * per_place / deff, 3.0, U * Tl)
-    return _test("E_w", names, R, n_eff, delta, ledger, family, testable, lag, symmetric=(lag == 0))
-
-
-def _ar_residuals(z: np.ndarray, p: int) -> np.ndarray:
-    """z [U, T] filtered by its AR(p), the coefficients pooled over places (least squares on every unit's lags);
-    the first p periods have no residual and are dropped."""
-    U, T = z.shape
-    X = np.stack([z[:, p - k - 1:T - k - 1].ravel() for k in range(p)], axis=1)
-    y = z[:, p:].ravel()
-    coef = np.linalg.lstsq(X, y, rcond=None)[0]
-    return (y - X @ coef).reshape(U, T - p)
-
-
-def _lag1(z: np.ndarray) -> float:
-    a, b = z[:, :-1].ravel(), z[:, 1:].ravel()
-    ok = np.isfinite(a) & np.isfinite(b)
-    return float(np.clip(np.corrcoef(a[ok], b[ok])[0, 1], -0.99, 0.99)) if ok.sum() > 10 else 0.0
-
-
-def _space(z: np.ndarray) -> float:
-    """ρ̄_space from the variance of the year means: Var(z̄_t) = σ²(1 + (U−1)ρ̄)/U."""
-    U = z.shape[0]
-    zz = np.where(np.isfinite(z), z, 0)
-    s2 = zz.var()
-    vbar = zz.mean(0).var()
-    return float(max((vbar * U / max(s2, 1e-12) - 1) / (U - 1), 0.0))
-
-
 def _test(estimand: str, names: list[str], R: np.ndarray, n_eff: np.ndarray, delta: float, ledger: control.Ledger,
-          family: str, testable, lag: int, symmetric: bool = True) -> list[Pair]:
+          family: str, testable, lag: int) -> list[Pair]:
     F = len(names)
-    idx = [(i, j) for i in range(F) for j in (range(i + 1, F) if symmetric else range(F)) if i != j]
+    idx = [(i, j) for i in range(F) for j in range(i + 1, F)]
     if testable is not None:
         idx = [(i, j) for i, j in idx if testable(names[i], names[j])]
     if not idx:
