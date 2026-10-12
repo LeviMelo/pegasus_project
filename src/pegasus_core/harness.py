@@ -72,7 +72,7 @@ class Positive:
 # the v0 lens of each declaration and the question it asked; the declarations stay as made (their commit order is the
 # evidence), the record reads them through the questions
 LENS_QUESTION = {"space_time": "excess", "outbreak": "excess", "change_point": "step", "trend_divergence": "trend",
-                 "spatial_cluster": "cluster", "group_disparity": "group", "E_w": "relation", "E_b": "relation",
+                 "spatial_cluster": "cluster", "group_disparity": "group", "E_b": "relation",
                  "E_b|Z": "relation", "explain_away": "explanation"}
 
 
@@ -205,7 +205,7 @@ POSITIVES: tuple[Positive, ...] = (
              criterion="excess-weighted recall >= 0.5; sign of (observed / expected male 15-29 share - 1) as documented",
              note="Atlas da Violência 2025 Tables 4.3 / 2.2: men aged 15-29 share of homicides 2013-2023 as a ratio to "
                   "Brazil's (49.2%), documented where >= 1.25 or <= 0.8"),
-    Positive("Cold months and respiratory admissions", "SIH-RD+INMET", "hospitalisation", "X", "E_w", "B2s",
+    Positive("Cold months and respiratory admissions", "SIH-RD+INMET", "hospitalisation", "X", "relation", "B2s",
              "municipalities with a station", (2010, 2023), grain="month",
              criterion="ρ(cold anomaly → admissions) < −δ at lag 0–1, absent in the 5-year-shifted control",
              note="Requia et al., Environ Res 2023;231:116231, low temperature and respiratory admissions in Brazil, "
@@ -271,9 +271,10 @@ POSITIVES: tuple[Positive, ...] = (
              note="Ceará reported the largest chikungunya epidemic of 2017 (105,232 confirmed cases in the state, 61,718 in "
                   "Fortaleza; Fortaleza and state bulletins, read through search summaries, not at the source)"),
     # Re-test of the arbovirus -> microcephaly pair (its first test, E_w at region-month, did not admit a lag: evaluation
-    # 2026-10-05). Declared before the coarse-grain, prewhitened run (data/positive_lagged_microcephaly.py)
+    # 2026-10-05; E_w is replaced by the relation estimator, BACKLOG 3.5). Declared before the coarse-grain,
+    # prewhitened run (data/positive_lagged_microcephaly.py)
     Positive("Dengue notifications lead microcephaly births, Northeast 2015-16", "SINAN.DENG -> SINASC.DN",
-             "probable_case -> birth", "* -> Q02", "E_w", "BP", "uf:*", (2015, 2017), grain="month",
+             "probable_case -> birth", "* -> Q02", "relation", "BP", "uf:*", (2015, 2017), grain="month",
              criterion="state scale, each series prewhitened by its own pooled AR(2), lags 0-12, delta_E 0.1: the largest "
                        "dengue->Q02 rho is at a lag in 5..9 with p < 0.05/13; dengue->Q90 (Down syndrome, control) admits no "
                        "lag at p < 0.05/13; Q02->dengue admits no lag in 5..9",

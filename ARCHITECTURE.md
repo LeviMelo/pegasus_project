@@ -708,7 +708,7 @@ group dimension where it applies: the system is general because the grid is.
 | 6 | **spatial coherence** | neighbouring places depart together | B0/B1 residual arrangement | ✓ graph-connected scans; ✓ heat-kernel scales (multiscale) |
 | 7 | **propagation** | departures ordered in space through time: emergence, diffusion, extinction | B1 | ✓ first-departure times over the graph, source and Theil–Sen speed against distance under a Moran spectral null (`propagation`); ○ emergence of a field in places where it was absent |
 | 8 | **group heterogeneity** | the departure differs across a group dimension | B0 by group | ✓ sex × age (`group_disparity`); ✓ race (`disparity`; and as a group dimension against the place's own population by race); ✓ every composition column as a group dimension (`Session.by_composition`) |
-| 9 | **relation** | co-variation with another field or context, over distance, lag, scale and group (§8.1) | each field's own tier | ✓ dependency map (between places), distributed lag, `compare` (scale), `joint`; ✓ time-varying contexts as series with their own predictive, jointly with the field over graph bands and lags (`tools.determinants`); ✓ a study's fields against the contexts between places (`dependency.field_map`); ✓ a study's relations among its fields and the exhaustive data-space screen (`relation_survey`); ○ one cross-structure estimator (§8.1) |
+| 9 | **relation** | co-variation with another field or context, over distance, lag, scale and group (§8.1) | each field's own tier | ✓ dependency map (between places), distributed lag, `compare` (scale), `joint`; ✓ time-varying contexts as series with their own predictive, jointly with the field over graph bands and lags (`tools.determinants`); ✓ a study's fields against the contexts between places (`dependency.field_map`); ✓ a study's relations among its fields and the exhaustive data-space screen (`relation_survey`); ✓ one estimator of the time-varying pair relation over distance (graph band), lag and scale (`relations.relation_estimate`: `compare`, `determinants` and `relation_survey` read it; §8.1) |
 
 Prospective use is not a component: it is every component tested against BP/BPA over recent periods (alarms). Each question of the registry names its component, and a method its own where it differs (`questions.components`: the cluster question's Poisson scan answers spatial coherence, its multiscale peaks level); the former questions keep their ids.
 
@@ -800,8 +800,11 @@ R_{XY}(d, ℓ, s, g) = association of X's departures at (u, t) with Y's at (v, t
   municipality, or the reverse); **g** a group dimension; **conditioning** on a context (a relation only where
   sanitation is poor).
 - **Significance** from surrogates that keep each field's own spatial and temporal structure and break the link
-  between them (Moran spectral randomisation on another graph; time shifts within places; phase surrogates for
-  courses). Effective sample sizes by Dutilleul's modified t where a closed form is used.
+  between them. The time-varying pair relation (`relations.relation_estimate`) uses the leader's circular shifts, one shift
+  common to all places and coefficients (the phase surrogates of Theiler et al. 1992 and Prichard & Theiler 1994 have
+  the same variance but a Gaussian tail that a spiky leader does not have), with a Student-t tail from the shifts'
+  kurtosis and effective count; between places, Moran spectral randomisation on another graph
+  and Dutilleul's modified t.
 - **Estimators by form** (the established method per estimand, P11): between places, weighted correlation of place
   effects with Dutilleul's n_eff, and partial correlation given an adjustment set (E_b, E_b|Z); delayed effects,
   distributed-lag terms with a GMRF over lag (DLNM, Gasparrini et al. 2010); shared geography, a shared-component model
@@ -1104,8 +1107,9 @@ it.
 | 6.8 | the cell predictive carries the persistent frailty's shape | it does not in large places | OPEN_QUESTIONS 12; BACKLOG |
 | 7.6 | weights learned by IHW | a priori Roeder–Wasserman weights, built and applied to one method | within-field gain measured at about 10 % of power |
 | 7.6 | TreeBH | TreeBH with Simes aggregation | the exact combination is a refinement |
-| 8.1 | one cross-structure estimator | E_b, E_b\|Z, distributed lag, compare and joint as separate tools | BACKLOG |
+| 8.1 | one cross-structure estimator | the time-varying pair relation is one estimator (`relations.relation_estimate`, BACKLOG 3.5); the between-place level correlation E_b, E_b\|Z (a different estimand), the distributed-lag effect size (`Session.relation`) and the joint-departure locus (`joint`) stay separate | each answers a question the estimator does not; distance is read as the graph frequency, not as a spatial lag between places |
 | 2.5 | meaning from pegasus_data | `gateway` parses raw date text and maps SIH-RD's Federal District region codes 2008–2017 | pegasus_data now derives both; the switch changes every gateway cache key and waits for a re-warm |
+| 8.1 | the relation estimator's null | a Student-t on the leader's circular shifts clear of the tested lags (as many shifts either side as the lags), all shifts where fewer than `NULL_MIN_EFFECTIVE` = 10 are effective; one shift for all places and coefficients | measured on time-reversed and place-permuted real fields (evaluation 2026-10-11-relation-estimator): nominal for time reversal, 2-5 times nominal below p = .001 for rows under place permutation; remedy: shifts per block of coherent coefficients, learned |
 | 10.2 | artefact keys hash pegasus_data's data versions | keys carry pegasus_data's package version (plus resource hashes) | pegasus_data exposes no publication-level data version yet |
 
 ### 12.3 Hand-set constants

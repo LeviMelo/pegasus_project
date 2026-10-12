@@ -1,46 +1,66 @@
-"""Relation models (ARCHITECTURE §7.5, O7): an exposure field's lagged effect on an outcome field's rate.
+"""Relation models (ARCHITECTURE §7.5, §8.1; BACKLOG 3.5): how fields move together, and an exposure's lagged effect.
+
+**The relation estimator** (stage D; `relation_map`, `relation_estimate`): one estimator of the time-varying pair
+relation, at every spatial support from the finest graph band to the national course.
+
+*Estimand.* The lagged association of a follower's and a leader's innovations: ρ_s(f, g, ℓ), the correlation of
+follower f at t with leader g at t − ℓ over the coefficients of a support s. A support is a linear map of the places:
+the graph Fourier bands (`multiscale.GraphSpectrum`; a continuum of spatial scales, which read as distance as well,
+since a relation present in the low bands and absent in the high holds between places far apart), the macro-regions'
+courses and the national course (information-weighted sums, the optimal weights for a common multiplicative
+departure). The estimator is the same at every support; only the map differs.
+
+*Innovations.* Every field's departures whitened by its own predictive (`innovations`, N1), so what two fields share
+is not each one's serial dependence: i.i.d. N(0, 1) under the model.
+
+*Null.* The statistic is a sum of the follower's values times the leader's Fourier coefficients, so its null is
+the leader's **circular shifts**, one for every place and coefficient: a surrogate that keeps the leader's whole
+spectrum and spatial structure (every cross-spectrum between places) and its nonlinear structure, and breaks its
+timing against the follower (the same variance as the phase surrogates of Theiler et al. 1992 and Prichard &
+Theiler 1994, whose Gaussian tail it does not share). All
+T shifts of one pair come from one FFT (`_cross`); the null is the shifts clear of the tested lags (a relation lifts
+its own neighbourhood and would otherwise widen its own null), and its tail is the Student-t whose degrees of freedom
+are the smaller of the shifts' kurtosis's and their effective count (`_null_moments`, `_tail_p`): a leader whose
+energy sits in a few periods, an epidemic, has a null far from normal, and the normal tail on the phase surrogates'
+closed-form variance called place-permuted copies related 2-4 times too often below p = 0.001. There is no draw and
+no p-value floor, and the tail is an extrapolation from the shifts, characterised on negative controls (evaluation
+2026-10-11-relation-estimator). At lag 0 the larger p of the two orders is used. One BH at q over every support, pair
+and lag.
+
+*Where found: partial.* A reported relation is re-read conditionally: the follower is residualised on the lags of
+every other field that has a reported relation with the follower or the leader at that support (ridge with its
+penalty chosen by generalised cross-validation), and the same estimator, with the same shift null, tests
+the residual against the leader. ``partial`` is the partial correlation and ``direct`` marks a relation that stays
+at q with its sign (a relation carried by another found field is a shared driver, not a direct one).
+
+*The lag profile* is the rows of one pair and support over ℓ, and, as one test, the cumulative association over the
+lags 1..L (`profiles`). What the estimator does not give is the effect in the outcome's units: that is the
+distributed-lag term below.
 
 **The distributed-lag term** (Gasparrini, Armstrong & Kenward 2010; the penalised form of Gasparrini, Scheipl,
-Armstrong & Kenward 2017):
+Armstrong & Kenward 2017; `Session.relation`):
 
     log μ_Y(u, t) = log μ̂_Y(u, t) + Σ_{ℓ=0..L} β(ℓ) · x(u, t − ℓ),
 
 where μ̂_Y is the outcome's own fitted expectation (an offset: its season, trend, place course and profile stay the
 model's, so shared seasonality is not read as a relation), x the exposure at the outcome's places and periods, and
 β(ℓ) a smooth curve over lag: an RW2 penalty τ·Σ(Δ²β)², with τ chosen by the Laplace approximation of the marginal
-likelihood. The counts are negative binomial with the outcome model's dispersion φ, by penalised IRLS.
-
-This is the two-stage form, with the offset fixed at the outcome model's fit. Where the exposure is widespread, the
-outcome's history has absorbed part of the lagged effect (evaluation 2026-10-06, absorption), so β is conservative.
-The term inside the monolith's joint fit is the v2. It is the **pairwise confirmation** of a relation the joint model
-reports (ADR-0029, stage D), never the search.
-
-**The joint model** (stage D; history/2026-10-plans/2026-10-06-o7-joint-relations.md): which fields move together over places
-and periods, at which spatial scale, and which leads which. One pipeline, no pairwise search and no zoning:
-
-1. `innovations`: every field's departures whitened by its own predictive (N1): per place, the Pearson residuals
-   times L⁻¹, LLᵀ the covariance over periods that B states. Under the model they are i.i.d. N(0, 1), so whatever
-   co-varies across fields afterwards is shared, not each field's own serial dependence.
-2. `bands`: the innovations on the graph Fourier basis of the place graph (`multiscale.GraphSpectrum`), split into
-   frequency bands: a continuum of spatial scales from the whole country to a few neighbouring towns, set by the
-   graph and not by administrative units. The transform is orthonormal, so the noise stays i.i.d. per coefficient.
-3. `lagged`: each field stacked with its own past (the stacked form of a dynamic factor model).
-4. `factor_model`: per band, the EM of probabilistic factor analysis with automatic relevance determination
-   (Rubin & Thayer 1982; Bishop 1999): z ~ N(0, I) per coefficient, r = Λz + ε, K chosen by the ARD.
-5. `relation_table`: every pair of distinct fields at every lag and band, its implied correlation ρ = (ΛΛᵀ)_fg over
-   the total variances, z = ρ·√n (exact under step 1's i.i.d. null), one BH over everything.
-
-A relation is two fields loading on one factor: statistical, never causal by itself (P16). Measured on a planted world
-over the real municipal graph (evaluation 2026-10-07, factor model): no false relation in a null world and none in a
-planted one, the planted lead found at its scale and lag. The cost grows with F·n·K², never with F².
+likelihood. The counts are negative binomial with the outcome model's dispersion φ, by penalised IRLS. It answers
+what the estimator cannot: how large the effect is (a rate ratio per unit of exposure, in the count likelihood where
+a rare outcome's cells are mostly zero) and its smooth joint lag shape with a simultaneous band. It is the
+**pairwise confirmation** of a relation the estimator reports (ADR-0029), never the search; it carries no null of its
+own (a debt: the estimator's shift null of the exposure is the null to attach).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import optimize, stats
+
+#: the graph-frequency bands the place graph's coefficients are split into (eigenvalue edges of the normalised Laplacian)
+BAND_EDGES = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 2.01)
 
 
 @dataclass
@@ -154,127 +174,22 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
                     int(sel.sum()))
 
 
-# ---------------------------------------------------------------------- the joint model (stage D, O7)
+
+# ---------------------------------------------------------------------- the relation estimator (stage D)
 
 @dataclass
 class Departures:
-    """Every field's departures from its expectation on a common lattice: r and its sampling variance v, [F, U, T]
-    (v infinite where a cell carries no information)."""
+    """Every field's innovations on a common lattice: r and its sampling variance v, [F, U, T] (v infinite where a cell
+    carries no information), and ``w`` [F, U] the place's information weight (√ its mean cell variance; None: equal),
+    which weights the places in the regional and national courses."""
     fields: list[str]
     places: np.ndarray
     periods: np.ndarray
     r: np.ndarray
     v: np.ndarray
+    w: np.ndarray | None = None
 
 
-@dataclass
-class Factors:
-    """A fitted joint factor model: loadings λ [F, K] with their conditional sd (given the scores: too small to test
-    a loading by, see `relations`), the factors' posterior means [K, U, T], each field's extra variance σ_f², its
-    typical sampling variance (the harmonic mean of v + σ²), the effective number of cells, the ARD variances γ [K],
-    and the fit's trace."""
-    fields: list[str]
-    loadings: np.ndarray
-    loadings_sd: np.ndarray
-    factors: np.ndarray
-    sigma2: np.ndarray
-    gamma: np.ndarray
-    noise_var: np.ndarray = None
-    cells: float = 0.0
-    trace: list = field(default_factory=list)
-
-    def relations(self) -> tuple[np.ndarray, np.ndarray]:
-        """[F, F] the implied correlation of two fields' departures, ΛΛᵀ over their total variances (shared + extra +
-        sampling; rotation-free), and its z against independence, ρ·√n_eff (the sampling sd of a correlation over
-        n_eff cells). The z is the relation's statistic: stage D's FDR runs on it."""
-        C = self.loadings @ self.loadings.T
-        tot = np.diag(C) + self.sigma2 + self.noise_var
-        rho = C / np.sqrt(np.outer(tot, tot))
-        np.fill_diagonal(rho, 1.0)
-        return rho, rho * np.sqrt(self.cells)
-
-
-def factor_model(d: Departures, K: int = 10, iterations: int = 200, tol: float = 1e-6, chunk: int = 20000,
-                 log=None) -> Factors:
-    """The joint model of the departures ``d`` (module docstring) with up to ``K`` factors, by the EM of probabilistic
-    factor analysis (Rubin & Thayer 1982) with heteroscedastic, known-plus-estimated noise per cell and automatic
-    relevance determination on the loadings' columns (Bishop 1999): each cell's factor scores z ~ N(0, I) have the
-    posterior N(m_n, Σ_n), Σ_n = (I + Λᵀ W_n Λ)⁻¹, and the loadings' update reads E[z zᵀ] = Σ_n + m_n m_nᵀ. The
-    posterior covariance is what keeps a factor from absorbing the fields' own noise: the alternating MAP without it
-    made every field load on every factor (null pairs' shared correlation to 0.83 on a planted world, 2026-10-06).
-    Initialised by the leading eigenvectors of the precision-weighted departures' covariance."""
-    import torch
-
-    from . import config
-
-    dev = config.array_device()
-    F, U, T = d.r.shape
-    n = U * T
-    K = min(K, F)        # no more factors than stacked series (two fields with their lags are 6 against K 16, 2026-10-10)
-    ok = np.isfinite(d.v.reshape(F, n))
-    f32, f64 = torch.float32, torch.float64      # the cells' contractions in single precision (a laptop GPU runs
-    R = torch.as_tensor(np.where(ok, d.r.reshape(F, n), 0.0), dtype=f32, device=dev)   # double at 1/64 the rate),
-    V = torch.as_tensor(np.where(ok, d.v.reshape(F, n), 0.0), dtype=f32, device=dev)   # the sums and M-step in double
-    OK = torch.as_tensor(ok, device=dev)
-    sigma2 = torch.zeros(F, dtype=f32, device=dev)
-    W = torch.where(OK, 1.0 / torch.where(OK, V, torch.ones_like(V)), torch.zeros_like(V))
-    Z = R * W.sqrt()
-    ev, vec = torch.linalg.eigh(Z @ Z.T / n)
-    top = torch.argsort(ev, descending=True)[:K]
-    lam = vec[:, top] * torch.sqrt(torch.clamp(ev[top], min=1e-6))
-    gamma = torch.ones(K, dtype=f64, device=dev)
-    eye = torch.eye(K, dtype=f32, device=dev)
-    trace, prev = [], None
-    for it in range(iterations):
-        W = torch.where(OK, 1.0 / torch.where(OK, V + sigma2[:, None], torch.ones_like(V)), torch.zeros_like(V))
-        A = torch.zeros((F, K, K), dtype=f64, device=dev)
-        b = torch.zeros((F, K), dtype=f64, device=dev)
-        ll = 0.0
-        resid2 = torch.zeros(F, dtype=f64, device=dev)
-        for a0 in range(0, n, chunk):                                   # E-step by chunks of cells
-            w, r = W[:, a0:a0 + chunk], R[:, a0:a0 + chunk]
-            P = eye + torch.einsum("fn,fk,fj->nkj", w, lam, lam)
-            L = torch.linalg.cholesky(P)
-            S = torch.cholesky_inverse(L)                                # Σ_n
-            m = torch.einsum("nkj,nj->nk", S, (w * r).T @ lam)            # m_n
-            Ezz = S + m[:, :, None] * m[:, None, :]
-            A += torch.einsum("fn,nkj->fkj", w, Ezz).double()
-            b += ((w * r) @ m).double()
-            fit = lam @ m.T
-            resid2 += torch.where(OK[:, a0:a0 + chunk], (r - fit) ** 2 + torch.einsum("fk,nkj,fj->fn", lam, S, lam),
-                                  torch.zeros_like(r)).double().sum(1)
-            # the marginal log likelihood of the chunk: −½ Σ (w r² − (Λᵀ W r)ᵀ Σ (Λᵀ W r) − log|W| + log|P|)
-            g = (w * r).T @ lam
-            ll += float(-0.5 * ((w * r * r).double().sum() - (g * m).double().sum()
-                                - torch.log(torch.where(w > 0, w, torch.ones_like(w))).double().sum()
-                                + 2 * torch.log(torch.diagonal(L, dim1=1, dim2=2)).double().sum()))
-        # M-step: the loadings with their ARD prior, then the ARD variances and the extra noise variances
-        H = A + torch.diag_embed((1.0 / gamma).expand(F, K))
-        lam64 = torch.linalg.solve(H, b[..., None])[..., 0]
-        cov = torch.linalg.inv(H)
-        gamma = torch.clamp((lam64 ** 2 + torch.diagonal(cov, dim1=1, dim2=2)).mean(0), min=1e-10)
-        lam = lam64.float()
-        sigma2 = torch.clamp((resid2 - torch.where(OK, V, torch.zeros_like(V)).double().sum(1)) / OK.sum(1).clamp(min=1),
-                             min=0.0).float()
-        trace.append(round(ll, 3))
-        if log and (it % 10 == 0):
-            log(f"iteration {it}: log likelihood {ll:.6g}, γ {np.round(gamma.cpu().numpy(), 5).tolist()}")
-        if prev is not None and abs(ll - prev) < tol * abs(ll):
-            break
-        prev = ll
-    sd = torch.sqrt(torch.clamp(torch.diagonal(cov, dim1=1, dim2=2), min=0.0))
-    # the factors' posterior means at every cell, for maps (the last E-step's)
-    W = torch.where(OK, 1.0 / torch.where(OK, V + sigma2[:, None], torch.ones_like(V)), torch.zeros_like(V))
-    scores = []
-    for a0 in range(0, n, chunk):
-        w, r = W[:, a0:a0 + chunk], R[:, a0:a0 + chunk]
-        S = torch.linalg.inv(eye + torch.einsum("fn,fk,fj->nkj", w, lam, lam))
-        scores.append(torch.einsum("nkj,nj->nk", S, (w * r).T @ lam))
-    Fk = torch.cat(scores).T.reshape(K, U, T)
-    c = lambda x: x.cpu().numpy()  # noqa: E731
-    noise_var = c(OK.sum(1) / W.sum(1))
-    cells = float(np.median(c(W.sum(1)) ** 2 / c((W ** 2).sum(1))))           # Kish's effective n, the fields' median
-    return Factors(d.fields, c(lam), c(sd), c(Fk), c(sigma2), c(gamma), noise_var, cells, trace)
 
 
 def innovations(surprises: list) -> Departures:
@@ -284,7 +199,7 @@ def innovations(surprises: list) -> Departures:
     model: the GLS innovations. A relation, lagged or not, is read on these (`lagged`, `bands`), never on raw
     departures: each field's serial correlation, stacked with its own past, was explained by shared factors and read
     as 2,400 relations in a world of independent fields; an AR pooled over places left 35, because big places carry
-    the frailty's correlation and small ones the Poisson's independence (2026-10-07). Returned with unit v."""
+    the frailty's correlation and small ones the Poisson's independence (2026-10-07). Returned with unit v and the places' information weights."""
     from . import surprise as sp_
 
     places = surprises[0].places
@@ -293,7 +208,7 @@ def innovations(surprises: list) -> Departures:
         places = np.intersect1d(places, s.places)
         periods = np.intersect1d(periods, np.asarray(s.years))
     T = len(periods)
-    out = []
+    out, wts = [], []
     for s in surprises:
         ui = np.searchsorted(s.places, places)
         ti = np.searchsorted(np.asarray(s.years), periods)
@@ -307,8 +222,9 @@ def innovations(surprises: list) -> Departures:
         S[:, np.arange(T), np.arange(T)] = 1.0
         L = np.linalg.cholesky(S)
         out.append(np.linalg.solve(L, x[..., None])[..., 0])
+        wts.append(np.sqrt(np.where(bad, 0.0, V).mean(1)))
     r = np.stack(out)
-    return Departures([s.field.id for s in surprises], places, periods, r, np.ones(r.shape))
+    return Departures([s.field.id for s in surprises], places, periods, r, np.ones(r.shape), np.stack(wts))
 
 
 def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndarray, periods: np.ndarray,
@@ -320,7 +236,7 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
     quasi-likelihood dispersion φ, and the within-place serial correlation of the Pearson residuals as an AR(1) pooled
     over places, whitened as a field's frailty is. A cell with no denominator carries no information (v infinite).
     What remains is the place-period departure from its own level and the national course, which a field's departures
-    are related to over lags and graph bands (`relation_map`): an association with that adjustment set, never an effect."""
+    are related to over lags and supports (`relation_map`): an association with that adjustment set, never an effect."""
     from scipy.special import expit
 
     obs = np.isfinite(k) & np.isfinite(n) & (n > 0)
@@ -356,38 +272,15 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
     rho = float(np.clip((x[:, 1:] * x[:, :-1])[both].sum() / max((x[:, :-1] ** 2)[both].sum(), 1e-12), -0.9, 0.9))
     L = np.linalg.cholesky(rho ** np.abs(np.subtract.outer(np.arange(T), np.arange(T))))
     e = np.linalg.solve(L, x[..., None])[..., 0]
-    return Departures([name], places, periods, e[None], np.where(ok, 1.0, np.inf)[None])
+    return Departures([name], places, periods, e[None], np.where(ok, 1.0, np.inf)[None],
+                      np.sqrt(np.where(ok, V, 0.0).mean(1))[None])
 
 
-def lagged(d: Departures, lags: int) -> Departures:
-    """The departures augmented by each field's own past (the stacked form of a dynamic factor model): field f at lag
-    ℓ is ``f@ℓ``, r_{f@ℓ}(u, t) = r_f(u, t − ℓ), over the periods with every lag observed. A factor loaded by A@0 and
-    B@ℓ is a relation in which A at t moves with B at t − ℓ: B leads A by ℓ periods."""
-    T = len(d.periods)
-    if lags >= T:
-        raise ValueError(f"{lags} lags leave no period of {T}")
-    r = np.concatenate([d.r[:, :, lags - ell:T - ell] for ell in range(lags + 1)])
-    v = np.concatenate([d.v[:, :, lags - ell:T - ell] for ell in range(lags + 1)])
-    names = [f"{f}@{ell}" for ell in range(lags + 1) for f in d.fields]
-    return Departures(names, d.places, d.periods[lags:], r, v)
-
-
-def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
-                                                                        0.2, 0.5, 2.01), min_cells: int = 0, log=print
-          ) -> dict[str, Departures]:
-    """The departures in graph-frequency bands (`multiscale.GraphSpectrum`; no zoning): each field's departures
-    standardised by their sampling sd (i.i.d. under the null), projected on the Laplacian's eigenvectors (orthonormal,
-    so the noise stays i.i.d. per coefficient), and split by eigenvalue into ``edges_of_bands``. A smooth regional
-    factor concentrates in the low bands, a local one in the high. Each band is a `Departures` over its coefficients
-    with unit sampling variance, keyed by its label: the eigenvalue range and the effective places of the heat kernel
-    at s = 1/λ (the band's spatial scale).
-
-    A band with fewer than ``min_cells`` cells (coefficients × periods; pass the number of lagged fields to be fitted)
-    is not returned, and is named in the log as unanswered: a factor model on fewer cells than variables is not
-    identified, and its implied correlations are not relations. With SIH's places permuted, the national band
-    (5 eigenvectors × 12 periods against 195 lagged fields) reported 42 false cross-system relations against 1
-    observed, and merged up to 216 cells it reported 377 (2026-10-07, evaluation relations-real). The relations of
-    the national and macro-regional scales are OPEN_QUESTIONS 9's."""
+def _bands(d: Departures, spectrum, edges: tuple[float, ...], log=None) -> dict[str, np.ndarray]:
+    """The innovations on the place graph's Fourier basis (orthonormal, so the noise stays i.i.d. per coefficient),
+    split by eigenvalue into ``edges``: label → [F, m, T] coefficients. A smooth regional factor concentrates in the
+    low bands, a local one in the high; the label names the eigenvalue range and the effective places of the heat
+    kernel at s = 1/λ (the band's spatial scale). A band of fewer than three coefficients is not returned."""
     import torch
 
     lam, Q = spectrum._eig
@@ -398,214 +291,240 @@ def bands(d: Departures, spectrum, edges_of_bands: tuple[float, ...] = (0.0, 0.0
     xh = (Q.T @ X).cpu().numpy().reshape(U, F, T).transpose(1, 0, 2)      # [F, eigen, T]
     lam_ = lam.cpu().numpy()
     out = {}
-    for lo, hi in zip(edges_of_bands[:-1], edges_of_bands[1:], strict=True):
+    for lo, hi in zip(edges[:-1], edges[1:], strict=True):
         idx = np.nonzero((lam_ >= lo) & (lam_ < hi))[0]
         if idx.size < 3:
+            if log:
+                log(f"band λ {lo:g}-{hi:g}: {idx.size} coefficients, fewer than 3: unanswered")
             continue
         mid = float(np.sqrt(max(lo, lam_[idx].min(), 1e-6) * hi))
-        label = f"λ {lo:g}-{hi:g} (~{spectrum.footprint(1.0 / mid):.0f} places)"
-        if idx.size * T < min_cells:
-            if log:
-                log(f"band {label}: {idx.size * T} cells for {min_cells}: not identified by the band model; its scale "
-                    "is read on the fields' courses (`course_relations`)")
-            continue
-        out[label] = Departures(d.fields, idx, d.periods, xh[:, idx, :], np.ones((F, idx.size, T)))
+        out[f"λ {lo:g}-{hi:g} (~{spectrum.footprint(1.0 / mid):.0f} places)"] = xh[:, idx, :]
     return out
 
 
-@dataclass
-class SpectralFactors:
-    """The joint model with each factor's own spatial spectrum (`spectral_factor_model`): loadings Λ [F, K] (each
-    column of unit norm), the factors' score variances per graph-frequency band G [K, B], each field's extra variance
-    σ² [F], the bands' coefficient counts n [B], labels and the effective places of their heat-kernel scale."""
-    fields: list[str]
-    loadings: np.ndarray
-    G: np.ndarray
-    sigma2: np.ndarray
-    n: np.ndarray
-    labels: list[str]
-    places: np.ndarray
-    trace: list = field(default_factory=list)
-
-    def band(self, b) -> _BandView:
-        """The fit read over band ``b`` (an index, or a list of fine bands pooled)."""
-        return _BandView(self, np.atleast_1d(b))
-
-    def report_bands(self, octaves: float = 1.5) -> dict[str, list[int]]:
-        """The fine bands pooled into reporting groups ``octaves`` wide in footprint (effective places): the fine grid
-        is the model's resolution; a relation is asked over scales wide enough to hold its coefficients."""
-        lp = np.log2(self.places)
-        edges = np.arange(lp.min(), lp.max() + octaves, octaves)
-        groups: dict[str, list[int]] = {}
-        for b, v in enumerate(lp):
-            g = int(np.searchsorted(edges, v, side="right") - 1)
-            lo, hi = 2 ** edges[g], 2 ** min(edges[g] + octaves, lp.max())
-            groups.setdefault(f"~{lo:.0f}-{hi:.0f} places", []).append(b)
-        return groups
-
-    def factor_scales(self) -> list[float]:
-        """Each factor's spatial scale: the effective places of the band where its spectrum peaks."""
-        return [float(self.places[int(np.argmax(g))]) for g in self.G]
-
-
-@dataclass
-class _BandView:
-    """One band of a `SpectralFactors`, read as `relation_table` reads a `Factors`."""
-    fit: SpectralFactors
-    b: np.ndarray
-
-    @property
-    def fields(self) -> list[str]:
-        return self.fit.fields
-
-    def relations(self) -> tuple[np.ndarray, np.ndarray]:
-        L, n = self.fit.loadings, self.fit.n[self.b]
-        g = (self.fit.G[:, self.b] * n).sum(1) / n.sum()                 # the factors' mean variance over the bands
-        C = (L * g) @ L.T
-        tot = np.diag(C) + 1.0 + self.fit.sigma2
-        rho = C / np.sqrt(np.outer(tot, tot))
-        np.fill_diagonal(rho, 1.0)
-        return rho, rho * np.sqrt(n.sum())
-
-
-def spectral_factor_model(d: Departures, spectrum, K: int = 12, n_bands: int = 24, iterations: int = 300,
-                          tol: float = 1e-7, log=None) -> SpectralFactors:
-    """One joint model of the (whitened, `innovations`, possibly `lagged`) departures over every spatial scale: on the
-    graph Fourier coefficients x_f(k, t) of the place graph ``spectrum``,
-
-        x(k, t) = Λ s(k, t) + ε,   s_j(k, t) ~ N(0, g_j(λ_k)),   ε_f ~ N(0, 1 + σ_f²),
-
-    each factor j with its own spatial spectral density g_j, piecewise constant over ``n_bands`` log-spaced bands of
-    the Laplacian's eigenvalues and smoothed across neighbouring bands (EM with smoothing, Silverman et al. 1990): a
-    stationary process on the graph per factor (Marques et al. 2017). A factor no field needs has g → 0 everywhere.
-    The bands are a fine grid on a continuum, not a choice: one fit reads every scale, a factor spanning several is
-    one factor, and each reports its own scale (`SpectralFactors.factor_scales`). Under the model the posterior of
-    s(k, t) depends on its band only, so the E-step costs B small K × K inversions."""
-    import torch
-
-    lam, Q = spectrum._eig
-    dev = Q.device
+def _courses(d: Departures) -> dict[str, np.ndarray]:
+    """The national and macro-regional courses (the IBGE code's first digit): each field's innovations summed over the
+    region's places with the places' information weights ``d.w`` (√V: the optimal weights for a departure common to
+    the region), over √Σw², so a course is N(0, 1) per period under the model. {"national": [F, 1, T],
+    "macro-regional": [F, R, T]}."""
     ok = np.isfinite(d.v) & (d.v > 0)
-    x = np.where(ok, d.r / np.sqrt(np.where(ok, d.v, 1.0)), 0.0)          # [F, U, T]
-    F, U, T = x.shape
-    Xin = torch.as_tensor(np.transpose(x, (1, 0, 2)).reshape(U, F * T), dtype=Q.dtype, device=dev)
-    X = (Q.T @ Xin).reshape(U, F, T).permute(1, 0, 2).reshape(F, U * T).float()          # [F, k·T]
-    lam_ = lam.cpu().numpy()
-    pos = lam_[lam_ > 1e-9]
-    edges = np.concatenate([[-1.0], np.geomspace(pos.min(), 2.0 + 1e-6, n_bands)])
-    band_k = np.clip(np.searchsorted(edges, lam_, side="right") - 1, 0, n_bands - 1)
-    band = torch.as_tensor(np.repeat(band_k, T), device=dev)                              # [k·T]
-    used = np.unique(band_k)
-    B = len(used)
-    remap = np.full(n_bands, -1)
-    remap[used] = np.arange(B)
-    band = torch.as_tensor(remap[np.repeat(band_k, T)], device=dev)
-    nb = torch.bincount(band, minlength=B).float()
-    mids = [float(np.sqrt(max(edges[b], pos.min()) * edges[b + 1])) for b in used]
-    places = np.array([spectrum.footprint(1.0 / m) for m in mids])
-    labels = [f"λ {max(edges[b], 0):.3g}-{edges[b + 1]:.3g} (~{p:.0f} places)" for b, p in zip(used, places, strict=True)]
-    # initialisation: the leading components of the coefficients
-    ev, vec = torch.linalg.eigh(X @ X.T / X.shape[1])
-    top = torch.argsort(ev, descending=True)[:K]
-    Lam = vec[:, top].float()
-    G = torch.clamp(ev[top] - 1.0, min=1e-3)[:, None].repeat(1, B).float()
-    sigma2 = torch.zeros(F, device=dev)
-    eye = torch.eye(K, device=dev)
-    onehot = torch.nn.functional.one_hot(band, B).float()                                 # [k·T, B]
-    trace, prev = [], None
-    for it in range(iterations):
-        w = 1.0 / (1.0 + sigma2)                                                           # [F]
-        LtW = Lam.T * w                                                                    # [K, F]
-        P = torch.diag_embed(1.0 / G.T) + (LtW @ Lam)[None]                                # [B, K, K]
-        S = torch.linalg.inv(P)                                                            # Σ_b
-        Y = LtW @ X                                                                        # [K, k·T]
-        m = torch.einsum("nkj,jn->kn", S[band], Y)                                         # [K, k·T]
-        # sufficient statistics
-        Smm = torch.einsum("kn,jn,nb->bkj", m, m, onehot)                                  # Σ_{n∈b} m mᵀ
-        Ess = (S * nb[:, None, None] + Smm)                                                # [B, K, K]
-        A = Ess.sum(0)
-        bx = X @ m.T                                                                       # [F, K]
-        Lam = bx @ torch.linalg.inv(A + 1e-6 * eye)
-        # the factors' spectra, EM then smoothed in log over neighbouring bands
-        Gnew = torch.diagonal(Ess, dim1=1, dim2=2).T / nb[None]                            # [K, B]
-        lg = torch.log(torch.clamp(Gnew, min=1e-8))
-        pad = torch.cat([lg[:, :1], lg, lg[:, -1:]], 1)
-        G = torch.exp(0.25 * pad[:, :-2] + 0.5 * pad[:, 1:-1] + 0.25 * pad[:, 2:])
-        # each loading column to unit norm, its scale moved into the spectrum
-        norm = torch.clamp(Lam.norm(dim=0), min=1e-8)
-        Lam, G = Lam / norm, G * (norm ** 2)[:, None]
-        resid = X - Lam @ m
-        sigma2 = torch.clamp((resid ** 2).mean(1) + torch.einsum("fk,bkj,fj,b->f", Lam, S, Lam, nb) / X.shape[1] - 1.0,
-                             min=0.0)
-        ll = float(-(resid ** 2).sum())
-        trace.append(round(ll, 2))
-        if log and it % 20 == 0:
-            log(f"iteration {it}: {ll:.6g}; factor peaks {np.round(G.max(1).values.cpu().numpy(), 4).tolist()}")
-        if prev is not None and abs(ll - prev) < tol * abs(ll):
-            break
-        prev = ll
-    c = lambda a: a.detach().cpu().numpy()  # noqa: E731
-    return SpectralFactors(d.fields, c(Lam), c(G), c(sigma2), c(nb), labels, places, trace)
+    x = np.where(ok, d.r / np.sqrt(np.where(ok, d.v, 1.0)), 0.0)
+    w = np.ones(x.shape[:2]) if d.w is None else d.w
+    region = np.asarray(d.places).astype(np.int64) // 100000
+    groups = {"national": [np.ones(len(region), dtype=bool)]}
+    if len(np.unique(region)) > 1:               # one region is the national course again
+        groups["macro-regional"] = [region == r for r in np.unique(region)]
+    out = {}
+    for label, masks in groups.items():
+        out[label] = np.stack([np.einsum("fu,fut->ft", w[:, m], x[:, m, :]) / np.sqrt(
+            np.maximum((w[:, m] ** 2).sum(1), 1e-300))[:, None] for m in masks], axis=1)
+    return out
 
 
-def relation_table(fits: dict[str, Factors] | SpectralFactors, q: float = 0.05) -> list[dict]:
-    """Stage D's report over fits at several supports (``fits``: support → `Factors`, on `lagged` departures or not):
-    every pair of distinct fields, at relative lag ℓ ≥ 0 (one of the two at lag 0), its implied correlation and z,
-    a two-sided p, and one BH at q over every pair, lag and support. A relation is statistical (P16): whether it is a
-    cause, a shared driver or a shared recording artefact is stage E's question."""
+def _standardise(a: np.ndarray) -> np.ndarray:
+    """[F, m, T] centred in time per coefficient and scaled to unit root mean square per field (a field with no
+    information stays zero)."""
+    a = a - a.mean(2, keepdims=True)
+    rms = np.sqrt((a ** 2).mean((1, 2), keepdims=True))
+    return a / np.where(rms > 0, rms, 1.0)
+
+
+def _cross(follow: np.ndarray, lead: np.ndarray, lags: list[int], first: int
+           ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The statistic S(ℓ) = Σ_k Σ_{t ≥ first} follow(k, t) · lead(k, t − ℓ) of every follower [P, m, T] against every
+    leader [Q, m, T] ([P, Q, len(lags)]), with its null's variance and degrees of freedom ([P, Q], `_null_moments`)
+    and the statistic at every circular shift ([P, Q, T]; the lags are its first entries).
+
+    The null is the same statistic over the shifts of the leader (``first`` is the largest lag): a circular shift
+    keeps the leader's whole structure, nonlinear included (a spike stays a spike), and breaks its timing against the
+    follower. The shifts S(τ) = Re Σ_ω Ñ(ω) e^{−2πiωτ/T}, Ñ(ω) = (1/T) Σ_{t ≥ first} Σ_k follow(k, t) ĝ(k, ω)
+    e^{2πiωt/T}, are one FFT of a cross-spectrum; over all T of them the second moment is Σ_ω |Ñ(ω)|², which is
+    also the variance over the phase surrogates (one phase per frequency, common to all coefficients: Prichard &
+    Theiler 1994) in closed form. A relation lifts the shifts near its own lag, and a null that contains it is
+    wide where it should be narrow, so the null is the shifts outside the tested lags and as many on either side
+    (τ in (2·first, T − first)), which are exchangeable with the observed one under independence (`_null_moments`)."""
+    T = follow.shape[2]
+    Fl = np.fft.fft(lead, axis=2)                                            # [Q, m, ω]
+    M = np.tensordot(follow * (np.arange(T) >= first), Fl, axes=([1], [1])).transpose(0, 2, 1, 3)   # [P, Q, t, ω]
+    t = np.arange(T)
+    Nt = np.einsum("pqtw,tw->pqw", M, np.exp(2j * np.pi * np.outer(t, t) / T), optimize=True) / T
+    shifts = np.fft.fft(Nt, axis=-1).real                                    # [P, Q, τ]: S at every circular shift
+    var, df = _null_moments(shifts[..., 2 * first + 1:T - first], shifts)
+    return shifts[..., lags], var, df, shifts
+
+
+#: the smallest effective size of the clear shifts for which they, and not all T, are the null: the variance of a
+#: sample of n_eff draws is known to 1/√(2 n_eff) (24 % at 10), and below it the clear shifts of a short series
+#: (T = 48, L = 12: 11 smooth ones) called 119 of 225 rows related on two epidemic waves (evaluation 2026-10-11)
+NULL_MIN_EFFECTIVE = 10.0
+
+
+def _moments(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Variance, effective size and kurtosis-based degrees of freedom of a null sample [..., n] (mean zero: the leader
+    is centred). The effective size is n over 1 + 2 Σ ρ_k, the positive autocorrelations of the shifts (smooth in τ
+    when the series are); the kurtosis's degrees of freedom are 3 + 6/(ν − 4) solved for ν."""
+    n = x.shape[-1]
+    var = (x ** 2).mean(-1)
+    kurt = (x ** 4).mean(-1) / np.maximum(var ** 2, 1e-300)
+    ss = np.maximum((x ** 2).sum(-1), 1e-300)
+    rho = np.stack([(x[..., :-k] * x[..., k:]).sum(-1) / ss * (1 - k / n) for k in range(1, max(n // 3, 1) + 1)], -1)
+    neff = n / (1 + 2 * np.clip(rho, 0, 1).sum(-1))
+    excess = kurt - 3.0
+    return var, neff, np.where(excess > 1e-6, 4.0 + 6.0 / np.maximum(excess, 1e-6), np.inf)
+
+
+def _null_moments(clear: np.ndarray, every: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The variance of the null and the degrees of freedom of the Student-t that stands for it. A leader whose
+    energy sits in a few periods (an epidemic, an outbreak) has a null far from normal, one shift carrying the
+    alignment, so ν is the smaller of the kurtosis's and the effective size less one. The null is the shifts clear of
+    the tested lags (``clear``) where their effective size is at least `NULL_MIN_EFFECTIVE`, else every shift
+    (``every``; its second moment is the phase surrogates' closed-form variance), per pair."""
+    var_c, neff_c, nu_c = _moments(clear) if clear.shape[-1] >= 4 else (None, None, None)
+    var_a, neff_a, nu_a = _moments(every)
+    if var_c is None:
+        return var_a, np.maximum(np.minimum(nu_a, neff_a - 1.0), 2.05)
+    ok = neff_c >= NULL_MIN_EFFECTIVE
+    var = np.where(ok, var_c, var_a)
+    df = np.where(ok, np.minimum(nu_c, neff_c - 1.0), np.minimum(nu_a, neff_a - 1.0))
+    return var, np.maximum(df, 2.05)
+
+
+def _tail_p(S: np.ndarray, var: np.ndarray, df: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Two-sided p and its z-equivalent for the statistic ``S`` against a null of variance ``var``: the Student-t with
+    ``df`` degrees of freedom (`_null_moments`) scaled to that variance. A normal tail on the closed-form variance
+    called place-permuted copies of real fields related 2-4 times too often below p = 0.001 (evaluation 2026-10-11)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = np.where(var > 1e-300, S / np.sqrt(var), 0.0)
+    p = np.clip(2 * stats.t.sf(np.abs(z) * np.sqrt(df / (df - 2.0)), df), 1e-300, 1.0)
+    return p, np.sign(z) * stats.norm.isf(p / 2)
+
+
+def _ridge_residual(Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    """The columns of Y [n, c] net of the regressors Z [n, p], each by a ridge whose penalty minimises the generalised
+    cross-validation criterion n·RSS/(n − df)² over a wide grid: the strength is learned from the data, and a Z with
+    more columns than cells (a national course of a dozen periods) shrinks instead of fitting."""
+    n = Z.shape[0]
+    U, s, _ = np.linalg.svd(Z, full_matrices=False)
+    UtY = U.T @ Y
+    grid = max(s.max(), 1e-12) ** 2 * np.logspace(-8, 2, 41)
+    sh = s[None, :] ** 2 / (s[None, :] ** 2 + grid[:, None])                  # [G, r]
+    out = np.empty_like(Y)
+    for j in range(Y.shape[1]):
+        c = UtY[:, j]
+        rss = float(Y[:, j] @ Y[:, j]) - ((2 * sh - sh ** 2) * (c ** 2)[None, :]).sum(1)
+        df = sh.sum(1)
+        gcv = np.where(n - df > 1e-6, n * rss / np.maximum(n - df, 1e-6) ** 2, np.inf)
+        g = int(np.argmin(gcv))
+        out[:, j] = Y[:, j] - U @ (sh[g] * c)
+    return out
+
+
+def _support_rows(label: str, a: np.ndarray, names: list[str], lags: int) -> tuple[list[dict], list[dict]]:
+    """Every pair, lag and direction at one support: the follower f at t against the leader g at t − ℓ (lag 0 once
+    per pair, with the larger p of its two orders), and the lag profiles (`_profiles`)."""
+    F, _, T = a.shape
+    a = _standardise(a)
+    ells = list(range(lags + 1))
+    S, V, DF, shifts = _cross(a, a, ells, lags)
+    nf = np.sqrt((a[:, :, lags:] ** 2).sum((1, 2)))                                              # follower window
+    ng = np.stack([np.sqrt((a[:, :, lags - ell:T - ell] ** 2).sum((1, 2))) for ell in ells], 1)   # leader window at ℓ
+    P, Z = _tail_p(S, V[..., None], DF[..., None])
+    rows = []
+    for f in range(F):
+        for g in range(F):
+            if f == g:
+                continue
+            for ell in ells:
+                if ell == 0 and g < f:
+                    continue
+                p, z = P[f, g, ell], Z[f, g, ell]
+                if ell == 0 and P[g, f, 0] > p:                 # lag 0 is symmetric: the larger p of the two orders
+                    p, z = P[g, f, 0], Z[g, f, 0]
+                den = nf[f] * ng[g, ell]
+                rows.append({"support": label, "field": names[f], "leader": names[g], "lag": ell,
+                             "rho": float(S[f, g, ell] / den) if den > 0 else 0.0, "z": float(z), "p": float(p),
+                             "_f": f, "_g": g})
+    return rows, _profiles(label, names, S, shifts, nf, ng, lags)
+
+
+def _profiles(label: str, names: list[str], S: np.ndarray, shifts: np.ndarray, nf: np.ndarray, ng: np.ndarray,
+              lags: int) -> list[dict]:
+    """The lag profile of every ordered pair at one support, as the cumulative association of the leader strictly
+    preceding the follower, ℓ = 1..L (the cumulative effect of a distributed-lag term, Gasparrini et al. 2010): the
+    sum of S(ℓ) over those lags, tested against the same statistic at every circular shift of the leader (`_cross`),
+    so the profile is one test per pair and support where its lags are L, and the lag of its largest term (``peak``)
+    is read from the lag rows. ``rho`` is the mean of the lag correlations."""
+    T = shifts.shape[2]
+    if lags < 1:
+        return []
+    window = np.arange(1, lags + 1)
+    cum = shifts[..., (np.arange(T)[:, None] + window[None, :]) % T].sum(-1)           # [F, F, τ]: Σ_ℓ S(τ + ℓ)
+    var, df = _null_moments(cum[..., 2 * lags:T - 2 * lags], cum)       # windows clear of the tested one and its neighbours
+    P, Z = _tail_p(cum[..., 0], var, df)
+    F = len(names)
+    out = []
+    for f in range(F):
+        for g in range(F):
+            if f == g:
+                continue
+            rho = np.array([S[f, g, ell] / (nf[f] * ng[g, ell]) if nf[f] * ng[g, ell] > 0 else 0.0 for ell in window])
+            out.append({"support": label, "field": names[f], "leader": names[g], "rho": float(rho.mean()),
+                        "z": float(Z[f, g]), "p": float(P[f, g]),
+                        "peak": int(window[np.argmax(rho * np.sign(rho.sum() or 1.0))])})
+    return out
+
+
+def _direct(a: np.ndarray, rows: list[dict], lags: int, q: float) -> None:
+    """Partial and direct for the reported ``rows`` of one support (module docstring): the follower, and the leader's
+    window, net of the lags 0..L of every other field with a reported relation with either (ridge, GCV), the residual
+    follower tested against the leader by `_cross`. A reported relation with nothing to condition on is its own partial.
+    Sets ``partial``, ``p_partial`` and ``direct`` on each row."""
     from . import control
 
-    if isinstance(fits, SpectralFactors):
-        fits = {label: fits.band(bs) for label, bs in fits.report_bands().items()}
-    rows = []
-    for support, fit in fits.items():
-        rho, z = fit.relations()
-        base = [n.split("@")[0] for n in fit.fields]
-        lag = [int(n.split("@")[1]) if "@" in n else 0 for n in fit.fields]
-        for i in range(len(base)):
-            for j in range(i + 1, len(base)):
-                if base[i] == base[j] or min(lag[i], lag[j]) != 0:
-                    continue
-                a, b = (i, j) if lag[i] == 0 else (j, i)       # a at lag 0; b at lag ℓ (b leads a by ℓ)
-                rows.append({"support": support, "field": base[a], "leader": base[b], "lag": lag[b],
-                             "rho": float(rho[i, j]), "z": float(z[i, j])})
-    if not rows:
-        return []
-    p = 2 * stats.norm.sf(np.abs([r["z"] for r in rows]))
-    keep = control.bh(p, q)
-    for r, pi, k in zip(rows, p, keep, strict=True):
-        r["p"], r["reported"] = float(pi), bool(k)
-    return rows
+    a = _standardise(a)
+    F, m, T = a.shape
+    found: dict[int, set[int]] = {}
+    for r in rows:
+        found.setdefault(r["_f"], set()).add(r["_g"])
+        found.setdefault(r["_g"], set()).add(r["_f"])
+    tested = []
+    for r in rows:
+        f, g, ell = r["_f"], r["_g"], r["lag"]
+        others = sorted((found[f] | found[g]) - {f, g})
+        if not others:
+            r["partial"], r["p_partial"], r["direct"] = r["rho"], r["p"], True
+            continue
+        Z = np.stack([a[h, :, lags - lam:T - lam].ravel() for h in others for lam in range(lags + 1)], axis=1)
+        rf, rg = _ridge_residual(np.stack([a[f, :, lags:].ravel(), a[g, :, lags - ell:T - ell].ravel()], 1), Z).T
+        follow = np.zeros((1, m, T))
+        follow[0, :, lags:] = rf.reshape(m, T - lags)
+        S, V, DF, _ = _cross(follow, a[g][None], [ell], lags)
+        p, z = _tail_p(S[0, 0, 0], V[0, 0], DF[0, 0])
+        r["partial"] = float(rf @ rg / max(np.linalg.norm(rf) * np.linalg.norm(rg), 1e-300))
+        r["p_partial"], r["_zc"] = float(p), float(z)
+        tested.append(r)
+    if tested:
+        keep = control.bh(np.array([r["p_partial"] for r in tested]), q)
+        for r, k in zip(tested, keep, strict=True):
+            r["direct"] = bool(k) and np.sign(r["_zc"]) == np.sign(r["rho"])
 
 
-def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float = 0.05, courses: bool = True,
-                 direct: bool = True, ledger=None, log=None, contexts: list[Departures] | None = None) -> dict:
-    """Stage D over a set of fields (ARCHITECTURE §7.5): their N1-whitened innovations (`innovations`) in the graph's
-    frequency bands (`bands`, the bands too small for the lagged fields left unanswered), each band's departures
-    stacked with their own past to ``lags`` periods (`lagged`), the EM factor model with ARD per band
-    (`factor_model`), and every pair, lag and band under one BH at q (`relation_table`). The scales the bands
-    cannot identify are answered on the fields' courses (``courses``: `course_relations`, national and macro-regional,
-    their own family at q). Returns ``rows`` (every pair, ``reported`` marking the relations), ``unanswered`` (the
-    bands not fitted) and ``fields``. Every band's family and the courses' are written to ``ledger`` (a fresh
-    `control.Ledger` when None) before they are fitted, and completed with their result (§9.2)."""
+def relation_estimate(d: Departures, spectrum, lags: int = 2, q: float = 0.05, courses: bool = True,
+                      conditional: bool = True, ledger=None, log=None, edges: tuple[float, ...] = BAND_EDGES) -> dict:
+    """The relation estimator over the innovations ``d`` (module docstring): every pair of distinct fields at every lag
+    0..``lags`` (one of the two leading) in each graph band of the place graph ``spectrum`` and, with ``courses``,
+    the macro-regional and national courses; the shift-null p of each (`_cross`); one BH at q over all of it; and,
+    with ``conditional``, the partial and direct read of the reported ones. Returns ``rows`` (``support``, ``field`` the
+    follower, ``leader``, ``lag``, ``rho``, ``z``, ``p``, ``reported``, and ``partial``, ``direct`` where reported),
+    ``profiles`` (per ordered pair and support, the cumulative association over lags 1..L with its own BH at q: the lag
+    profile as one test, ``peak`` its largest lag), ``unanswered`` (the bands too small to read) and ``fields``. Each support's family is written to ``ledger`` (a fresh
+    `control.Ledger` when None) before it is computed, and completed with its result (§9.2)."""
     from . import control
 
     ledger = ledger if ledger is not None else control.Ledger()
-    d = innovations(surprises)
-    for c in contexts or ():
-        # a context's innovations (`context_innovations`) on the fields' lattice; a place or period it lacks is no
-        # information, never a zero departure
-        ui, ti = np.searchsorted(c.places, d.places), np.searchsorted(c.periods, d.periods)
-        hu = (ui < len(c.places)) & (c.places[np.minimum(ui, len(c.places) - 1)] == d.places)
-        ht = (ti < len(c.periods)) & (c.periods[np.minimum(ti, len(c.periods) - 1)] == d.periods)
-        r = np.zeros((1, len(d.places), len(d.periods)))
-        v = np.full_like(r, np.inf)
-        sub = np.ix_(np.nonzero(hu)[0], np.nonzero(ht)[0])
-        r[0][sub] = c.r[0][np.ix_(ui[hu], ti[ht])]
-        v[0][sub] = c.v[0][np.ix_(ui[hu], ti[ht])]
-        d = Departures(d.fields + c.fields, d.places, d.periods, np.concatenate([d.r, r]), np.concatenate([d.v, v]))
     T = len(d.periods)
-    min_cells = int(np.ceil((lags + 1) * len(d.fields) * T / max(T - lags, 1)))   # lagged cells ≥ lagged fields
+    if lags >= T:
+        raise ValueError(f"{lags} lags leave no period of {T}")
     unanswered: list[str] = []
 
     def note(msg: str) -> None:
@@ -613,163 +532,77 @@ def relation_map(surprises: list, spectrum, lags: int = 2, K: int = 16, q: float
         if log:
             log(msg)
 
-    fits, graphs_, tests = {}, {}, {}
-    fields_spec = sorted(d.fields)
-    for label, db in bands(d, spectrum, min_cells=min_cells, log=note).items():
-        tests[label] = ledger.register(control.Hypothesis(f"relation|{label}", "scan", {
-            "model": "band factor model on N1 innovations", "fields": fields_spec, "lags": lags, "K": K}))
-        dl = lagged(db, lags)
-        fits[label] = factor_model(dl, K=K)
-        if direct:
-            graphs_[label] = direct_relations(dl, fits[label])
-        if log:
-            log(f"band {label}: {db.r.shape[1]} coefficients, "
-                f"{int((fits[label].gamma > 1e-3 * fits[label].gamma.max()).sum())} factors kept")
-    rows = relation_table(fits, q=q)
-    for label, tid in tests.items():
-        mine = [r for r in rows if r["support"] == label]
-        ledger.complete(tid, float(min((r["p"] for r in mine), default=1.0)), None,
-                        {"pairs": len(mine), "reported": sum(r["reported"] for r in mine)})
-    for r in rows:              # direct given the factors (§7.6), or carried by a shared driver
-        g = graphs_.get(r["support"])
-        if g is not None:
-            names = g["fields"]
-            i, j = names.index(f"{r['field']}@0"), names.index(f"{r['leader']}@{r['lag']}")
-            r["partial"] = float(g["partial"][i, j])
-            # direct given the factors when the residual keeps the relation's sign; a partial of the other sign is the
-            # factors over-explaining a shared movement (dengue deaths and admissions: ρ +0.44, partial −0.38, 2026-10-07)
-            r["direct"] = abs(r["partial"]) > 1e-8 and np.sign(r["partial"]) == np.sign(r["rho"])
+    supports = _bands(d, spectrum, edges, note)
     if courses:
-        tid = ledger.register(control.Hypothesis("relation|courses", "scan", {
-            "model": "national and macro-regional courses, phase surrogates", "fields": fields_spec, "lags": lags}))
-        cr = course_relations(surprises, lags=lags, q=q)
-        ledger.complete(tid, float(min((r["p"] for r in cr), default=1.0)), None,
-                        {"pairs": len(cr), "reported": sum(r["reported"] for r in cr)})
-        rows += cr
+        supports.update(_courses(d))
+    fields_spec = sorted(d.fields)
+    rows, profiles, arrays = [], [], {}
+    for label, a in supports.items():
+        tid = ledger.register(control.Hypothesis(f"relation|{label}", "scan", {
+            "model": "lagged cross-covariance of N1 innovations, leader circular-shift null", "fields": fields_spec,
+            "lags": lags}))
+        mine, prof = _support_rows(label, a, d.fields, lags)
+        rows += mine
+        profiles += prof
+        arrays[label] = (a, tid)
         if log:
-            log(f"courses: {sum(r['reported'] for r in rows if r['support'] in ('national', 'macro-regional'))} "
-                "national and macro-regional relations")
-    return {"rows": rows, "unanswered": unanswered, "fields": d.fields}
-
-
-
-# ---------------------------------------------------------------------- the national and macro-regional courses
-
-
-def phase_surrogates(x: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
-    """[n, T] surrogates of a series with its power spectrum kept and its phases drawn at random (Theiler et al.
-    1992): its own autocorrelation stays, any relation to another series is destroyed."""
-    T = len(x)
-    f = np.fft.rfft(x - x.mean())
-    ph = rng.uniform(0, 2 * np.pi, (n, len(f)))
-    ph[:, 0] = 0.0
-    if T % 2 == 0:
-        ph[:, -1] = 0.0                                  # the Nyquist term stays real
-    return np.fft.irfft(np.abs(f)[None, :] * np.exp(1j * ph), n=T) + x.mean()
-
-
-def course_relations(surprises: list, lags: int = 2, q: float = 0.05, replicates: int = 999, seed: int = 0) -> list[dict]:
-    """Relations at the scales the band factor model cannot identify (OPEN_QUESTIONS 9): each field's course as the
-    yearly log ratio of observed to expected, nationally and in each macro-region (the IBGE code's first digit). A
-    pair's statistic at lag ℓ is the correlation of follower(t) with leader(t − ℓ), pooled over the regions after
-    centring each region's series. Its null comes from phase surrogates of the leader's series (`phase_surrogates`),
-    which keep each series' own autocorrelation, so the test has the T periods' degrees of freedom and no more; a
-    place permutation is no null here, as it keeps every course (evaluation 2026-10-07, relations real). Two
-    supports: ``national`` and ``macro-regional``. Rows as `relation_table`'s, with one BH at q over them all."""
-    from . import control
-
-    rng = np.random.default_rng(seed)
-    names = [s.field.id for s in surprises]
-    places = np.asarray(surprises[0].places).astype(np.int64)
-    regions = places // 100000
-    supports = {"national": [np.ones(len(places), dtype=bool)],
-                "macro-regional": [regions == r for r in np.unique(regions)]}
-    rows = []
-    for support, masks in supports.items():
-        series = []                                      # [F][R] the centred log-ratio courses
-        for s in surprises:
-            pl = np.asarray(s.places).astype(np.int64)
-            per = []
-            for mk in masks:
-                sel = np.isin(pl, places[mk])
-                o, e = s.y[sel].sum(0), s.mu[sel].sum(0)
-                lr = np.log((o + 0.5) / (e + 0.5))
-                per.append(lr - lr.mean())
-            series.append(per)
-        T = len(series[0][0])
-        surrogates = [[phase_surrogates(x, replicates, rng) for x in per] for per in series]   # once per field
-        for i in range(len(names)):
-            for j in range(len(names)):
-                if i == j:
-                    continue
-                for ell in range(lags + 1):
-                    if ell == 0 and j < i:
-                        continue                         # lag 0 is symmetric: each pair once
-                    a = np.concatenate([x[ell:] for x in series[i]])
-                    b_series = series[j]
-                    b = np.concatenate([x[:T - ell] for x in b_series])
-                    r = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else 0.0
-                    sur = np.concatenate([x[:, :T - ell] for x in surrogates[j]], 1)
-                    sur = sur - sur.mean(1, keepdims=True)
-                    ac = a - a.mean()
-                    rs = (sur @ ac) / np.maximum(np.linalg.norm(sur, axis=1) * np.linalg.norm(ac), 1e-300)
-                    p = (1 + int(np.sum(np.abs(rs) >= abs(r)))) / (replicates + 1)
-                    rows.append({"support": support, "field": names[i], "leader": names[j], "lag": ell, "rho": r,
-                                 "z": float(stats.norm.isf(p / 2) * np.sign(r)), "p": p})
+            log(f"support {label}: {a.shape[1]} coefficients, {len(mine)} pair-lags")
     if rows:
         keep = control.bh(np.array([r["p"] for r in rows]), q)
         for r, k in zip(rows, keep, strict=True):
             r["reported"] = bool(k)
-    return rows
+    if profiles:
+        keep = control.bh(np.array([r["p"] for r in profiles]), q)
+        for r, k in zip(profiles, keep, strict=True):
+            r["reported"] = bool(k)
+    for label, (a, tid) in arrays.items():
+        mine = [r for r in rows if r["support"] == label]
+        ledger.complete(tid, float(min((r["p"] for r in mine), default=1.0)), None,
+                        {"pairs": len(mine), "reported": sum(r["reported"] for r in mine)})
+        if conditional and any(r["reported"] for r in mine):
+            _direct(a, [r for r in mine if r["reported"]], lags, q)
+    for r in rows:
+        r.pop("_f"), r.pop("_g"), r.pop("_zc", None)
+    return {"rows": rows, "profiles": profiles, "unanswered": unanswered, "fields": d.fields}
 
 
-# ---------------------------------------------------------------------- direct relations: sparse + low rank (§7.6)
+def restrict(d: Departures, periods: tuple[int, int] | None = None, macro: list[int] | None = None) -> Departures:
+    """The innovations of the periods labelled ``periods`` (first, last: inclusive) and the places of the macro-regions
+    ``macro`` (the IBGE code's first digit): a relation asked of a window and a part of the country. The innovations
+    were whitened over the whole fitted series, so cutting them afterwards keeps their null."""
+    ti = np.ones(len(d.periods), dtype=bool) if periods is None else (d.periods >= periods[0]) & (d.periods <= periods[1])
+    ui = np.ones(len(d.places), dtype=bool) if macro is None else np.isin(np.asarray(d.places).astype(np.int64) // 100000,
+                                                                          macro)
+    if not ti.any() or not ui.any():
+        raise ValueError(f"no cell in periods {periods}, macro-regions {macro}")
+    return Departures(d.fields, d.places[ui], d.periods[ti], d.r[:, ui][:, :, ti], d.v[:, ui][:, :, ti],
+                      None if d.w is None else d.w[:, ui])
 
 
-def direct_relations(d: Departures, fit: Factors, lambdas: tuple[float, ...] = (0.5, 0.35, 0.25, 0.18, 0.12, 0.08, 0.05),
-                     subsamples: int = 20, beta: float = 0.05, seed: int = 0) -> dict:
-    """Which of a band's relations are direct (ARCHITECTURE §7.6): the latent-variable graphical model of
-    Chandrasekaran, Parrilo & Willsky (2012), the precision of the fields' departures as sparse minus low rank. The low
-    rank is the factor model's (``fit``, on the same departures ``d``); the sparse part is the graphical lasso of
-    the residual r − ΛF, its penalty chosen by StARS (Liu, Roeder & Wasserman 2010): the least penalty whose edges
-    are stable across ``subsamples`` subsamples of 10√n cells (instability ≤ ``beta``). A relation the factors carry
-    and the sparse graph does not is a shared driver; one in the graph is direct given the factors. Returns the
-    partial correlations [F, F], the chosen penalty and the instability path."""
-    import warnings
-
-    from sklearn.covariance import graphical_lasso
-
-    warnings.filterwarnings("ignore", module="sklearn")    # its convergence notices, once per subsample
-    F = len(d.fields)
-    R = d.r.reshape(F, -1)
-    ok = np.isfinite(d.v.reshape(F, -1)).all(0) & np.isfinite(R).all(0)
-    low = np.einsum("fk,kn->fn", fit.loadings, fit.factors.reshape(fit.factors.shape[0], -1))
-    X = (R - low)[:, ok]
-    X = (X - X.mean(1, keepdims=True)) / np.maximum(X.std(1, keepdims=True), 1e-12)
-    n = X.shape[1]
-    rng = np.random.default_rng(seed)
-    b = int(min(n, max(10 * np.sqrt(n), 5 * F)))
-    path = []
-    chosen = lambdas[0]
-    for lam in sorted(lambdas, reverse=True):
-        freq = np.zeros((F, F))
-        for _ in range(subsamples):
-            idx = rng.choice(n, b, replace=False)
-            S = np.corrcoef(X[:, idx])
-            try:
-                _, P = graphical_lasso(S, alpha=lam, max_iter=200)
-            except FloatingPointError:
-                continue
-            freq += np.abs(P) > 1e-8
-        theta = freq / subsamples
-        off = ~np.eye(F, dtype=bool)
-        instab = float(np.mean(2 * theta[off] * (1 - theta[off])))
-        path.append({"lambda": lam, "instability": round(instab, 4)})
-        if instab > beta:
-            break                                       # StARS: the least penalty before the edges turn unstable
-        chosen = lam
-    _, P = graphical_lasso(np.corrcoef(X), alpha=chosen, max_iter=500)
-    dg = np.sqrt(np.diag(P))
-    partial = -P / np.outer(dg, dg)
-    np.fill_diagonal(partial, 1.0)
-    return {"partial": partial, "lambda": chosen, "path": path, "fields": d.fields}
+def relation_map(surprises: list, spectrum, lags: int = 2, q: float = 0.05, courses: bool = True,
+                 conditional: bool = True, ledger=None, log=None, contexts: list[Departures] | None = None,
+                 periods: tuple[int, int] | None = None, macro: list[int] | None = None) -> dict:
+    """Stage D over a set of fields (ARCHITECTURE §7.5): their N1 innovations (`innovations`), with any time-varying
+    ``contexts`` (`context_innovations`) entered beside them, read by `relation_estimate`. ``periods`` and ``macro``
+    cut the innovations (`restrict`) to a window and to macro-regions; ``spectrum`` is then the cut places' graph, and
+    the "national" support is the cut places' course."""
+    d = innovations(surprises)
+    for c in contexts or ():
+        # a context's innovations on the fields' lattice; a place or period it lacks is no information, never a zero
+        # departure
+        ui, ti = np.searchsorted(c.places, d.places), np.searchsorted(c.periods, d.periods)
+        hu = (ui < len(c.places)) & (c.places[np.minimum(ui, len(c.places) - 1)] == d.places)
+        ht = (ti < len(c.periods)) & (c.periods[np.minimum(ti, len(c.periods) - 1)] == d.periods)
+        r = np.zeros((1, len(d.places), len(d.periods)))
+        v = np.full_like(r, np.inf)
+        w = np.zeros((1, len(d.places)))
+        sub = np.ix_(np.nonzero(hu)[0], np.nonzero(ht)[0])
+        r[0][sub] = c.r[0][np.ix_(ui[hu], ti[ht])]
+        v[0][sub] = c.v[0][np.ix_(ui[hu], ti[ht])]
+        w[0][hu] = c.w[0][ui[hu]]
+        d = Departures(d.fields + c.fields, d.places, d.periods, np.concatenate([d.r, r]), np.concatenate([d.v, v]),
+                       np.concatenate([d.w, w]))
+    if periods is not None or macro is not None:
+        d = restrict(d, periods, macro)
+    return relation_estimate(d, spectrum, lags=lags, q=q, courses=courses, conditional=conditional, ledger=ledger,
+                             log=log)

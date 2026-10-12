@@ -22,7 +22,7 @@ Terms as PegaSUS uses them. The definitions are in ARCHITECTURE; this is the sho
 | **lens** | a scan of one field (cluster, outbreak, disparity, trend, observation); since revision 3 a screen only, its claims replaced by departure models | §7.1 |
 | **subset scan** | the search for the subset of cells, across dimensions, whose combined surprise is largest | §7.2 |
 | **pattern** | a low-rank component of departures shared by places, times and fields | §7.4 |
-| **estimand (E_b, E_b\|Z, E_w, E_i)** | the declared question of a pair test: between places, adjusted, within places over time, between institutions | §7.5 |
+| **estimand (E_b, E_b\|Z, E_i)** | the declared question of a pair test: between places, adjusted, between institutions; within places over time is the relation estimator's | §7.5 |
 | **minimum effect δ** | the effect below which a relation is not a lead; calibrated on negative controls | §8.4 |
 | **family** | the unit of FDR control: lens or estimand × tier × field families × support | §8.1 |
 | **ledger** | the append-only record of every test, written before it runs | §9.2 |
@@ -47,6 +47,6 @@ Terms as PegaSUS uses them. The definitions are in ARCHITECTURE; this is the sho
 | **noise structure** | the expectation's description of how counts vary beyond their mean: dispersion, and the dependence of a place's deviations across periods (N1) | §6.1, §12 |
 | **reference** | what a departure is measured against (Brazil, the region, the place's own past), declared per estimand; the tiers' role since revision 3 | §6.1, §7.0 |
 | **departure model** | a departure term of a declared shape (cell excess, step, trend, cluster, group interaction) added to the model and read through its posterior; the stage-C inference | §7.0 |
-| **joint relation model** | stage D: all fields' departures modelled together through shared latent space–time factors and sparse lagged dependence; pairwise lag tests only confirm | §7.5 |
+| **relation estimator** | stage D: the lagged association of two fields' innovations at a support (graph band, macro-region, nation), tested against the leader's circular shifts (spectrum, spatial and nonlinear structure kept, timing broken; a Student-t tail), one BH over every pair, lag and support; the partial and direct read only of what is reported | §7.5, §8.1 |
 | **the bench** | the statistical characterisation of stages B–D: the grid of planted signals in refitted worlds, null worlds, negatives, SBC | §10 |
 | **absorption** | the share of a departure a refit takes into the expectation (9–63 % by locus); why departures are model terms and leads are sized held out | §10.3 |
