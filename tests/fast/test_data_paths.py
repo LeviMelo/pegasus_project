@@ -197,3 +197,12 @@ def test_an_extract_held_whole_is_not_built_again(monkeypatch):
     out: dict = {}
     study._ensure_extract([it], out, print)
     assert out["extract"] == "held whole by an existing extract"
+
+
+def test_triage_on_a_source_held_as_an_extract(monkeypatch):
+    # the evidence grid and the facility cube read SIA-PA's every event, past the slice's store: unknown, not fetched
+    monkeypatch.setenv("PEGASUS_AREA", "43")
+    s = tools.Session("SIASUS-PA", "procedure", list(range(2015, 2018)), source={"classifier": "PA_CIDPRI",
+                                                                                 "codes": ["B58", "P371"]})
+    s._prepare_grid()
+    assert s._total is None and s._ill is None and s._pop is not None and s._facilities() is None

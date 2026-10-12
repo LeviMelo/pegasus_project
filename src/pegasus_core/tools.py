@@ -1077,7 +1077,9 @@ class Session:
             self._prepare_grid()
             self._fac = None
             if self._per_year == 1:         # the cube is by year: no facility read at the monthly grain (`triage` says so)
-                with contextlib.suppress(LookupError):      # the dataset names no facility: nothing to read
+                # the dataset names no facility (LookupError), or its every event is not held (a source read as an
+                # extract of its codes, beyond which a study downloads nothing: ValueError): no facility evidence
+                with contextlib.suppress(LookupError, ValueError):
                     self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
         return self._fac
 
@@ -1098,7 +1100,10 @@ class Session:
             hit = store.get_arrays("tools", key)
             if hit is not None:
                 self._grid_places, self._grid_years, self._per_year = hit["places"], hit["years"], 1
-                self._total, self._ill, self._pop = hit["total"], hit["ill"], hit["pop"]
+                known = "known" not in hit or bool(hit["known"][0])
+                self._total = hit["total"] if known else None
+                self._ill = hit["ill"] if known else None
+                self._pop = hit["pop"]
                 return
             pop_t = gateway.population(list(self.years)).group_by(["u", "year"]).aggregate([("n", "sum")])
             # the study's area, as its blocks: triage indexes both by place (RS's grid held Brazil's 5,570)
@@ -1110,8 +1115,15 @@ class Session:
                 np.searchsorted(years, pop_t.column("year").to_numpy())] = pop_t.column("n_sum").to_numpy()
             reg = self.expectations.registry
             total, ill = np.zeros_like(pop), np.zeros_like(pop)
+            known = True
             for j, year in enumerate(years):          # vectorised: a Python loop over SIH's rows took 320 s a field
-                c = gateway.event_counts(self.dataset, self.event, int(year)).counts
+                try:
+                    c = gateway.event_counts(self.dataset, self.event, int(year)).counts
+                except (ValueError, LookupError):
+                    # the type's every event is not held (SIA-PA, read as an extract of its codes; a study downloads
+                    # nothing past its store): its totals are unknown, and the evidence that reads them is not drawn
+                    known = False
+                    break
                 cu = c.column("u").to_numpy()
                 u = np.minimum(np.searchsorted(places, cu), len(places) - 1)
                 ok = places[u] == cu
@@ -1123,8 +1135,9 @@ class Session:
                 total_ill = ok & chap
                 ill[:, j] += np.bincount(u[total_ill], weights=y[total_ill], minlength=len(places))
             self._grid_places, self._grid_years, self._per_year = places, years, 1
-            self._total, self._ill, self._pop = total, ill, pop
-            store.put_arrays("tools", key, {"places": places, "years": years, "total": total, "ill": ill, "pop": pop})
+            self._total, self._ill, self._pop = (total, ill, pop) if known else (None, None, pop)
+            store.put_arrays("tools", key, {"places": places, "years": years, "total": total, "ill": ill, "pop": pop,
+                                            "known": np.array([int(known)])})
             return
         # the stored fits of this reader, else the blocks this session has read (a fit loaded on demand is not yet
         # listed among the stored ones: SINAN-TOXC's triage found none and failed, the smoke study, 2026-10-11)

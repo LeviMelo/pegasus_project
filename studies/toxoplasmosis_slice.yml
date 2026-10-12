@@ -7,6 +7,7 @@ topic:
   seeds:
     icd10: [B58, P37.1]
     sinan: [TOXC]
+    terms: [toxoplasm]
   only: [SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
 period: 2014-2021
 where: RS
