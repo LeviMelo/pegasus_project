@@ -15,6 +15,7 @@ grain: [year]
 depth: deep
 related: 1
 nulls: quick
+relations: [fields, contexts, screen]
 draws: 2
 contexts: [sisagua_surveillance_ecoli_present]
 hypotheses:
