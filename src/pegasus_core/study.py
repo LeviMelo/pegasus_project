@@ -1323,6 +1323,9 @@ def run(decl: Declaration, log=print) -> Path:
     read = _probe(scope, read, log)
     prepared = _prepare_store(decl, read, log)
     read = _count_prepared(scope, read, log)
+    # from here nothing downloads: the scope priced what the study reads and the store step fetched it; the lanes
+    # inherit the limit (`gateway.max_download`)
+    os.environ["PEGASUS_MAX_DOWNLOAD"] = "0"
     (out / "scope.yml").write_text(yaml.safe_dump({**scope.to_dict(), "estimated_minutes": estimate}, sort_keys=False,
                                                   allow_unicode=True), encoding="utf-8")
     phases["store"], t = round(time.time() - t, 1), time.time()
@@ -1338,6 +1341,7 @@ def run(decl: Declaration, log=print) -> Path:
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
             "steps": steps, "store_tables": tables}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
+    os.environ.pop("PEGASUS_MAX_DOWNLOAD", None)
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
     return out
 

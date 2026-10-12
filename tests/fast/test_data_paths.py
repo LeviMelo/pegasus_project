@@ -165,3 +165,14 @@ def test_a_fit_read_on_a_window_of_its_years():
     w = surprise.window(s, [2020, 2021])
     assert list(w.years) == [2020, 2021] and w.y.shape == (s.y.shape[0], 2)
     assert (w.mu == s.mu[:, 1:3]).all() and (w.y == s.y[:, 1:3]).all()
+
+
+def test_a_study_never_downloads_past_its_store(monkeypatch):
+    # SIA-PA's serology read its exposure from every SIA-PA event of a year: 324 files fetched inside a lane (deep16)
+    from pegasus_data.retrieve import DownloadBudgetExceeded
+
+    monkeypatch.setenv("PEGASUS_MAX_DOWNLOAD", "0")
+    with pytest.raises(DownloadBudgetExceeded):
+        gateway.event_counts("SIASUS-PA", "procedure", 2016, cell=False)
+    c = gateway.event_counts("SIASUS-PA", "procedure", 2016, codes=SEROLOGY, cell=False)    # its extract: on disk
+    assert int(c.counts.column("y").to_numpy().sum()) > 0

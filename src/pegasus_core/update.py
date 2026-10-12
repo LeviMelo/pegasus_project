@@ -275,6 +275,11 @@ def _ensure_total(s, plan: Plan, label: str, out: dict, log) -> None:
 
     if str(s.source.get("population", "")).startswith("events:"):
         return                  # a ratio field asks no share (`tools.Session.lens`)
+    if any(x.extract for x in plan.systems if x.dataset == s.dataset):
+        # an extract holds its codes' records only: the share of all the type's events would download the whole
+        # dataset (SIA-PA, 175 GB) to fit its denominator; the share question says it has none
+        out[f"fit {label} * (share denominator)"] = "not fitted: read from an extract of its codes"
+        return
     # a code set's share is of all the type's events: the denominator is the unrestricted reader's fit
     src = {k: v for k, v in s.source.items() if k != "codes"}
     try:

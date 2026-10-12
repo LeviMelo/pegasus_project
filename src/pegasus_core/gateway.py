@@ -454,7 +454,7 @@ def _infant_age_mix() -> np.ndarray:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 raw = pg.count_events("SIM.DO", "death", period=y, geography="BR", by=[cause, coded],
-                                      root=config.data_root(), allow_partial=False, max_download=8 * 1024**3)
+                                      root=config.data_root(), allow_partial=False, max_download=max_download())
             con = duckdb.connect()
             con.register("r", raw)
             for band, n in con.execute(f"""
@@ -633,7 +633,7 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         raw = pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
-                              allow_partial=False, max_download=8 * 1024**3, records=records)
+                              allow_partial=False, max_download=max_download(), records=records)
     con = duckdb.connect()
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
@@ -683,6 +683,13 @@ def extract_years(dataset: str, column: str, codes: list[str], years: list[int])
             continue
         out.append(int(y))
     return out
+
+
+def max_download() -> int:
+    """The bytes one read may download (pegasus_data's ``max_download``): 8 GB, or ``PEGASUS_MAX_DOWNLOAD``. A study
+    sets 0 once its store is prepared (`study.run`): what its scope priced is on disk, and a reader reaching past it
+    fails visibly instead of fetching (SIA-PA's serology fetched a year of SIA-PA's files for its exposure, deep16)."""
+    return int(os.environ.get("PEGASUS_MAX_DOWNLOAD", 8 * 1024**3))
 
 
 @functools.cache
@@ -768,7 +775,7 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     flag = (rule.get("flag") or {}).get("column")
     select = None if "except" in rule else wanted + ([flag] if flag else [])
     # ``rows`` ({column: code prefixes}): only those records, filtered in the lake's scan (pegasus_data `query(rows=)`)
-    kwargs = {"root": config.data_root(), "max_download": 8 * 1024**3, **({"provenance": "all"} if identity else {}),
+    kwargs = {"root": config.data_root(), "max_download": max_download(), **({"provenance": "all"} if identity else {}),
               **({"rows": rows} if rows else {})}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -1945,7 +1952,7 @@ def raw_event_counts(dataset: str, event: str, year: int, by: list[str]):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
-                               allow_partial=False, max_download=8 * 1024**3)
+                               allow_partial=False, max_download=max_download())
 
 
 def raw_field(name: str, years: list[int]):

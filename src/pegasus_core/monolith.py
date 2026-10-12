@@ -185,13 +185,21 @@ def _tree(structure: str = "ICD10") -> tuple[dict, dict]:
 
 @lru_cache(maxsize=64)
 def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, structure: str = "ICD10",
-                classifier: str | None = None) -> float:
-    """The share of the block's events (years given) recorded at age 0, from the gateway's cached counts."""
+                classifier: str | None = None, codes: tuple = ()) -> float:
+    """The share of the field's events (years given) recorded at age 0, from the gateway's cached counts: a code set's
+    own events (``codes``, read from its extract where one holds them). Read on every event of the block, a code set
+    took its dataset's exposure, P37.1 admissions SIH's, and SIA-PA's serology fetched a whole year of SIA-PA's 324
+    files to learn it (deep16, 2026-10-12)."""
     parent_of, level_of = ({"*": None}, {"*": "category"}) if block == "*" else _tree(structure)
     width = 3 if block == "*" else gateway.category_width(structure)
     at0 = total = 0.0
     for year in years:
-        tab = gateway.event_counts(dataset, event, int(year), classifier=classifier).counts
+        tab = gateway.event_counts(dataset, event, int(year), classifier=classifier, codes=list(codes)).counts
+        if codes:
+            hit = pc.starts_with(tab.column("code"), codes[0])
+            for c in codes[1:]:
+                hit = pc.or_(hit, pc.starts_with(tab.column("code"), c))
+            tab = tab.filter(pc.fill_null(hit, False))
         enc = pc.dictionary_encode(pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width)
                                    if block != "*" else tab.column("code").combine_chunks())
         ok = np.array([block == "*" or (level_of.get(c) == "category" and _chapter(c, parent_of) == block)
@@ -256,7 +264,8 @@ def default_population(dataset: str, event: str, block: str, years: list[int], s
     if declared:
         return "events:" + ";".join(declared["events"])
     return "hybrid" if _age0_share(dataset, event, block, tuple(years), config.data_version(),
-                                   _.get("structure", "ICD10"), _.get("classifier")) >= NEWBORN_SHARE else "popsvs"
+                                   _.get("structure", "ICD10"), _.get("classifier"),
+                                   tuple(_.get("codes") or ())) >= NEWBORN_SHARE else "popsvs"
 
 
 def assemble(dataset: str, event: str, block: str, years: range | list[int], profile: str = "block",
