@@ -874,9 +874,12 @@ class Session:
                     x.status = "explained"      # only a tested explanation takes a lead out; bound and consistent stay attached
                 elif x.status == "explained":
                     x.status = "open"           # explained by a verdict the current rules do not repeat
-                if replicate:
+                if replicate and span:
                     x.replications = {**x.replications, **self._replicate(x, s, rows, span, direction, half, edges)}
                     x.replication = control.replication_tier(kinds_of(x))
+                elif replicate:
+                    # a locus without years (a group answer over the whole period): no window to replicate it in
+                    x.replications = {**x.replications, "halves": {"tested": False, "reason": "its locus names no years"}}
             self._ledger_close(batch)
             log(f"{i + 1}/{len(by_node)} {node}{f' ({tier} fit to {train_last})' if train_last else ''}: {len(group)} leads")
         if write:
@@ -1112,7 +1115,10 @@ class Session:
             self._total, self._ill, self._pop = total, ill, pop
             store.put_arrays("tools", key, {"places": places, "years": years, "total": total, "ill": ill, "pop": pop})
             return
-        blocks = self._blocks()
+        # the stored fits of this reader, else the blocks this session has read (a fit loaded on demand is not yet
+        # listed among the stored ones: SINAN-TOXC's triage found none and failed, the smoke study, 2026-10-11)
+        blocks = self._blocks() or sorted(self.expectations._models) or ["*"]
+        self._per_year = 12 if self.source.get("grain") == "month" else 1
         total = ill = pop = None
         for b in blocks:
             d = self._data(b)
