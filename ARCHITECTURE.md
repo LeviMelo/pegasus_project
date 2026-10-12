@@ -252,7 +252,7 @@ topic:
   exclude: []                         # datasets or systems forced out
   only: []                            # the datasets or systems the study is restricted to (empty: all)
 period: 2010-2025                     # clipped to each source's validity (§2.4)
-where: BR                             # Brazil, states, regions, or a list of municipalities
+where: BR                             # Brazil, or states (RS, 43) and municipalities (431690): every fit is the area's
 grain: [year, month]
 depth: standard                       # survey | standard | deep | exhaustive (§3.3)
 q: 0.05                               # the study's false-discovery rate
