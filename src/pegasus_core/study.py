@@ -2372,9 +2372,12 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     # window's years alone is never made (the screen had asked every stored block for one)
     cover: dict[tuple[str, str, str], set[int]] = {}
     fits: dict[tuple[str, str, str], list[list[int]]] = {}
+    # the fits the study can load: its own area's (an area study read Brazil's 577 stored blocks, none loadable under
+    # its area, and fitted each on demand, unpriced: the slice past its cap, 2026-10-12)
+    area = sorted(config.study_area() or []) or None
     for m in store.manifests("monolith"):
         k = m["key"]
-        if k.get("codes") or k.get("source") or not k.get("block") or not k.get("event") or k.get("area"):
+        if k.get("codes") or k.get("source") or not k.get("block") or not k.get("event") or (k.get("area") or None) != area:
             continue
         cover.setdefault((k["dataset"], k["event"], k["block"]), set()).update(k.get("years") or [])
         fits.setdefault((k["dataset"], k["event"], k["block"]), []).append(sorted(k.get("years") or []))
