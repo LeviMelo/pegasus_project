@@ -2184,8 +2184,14 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
         except Exception as exc:  # noqa: BLE001 - a column that cannot be split is a note, the others are written
             log(f"study: {it.dataset} {f.node} by {column}: {type(exc).__name__}: {exc}")
             continue
+        # labelled on the values this split holds, as pegasus_data labels a query (`pg.levels`): weighed on the
+        # whole dataset's values (`gateway.value_labels`), SIM's and SIH's every column was read for every year
+        # in the products, 20 minutes of a slice (2026-10-12)
+        held = sorted({str(v) for v in values} - {"not recorded", "value missing"})
         try:
-            vl = gateway.value_labels(it.dataset, it.event, column, tuple(int(x) for x in it.years))
+            import pegasus_data as pg
+
+            vl = pg.levels(it.dataset, column, held, root=config.data_root()) if held else {}
         except Exception:  # noqa: BLE001 - a column no table decodes: its values as recorded, said undecoded
             vl = {}
         shown = {v: (vl[str(v)] if str(v) in vl else (str(v) if str(v) in ("not recorded", "value missing")

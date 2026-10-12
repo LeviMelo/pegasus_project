@@ -382,6 +382,16 @@ places; relations; the persons' cohorts and the completeness across systems wher
 quality; an answer to every declared hypothesis; the report; and no failed step. The gate (`scripts/prelaunch.py
 --slices`) checks it on a slice of every preset and of a second condition before any national run.
 
+Presence is not adequacy (2026-10-12: a folder that passed held notification counts rated as incidence, perinatal deaths
+per person-year of everyone, its area labelled Brazil, no interval on any finding, raw codes, no proportions). The body
+also checks that the numbers carry their meaning: the whole is labelled as the study's area; a notified condition with
+a confirmed-case event (pegasus_data's `status`) is rated on its cases; pregnancy and perinatal fields (ICD-10 O, P, or
+the newborn exposure) also per 1,000 live births; every finding with an expectation carries its locus's O/E with an
+exact Poisson interval; groups give each value's label and share with a Clopper–Pearson interval; persons each
+outcome's proportion over link draws (Rubin's rules); and the folder's `README.md` describes every table's columns
+(`study.COLUMNS`) and every field's definition, case status and denominator with their evidence, an undescribed column
+failing the gate.
+
 ### 3.5 The report
 
 `report.html`, static, offline, generated from the folder's tables and the declarations:
