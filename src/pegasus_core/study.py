@@ -698,7 +698,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
     if decl.depth in ("deep", "exhaustive"):
         strength = {r["code"]: float(r.get("low") or 0.0) for r in related if r["related"]}
         extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
-                  for it in _related_elsewhere(decl, [r for r in related if r["related"]], served)]
+                  for it in _related_elsewhere(decl, [r for r in related if r["related"]], served,
+                                               {i.dataset for i in items if i.status == "in"})]
     kept = _declared_only(decl, [it for _, it in extra], excluded)
     items += _within_time(decl, items, [(w, it) for w, it in extra if it in kept])
     if decl.depth in ("deep", "exhaustive"):
@@ -961,11 +962,13 @@ def _chapter(tree: dict, code: str) -> str:
     return code if code in tree and tree[code]["level"] == "chapter" else "*"
 
 
-def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str]) -> list[Item]:
-    """A related code read in every other served source that records it (ARCHITECTURE §4.3, acceptance item 1: births
-    with the anomalies found beside the topic's codes in admissions or deaths): its ICD-10 classifiers, as a code set,
-    and its ICD-10 code columns (SINASC's anomaly list), as the code's node of that column's tree; over the study's years
-    already in the lake (a related code buys no download)."""
+def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str], topic: set[str]) -> list[Item]:
+    """A related code read in the other sources (ARCHITECTURE §4.3, acceptance item 1: births with the anomalies found
+    beside the topic's codes in admissions or deaths): in a source that holds the topic (``topic``), its ICD-10
+    classifiers as a code set and its ICD-10 code columns; in any other, only its declared code lists (SINASC's anomaly
+    list), as the code's node of that column's tree. Read in every source's diagnosis columns, the deep scope held
+    386 items and 848 minutes, B20–B24 in radiotherapy and dialysis authorisations among them (2026-10-11); over the
+    study's years already in the lake (a related code buys no download)."""
     tree = {r["code"]: r for r in gateway.code_tree("ICD10").to_pylist()}
     out, seen = [], set()
     for r in related:
@@ -982,8 +985,9 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str])
             if not ys:
                 continue
             why = f"related code {code} ({r['label']}), found on {r['dataset']} records with the topic's codes"
+            mine = any(gateway.same_dataset(ds, t) for t in topic)
             for et in ets:
-                for c in et.get("classifiers") or []:
+                for c in (et.get("classifiers") or []) if mine else []:
                     if c.get("structure") == "ICD10" and (ds, et["name"], c["column"], code) not in seen:
                         seen.add((ds, et["name"], c["column"], code))
                         out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {c['column']}",
@@ -994,6 +998,8 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str])
                     src = fields.codes_source(ds, d.column)
                     if src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
                         continue
+                    if not mine and src.get("source") != "code_list":
+                        continue            # outside the topic's sources, a code list only (a birth's anomalies)
                     seen.add((ds, et["name"], d.column, code))
                     if not decl.in_chapters and "source" not in src:     # a code set on that column, no chapter fit
                         out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {d.column.split(':', 1)[1]}",
