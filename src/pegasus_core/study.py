@@ -334,6 +334,13 @@ def _icd(code: str) -> str:
     return code.replace(".", "").strip().upper()
 
 
+def _one_institution(x) -> str | None:
+    """The one establishment a lead's triage found its events in, if any: a triage's ``facility`` is a dict of its
+    evidence, or False where none was found (deep17's products died on the bool)."""
+    fac = (x.robustness.get("triage") or {}).get("facility")
+    return fac.get("one_institution") if isinstance(fac, dict) else None
+
+
 def _corroboration_text(corr: dict) -> str | None:
     """What another system said of a finding: its best source's test (observed against the null's median, p, and the
     q over every lead when tested), or why it was not tested; None when it was not asked (only signals are). The
@@ -1790,8 +1797,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 rows.extend({**_finding(x, it, label, names), "_event": it.event,
                              "_places": [int(q) for q in x.locus.get("places") or []],
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
-                                                     | ({str(f_)} if (f_ := ((x.robustness.get("triage") or {}).get("facility")
-                                                                             or {}).get("one_institution")) else set()))}
+                                                     | ({str(f_)} if (f_ := _one_institution(x)) else set()))}
                             for x in current
                             if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
                             and list(x.provenance.get("years") or []) == list(it.years))

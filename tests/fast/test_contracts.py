@@ -193,3 +193,12 @@ def test_a_related_field_is_asked_what_the_declaration_says(tmp_path):
     assert study.load(p).choice("related_questions") == []
     p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\nrelated_questions: [excess]\n", encoding="utf-8")
     assert study.load(p).choice("related_questions") == ["excess"]
+
+
+def test_a_triage_without_an_institution_is_read():
+    # a triage's facility is False where none was found: deep17's products died reading it as a dict
+    class X:
+        def __init__(self, fac):
+            self.robustness = {"triage": {"facility": fac}}
+
+    assert study._one_institution(X(False)) is None and study._one_institution(X({"one_institution": "0000477"})) == "0000477"
