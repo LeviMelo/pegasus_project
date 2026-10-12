@@ -138,3 +138,14 @@ def test_a_related_code_is_one_field_a_source():
     assert per and max(per.values()) == 1
     rext = [i for i in out if i.dataset == "SIM-DOREXT" and i.event == "death"]
     assert rext and rext[0].source["classifier"] == "mentions:death.causes"      # every line of the certificate
+
+
+def test_capture_lists_are_the_declared_population():
+    # a link's side filter is written for pairing: SIM's took B58 deaths at every age into a congenital population
+    from pegasus_core import capture
+
+    f = capture.lists_of(["SINAN-TOXC", "SIH-RD", "SIM-DO"], ["P37.1"])
+    assert f["capture"] == "congenital_toxoplasmosis"
+    assert "deceased.age_years" in f["lists"]["SIM-DO"]["where"] and f["lists"]["SINAN-TOXC"]["where"]
+    assert set(f["links"]) == {"sinan_toxc_to_sih_admission", "sinan_toxc_to_sim", "sih_toxoplasmosis_admissions_to_sim"}
+    assert gateway.value_labels("SINAN-TOXC", "notification", "CLASSI_FIN", (2021,))["1"] == "Confirmado"

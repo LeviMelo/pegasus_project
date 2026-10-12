@@ -1,98 +1,216 @@
-"""Capture fields (ARCHITECTURE §5.2, §6.4; BACKLOG 2.7, 6.4): how many events no system recorded, from the overlap of
-the systems that recorded some, by log-linear multiple-systems estimation.
+"""Completeness across systems by capture–recapture (ARCHITECTURE §5.2, §8.4; acceptance items 2 and 5).
 
-k systems each record some of the events (a congenital toxoplasmosis case notified in SINAN, admitted in SIH, dead in
-SIM); linked, every recorded event has an inclusion pattern (1, 0, 1). The 2^k − 1 observed pattern counts are fitted by
-Poisson log-linear models (Fienberg 1972; Bishop, Fienberg & Holland 1975, ch. 6): main effects for each system plus a
-subset of the pairwise interactions, which carry the dependence between systems (a death certificate is likelier for
-an admitted child). The unobserved cell (0, …, 0) is the model's prediction there, and the total N̂ = n + n̂₀.
+Each system that records a topic is a list of its cases; the persons pegasus_data's links make (`gateway.persons`) say
+which cases two lists share. With three lists the unseen cases are estimated by a log-linear model of the seven
+observed patterns (Fienberg 1972; Hook and Regal 1995), the model chosen by AIC among those allowing any pairwise
+dependence, with Chao's log-transformed interval; with two lists by Chapman's estimator, a lower bound when the lists
+are positively dependent (a child admitted is likelier to be notified), which two lists cannot test.
 
-Which dependences hold is not known, so no single model is chosen: every hierarchical model with main effects and any
-set of pairwise terms is fitted, and N̂ is averaged over them by Akaike weight, its variance the unconditional one of
-Buckland, Burnham & Augustin (1997). Each model's n̂₀ has the log-scale interval of its intercept-based prediction
-(the usual log-normal interval for a missing cell). Models whose fitted n̂₀ is unbounded (a pairwise term that leaves
-the missing cell unidentified) are left out.
-
-Checked on the three-source spina bifida data of upstate New York, 1969–1974 (Hook, Albright & Cross 1980; the R
-package conting's `spina`, 621 cases on three lists): every model's N̂, deviance and AIC equal R's `glm`; the averaged
-N̂ is 734.8 [660.5, 809.1] and the lists' completeness 69 %, 28 % and 25 %, the authors' 68 %, 27 % and 25 %.
+A population and its lists are pegasus_data's declarations (`pegasus_data.captures`: one definition across systems,
+a list's ``group`` making one person of a child's admissions, ``death`` its members who died of the condition): a
+link's side filter is written for pairing, and SIM's took B58 deaths at every age into a congenital population
+(2026-10-12). A death certificate lists only deaths, so the cases are listed by the systems of cases, the deaths by
+every system.
 """
 
 from __future__ import annotations
 
+import collections
 import itertools
-import warnings
-from dataclasses import dataclass
+from dataclasses import replace
 
 import numpy as np
+import pyarrow as pa
+
+from . import gateway
 
 
-@dataclass
-class Estimate:
-    observed: float                     # n: events recorded by at least one system
-    total: float                        # N̂, model-averaged
-    low: float                          # its 95 % interval
-    high: float
-    completeness: dict[str, float]      # each system's recorded share of N̂
-    models: list[dict]                  # every model fitted: terms, N̂, n̂₀, deviance, df, AIC, weight
+def lists_of(datasets: list[str], codes: list[str]) -> dict | None:
+    """The declared capture population of ``codes`` (`pegasus_data.captures`) whose lists are systems among
+    ``datasets`` (pegasus_data codes): each list with its filter, grouping, death, the person role its links name, and
+    whether its records are deaths; the declared links between two lists. None without a population of two lists."""
+    import pegasus_data as pg
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.linkage.roles import load_roles
+    from pegasus_data.semantics.curation import read_yaml
+
+    keys = {gateway.dataset_key(d) for d in datasets}
+    raw = read_yaml(links_file()).get("links") or {}
+    kinds = load_roles()
+    for cap in pg.captures(codes):
+        lists = {gateway.dataset_key(d): {**v, "dataset": d} for d, v in cap["lists"].items()
+                 if gateway.dataset_key(d) in keys}
+        if len(lists) < 2:
+            continue
+        links = []
+        for name, spec in gateway.link_specs().items():
+            person = list((raw.get(name) or {}).get("person") or [])
+            a, b = gateway.dataset_key(spec.left.dataset), gateway.dataset_key(spec.right.dataset)
+            if len(person) != 2 or a not in lists or b not in lists or a == b:
+                continue
+            for k, role in ((a, person[0]), (b, person[1])):
+                lists[k].setdefault("role", role)
+            # a link of the population's own records (a side naming its codes, or a list whose every record is the
+            # population: SINAN's agravo), not one of every death or every admission
+            if any(any(c in (sd.where or "") for c in cap["conditions"]) or not lists[gateway.dataset_key(sd.dataset)]["where"]
+                   for sd in (spec.left, spec.right)):
+                links.append(name)
+        for v in lists.values():
+            v["deaths"] = getattr(kinds.get(v["dataset"]), "record", "") == "death"
+        lists = {k: v for k, v in lists.items() if v.get("role")}
+        if len(lists) >= 2:
+            return {"capture": cap["capture"], "description": cap["description"], "lists": lists, "links": links}
+    return None
 
 
-def _design(patterns: np.ndarray, pairs: tuple[tuple[int, int], ...]) -> np.ndarray:
-    cols = [np.ones(len(patterns))] + [patterns[:, j] for j in range(patterns.shape[1])]
-    cols += [patterns[:, a] * patterns[:, b] for a, b in pairs]
-    return np.column_stack(cols).astype(float)
+def records(lst: dict, year: int, deaths: bool) -> pa.Table | None:
+    """One list's records of ``year`` (``_record_key`` and its grouping roles): the population's filter, and for its
+    deaths the list's declared death (None when the list declares none: it cannot list them)."""
+    from pegasus_data.linkage.engine import Side, _side_table
+    from pegasus_data.linkage.roles import load_roles
+
+    where = lst["where"]
+    if deaths and not lst["deaths"]:
+        if not lst.get("death"):
+            return None
+        where = f"({where}) AND ({lst['death']})" if where else lst["death"]
+    side = replace(Side(lst["dataset"]), where=where)
+    # the grouping roles, else any one role: the identity columns come with every side table
+    roles = list(lst["group"]) or [next(iter(load_roles()[lst["dataset"]].roles))]
+    return _side_table(side, roles, period=year, geography="BR")
 
 
-def multiple_systems(counts: dict[tuple[int, ...], float], systems: list[str], max_pairs: int | None = None,
-                     z: float = 1.959963984540054) -> Estimate:
-    """N̂ from the counts of each observed inclusion pattern (a tuple of 0/1 per system, the all-zero one absent),
-    averaged over the log-linear models with main effects and any set of pairwise interactions (at most ``max_pairs``;
-    all by default). Needs at least three systems for any dependence to be estimable; with two, only independence."""
+def patterns(lists: dict[str, dict], year: int, deaths: bool, datasets: list[str], draw: int | None = None):
+    """The persons of ``year`` on each list, as patterns (one bool per list, in ``lists``' order) and their counts.
+    A record on no link is a person of its own; a list's records sharing its grouping are one person."""
+    tables = {k: records(v, year, deaths) for k, v in lists.items()}
+    tables = {k: t for k, t in tables.items() if t is not None}
+    ent = gateway.persons(year, draw=draw, datasets=datasets)
+    nodes = ent.nodes.to_pandas()
+    person = {(gateway.dataset_key(d), r, rec): p for d, r, rec, p in
+              zip(nodes.dataset, nodes.role, nodes.record, nodes.person, strict=True)}
+    parent: dict = {}
+
+    def find(x):
+        while parent.get(x, x) != x:
+            x = parent[x]
+        return x
+
+    members: dict[str, set] = {}
+    for k, t in tables.items():
+        lst = lists[k]
+        ids = []
+        recs = t.column("_record_key").to_pylist()
+        groups = (list(zip(*[t.column(g).to_pylist() for g in lst["group"]], strict=True)) if lst["group"]
+                  else [None] * len(recs))
+        first: dict = {}
+        for rec, g in zip(recs, groups, strict=True):
+            pid = ("p", person[(k, lst["role"], rec)]) if (k, lst["role"], rec) in person else ("r", k, rec)
+            if g is not None and all(v is not None for v in g):
+                if g in first:                       # one person for a group's records (a child's admissions)
+                    parent[find(pid)] = find(first[g])
+                else:
+                    first[g] = pid
+            ids.append(pid)
+        members[k] = set(ids)
+    order = [k for k in lists if k in members]
+    who: dict = collections.defaultdict(set)
+    for k in order:
+        for pid in members[k]:
+            who[find(pid)].add(k)
+    counts = collections.Counter(tuple(k in s for k in order) for s in who.values())
+    return order, counts
+
+
+def loglinear(counts: dict[tuple, int]) -> dict:
+    """Three lists: the unseen cases by every hierarchical log-linear model with pairwise interactions (the three-way
+    is not identifiable), the one of least AIC reported, each model's estimate kept. Chao's interval on the log of the
+    unseen count."""
     import statsmodels.api as sm
 
-    k = len(systems)
-    if k < 2:
-        raise ValueError("capture needs at least two systems")
-    pats = [p for p in itertools.product((0, 1), repeat=k) if any(p)]
-    y = np.array([float(counts.get(p, 0.0)) for p in pats])
-    X_pat = np.array(pats, dtype=float)
-    n = float(y.sum())
-    pairs_all = list(itertools.combinations(range(k), 2))
-    limit = len(pairs_all) if max_pairs is None else max_pairs
+    cells = [c for c in itertools.product([0, 1], repeat=3) if any(c)]
+    y = np.array([counts.get(tuple(bool(v) for v in c), 0) for c in cells], dtype=float)
+    n = y.sum()
+    terms = [(0, 1), (0, 2), (1, 2)]
     models = []
-    for r in range(0, min(limit, len(pairs_all)) + 1):
-        for pairs in itertools.combinations(pairs_all, r):
-            X = _design(X_pat, pairs)
-            if X.shape[1] > len(y):
+    for k in range(4):
+        for inter in itertools.combinations(terms, k):
+            X = np.array([[1, *c, *[c[i] * c[j] for i, j in inter]] for c in cells], dtype=float)
+            if X.shape[1] > len(cells):
                 continue
             try:
-                with warnings.catch_warnings():     # the saturated model has no residual df: statsmodels warns, harmlessly
-                    warnings.simplefilter("ignore")
-                    fit = sm.GLM(y, X, family=sm.families.Poisson()).fit()
-            except Exception:  # noqa: BLE001 - a model that does not converge is not averaged
+                fit = sm.GLM(y, X, family=sm.families.Poisson()).fit()
+            except Exception:  # noqa: BLE001 - a model the cells cannot fit is left out, said by its absence
                 continue
-            x0 = _design(np.zeros((1, k)), pairs)[0]
-            eta = float(x0 @ fit.params)
-            se = float(np.sqrt(x0 @ fit.cov_params() @ x0))
-            if not np.isfinite(eta) or not np.isfinite(se) or eta > np.log(1e3 * max(n, 1.0)):
-                continue                  # the missing cell unidentified (n̂₀ unbounded)
-            n0 = float(np.exp(eta))
-            models.append({"terms": [f"{systems[a]}:{systems[b]}" for a, b in pairs], "total": n + n0, "missing": n0,
-                           "missing_low": float(np.exp(eta - z * se)), "missing_high": float(np.exp(eta + z * se)),
-                           "se_total": n0 * se, "deviance": float(fit.deviance), "df": int(fit.df_resid),
-                           "aic": float(fit.aic)})
+            b0, se = float(fit.params[0]), float(fit.bse[0])
+            if not np.isfinite(b0) or not np.isfinite(se):
+                continue
+            f0 = float(np.exp(b0))
+            var = f0 ** 2 * se ** 2
+            c = float(np.exp(1.96 * np.sqrt(np.log(1 + var / max(f0, 1e-9) ** 2))))
+            models.append({"model": "independence" if not inter else " + ".join(
+                "".join("ABC"[i] for i in t) for t in inter), "aic": float(fit.aic), "unseen": f0,
+                "estimate": n + f0, "low": n + f0 / c, "high": n + f0 * c, "df": int(len(cells) - X.shape[1])})
     if not models:
-        raise ValueError("no log-linear model identifies the unrecorded events")
-    aic = np.array([m["aic"] for m in models])
-    w = np.exp(-(aic - aic.min()) / 2)
-    w /= w.sum()
-    for m, wi in zip(models, w, strict=True):
-        m["weight"] = float(wi)
-    N = np.array([m["total"] for m in models])
-    se = np.array([m["se_total"] for m in models])
-    total = float((w * N).sum())
-    # Buckland, Burnham & Augustin (1997): the unconditional sd carries the spread between models
-    sd = float((w * np.sqrt(se ** 2 + (N - total) ** 2)).sum())
-    low, high = max(n, total - z * sd), total + z * sd
-    completeness = {s: float(sum(c for p, c in counts.items() if p[j])) / total for j, s in enumerate(systems)}
-    return Estimate(n, total, low, high, completeness, sorted(models, key=lambda m: m["aic"]))
+        return {"estimate": None, "note": "no log-linear model fits the cells"}
+    best = min(models, key=lambda m: m["aic"])
+    return {**best, "observed": int(n), "models": models}
+
+
+def chapman(n1: int, n2: int, m: int) -> dict:
+    """Two lists: Chapman's estimator and its interval; a lower bound under positive dependence."""
+    est = (n1 + 1) * (n2 + 1) / (m + 1) - 1
+    var = (n1 + 1) * (n2 + 1) * (n1 - m) * (n2 - m) / ((m + 1) ** 2 * (m + 2))
+    f0 = max(est - (n1 + n2 - m), 0.0)
+    c = float(np.exp(1.96 * np.sqrt(np.log(1 + var / max(f0, 1e-9) ** 2)))) if f0 > 0 else 1.0
+    n = n1 + n2 - m
+    return {"model": "Chapman (two lists)", "estimate": est, "low": n + f0 / c, "high": n + f0 * c,
+            "observed": n, "unseen": f0}
+
+
+def capture(datasets: list[str], codes: list[str], years: list[int], usable_years, draw: int | None = None,
+            log=print) -> list[dict]:
+    """Every population the read systems list (the topic's cases; its deaths), pooled over ``usable_years`` (the years
+    whose covering runs of every link are usable): its patterns, the estimate, each list's completeness against it,
+    and what it rests on. ``datasets`` are pegasus_data codes."""
+    found = lists_of(datasets, codes)
+    if found is None:
+        return []
+    out = []
+    for deaths in (False, True):
+        lists = {k: v for k, v in found["lists"].items() if deaths or not v["deaths"]}
+        if len(lists) < 2:
+            continue
+        ys = [y for y in years if usable_years(found["links"], y)]
+        if not ys:
+            out.append({"population": "deaths" if deaths else "cases", "lists": " × ".join(lists),
+                        "note": "no year has a usable run of every link between the lists"})
+            continue
+        total: collections.Counter = collections.Counter()
+        order = None
+        for y in ys:
+            order, c = patterns(lists, y, deaths, datasets, draw)
+            total.update(c)
+            log(f"capture {'deaths' if deaths else 'cases'} {y}: " + ", ".join(
+                f"{''.join('1' if b else '0' for b in k)} {v}" for k, v in sorted(c.items())))
+        if order is None or len(order) < 2:
+            continue
+        if len(order) == 3:
+            est = loglinear(total)
+        else:
+            n1 = sum(v for k, v in total.items() if k[0])
+            n2 = sum(v for k, v in total.items() if k[1])
+            m = total.get((True, True), 0)
+            est = chapman(n1, n2, m)
+        sizes = {k: sum(v for p, v in total.items() if p[i]) for i, k in enumerate(order)}
+        row = {"capture": found["capture"], "population": "deaths" if deaths else "cases", "lists": " × ".join(order),
+               "years": f"{ys[0]}-{ys[-1]}" if len(ys) > 1 else str(ys[0]),
+               "patterns": ", ".join(f"{''.join('1' if b else '0' for b in k)}:{v}" for k, v in sorted(total.items())),
+               "observed": est.get("observed"), "estimate": est.get("estimate"), "low": est.get("low"),
+               "high": est.get("high"), "model": est.get("model"),
+               "completeness": ", ".join(f"{k} {sizes[k] / est['estimate']:.0%}" for k in order)
+               if est.get("estimate") else None,
+               "note": ("two lists: a lower bound if they are positively dependent, which they cannot test"
+                        if len(order) == 2 else f"log-linear, least AIC of {len(est.get('models') or [])} models")}
+        out.append(row)
+    return out

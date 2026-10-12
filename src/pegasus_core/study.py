@@ -1125,6 +1125,32 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
     return out
 
 
+def _capture(decl: Declaration, scope: Scope, log) -> list[dict]:
+    """Capture–recapture over the read systems (`capture`, acceptance items 2 and 5): the population pegasus_data
+    declares for the topic's codes, over the study's years whose covering runs of every link between its lists are
+    stored with a usable verdict and touch no reserve; pooled across them. Linkage uncertainty is not drawn here: the
+    undrawn persons, said in the report."""
+    from . import capture
+
+    read = sorted({gateway.data_code(i.dataset) for i in scope.items if i.status == "in"})
+    codes = list(decl.seeds.get("icd10") or [])
+
+    def usable(links: list[str], year: int) -> bool:
+        for link in links:
+            for side in ("left", "right"):
+                for z in gateway.covering_runs(link, side, year):
+                    rep = gateway.link_report(link, z) or {}
+                    if gateway.run_touches_reserve(link, z) or rep.get("verdict") not in USABLE_LINKS:
+                        return False
+        return True
+
+    try:
+        return capture.capture(read, codes, list(decl.years), usable, log=log)
+    except Exception as exc:  # noqa: BLE001 - a capture that cannot be read is said; the folder stands
+        log(f"study: capture: {type(exc).__name__}: {exc}")
+        return [{"population": "", "note": f"not computed: {type(exc).__name__}: {exc}"}]
+
+
 def _capture_note(scope: Scope) -> str:
     """Whether the read systems can estimate each other's completeness (capture–recapture, ARCHITECTURE §5.2): three
     systems linked pairwise by viable runs, from the scope's person paths; otherwise which links stand in the way. Every
@@ -1468,6 +1494,12 @@ LANE_FREE_GB = float(os.environ.get("PEGASUS_LANE_FREE_GB", "6"))
 LANE_PRESSURE_GB = float(os.environ.get("PEGASUS_LANE_PRESSURE_GB", "2"))
 
 
+def _may_resume(avail_gb: float, lane_gb: float, others_working: bool) -> bool:
+    """Whether a paused lane resumes: its memory fits beside the floor, or no other lane computes (then the paused lanes
+    are the only work left, and waiting frees nothing)."""
+    return avail_gb > LANE_FREE_GB + lane_gb or not others_working
+
+
 def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     """The study's items, in lanes (BACKLOG 9.5): the items of one dataset form a group run in order in one lane (they
     share its fits, caches and the share denominator: two lanes would fit one block twice and race on its key); groups
@@ -1506,6 +1538,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     steps: dict = {}
     pending, running, lost = list(order), {}, []
     paused: dict[int, psutil.Process] = {}
+    cpu_seen: dict[int, float] = {}
 
     def balance() -> None:
         # Lanes grow after they are admitted: three survey lanes held 42 GB committed on a 31.6 GB machine, and all of
@@ -1513,12 +1546,16 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
         # largest is suspended, so the system pages the idle ones out and the largest runs at its own speed; they are
         # resumed one at a time, the smallest first, as memory frees.
         avail = psutil.virtual_memory().available / 2**30
-        lanes_now = {}
+        lanes_now, working = {}, set()
         for c in me.children():
             try:
                 lanes_now[c.pid] = (c, c.memory_info().private / 2**30)
+                cpu = sum(c.cpu_times()[:2])
             except (psutil.Error, AttributeError):
                 continue
+            if cpu - cpu_seen.get(c.pid, 0.0) > 0.5:     # a lane computing; an idle pool worker is no lane
+                working.add(c.pid)
+            cpu_seen[c.pid] = cpu
         active = {pid: v for pid, v in lanes_now.items() if pid not in paused}
         if avail < LANE_PRESSURE_GB and len(active) > 1:
             keep = max(active, key=lambda pid: active[pid][1])
@@ -1534,8 +1571,10 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
         elif paused:
             # the smallest paused lane, once its own memory fits beside the floor: resumed at the floor alone, two 11 GB
             # lanes took turns pausing each other (the survey, 2026-10-11)
+            # or when no other lane computes: the pool's idle workers had counted as active, and deep8 waited with
+            # two lanes paused for 10 GB that nothing running would free (2026-10-12)
             pid = min(paused, key=lambda p: lanes_now.get(p, (None, 0.0))[1])
-            if avail > LANE_FREE_GB + lanes_now.get(pid, (None, 0.0))[1] or len(active) == 0:
+            if _may_resume(avail, lanes_now.get(pid, (None, 0.0))[1], bool(working - set(paused))):
                 try:
                     paused.pop(pid).resume()
                     log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
@@ -1704,6 +1743,10 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap("persons")
     pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
+    captured = _capture(decl, scope, log) if decl.choice("persons") else []
+    lap("capture")
+    pq.write_table(_rows_table(captured) if captured else pa.table({"population": pa.array([], pa.string())}),
+                   out / "capture.parquet")
     profile = _context_profiles(decl, scope, rows, log)
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
@@ -1736,13 +1779,14 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     con.execute(f"CREATE VIEW related AS SELECT * FROM read_parquet('{(out / 'related.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW relations AS SELECT * FROM read_parquet('{(out / 'relations.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW capture AS SELECT * FROM read_parquet('{(out / 'capture.parquet').as_posix()}')")
     con.close()
     lap("tables")
     hyp = _hypotheses(decl, scope)
     pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
     lap("hypotheses")
-    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons)
+    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons, captured)
     lap("report")
     return views
 
@@ -2456,7 +2500,8 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 
 
 def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
-            hyp: list[dict] | None = None, relations: list[dict] | None = None, persons: list[dict] | None = None) -> None:
+            hyp: list[dict] | None = None, relations: list[dict] | None = None, persons: list[dict] | None = None,
+            captured: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     from pegasus_data.linkage.engine import CAUTION, VIABLE
 
@@ -2510,7 +2555,15 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
                              ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                              ("q", "q")], cap=30) if quality else "<p>No quality departure at this depth.</p>",
-             f"<h3>Completeness across systems</h3><p>{e(_capture_note(scope))}</p>",
+             "<h3>Completeness across systems</h3>"
+             + (table(captured, [("population", "population"), ("lists", "lists"), ("years", "years"),
+                                 ("patterns", "persons by list (1 on it, 0 not)"), ("observed", "observed"),
+                                 ("estimate", "estimated"), ("low", "95 % from"), ("high", "to"), ("model", "model"),
+                                 ("completeness", "each list's share"), ("note", "rests on")], cap=10)
+                + "<p>Every estimate assumes the links find every pair: a pair a link misses (SINAN carries an age, "
+                  "not a birth date, for the link to match) raises the estimate, and lists that record the same "
+                  "persons more often than chance lower it.</p>"
+                if any(r.get("estimate") for r in captured or []) else f"<p>{e(_capture_note(scope))}</p>"),
              "<h2>3b. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),

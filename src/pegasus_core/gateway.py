@@ -1554,8 +1554,17 @@ def value_labels(dataset: str, event: str, column: str, years: tuple[int, ...]) 
                 continue
             if c.counts is not None and "value" in c.counts.column_names:
                 codes |= {str(v) for v in pc.unique(c.counts.column("value")).to_pylist() if v is not None}
-    else:
+    elif column == _strata(dataset, event).get("race"):
         codes = {str(k) for k in range(10)}       # the race stratum's codes: one digit
+    else:
+        # any other column, by the codes its records hold: weighed on 0-9, SINAN-TOXC's CLASSI_FIN (1, 2, 8) took
+        # polio's table, "Confirmado Poliovírus Selvagem" for 1 (2026-10-12)
+        for y in years:
+            try:
+                raw = _records(dataset, event, int(y), [column])
+            except Exception:  # noqa: BLE001 - a year that does not hold the column labels nothing
+                continue
+            codes |= {str(v).strip() for v in pc.unique(raw.column(column)).to_pylist() if v not in (None, "")}
     if not codes:
         return {}
     return pg.levels(dataset, column, sorted(codes), root=config.data_root())

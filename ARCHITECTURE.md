@@ -874,6 +874,11 @@ from p_match, combined by Rubin's rules).
 - **Capture–recapture:** where two or more systems record the same persons (a disease's notifications, admissions and
   deaths), the overlap estimates the total and each system's completeness by place and period (log-linear
   multi-system models, heterogeneity by stratum); completeness becomes a field (§5.2) and a quality finding (§9.7).
+  Built (`capture`, 2026-10-12): the population and its lists are pegasus_data's declarations (`captures`), one
+  definition across systems; the cases are listed by the systems of cases (two lists: Chapman, a lower bound under
+  positive dependence), the deaths by every system (three: the log-linear model of least AIC, Chao's interval),
+  pooled over the years whose covering runs of every link are usable (`capture.parquet`, the report's completeness
+  table). Not yet: strata by place and period, linkage draws, and the links' missed pairs, which raise the estimate.
 
 ### 8.5 Congenital anomalies: the pattern, generally
 

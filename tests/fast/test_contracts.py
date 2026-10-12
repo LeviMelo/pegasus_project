@@ -112,3 +112,25 @@ def test_a_depth_is_a_preset_of_the_declarations_choices(tmp_path):
     p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\nrelations: [everything]\n", encoding="utf-8")
     with pytest.raises(study.DeclarationError, match="relations"):
         study.load(p)
+
+
+def test_capture_recovers_a_known_population():
+    # three independent lists of 1,000 with capture 0.5, 0.4, 0.3: the expected cells give back 1,000 (210 unseen)
+    import itertools
+
+    from pegasus_core import capture
+
+    p = (0.5, 0.4, 0.3)
+    cells = {c: 1000 * float(__import__("numpy").prod([q if b else 1 - q for q, b in zip(p, c, strict=True)]))
+             for c in itertools.product([False, True], repeat=3) if any(c)}
+    est = capture.loglinear(cells)
+    assert est["model"] == "independence" and abs(est["estimate"] - 1000) < 1e-6 and est["low"] < 1000 < est["high"]
+    two = capture.chapman(500, 400, 200)
+    assert abs(two["estimate"] - (501 * 401 / 201 - 1)) < 1e-9
+
+
+def test_a_paused_lane_resumes_when_nothing_else_computes():
+    # deep8 waited with two lanes paused: the pool's idle workers counted as active, and 8.4 GB free never reached 12
+    assert study._may_resume(8.4, 6.1, others_working=False)
+    assert not study._may_resume(8.4, 6.1, others_working=True)
+    assert study._may_resume(14.0, 6.1, others_working=True)
