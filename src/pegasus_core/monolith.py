@@ -575,7 +575,9 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     rest = uniq // (2 * nB)
     t, rest = rest % T, rest // T
     u, e = rest % len(places), rest // len(places)
+    area = config.study_area()
     key = {"dataset": dataset, "event": event, "block": block, "years": years.tolist(),
+           **({"area": sorted(area)} if area else {}),       # every fit's key (`Monolith.key`): an area's fit is its own
            "data": config.data_version(), **gateway.population_key(population),
            **({} if profile == "group" else {"profile": profile}),
            **({} if source == "events" and not {"classifier", "support"} & set(source_args) and structure == "ICD10" else

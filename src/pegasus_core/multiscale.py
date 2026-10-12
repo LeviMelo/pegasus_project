@@ -243,6 +243,7 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
     over its minimum relevant ratio times the expectation: ``rate_ratio``, or for a count field with ``mean_cell`` the
     burden θ0 means at that mean cell through the peak's own kernel and contrast (`lenses.burden_ratio`, S1.6); the
     returned dict also holds each scale's calibration."""
+    replicates = config.replicates(replicates)          # the study's `nulls`
     torch, dev = _torch()
     U, T = s.y.shape
     gauss = surprise.gaussian(s)    # a Gaussian location (a measure, a share): the standardised excess, log effects

@@ -440,6 +440,7 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
     Gaussian score, its residuals ← 0), repeat until the next p exceeds α. Returns the subsets
     with Gumbel and empirical p. The null is drawn only when the observed best score is positive
     (a score of zero has p = 1 under any null): ``Null`` is None when no subset beat the expectation."""
+    replicates = config.replicates(replicates)          # the study's `nulls`
     m0, m = m, m.copy()          # the null is of the unconditioned expectation
     y = y.copy()
     out: list[Subset] = []

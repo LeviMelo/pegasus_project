@@ -411,6 +411,7 @@ class Session:
             block = next(iter(self.expectations._models), None) or next(iter(self._blocks()), None)
             places = (self.expectations.model(block).data.places if block is not None else
                       np.unique(gateway.population(list(self.years)[-1:]).column("u").to_numpy()))
+            places = places[config.in_area(places)]     # the study's area: its graph, as its blocks (RS 497, not 5,570)
             self._edges = graphs.edges(places, self.graph)
         return self._edges
 

@@ -336,6 +336,7 @@ def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, repli
 def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.ndarray, years: list[int],
                 direction: int, seed_text: str, replicates: int = 4999, connected: bool = True) -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
+    replicates = config.replicates(replicates)          # the study's `nulls`
     sid = f"{source.kind}:{source.dataset}:{source.event}"
     if direction <= 0:
         return Corroboration(False, sid, source.label, detail={"reason": "a deficit is not corroborated by a field"})

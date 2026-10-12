@@ -99,7 +99,7 @@ def reading_order(x: Lead) -> tuple:
 
 class Register:
     def __init__(self, path: Path | None = None):
-        self.path = path or config.home() / "leads"
+        self.path = path or config.home() / f"leads{config.area_suffix()}"
         self.path.mkdir(parents=True, exist_ok=True)
 
     def add(self, leads: list[Lead]) -> None:

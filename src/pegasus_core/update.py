@@ -155,7 +155,11 @@ def _declared(sys_: System, kind: str, wanted: list[str] | str | None, plan: Pla
 def _key(step: str, code: tuple, **inputs: Any) -> dict[str, Any]:
     """A step's key: its inputs, the data version and the code the step runs (`config.code_key` of ``code``), never
     the repository's commit, which re-keyed every step on every commit (survey 2026-10-07)."""
-    return {"step": step, "data": config.data_version(), "code": config.code_key(*code), **inputs}
+    # the study's choices that change a step's result without being its inputs: the replicate worlds' factor (`nulls`)
+    # and the area (`where`), so a quick or a regional study never reuses a precise or a national step's result
+    nulls, area = config.replicates(1000, floor=1) / 1000, config.study_area()
+    return {"step": step, "data": config.data_version(), "code": config.code_key(*code), **inputs,
+            **({"nulls": nulls} if nulls != 1.0 else {}), **({"area": sorted(area)} if area else {})}
 
 
 def _done(key: dict[str, Any]) -> bool:

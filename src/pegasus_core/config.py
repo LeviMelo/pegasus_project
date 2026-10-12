@@ -64,6 +64,24 @@ def in_area(u, area: frozenset[int] | None = None):
     return np.isin(u // 10000, states) | np.isin(u, places)
 
 
+def area_suffix() -> str:
+    """The suffix of the register's and the ledger's homes for the study's area ("" for Brazil): an area's leads and
+    tests are its own, never read by Brazil's studies as theirs, nor theirs by it."""
+    area = study_area()
+    return "" if area is None else "_area_" + "-".join(str(a) for a in sorted(area))
+
+
+def replicates(n: int, floor: int = 19) -> int:
+    """A method's own number of replicate null worlds, scaled by the study's ``nulls`` (`PEGASUS_NULLS`: 0.25 quick, 1
+    standard, 4 precise): the precision of every Monte Carlo p-value, the user's to trade against time; never below
+    ``floor`` (a p-value needs some worlds to exist)."""
+    try:
+        scale = float(os.environ.get("PEGASUS_NULLS", "1") or 1)
+    except ValueError:
+        scale = 1.0
+    return max(floor, int(round(n * scale)))
+
+
 def population_source() -> str:
     """The exposure the gateway reads unless a call names one: ``popsvs`` (IBGE's projection as the MoH
     distributes it) ``account-2`` (pegasus_data's modelled population account, with intervals; ADR-0010) or ``account-3`` / ``account-4``

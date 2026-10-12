@@ -89,3 +89,12 @@ def test_the_place_level_map_leaves_out_a_field_without_events():
              ("SIHSUS-RD", "hospitalisation", "*", {"classifier": "DIAG_SECUN", "codes": ["Z999"]}, list(range(2019, 2024)))]
     rows = dependency.field_map(topic, ["sisagua_surveillance_ecoli_present"])
     assert {r["x"] for r in rows} == {"SINAN-TOXC:*"}
+
+
+def test_an_areas_graph_and_register_are_its_own(monkeypatch):
+    monkeypatch.setenv("PEGASUS_AREA", "43")
+    from pegasus_core import config, leads
+
+    s = tools.Session("SINAN-TOXC", "notification", list(range(2019, 2024)))
+    assert int(s.edges().max()) < 497                     # the graph over the area's 497 places, not Brazil's 5,570
+    assert leads.Register().path.name == "leads_area_43" and config.area_suffix() == "_area_43"

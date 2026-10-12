@@ -42,7 +42,7 @@ class Ledger:
     """Append-only: ``pending`` rows when a test is registered, ``result`` rows when it finishes."""
 
     def __init__(self, path: Path | None = None):
-        self.path = path or config.home() / "ledger"
+        self.path = path or config.home() / f"ledger{config.area_suffix()}"
         self.path.mkdir(parents=True, exist_ok=True)
 
     def register(self, h: Hypothesis) -> str:

@@ -35,7 +35,7 @@ DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
 DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters", "questions", "readers"}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters", "questions", "readers", "nulls", "draws"}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 #: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
@@ -68,10 +68,17 @@ class Declaration:
     chapters: bool | None = None   # the topic's nodes read inside their fitted chapters (None: beyond a survey)
     questions: list[str] | None = None  # the questions asked of every field (None: all, `questions.QUESTIONS`)
     readers: list[str] | None = None    # the field kinds the depth adds (None: its `DEPTH_READERS`)
+    nulls: float = 1.0                   # replicate null worlds per test, as a factor on each method's own (`NULLS`)
+    draws: int | None = None             # plausible link sets the persons step averages over (None: `PERSON_DRAWS`)
 
     @property
     def in_chapters(self) -> bool:
         return self.depth != "survey" if self.chapters is None else self.chapters
+
+
+#: the precision of every Monte Carlo test, in words: a factor on each method's own replicate null worlds (a p-value's
+#: floor is about 1/(R + 1); quick halves the excess question's 40 worlds' resolution twice over)
+NULLS = {"quick": 0.25, "standard": 1.0, "precise": 4.0}
 
 
 def _area(where) -> list[int] | None:
@@ -155,6 +162,11 @@ def load(path: str | Path) -> Declaration:
         v = doc.get(k)
         if v is not None and (not isinstance(v, list) or set(v) - set(allowed)):
             problems.append(f"{k} {v!r}: a list among {', '.join(allowed)}")
+    nulls = doc.get("nulls", "standard")
+    if not (nulls in NULLS or (isinstance(nulls, (int, float)) and nulls > 0)):
+        problems.append(f"nulls {nulls!r}: {', '.join(NULLS)}, or a factor on each test's replicate null worlds")
+    if doc.get("draws") is not None and (not isinstance(doc["draws"], int) or doc["draws"] < 1):
+        problems.append(f"draws {doc['draws']!r}: how many plausible link sets the persons step averages over, 1 or more")
     if doc.get("chapters") is not None and not isinstance(doc["chapters"], bool):
         problems.append(f"chapters {doc['chapters']!r}: true (the topic's codes inside their fitted chapters) or false "
                         "(as code sets of their own)")
@@ -178,7 +190,9 @@ def load(path: str | Path) -> Declaration:
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
                        time=float(doc["time"]) if doc.get("time") is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
-                       chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"))
+                       chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
+                       nulls=float(NULLS.get(nulls, nulls)) if nulls in NULLS or isinstance(nulls, (int, float)) else 1.0,
+                       draws=doc.get("draws"))
 
 
 # ---------------------------------------------------------------------- the scope
@@ -574,6 +588,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
     else:
         os.environ.pop("PEGASUS_AREA", None)
+    os.environ["PEGASUS_NULLS"] = str(decl.nulls)        # every test's replicate worlds (`config.replicates`)
     items: list[Item] = []
     excluded: list[dict] = []
     served = set(gateway.event_datasets())
@@ -987,14 +1002,14 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
             for y in years:
                 mine = sorted({o.dataset for o in scope.items if o.status == "in"})   # the persons of its own links
                 key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
-                       "draws": PERSON_DRAWS[decl.depth], "q": decl.q, "data": config.data_version(),
+                       "draws": decl.draws or PERSON_DRAWS[decl.depth], "q": decl.q, "data": config.data_version(),
                        "code": config.code_key(tools.cohort), "datasets": mine}
                 hit = store.get_table("study_table", key)
                 if hit is not None:
                     out.extend(hit.to_pylist())
                     continue
                 try:
-                    found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=PERSON_DRAWS[decl.depth],
+                    found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=decl.draws or PERSON_DRAWS[decl.depth],
                                          q=decl.q, log=log, datasets=mine)
                 except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
                     out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
