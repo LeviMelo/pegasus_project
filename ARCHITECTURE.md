@@ -374,6 +374,14 @@ toxoplasmosis/
 
 Every table uses readable names beside codes (municipality name and IBGE code; ICD label and code).
 
+**The analytic body** (`study.body`; author, 2026-10-12: enough data and statistics for a thorough
+epidemiological analysis and a paper, produced reliably across every preset and scope). Every study folder holds, or
+says why it does not: the scope with each source's reason; incidence with its denominator and 95 % interval by place and
+year for every source read; a series and a map for every field; findings each with its recording class and named
+places; relations; the persons' cohorts and the completeness across systems where persons are asked for; the data's
+quality; an answer to every declared hypothesis; the report; and no failed step. The gate (`scripts/prelaunch.py
+--slices`) checks it on a slice of every preset and of a second condition before any national run.
+
 ### 3.5 The report
 
 `report.html`, static, offline, generated from the folder's tables and the declarations:

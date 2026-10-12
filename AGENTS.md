@@ -192,6 +192,12 @@ $PY scripts/check_docs.py
   inputs or the shared store's cached objects; `scripts/prelaunch.py` runs them (minutes) and a study is launched
   only on a commit they pass. A test is added with the fix of every crash a run finds. Meaning is still judged on
   real data with known answers.
+- **Slices before anything national** (author, 2026-10-12). A national or multi-year study is never the debugging
+  loop. `scripts/prelaunch.py --slices` runs every study of `studies/slices/` (each preset on one state and a few years,
+  and a second condition), each within twice its estimate and each folder checked against the analytic body
+  (`study.body`); a national run is launched only on a commit every slice passes, and is stopped at twice its own
+  estimate. No commit to `src/` while a run is going.
+- **One folder** (author, 2026-10-12). PegaSUS is this folder alone: no git worktrees or sibling checkouts.
 - **Never run, wait on or measure outdated code** (author, 2026-10-11). A run tests the commit it was launched on and
   nothing else.
   - The moment a commit changes code a running job executes, stop that job and relaunch it on the new commit. Do not
