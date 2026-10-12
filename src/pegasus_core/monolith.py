@@ -194,7 +194,10 @@ def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, s
     width = 3 if block == "*" else gateway.category_width(structure)
     at0 = total = 0.0
     for year in years:
-        tab = gateway.event_counts(dataset, event, int(year), classifier=classifier, codes=list(codes)).counts
+        try:
+            tab = gateway.event_counts(dataset, event, int(year), classifier=classifier, codes=list(codes)).counts
+        except gateway.NoSexRecorded:
+            continue            # records with no sex nor age say nothing of newborns (SIA's consolidated production)
         if codes:
             hit = pc.starts_with(tab.column("code"), codes[0])
             for c in codes[1:]:
