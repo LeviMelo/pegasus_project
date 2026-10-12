@@ -2392,7 +2392,26 @@ def reserved_links(year: int) -> frozenset[str]:
     return frozenset(name for name in link_specs() if run_touches_reserve(name, year))
 
 
-def persons(year: int, draw: int | None = None):
+def links_outside(datasets) -> frozenset[str]:
+    """The declared links with a side outside ``datasets`` (any spelling; None: none is outside): a study's persons are
+    made from the links among its own datasets, routes through them included (TOXC → SIH → SIM), never from every link
+    of the year (the smoke study decoded other systems' records to build its TOXC cohort, 2026-10-11)."""
+    if datasets is None:
+        return frozenset()
+    from pegasus_data._request import parse_dataset
+
+    def canon(x):
+        try:
+            return parse_dataset(x)
+        except Exception:  # noqa: BLE001 - a name pegasus_data does not parse is compared as written
+            return (x, None)
+
+    mine = {canon(d) for d in datasets}
+    return frozenset(name for name, sp in link_specs().items()
+                     if canon(sp.left.dataset) not in mine or canon(sp.right.dataset) not in mine)
+
+
+def persons(year: int, draw: int | None = None, datasets=None):
     """The persons of one scope: every viable stored national run of ``year`` merged (pegasus_data `build_entities`,
     strongest evidence first, under a person's constraints); ``draw`` merges one plausible link set (each edge kept
     with its p_match). PegaSUS reads persons, not one link's pairs (S2.4)."""
@@ -2402,7 +2421,7 @@ def persons(year: int, draw: int | None = None):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw,
-                              exclude=reserved_links(year))
+                              exclude=reserved_links(year) | links_outside(datasets))
 
 
 def _scope_runs(year: int) -> list[str]:
@@ -2412,7 +2431,7 @@ def _scope_runs(year: int) -> list[str]:
     return sorted(p.name for p in (Path(config.data_root()) / "lake" / "links").rglob(f"*_BR_{year}*.json"))
 
 
-def person_quality(year: int) -> dict:
+def person_quality(year: int, datasets=None) -> dict:
     """What one scope's persons rest on (S2.4(d)): per link, the edges merged, already one person and refused under a
     person's constraints (pegasus_data `build_entities`), and its triangles, its pairs against the persons the other
     links make (`entities.triangles`: the same partner or another). A reading over persons carries it."""
@@ -2422,15 +2441,15 @@ def person_quality(year: int) -> dict:
     from pegasus_data.linkage.entities import triangles
 
     key = {"what": "person_quality", "year": year, "data": config.data_version(), "code": config.code_key(person_quality),
-           "runs": _scope_runs(year)}
+           "runs": _scope_runs(year), **({"datasets": sorted(datasets)} if datasets is not None else {})}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return json.loads(cached.column("json")[0].as_py())
-    ent = persons(year)
+    ent = persons(year, datasets=datasets)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         tri = triangles(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()),
-                        exclude=reserved_links(year))
+                        exclude=reserved_links(year) | links_outside(datasets))
     out = {name: {**stats, "triangles": tri.get(name)} for name, stats in ent.by_spec.items()}
     store.put_table("gateway", key, pa.table({"json": [json.dumps(out)]}), {"source": "pegasus_data entities, triangles"})
     return out

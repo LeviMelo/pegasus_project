@@ -896,16 +896,17 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 out.append({"cohort": label, "note": "no year of the study holds its persons' link runs"})
                 continue
             for y in years:
+                mine = sorted({o.dataset for o in scope.items if o.status == "in"})   # the persons of its own links
                 key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
                        "draws": PERSON_DRAWS[decl.depth], "q": decl.q, "data": config.data_version(),
-                       "code": config.code_key(tools.cohort)}
+                       "code": config.code_key(tools.cohort), "datasets": mine}
                 hit = store.get_table("study_table", key)
                 if hit is not None:
                     out.extend(hit.to_pylist())
                     continue
                 try:
                     found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=PERSON_DRAWS[decl.depth],
-                                         q=decl.q, log=log)
+                                         q=decl.q, log=log, datasets=mine)
                 except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
                     out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
                     continue

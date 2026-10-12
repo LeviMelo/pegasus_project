@@ -1962,7 +1962,7 @@ def records(dataset: str, event: str, year: int, columns: list[str], places: lis
 
 
 def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]], year: int, draws: int = 10,
-           q: float = 0.05, log=print) -> list[leads.Lead]:
+           q: float = 0.05, log=print, datasets=None) -> list[leads.Lead]:
     """The cohort scan (ARCHITECTURE §7.8) on persons: every event of ``dataset`` in ``year`` is a person in ``role``
     (a birth's baby); each outcome is that person having a record of another kind (pegasus_data dataset code, person
     role: an infant death certificate, a newborn admission) through any route of the linked persons (`gateway.persons`:
@@ -2005,7 +2005,8 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
         base[d.column] = pa.array(["not recorded" if x in d.missing else x for x in raw])
     labels = [f"{o[0]}:{o[1]}" for o in outcomes]
     # what the persons rest on, per scope (S2.4(d)): each link's refusals and its agreement with the other routes
-    quality = {z: gateway.person_quality(z) for z in scopes}
+    # ``datasets``: the persons of the links among these only (a study's own; None: every link of the year)
+    quality = {z: gateway.person_quality(z, datasets=datasets) for z in scopes}
     for z, links_ in quality.items():
         log(f"persons {z}: " + "; ".join(
             f"{name} {st['kept']} kept, {st['refused']} refused"
@@ -2022,7 +2023,7 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     for i in range(draws):
         hit: dict[tuple[str, str], set[str]] = {o: set() for o in linked}
         for z in scopes:
-            ent = gateway.persons(z, draw=i)
+            ent = gateway.persons(z, draw=i, datasets=datasets)
             for o in linked:
                 hit[o] |= gateway.person_records(ent, kind, o)
         cols = {lab: pa.array(on_record[o] if o in on_record else
