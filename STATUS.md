@@ -1,8 +1,10 @@
 # Status: the map of the code
 
-**2026-10-10.** Branch `design-v0`, HEAD `69efd93` (327 commits since 2026-09-30), plus uncommitted documentation. This file is the map of the codebase as it is: what each module does, what it keeps on disk, how it is driven, what works and what does not. The theory and the plan are in `ARCHITECTURE.md`; the ordered work is in `BACKLOG.md`; decisions, measurements and open questions are in their own files. This file is rewritten, never appended, and holds no plan.
+**2026-10-12.** Branch `scope-v2` (454 commits since 2026-09-30; 127 since 2026-10-10), `pegasus_core` 44 modules and 27,607 lines. This file is the map of the codebase as it is: what each module does, what it keeps on disk, how it is driven, what works and what does not. The theory and the plan are in `ARCHITECTURE.md`; the ordered work is in `BACKLOG.md`; decisions, measurements and open questions are in their own files. This file is rewritten, never appended, and holds no plan.
 
-Sources: the code (read 2026-10-10), `scripts/codehealth.py`, `scripts/check_docs.py`, the stores in `pegasus_home/`, and the live capability assessment `data/assessment/2026-10-10-capability-assessment.md` (made while an overnight `update plans/s6_0_sim_all.yml` held the machine; its findings are quoted as measured there, not re-run).
+**Where the work stands (2026-10-12).** The study is driven by its declaration: `where` (an area), `period`, `topic.only`/`exclude`, and each depth's preset choices (`readers`, `related`, `relations`, `chapters`, `persons`, `replicate`, `download`, `draws`, `nulls`; ARCHITECTURE §3.3), priced per choice by `pegasus-core scope` and checked against the win condition by `pegasus-core audit`. The smoke study (TOXC, SIH, SIM) runs end to end nationally (32 min) and in one state (RS, 5 min); the deep milestone (33 items, 2010–2025) is the run in progress. Capture–recapture of the topic's population (`capture`), the persons' cohort scan and linked shares, corroboration and later-year replication are in the products. `tests/fast` (40 tests) and `scripts/prelaunch.py` gate every launch. Sections 1–7 below are the map as read on 2026-10-10 and are partly stale on module sizes; section 8 is current.
+
+Sources: the code (read 2026-10-10 and, for the study path, 2026-10-12), `scripts/codehealth.py`, `scripts/check_docs.py`, the stores in `pegasus_home/`, the live capability assessment `data/assessment/2026-10-10-capability-assessment.md`, and the study runs of 2026-10-11/12 (`EVALUATION.md`).
 
 ---
 
@@ -356,6 +358,16 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
   - **Row tables** kept only the first row's columns. `findings.parquet` lost `institution_facts`; persons lost either its estimates or its notes.
   - **Related fields in other sources:** a code column with no codelist crashed scope resolution. Latent: SIA-PA PA_MORFOL, SINAN-VIOL CIRC_LESAO.
 - **Deep studies did not replicate in later years.** A deep or exhaustive item with eight or more years now holds out its last `LATER_YEARS` (3), selects on the years before and tests once on them (`Item.confirm_last`, `update._later_years`).
+
+- **Found and fixed on 2026-10-12 (RS smoke rs1–rs5, deep7–deep10):**
+  - an area study read Brazil's parameters, graph and evidence grid;
+  - linkage draws were not reproducible (ties on bits in any order; pegasus_data) and each draw rebuilt the cohort's components (3.4 s, now 0.37 s);
+  - a cohort reported zero deaths where its link was not viable or reserved, and said nothing of a cohort with nothing at q;
+  - the exhaustive scope held 725 fields (each related code on every classifier and certificate line, SIM-DOREXT's lines ungrouped, a dengue linked share), now 202;
+  - code-list items were counted with the field's name as a column;
+  - a code set's corroboration read every code SIH records, and the findings table kept only the reason of an untested one;
+  - SINAN-TOXC's CLASSI_FIN was labelled from polio's table (labels weighed on 0–9, not the column's codes);
+  - two paused lanes waited forever, the pool's idle workers counting as active lanes (deep8).
 
 Fixed before the survey: persons read nothing through link runs stored before 2026-10-10, which named records by row (pegasus_data `store.load` relabels; merged).
 

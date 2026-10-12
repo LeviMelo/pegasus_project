@@ -387,6 +387,18 @@ def _volumes(dataset: str, root: str) -> dict[int, float]:
 EXTRACT_DISK_SHARE = 0.5
 
 
+def _extract_held(it: Item, years: list[int]) -> list[int]:
+    """The ``years`` an existing extract holds whole for a code-set item's codes on its classifier (its own, else the
+    event type's primary): free to read, as a lake year is."""
+    codes = (it.source or {}).get("codes")
+    if not codes or not years:
+        return []
+    column = (it.source or {}).get("classifier") or next(
+        (c["column"] for c in gateway.event_type(it.dataset, it.event).get("classifiers") or [] if c["role"] == "primary"),
+        None)
+    return gateway.extract_years(it.dataset, column, list(codes), years) if column else []
+
+
 def _extract_or_lake(it: Item, gb: float) -> None:
     """A code set whose download would not fit the disk as a lake (more than `EXTRACT_DISK_SHARE` of the data root's
     free space: SIA-PA 2010-2025 is 175 GB against under 180 GB free) is read as an extract of its codes: the dataset's
@@ -746,6 +758,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
     priced = []
     for it in items:
         ys, cost = _cost(it.dataset, decl.years)
+        held = _extract_held(it, ys)
+        if held:                          # its codes already extracted, whole, for these years: free, read from there
+            cost = {y: (0.0 if y in held else c) for y, c in cost.items()}
+            it.extract = True
         if it.denominator:
             # a ratio reads its denominator's years too (``lag`` earlier): both are priced, and only years both publish
             dys, dcost = _cost(it.denominator[0], [y - it.denominator[1] for y in decl.years])

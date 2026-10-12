@@ -144,3 +144,14 @@ def test_a_code_sets_categories_are_its_codes():
     assert study._corroboration_text({"tested": False, "reason": "no independent field holds its codes"}).startswith("no")
     assert "p 0.001" in study._corroboration_text({"tested": True, "label": "SIM-DO death", "observed": 3.0,
                                                   "null_median": 1.0, "p": 0.001, "q": 0.02})
+
+
+def test_a_quality_field_is_asked_of_recording_only():
+    # a column's completeness asked of propagation, share, group, seasonality held the TOXC item half an hour
+    from pegasus_core import questions
+
+    class S:
+        source = {"quality": True, "indicator": "ID_PAIS"}
+
+    out = questions._ask(S(), "propagation", "*")
+    assert out == [] and "quality field" in out.failed["*"] and set(questions.QUALITY_QUESTIONS) <= set(questions.QUESTIONS)

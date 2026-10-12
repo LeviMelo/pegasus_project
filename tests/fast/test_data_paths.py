@@ -149,3 +149,9 @@ def test_capture_lists_are_the_declared_population():
     assert "deceased.age_years" in f["lists"]["SIM-DO"]["where"] and f["lists"]["SINAN-TOXC"]["where"]
     assert set(f["links"]) == {"sinan_toxc_to_sih_admission", "sinan_toxc_to_sim", "sih_toxoplasmosis_admissions_to_sim"}
     assert gateway.value_labels("SINAN-TOXC", "notification", "CLASSI_FIN", (2021,))["1"] == "Confirmado"
+
+
+def test_years_an_extract_holds_whole_are_free():
+    # SIA-PA's serology for 2010-2018 sat extracted on disk while the scope priced it as 175 GB to download
+    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2015, 2019], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
+    assert study._extract_held(it, [2015, 2019]) == [2015]          # 2019's files are not all read yet

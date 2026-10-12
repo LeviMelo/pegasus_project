@@ -13,6 +13,32 @@ It reads all its data through **[pegasus_data](../pegasus_data)**, the project's
 
 **State:** architecture revision 5 (2026-10-10): the win condition is an exhaustive study of one topic from one declaration (ARCHITECTURE §1.4). The code as it is: `STATUS.md`; the ordered work: `BACKLOG.md`.
 
+## Run a study
+
+A study is one declaration (`studies/*.yml`; every key in ARCHITECTURE §3.1). A depth (`survey`, `standard`, `deep`,
+`exhaustive`) presets the choices below, and any of them can be set by hand to make a study smaller or larger:
+
+```yaml
+study: toxoplasmosis_rs
+topic: {seeds: {icd10: [P37.1], sinan: [TOXC]}, only: [SINAN-TOXC, SIH-RD, SIM-DO]}  # what, and which sources
+period: 2015-2023
+where: RS                 # Brazil, states or municipalities: fits, graphs and leads are the area's
+depth: deep
+related: 1                # how many related codes to read beside the topic's own, strongest first
+readers: [compositions, linked]   # which kinds of fields beyond counts
+questions: [excess, group]        # which questions to ask of every field
+relations: [fields]       # relations among the fields; add contexts, screen
+persons: true             # the cohort scan and capture-recapture over linked persons
+replicate: true           # test the leads on the later years they were not selected on
+nulls: quick              # the tests' null worlds: quick, standard or precise
+```
+
+```bash
+pegasus-core scope studies/toxoplasmosis_rs.yml   # what it would read, why, and the minutes behind each choice
+pegasus-core study studies/toxoplasmosis_rs.yml   # run it; the folder lands beside the declaration
+pegasus-core audit studies/toxoplasmosis_rs       # the folder against the win condition's acceptance items
+```
+
 | document | what it holds |
 |---|---|
 | `ARCHITECTURE.md` | **the ground truth, the plan and the theory:** purpose and principles, the data space, studies, fields, expectations, questions, relations, interpretation, execution, validation, departures |

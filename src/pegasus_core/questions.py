@@ -207,8 +207,20 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
             session._local.memo = None
 
 
+#: the questions a quality field (a column's blank or "ignored" share, ARCHITECTURE §9.7) is asked: a departure in
+#: completeness, a change of recording practice (a step, a trend), a region's practice (a cluster), an institution's.
+#: The others ask of an epidemic (its spread, its share of events, its groups, seasons and alarms): asked of each of
+#: SINAN-TOXC's forty columns they held the deep study's TOXC item half an hour (2026-10-12)
+QUALITY_QUESTIONS = ("excess", "step", "trend", "cluster", "institution")
+
+
 def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer]:
     qn = QUESTIONS[question]
+    if (getattr(session, "source", None) or {}).get("quality") and question not in QUALITY_QUESTIONS:
+        out = AnswerList()
+        out.other_shape, out.k = [], 1
+        out.failed = {"*": f"{question!r} is not asked of a quality field (`QUALITY_QUESTIONS`)"}
+        return out
     kind = session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count")
     methods = [m for m in qn.methods if kind in m.kinds]
     k = max(len(methods), 1)

@@ -669,6 +669,22 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
     return EventCounts(counts, unallocated, key)
 
 
+def extract_years(dataset: str, column: str, codes: list[str], years: list[int]) -> list[int]:
+    """The ``years`` an existing pegasus_data extract of ``dataset`` holds whole for ``codes`` on ``column``
+    (`pegasus_data.extract_table`, which refuses a year with a file unread or failed): data already on disk, which a
+    scope prices as free (SIA-PA's serology for 2010-2018 had been deferred as 175 GB to download, 2026-10-12)."""
+    import pegasus_data as pg
+
+    out = []
+    for y in years:
+        try:
+            pg.extract_table(dataset, column, list(codes), [int(y)], root=config.data_root())
+        except (LookupError, OSError, ValueError):
+            continue
+        out.append(int(y))
+    return out
+
+
 @functools.cache
 def _declared_key(dataset: str, event: str) -> dict:
     """What an artefact read from pegasus_data's events adds to its key: a hash of the event type's declaration, the
