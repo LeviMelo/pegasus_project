@@ -169,3 +169,17 @@ def test_a_small_corroboration_p_is_read_from_the_tail():
     p, how = corroborate.tail_p(null, 4.0)
     assert "tail" in how and 0.2 < p / stats.norm.sf(4.0) < 5
     assert corroborate.tail_p(null, 1.0)[1] == "permutation"
+
+
+def test_a_later_years_test_reads_its_own_fields_leads_only():
+    # the training register is one per dataset: every code set's node is "*", and B58's leads were tested on P37.1's
+    def lead(codes):
+        return leads.Lead(kind="answer", estimand="excess", tier="B1", fields=["SIHSUS-RD:hospitalisation:*"],
+                          locus={}, effect=1.0, scale="rate_ratio", interval=None, p=0.01, q=0.01, family="f",
+                          null="", calibrated=True, provenance={"source": {"codes": codes}})
+
+    class S:
+        dataset, event, source = "SIHSUS-RD", "hospitalisation", {"codes": ["P371"]}
+        _own = tools.Session._own
+
+    assert S()._own(lead(["P371"])) and not S()._own(lead(["B58"]))

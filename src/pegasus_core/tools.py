@@ -1336,7 +1336,10 @@ class Session:
         recur: an answer whose every attributed course is a spike or a transient (`departures.attribute`) stays
         untested here by nature, and needs corroboration."""
         t = self.train(last)
-        selected = t.register.current()
+        # this session's own reader's leads only: the training register is one per dataset and event, and every code
+        # set's node is "*", so each item had tested the others' leads against its own forecast (B58's against P37.1's,
+        # 2026-10-12)
+        selected = [x for x in t.register.current() if self._own(x)]
         if self.source.get("mark"):
             tested = [(x, {"tested": False, "reason": "a measure's later years are cell means: the count tail does not "
                                                       "apply; not built"}) for x in selected]
@@ -1370,6 +1373,13 @@ class Session:
         self._record(tested, "prospective", q)
         t.register.add(selected)
         return selected
+
+    def _own(self, x: leads.Lead) -> bool:
+        """Whether lead ``x`` is this session's field's: its dataset, event and reader (a register is shared by every
+        item of a dataset and event, and a code set, a measure or a linked share is a reader of its own)."""
+        return (bool(x.fields) and x.fields[0].startswith(f"{self.dataset}:{self.event}:")
+                and json.dumps(x.provenance.get("source") or {}, sort_keys=True, default=list)
+                == json.dumps(self.source or {}, sort_keys=True, default=list))
 
     def _ledger_open(self, kind: str, items: list[tuple[leads.Lead, dict[str, Any]]]) -> dict[str, Any]:
         """A batch of stage-E tests, (lead, spec) each, written to the ledger before any of them runs (§9.2), in one
@@ -1462,7 +1472,7 @@ class Session:
         exact Poisson interval, unbiased for the locus's realised rate whatever A selected. Written to
         ``lead.replications["honest"]``; it is a size, never a verdict."""
         a, e = self.side("A"), self.side("E")
-        selected = a.register.current()
+        selected = [x for x in a.register.current() if self._own(x)]
         by_node: dict[str, list[leads.Lead]] = {}
         for x in selected:
             by_node.setdefault(x.fields[0].split(":")[-1], []).append(x)

@@ -297,7 +297,26 @@ def summary(a: Answer) -> dict:
 # ---------------------------------------------------------------------- the methods' measured records
 
 
+#: `method_records` of this process, by q and the harness store's state (its directory's modification time, which a
+#: new record changes): read again for every question pass, it was a third of a lane (py-spy, deep12)
+_RECORDS: dict[tuple, dict] = {}
+
+
 def method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
+    """`_method_records`, kept while the harness store is unchanged."""
+    from . import config
+
+    home = config.home() / "harness"
+    key = (q, home.stat().st_mtime_ns if home.exists() else 0)
+    if key not in _RECORDS:
+        _RECORDS.clear()
+        _RECORDS[key] = _method_records(q)
+    import copy
+
+    return copy.deepcopy(_RECORDS[key])         # a caller's edits never reach the next caller
+
+
+def _method_records(q: float = 0.05) -> dict[str, dict[str, Any]]:
     """Each method's record from what the harness measured and stored (ARCHITECTURE §10.5), never a hand-written
     table, and from each measurement's latest run only (a method fixed since an earlier run is not charged with it):
     per documented positive, the last record's verdict for the method (`event_record`); per field, the last grid that
