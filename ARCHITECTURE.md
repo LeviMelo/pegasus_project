@@ -325,6 +325,7 @@ understands, not budgets). Each key the declaration sets overrides its depth's:
 |---|---|---|---|---|
 | `readers` | none | measures, compositions, intervals, flows, quality, supports, linked | same | same |
 | `related` (codes read, strongest first, each wherever recorded) | 0 | 3 | 8 | 20 |
+| `related_questions` (asked of the related codes' fields: they are read to relate them to the topic) | none | none | none | none |
 | `relations` | fields | fields | + contexts | + screen |
 | `chapters` | false | true | true | true |
 | `persons` (cohort scan) | false | false | true | true |

@@ -43,13 +43,14 @@ RELATIONS = ("fields", "contexts", "screen")
 #: ``related`` a count of related codes read strongest first (each wherever recorded), ``draws`` plausible link sets for the persons
 PRESETS = {
     "survey": {"readers": [], "related": 0, "relations": ["fields"], "chapters": False, "persons": False,
-               "replicate": False, "download": 2.0, "draws": 1},
+               "replicate": False, "download": 2.0, "draws": 1, "related_questions": []},
     "standard": {"readers": list(READERS), "related": 3, "relations": ["fields"], "chapters": True, "persons": False,
-                 "replicate": False, "download": 10.0, "draws": 1},
+                 "replicate": False, "download": 10.0, "draws": 1, "related_questions": []},
     "deep": {"readers": list(READERS), "related": 8, "relations": ["fields", "contexts"], "chapters": True,
-             "persons": True, "replicate": True, "download": 40.0, "draws": 10},
+             "persons": True, "replicate": True, "download": 40.0, "draws": 10, "related_questions": []},
     "exhaustive": {"readers": list(READERS), "related": 20, "relations": list(RELATIONS), "chapters": True,
-                   "persons": True, "replicate": True, "download": float("inf"), "draws": 20},
+                   "persons": True, "replicate": True, "download": float("inf"), "draws": 20,
+                   "related_questions": []},
 }
 KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "questions",
         "nulls", *PRESETS["survey"]}
@@ -87,6 +88,8 @@ class Declaration:
     replicate: bool | None = None        # leads selected on the earlier years and tested once on the last `LATER_YEARS`
     download: float | None = None        # gigabytes the study may download
     draws: int | None = None             # plausible link sets the persons step averages over
+    related_questions: list[str] | None = None  # the questions asked of the related codes' fields (preset: none, they
+                                                # are read to relate them to the topic: a lead, never a cause)
 
     def choice(self, key: str):
         """The declaration's ``key``, or its depth's preset (`PRESETS`)."""
@@ -176,7 +179,8 @@ def load(path: str | Path) -> Declaration:
                         "topic.only restricts the study to datasets or systems, topic.exclude leaves them out")
     from .questions import QUESTIONS
     names = [getattr(q, "name", q) for q in QUESTIONS]
-    for k, allowed in (("questions", names), ("readers", list(READERS)), ("relations", list(RELATIONS))):
+    for k, allowed in (("questions", names), ("related_questions", names), ("readers", list(READERS)),
+                       ("relations", list(RELATIONS))):
         v = doc.get(k)
         if v is not None and (not isinstance(v, list) or set(v) - set(allowed)):
             problems.append(f"{k} {v!r}: a list among {', '.join(allowed)}")
@@ -216,6 +220,7 @@ def load(path: str | Path) -> Declaration:
                        download=float(doc["download"]) if doc.get("download") is not None else None,
                        chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
                        relations=doc.get("relations"), persons=doc.get("persons"), replicate=doc.get("replicate"),
+                       related_questions=doc.get("related_questions"),
                        nulls=float(NULLS.get(nulls, nulls)) if nulls in NULLS or isinstance(nulls, (int, float)) else 1.0,
                        draws=doc.get("draws"))
 
@@ -472,13 +477,15 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
     questions = float(np.median(per_item)) if per_item else 120.0
     from .questions import QUESTIONS
 
-    # the declaration's questions only: their share of the eleven (a measured step asked them all)
-    share = len(decl.questions) / len(QUESTIONS) if decl.questions is not None else 1.0
-    questions *= share
+    # each item's questions only: their share of the eleven (a measured step asked them all)
+    def share_of(it):
+        asked = it.questions if it.questions is not None else decl.questions
+        return len(asked) / len(QUESTIONS) if asked is not None else 1.0
     for it in items:
         if it.status != "in" or not it.years:
             continue
         step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
+        share = share_of(it)
         if step in measured and share == 1.0:
             it.est_seconds = round(measured[step], 1)
             continue
@@ -490,7 +497,7 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
                 fit += float(m["fit_seconds"]) * len(it.years) / max(len(m["key"].get("years") or [1]), 1)
             else:
                 fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
-        it.est_seconds = round(fit + questions, 1)
+        it.est_seconds = round(fit + questions * share, 1)
 
 
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:
@@ -866,7 +873,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
                 it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
     items = _shared_blocks(_one_per_field(items))
     for it in items:
-        it.questions = decl.questions          # every item, the related codes' and the linked shares' too
+        # the topic's fields and their linked shares are asked the declaration's questions; a related code's field is
+        # read to relate it to the topic (`related_questions`, preset none): asked all eleven, 160 related fields made
+        # the exhaustive scope's hours (2026-10-12)
+        it.questions = decl.choice("related_questions") if it.reason.startswith("related code") else decl.questions
     overlap, overhead = _phase_record(decl)
     if overhead < 0:                     # another study's seconds per step: this scope's items read
         overhead = -overhead * sum(1 for i in items if i.status == "in")
@@ -975,6 +985,8 @@ def _strongest(decl: Declaration, extra: list[tuple[float, Item]]) -> list[Item]
     order = sorted(best, key=lambda c: -best[c])
     rank = {c: k for k, c in enumerate(order[:int(min(n, len(order))) + RELATED_SHOWN], 1)}
     added = [it for _, it in extra if _related_code(it) in rank]
+    for it in added:
+        it.questions = decl.choice("related_questions")
     _estimate(decl, added)
     for it in added:
         k = rank[_related_code(it)]
@@ -1523,6 +1535,10 @@ LANE_FREE_GB = float(os.environ.get("PEGASUS_LANE_FREE_GB", "6"))
 LANE_PRESSURE_GB = float(os.environ.get("PEGASUS_LANE_PRESSURE_GB", "2"))
 
 
+#: seconds without CPU after which a lane counts as idle (`_run_items`' balance)
+LANE_QUIET_S = 60.0
+
+
 def _may_resume(avail_gb: float, lane_gb: float, others_working: bool) -> bool:
     """Whether a paused lane resumes: its memory fits beside the floor, or no other lane computes (then the paused lanes
     are the only work left, and waiting frees nothing)."""
@@ -1567,7 +1583,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     steps: dict = {}
     pending, running, lost = list(order), {}, []
     paused: dict[int, psutil.Process] = {}
-    cpu_seen: dict[int, float] = {}
+    cpu_seen: dict[int, tuple[float, float]] = {}      # pid -> (its CPU seconds, when they last grew)
 
     def balance() -> None:
         # Lanes grow after they are admitted: three survey lanes held 42 GB committed on a 31.6 GB machine, and all of
@@ -1582,9 +1598,14 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 cpu = sum(c.cpu_times()[:2])
             except (psutil.Error, AttributeError):
                 continue
-            if cpu - cpu_seen.get(c.pid, 0.0) > 0.5:     # a lane computing; an idle pool worker is no lane
+            seen, grew = cpu_seen.get(c.pid, (0.0, 0.0))
+            if cpu - seen > 0.5:
+                grew = time.time()
+            cpu_seen[c.pid] = (cpu, grew)
+            # a lane that computed within the last minute: a lane paging under pressure computes in bursts, and resumed
+            # beside it on one quiet tick the others thrashed it (deep14); an idle pool worker computes for minutes none
+            if time.time() - grew < LANE_QUIET_S:
                 working.add(c.pid)
-            cpu_seen[c.pid] = cpu
         active = {pid: v for pid, v in lanes_now.items() if pid not in paused}
         if avail < LANE_PRESSURE_GB and len(active) > 1:
             keep = max(active, key=lambda pid: active[pid][1])

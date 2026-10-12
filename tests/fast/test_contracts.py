@@ -183,3 +183,13 @@ def test_a_later_years_test_reads_its_own_fields_leads_only():
         _own = tools.Session._own
 
     assert S()._own(lead(["P371"])) and not S()._own(lead(["B58"]))
+
+
+def test_a_related_field_is_asked_what_the_declaration_says(tmp_path):
+    # a related code is read to relate it to the topic: asked all eleven questions, 160 of them made the exhaustive
+    # scope's hours; the preset asks none, `related_questions` asks more
+    p = tmp_path / "s.yml"
+    p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\ndepth: exhaustive\n", encoding="utf-8")
+    assert study.load(p).choice("related_questions") == []
+    p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\nrelated_questions: [excess]\n", encoding="utf-8")
+    assert study.load(p).choice("related_questions") == ["excess"]
