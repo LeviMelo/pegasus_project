@@ -665,6 +665,12 @@ def resolve(decl: Declaration, log=print) -> Scope:
             continue
         if it.records == 0 and it.mentions:
             it.note = (it.note + "; " if it.note else "") + "no record has the topic as its primary code: read through its mentions"
+        elif 0 < it.records < len(held) and not it.mentions:
+            # fewer than one of the topic's records a year, nationally: no question can see a departure in it (SIA-PS
+            # held 14 and its whole lake, 2,284 files, was built for them, 2026-10-12)
+            it.status = "none"
+            excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"{it.records} of the topic's records in "
+                             f"{held[0]}-{held[-1]}, fewer than one a year: too few for any question"})
         elif it.records == 0:
             it.status = "none"
             excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} "
@@ -1071,23 +1077,35 @@ def _probe(scope: Scope, read: list[Item], log) -> list[Item]:
         if it.records is not None or it.extract or it.mentions or not it.years or it.denominator:
             keep.append(it)
             continue
-        # its largest published year: the most records and the most complete (the newest is often preliminary, a
-        # fraction of a year: CIHA's 2025 held none of the topic, its 2009–2023 do)
+        # the years the lake holds, all of them (free; a related code's item comes here uncounted); else its largest
+        # published year, the most records and the most complete (the newest is often preliminary, a fraction of a
+        # year: CIHA's 2025 held none of the topic, its 2009–2023 do)
+        import pegasus_data as pg
+
+        held = sorted(set(it.years) & set(pg.lake_coverage(it.dataset, root=config.data_root())))
         volume = _volumes(it.dataset, config.data_root())
-        year = max(it.years, key=lambda y: (volume.get(y) or 0.0, y))
+        probe = held or [max(it.years, key=lambda y: (volume.get(y) or 0.0, y))]
+        year = probe[-1]
         try:
-            gateway.ensure_lake(it.dataset, [year], log=log)
-            n = _records(it, [year])
+            if not held:
+                gateway.ensure_lake(it.dataset, probe, log=log)
+            n = _records(it, probe)
         except Exception as exc:  # noqa: BLE001 - a probe that fails decides nothing: the item goes on, its run says why
             log(f"study: probe {it.dataset} {year}: {type(exc).__name__}: {exc}")
             keep.append(it)
             continue
+        if held:
+            it.records = n
+        if held and 0 < n < len(held) and not it.mentions:
+            it.status = "none"
+            scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"{n} of the topic's records in "
+                                   f"{held[0]}-{held[-1]}, fewer than one a year: too few for any question"})
+            continue
         if n == 0:
             it.status = "none"
-            held = ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
-            scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} but its probe year "
-                                   f"{year} holds none of them; its other years were not fetched"})
-            log(f"study: {it.dataset} {it.event}: none of the topic in {year}, its other years not fetched")
+            scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} but "
+                                   f"{probe[0]}-{year} hold none of them" + ("" if held else "; its other years were not fetched")})
+            log(f"study: {it.dataset} {it.event}: none of the topic in {probe[0]}-{year}")
             continue
         keep.append(it)
     scope.items = [i for i in scope.items if i.status != "none"]
@@ -1107,8 +1125,7 @@ def _count_prepared(scope: Scope, read: list[Item], log) -> list[Item]:
                 log(f"study: {it.dataset} {it.event}: records not counted after the store: {type(exc).__name__}: {exc}")
             if it.records == 0 and not it.mentions:
                 it.status = "none"
-                held = ", ".join(it.nodes or (it.source or {}).get("codes") or ["its events"])
-                scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held} but its "
+                scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} but its "
                                        f"records hold none in {it.years[0]}-{it.years[-1]} (counted once its lake was built)"})
                 continue
         keep.append(it)
