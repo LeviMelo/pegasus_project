@@ -4,7 +4,7 @@
 study within twice its estimate, then `pegasus-core audit`. Rio Grande do Sul, 2014–2021; seeds B58, P37.1, TOXC and
 "toxoplasm"; SINAN-TOXC, SIH-RD, SIM-DO and SIA-PA (its serology read from the extract); deep preset (every reader,
 later years, persons, capture), one related code, `nulls: quick`, two link draws, SISAGUA's E. coli as the context, the
-Santa Maria hypothesis. Run from `pegasus_project_dev` at d1dc655 (slice3), shared store; log
+Santa Maria hypothesis. Run at d1dc655 (from a worktree since removed; folder now `studies/toxoplasmosis_slice`) (slice3), shared store; log
 `pegasus_project/data/probes/slice3.log`.
 
 **Why a slice.** Thirteen national deep runs (deep7–deep19, 2–3 h each) had been the debugging loop, each finding one

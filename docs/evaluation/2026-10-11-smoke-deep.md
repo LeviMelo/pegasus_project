@@ -3,7 +3,7 @@
 **Scenario.** `studies/toxoplasmosis_smoke.yml`: the reference study cut by its declaration to congenital
 toxoplasmosis's own records. Seeds P37.1 and TOXC; sources SINAN-TOXC, SIH-RD and SIM-DO; 2015–2023; depth deep;
 code sets; questions excess and group; compositions only; one context (SISAGUA E. coli); the Santa Maria hypothesis.
-Run worktree `pegasus_project_run` at 2ebc272; shared store and data root. Log
+Run at 2ebc272 (from a worktree since removed; folder now `studies/toxoplasmosis_smoke`); shared store and data root. Log
 `pegasus_project/data/probes/study_toxo_smoke4.log`; folder `studies/toxoplasmosis_smoke` (2.3 MB).
 
 **Ran.** 9 steps, 0 failed, 466 findings (signal 67, system 46, noise 311). Every deep path ran: later-year
