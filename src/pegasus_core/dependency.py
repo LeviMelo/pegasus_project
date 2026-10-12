@@ -13,6 +13,8 @@ constant sd 0.05 the gate used (it cannot change ρ); the plan names which (``co
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from . import config, gateway, surprise
@@ -241,14 +243,22 @@ def field_map(fields: list[tuple[str, str, str, dict | None, list[int]]], contex
     span = sorted({y for *_, ys in fields for y in ys})
     places = np.sort(gateway.population([span[-1]]).column("u").unique().to_numpy())
     names, groups, labels, B, SD = [], [], [], [], []
+    seen = set()
     for ds, ev, node, source, years in fields:
+        ident = (ds, ev, node, json.dumps(source or {}, sort_keys=True, default=str))
+        if ident in seen:               # one field read twice (a code set found as a seed and as a related code)
+            continue
+        seen.add(ident)
         s = tools.Session(ds, ev, list(years), source=source)
         su = s.surprise(node, "B0")
         y, mu, _, _ = _window(su, list(years), places)
         if y.sum() <= 0:
             continue
         b, sd, _ = place_effect(y, mu)
-        names.append(f"{ds}:{node}" + (f"|{fields_mod.reader_tag(source)}" if source else ""))
+        name = f"{ds}:{node}" + (f"|{fields_mod.reader_tag(source)}" if source else "")
+        if name in names:               # two readers the tag does not tell apart (a code set in two columns): both kept
+            name = f"{name}#{sum(n.split('#')[0] == name for n in names) + 1}"
+        names.append(name)
         groups.append("topic")
         labels.append(names[-1])
         B.append(b)
