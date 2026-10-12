@@ -446,7 +446,8 @@ def _records(it: Item, years: list[int]) -> int:
         # (the Santa Maria hypothesis's own source left out, 2026-10-11); a code list by its own reader, its field's
         # name ("codes:LINHAA_O") is no column (deep7's probes of SIM-DOFET and SIM-DOREXT failed on it, 2026-10-12)
         c = (gateway.code_list_counts(it.dataset, it.event, y, src["column"]).counts if listed else
-             gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False).counts)
+             gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False,
+                                  codes=tuple(src.get("codes") or ()) if it.extract else ()).counts)
         if config.study_area() is not None:                 # the study's area's records only
             c = c.filter(pa.array(config.in_area(c.column("u").to_numpy())))
         if prefixes:
@@ -1439,7 +1440,9 @@ def _count_prepared(scope: Scope, read: list[Item], log) -> list[Item]:
     them through, is no field (SIA-AN's serology codes, 0 records in 2010–2014, had been fitted and failed, survey10)."""
     keep = []
     for it in read:
-        if it.records is None and not it.extract:
+        # an extract's item too, from its extract: a code set split by SIGTAP chapter held none of Rio Grande do Sul's
+        # records (a health-education activity) and its fit failed on an empty table (2026-10-12)
+        if it.records is None:
             try:
                 it.records = _records(it, it.years)
             except Exception as exc:  # noqa: BLE001 - counted by its own run then, which says why if it cannot
