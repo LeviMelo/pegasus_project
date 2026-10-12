@@ -294,7 +294,7 @@ class Scope:
             if it.status != "in":
                 if k == "related" and it.est_seconds:
                     out["related"].setdefault("next, each", []).append(
-                        f"{(it.source or {}).get('codes', [''])[0]} in {it.dataset}"
+                        f"{_related_code(it)} in {it.dataset}"
                         + (f" {it.source['classifier']}" if (it.source or {}).get("classifier") else "") + f": {m:.1f}")
                 continue
             if k == "topic":
@@ -396,11 +396,17 @@ def _records(it: Item, years: list[int]) -> int:
     import pyarrow.compute as pc
 
     total = 0
-    prefixes = list(it.nodes or []) + list((it.source or {}).get("codes") or [])
+    src = it.source or {}
+    prefixes = list(it.nodes or []) + list(src.get("codes") or [])
+    listed = src.get("source") == "code_list"
+    if listed:              # a code list is counted by ICD category (`gateway.code_list_counts`)
+        prefixes = list(dict.fromkeys(p[:3] for p in prefixes))
     for y in years:
         # every event, whatever its cell: a foetal death has no age, and counted by cells SIM-DOFET held no P37.1
-        # (the Santa Maria hypothesis's own source left out, 2026-10-11)
-        c = gateway.event_counts(it.dataset, it.event, y, classifier=(it.source or {}).get("classifier"), cell=False).counts
+        # (the Santa Maria hypothesis's own source left out, 2026-10-11); a code list by its own reader, its field's
+        # name ("codes:LINHAA_O") is no column (deep7's probes of SIM-DOFET and SIM-DOREXT failed on it, 2026-10-12)
+        c = (gateway.code_list_counts(it.dataset, it.event, y, src["column"]).counts if listed else
+             gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False).counts)
         if config.study_area() is not None:                 # the study's area's records only
             c = c.filter(pa.array(config.in_area(c.column("u").to_numpy())))
         if prefixes:
@@ -537,16 +543,24 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
     """The linked-share fields of the person paths (ARCHITECTURE §5.2): on every read source a usable path has a side
     on, the share of the source's events paired across the link (`fields.link_source`), over the years whose covering
     runs (`gateway.covering_runs`: a padded side's records of a year are paired by the runs around it) are all stored
-    with a usable verdict. A year without one is left out and said, never read as unlinked."""
+    with a usable verdict. A year without one is left out and said, never read as unlinked. Only a path whose other
+    side the study reads: the persons it follows are in systems it covers (B58 deaths' share linked to dengue
+    notifications was a field of the exhaustive scope, 2026-10-12)."""
     from pegasus_data.linkage.engine import link_method, stored_key
 
     verdicts = {(r["run"].get("spec"), r["stem"]): r.get("verdict") for r in runs}
+    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"}
     out = []
     for p in (p for p in paths if p["verdict"] in USABLE_LINKS):
         method = link_method(p["link"])
         for it in (i for i in items if i.status == "in" and i.source is None):
             for side in (s for s in p["sides_read"] if gateway.same_dataset(p[s], it.dataset)):
                 column = f"link:{p['link']}:{side}"
+                other = p["right" if side == "left" else "left"]
+                if gateway.dataset_key(other) not in read:
+                    excluded.append({"seed": f"{it.dataset}:{column}", "why": f"its other side, {other}, is not read "
+                                     "by the study"})
+                    continue
                 d = next((x for x in fields.declared_links(it.dataset, it.event) if x.column == column), None)
                 if d is None:
                     continue
@@ -803,17 +817,13 @@ def resolve(decl: Declaration, log=print) -> Scope:
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
     extra: list[tuple[float, Item]] = []            # (strength, item): the related codes' fields, the strongest read
     if decl.choice("related") > 0:
-        # beyond a survey, each related code is read where it was found, as a code set of its own (a lead, never a cause)
+        # each related code read as one field in each source that records it (a lead, never a cause)
+        strength: dict[str, float] = {}
         for r in (r for r in related if r["related"]):
-            extra.append((float(r.get("low") or 0.0), Item(
-                r["dataset"], r["event"], ["*"], None, list(r["item_years"]),
-                f"related code {r['code']} ({r['label']}): on {r['observed']:.0f} of its records with the topic's codes, "
-                f"{r['lift']:.1f} times expected", source={"codes": [r["code"]]})))
-        # and where else a related code is recorded (a code list, another source's classifier)
-        strength = {r["code"]: float(r.get("low") or 0.0) for r in related if r["related"]}
-        extra += [(strength.get(((it.source or {}).get("codes") or it.nodes or [""])[0], 0.0), it)
-                  for it in _related_elsewhere(decl, [r for r in related if r["related"]], served,
-                                               {i.dataset for i in items if i.status == "in"})]
+            strength[r["code"]] = max(strength.get(r["code"], 0.0), float(r.get("low") or 0.0))
+        extra += [(strength.get(_related_code(it), 0.0), it)
+                  for it in _related_fields(decl, [r for r in related if r["related"]], served,
+                                            {i.dataset for i in items if i.status == "in"})]
     kept = _declared_only(decl, [it for _, it in extra], excluded)
     # one field once before ranking: a related code read where the topic's own field already reads it (SIH's B58)
     # took a place among the strongest and was then dropped (`_one_per_field`), and the next ones listed it thrice
@@ -825,7 +835,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         for it in items:
             if it.status == "in" and len(it.years) >= 2 * LATER_YEARS + 2:
                 it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
-    items = _one_per_field(items)
+    items = _shared_blocks(_one_per_field(items))
     for it in items:
         it.questions = decl.questions          # every item, the related codes' and the linked shares' too
     overlap, overhead = _phase_record(decl)
@@ -854,6 +864,29 @@ def _one_per_field(items: list[Item]) -> list[Item]:
             continue
         seen.add(key)
         out.append(it)
+    return out
+
+
+def _shared_blocks(items: list[Item]) -> list[Item]:
+    """Related codes read as nodes of one fitted block are one item, their nodes together: the block is fitted once and
+    asked of each (the exhaustive scope held 504 such items in 124 blocks, each priced and run as a fit of its own,
+    2026-10-12). Only read items of the same dataset, event, blocks, reader and years are joined."""
+    out, by = [], {}
+    for it in items:
+        if it.status != "in" or not it.nodes or not it.reason.startswith("related code"):
+            out.append(it)
+            continue
+        key = (gateway.dataset_key(it.dataset), it.event, tuple(it.blocks), json.dumps(it.source, sort_keys=True,
+               default=str), tuple(it.years), it.confirm_last)
+        if key not in by:
+            by[key] = it
+            out.append(it)
+            continue
+        m = by[key]
+        m.nodes = sorted(set(m.nodes) | set(it.nodes))
+        m.est_seconds = max(m.est_seconds or 0.0, it.est_seconds or 0.0) or None
+        m.reason = (m.reason.split(" (with related codes")[0] + f" (with related codes "
+                    f"{', '.join(n for n in m.nodes if n != m.nodes[0])} in the same block)")
     return out
 
 
@@ -1050,7 +1083,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 continue
             done.add((it.dataset, kind))
             # the outcome on the person's own record: the topic's codes on a declared code list the study reads in this
-            # source (`_related_elsewhere`: SINASC's CODANOMAL with an anomaly found beside the topic's codes)
+            # source (`_related_fields`: SINASC's CODANOMAL with an anomaly found beside the topic's codes)
             same = [("record", f"{col}~{','.join(o.nodes)}") for o in scope.items
                     if o.status == "in" and gateway.same_dataset(o.dataset, it.dataset) and o.nodes
                     and (o.source or {}).get("source") == "code_list" for col in (o.source or {}).get("column") or []]
@@ -1133,20 +1166,25 @@ def _chapter(tree: dict, code: str) -> str:
     return code if code in tree and tree[code]["level"] == "chapter" else "*"
 
 
-def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str], topic: set[str]) -> list[Item]:
-    """A related code read in the other sources (ARCHITECTURE §4.3, acceptance item 1: births with the anomalies found
-    beside the topic's codes in admissions or deaths): in a source that holds the topic (``topic``), its ICD-10
-    classifiers as a code set and its ICD-10 code columns; in any other, only its declared code lists (SINASC's anomaly
-    list), as the code's node of that column's tree. Read in every source's diagnosis columns, the deep scope held
-    386 items and 848 minutes, B20–B24 in radiotherapy and dialysis authorisations among them (2026-10-11); over the
-    study's years already in the lake (a related code buys no download)."""
+def _related_fields(decl: Declaration, related: list[dict], served: set[str], topic: set[str]) -> list[Item]:
+    """Each related code as one field in each source that records it (ARCHITECTURE §4.3, acceptance item 1: births with
+    the anomalies found beside the topic's codes in admissions or deaths), over the study's years already in the lake
+    (a related code buys no download). In a source that holds the topic (``topic``), the code on its primary ICD-10
+    classifier (else its first) as a code set; in any other, the code anywhere on its records: its declared mention
+    group (every line of a certificate), else its first code list (SINASC's anomalies), as the code's node of that
+    list's tree. One field a source: read on every classifier and every certificate line apart, the exhaustive scope
+    held 725 fields of 20 codes, 31 hours (2026-10-12); in every source's diagnosis columns, the deep scope 386 items
+    and 848 minutes, B20–B24 in radiotherapy and dialysis authorisations among them (2026-10-11)."""
     tree = {r["code"]: r for r in gateway.code_tree("ICD10").to_pylist()}
-    out, seen = [], set()
+    found = {}
     for r in related:
+        found.setdefault((r["code"], gateway.dataset_key(r["dataset"])), r)
+    out, seen = [], set()
+    for r in sorted(related, key=lambda r: -float(r.get("low") or 0.0)):
         code = r["code"]
         if code not in tree:
             continue
-        for ds in sorted(served - {r["dataset"]}):
+        for ds in sorted(served):
             try:
                 ets = gateway.event_types(ds)
                 ys, cost = _cost(ds, decl.years)
@@ -1155,29 +1193,35 @@ def _related_elsewhere(decl: Declaration, related: list[dict], served: set[str],
             ys = [y for y in ys if cost.get(y) == 0.0]
             if not ys:
                 continue
-            why = f"related code {code} ({r['label']}), found on {r['dataset']} records with the topic's codes"
+            here = found.get((code, gateway.dataset_key(ds)))
+            why = (f"related code {code} ({r['label']}): on {here['observed']:.0f} of its records with the topic's codes, "
+                   f"{here['lift']:.1f} times expected" if here else
+                   f"related code {code} ({r['label']}), found on {r['dataset']} records with the topic's codes")
             mine = any(gateway.same_dataset(ds, t) for t in topic)
             for et in ets:
-                for c in (et.get("classifiers") or []) if mine else []:
-                    if c.get("structure") == "ICD10" and (ds, et["name"], c["column"], code) not in seen:
-                        seen.add((ds, et["name"], c["column"], code))
-                        out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {c['column']}",
-                                        source={"classifier": c["column"], "codes": [code]}))
-                for d in fields.declared_codes(ds):
-                    if d.reason:            # a column refused with why (no codelist: `codes_source` has no tree to read)
+                if (ds, et["name"], code) in seen:
+                    continue
+                if mine:
+                    icd = [c for c in et.get("classifiers") or [] if c.get("structure") == "ICD10"]
+                    c = next((c for c in icd if c["role"] == "primary"), icd[0] if icd else None)
+                    if c is None:
                         continue
-                    src = fields.codes_source(ds, d.column)
-                    if src.get("structure") != "ICD10" or (ds, et["name"], d.column, code) in seen:
-                        continue
-                    if not mine and src.get("source") != "code_list":
-                        continue            # outside the topic's sources, a code list only (a birth's anomalies)
-                    seen.add((ds, et["name"], d.column, code))
-                    if not decl.choice("chapters") and "source" not in src:     # a code set on that column, no chapter fit
-                        out.append(Item(ds, et["name"], ["*"], None, ys, f"{why}; read in its {d.column.split(':', 1)[1]}",
-                                        source={"classifier": src["classifier"], "codes": [code]}))
-                        continue
-                    out.append(Item(ds, et["name"], [_chapter(tree, code)], [code], ys,
-                                    f"{why}; read in its {d.column.split(':', 1)[1]}", source=src))
+                    seen.add((ds, et["name"], code))
+                    out.append(Item(ds, et["name"], ["*"], None, ys, why + ("" if c["role"] == "primary" else
+                                                                             f"; read in its {c['column']}"),
+                                    source={"codes": [code]} if c["role"] == "primary" else
+                                    {"classifier": c["column"], "codes": [code]}))
+                    continue
+                lists = [fields.mentions_source(ds, d.column) for d in fields.declared_mentions(ds)]
+                lists += [src for d in fields.declared_codes(ds) if not d.reason
+                          and (src := fields.codes_source(ds, d.column)).get("source") == "code_list"
+                          and src.get("structure") == "ICD10"]
+                if not lists:
+                    continue
+                seen.add((ds, et["name"], code))
+                out.append(Item(ds, et["name"], [_chapter(tree, code)], [code], ys,
+                                f"{why}; read anywhere on its records ({lists[0]['classifier'].split(':', 1)[1]})",
+                                source=lists[0]))
     return out
 
 
@@ -1273,7 +1317,7 @@ def _probe(scope: Scope, read: list[Item], log) -> list[Item]:
             it.status = "none"
             scope.excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} but "
                                    f"{probe[0]}-{year} hold none of them" + ("" if held else "; its other years were not fetched")})
-            log(f"study: {it.dataset} {it.event}: none of the topic in {probe[0]}-{year}")
+            log(f"study: {it.dataset} {it.event} {held_codes(it)}: none in {probe[0]}-{year}")
             continue
         keep.append(it)
     scope.items = [i for i in scope.items if i.status != "none"]

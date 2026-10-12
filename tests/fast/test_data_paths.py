@@ -114,3 +114,27 @@ def test_an_outcome_no_direct_link_reaches_is_said():
     reach = {y: gateway.direct_reach(("SINAN-TOXC", "patient"), ("SIM-DO", "deceased"), y)[0]["runs"][0]["verdict"]
              for y in (2021, 2022, 2023)}
     assert reach == {2021: "use with caution", 2022: "not viable", 2023: "reserved"}
+
+
+def test_a_code_list_item_is_counted_by_its_own_reader():
+    # deep7's probes counted SIM-DOFET's codes:LINHAA_O by the field's name as a column, and failed
+    from pegasus_core import fields
+
+    fet = study.Item("SIM-DOFET", "foetal_death", ["XVI"], ["P371"], [2022], "",
+                     source=fields.codes_source("SIM-DOFET", "codes:LINHAA_O"))
+    assert study._records(fet, [2022]) == 0                    # the original lines are empty in the files
+    born = study.Item("SINASC-DN", "birth", ["XVII"], ["Q03"], [2022], "",
+                      source=fields.codes_source("SINASC-DN", "codes:CODANOMAL"))
+    assert study._records(born, [2022]) == 530
+
+
+def test_a_related_code_is_one_field_a_source():
+    # read on every classifier and certificate line apart, 20 codes made 725 fields (31 h, exhaustive scope)
+    decl = study.Declaration("s", {"icd10": ["B58"]}, list(range(2015, 2024)), study.Path("s.yml"), depth="deep")
+    related = [{"code": "H32", "label": "Coriorretinite", "dataset": "SIHSUS-RD", "event": "hospitalisation",
+                "observed": 40.0, "lift": 300.0, "low": 190.0}]
+    out = study._related_fields(decl, related, {"SIHSUS-RD", "SIM-DOREXT", "SINASC-DN"}, {"SIHSUS-RD"})
+    per = collections.Counter((i.dataset, i.event) for i in out)
+    assert per and max(per.values()) == 1
+    rext = [i for i in out if i.dataset == "SIM-DOREXT" and i.event == "death"]
+    assert rext and rext[0].source["classifier"] == "mentions:death.causes"      # every line of the certificate
