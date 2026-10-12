@@ -3004,7 +3004,13 @@ def audit(folder: str | Path) -> list[dict]:
         ("report.html", (folder / "report.html").exists()), ("provenance.json", bool(prov))])
     size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) / 2**20
     item(8, "storage", [(f"the folder holds {size:.1f} MB", size < 200), ("study.duckdb views", (folder / "study.duckdb").exists())])
-    sm = [f for f in findings if 431690 in [int(x) for x in (f.get("places") or []) if str(x).isdigit()]
+    def places_of(f):
+        # the findings table writes a finding's places as text ("431690, 430010 (+17)"), the register as a list
+        raw = f.get("places") or []
+        return {int(x) for x in (raw if isinstance(raw, list) else str(raw).replace("(", " ").replace(",", " ").split())
+                if str(x).isdigit() and len(str(x)) == 6}
+
+    sm = [f for f in findings if 431690 in places_of(f) and f.get("class") == "signal"
           and (f.get("first_year") or 0) <= 2018 <= (f.get("last_year") or 9999)]
     item(9, "documented event", [(f"Santa Maria 2018 found by discovery: {len(sm)} findings "
                                   + ", ".join(sorted({str(f.get('label'))[:40] for f in sm}))[:300], bool(sm))])

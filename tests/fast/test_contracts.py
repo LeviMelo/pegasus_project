@@ -236,3 +236,14 @@ def test_a_compacted_register_keeps_every_state(tmp_path):
     assert reg.compact() == 31 and len(list(reg.path.glob("part-*.parquet"))) == 1
     assert {x.id: x.status for x in reg.current()} == before and before[lead(3).id] == "retired"
     assert len(reg.current(family="f1")) == 10
+
+
+def test_the_audit_reads_a_findings_places_as_written(tmp_path):
+    # the findings table writes places as text; the audit read them as a list and missed Santa Maria's 2018 signal
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pq.write_table(pa.table({"places": ["430010, 431690 (+17)"], "class": ["signal"], "first_year": [2018],
+                             "last_year": [2018]}), tmp_path / "findings.parquet")
+    item9 = next(r for r in study.audit(tmp_path) if r["item"] == 9)
+    assert item9["status"] == "met"
