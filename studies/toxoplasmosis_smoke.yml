@@ -1,6 +1,6 @@
 # The debugging loop, minutes: every deep path (scope, store, fits, the later years' replication, related codes, the
 # persons step, contexts, the hypothesis, the products) once, on the congenital disease's own records. Cut by the
-# declaration (topic.only, period, chapters, questions, readers, contexts, time), never by editing code.
+# declaration (topic.only, period, chapters, questions, readers, contexts, related), never by editing code.
 study: toxoplasmosis_smoke
 topic:
   seeds:
@@ -12,7 +12,7 @@ where: BR
 grain: [year]
 depth: deep
 chapters: false
-time: 3
+related: 3
 questions: [excess, group]
 readers: [compositions]
 contexts: [sisagua_surveillance_ecoli_present]

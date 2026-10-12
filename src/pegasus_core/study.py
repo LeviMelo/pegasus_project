@@ -35,7 +35,7 @@ DEPTHS = ("survey", "standard", "deep", "exhaustive")
 #: ARCHITECTURE §12.3: to become the cost model's budget, BACKLOG 9.1)
 DOWNLOAD_BUDGET_GB = {"survey": 2.0, "standard": 10.0, "deep": 40.0, "exhaustive": float("inf")}
 SEED_SYSTEMS = ("icd10", "sinan", "terms")
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "time", "download", "chapters", "questions", "readers", "nulls", "draws"}
+KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "related", "download", "chapters", "questions", "readers", "nulls", "draws"}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 #: the declared readers each depth adds to every source (ARCHITECTURE §3.3, §5.2): at standard and deeper, every
@@ -63,7 +63,8 @@ class Declaration:
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
-    time: float | None = None    # minutes for the related codes' fields, in place of the depth's `TIME_BUDGET_MIN`
+    related: float | None = None  # how many related codes are read as fields of their own, strongest first (None: the
+                                  # depth's `RELATED`; inf: all)
     download: float | None = None  # gigabytes the study may download, in place of the depth's `DOWNLOAD_BUDGET_GB`
     chapters: bool | None = None   # the topic's nodes read inside their fitted chapters (None: beyond a survey)
     questions: list[str] | None = None  # the questions asked of every field (None: all, `questions.QUESTIONS`)
@@ -172,8 +173,10 @@ def load(path: str | Path) -> Declaration:
                         "(as code sets of their own)")
     if doc.get("download") is not None and (not isinstance(doc["download"], (int, float)) or doc["download"] < 0):
         problems.append(f"download {doc['download']!r}: gigabytes the study may download, 0 or more")
-    if doc.get("time") is not None and (not isinstance(doc["time"], (int, float)) or doc["time"] < 0):
-        problems.append(f"time {doc['time']!r}: minutes for the related codes' fields, 0 or more")
+    rel = doc.get("related")
+    if rel is not None and rel != "all" and (isinstance(rel, bool) or not isinstance(rel, int) or rel < 0):
+        problems.append(f"related {rel!r}: how many related codes to read as fields of their own, strongest first "
+                        "(0 for none, or all)")
     where = doc.get("where", "BR")
     try:
         area = _area(where)
@@ -188,7 +191,7 @@ def load(path: str | Path) -> Declaration:
                        where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
-                       time=float(doc["time"]) if doc.get("time") is not None else None,
+                       related=(float("inf") if rel == "all" else float(rel)) if rel is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
                        chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
                        nulls=float(NULLS.get(nulls, nulls)) if nulls in NULLS or isinstance(nulls, (int, float)) else 1.0,
@@ -246,9 +249,43 @@ class Scope:
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
                 "person_paths": self.paths, "link_runs_to_compute": self.link_runs, "medicines": self.medicines,
+                "minutes_by_choice": self.minutes_by_choice(),
                 "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in") / self.lane_overlap
                                             + sum(r["est_seconds"] or 0 for r in self.link_runs)
                                             + self.overhead_seconds) / 60, 1)}
+
+    def minutes_by_choice(self) -> dict:
+        """The estimated minutes behind each choice the declaration makes, so a person sees what to cut: per dataset
+        (``topic.only`` / ``topic.exclude``), the related fields (``related``) read and the next ones deferred, the
+        persons' linked shares and link runs (``depth``), the declared ratios, and the fixed phases."""
+        def kind(it):
+            if it.reason.startswith("related code"):
+                return "related"
+            if (it.source or {}).get("source") == "linked":
+                return "persons"
+            return "ratios" if it.denominator else "topic"
+
+        out: dict = {"topic, by dataset": {}, "related": {}, "persons": 0.0, "ratios": 0.0}
+        for it in self.items:
+            m = (it.est_seconds or 0.0) / self.lane_overlap / 60
+            k = kind(it)
+            if it.status != "in":
+                if k == "related" and it.est_seconds:
+                    out["related"].setdefault("next, each", []).append(
+                        f"{(it.source or {}).get('codes', [''])[0]} in {it.dataset}"
+                        + (f" {it.source['classifier']}" if (it.source or {}).get("classifier") else "") + f": {m:.1f}")
+                continue
+            if k == "topic":
+                d = out["topic, by dataset"]
+                d[it.dataset] = d.get(it.dataset, 0.0) + m
+            elif k == "related":
+                out["related"]["read"] = out["related"].get("read", 0.0) + m
+                out["related"]["fields read"] = out["related"].get("fields read", 0) + 1
+            else:
+                out[k] += m
+        out["persons"] += sum(r["est_seconds"] or 0 for r in self.link_runs) / 60
+        out["scope, store and products"] = self.overhead_seconds / 60
+        return json.loads(json.dumps(out, default=float), parse_float=lambda x: round(float(x), 1))
 
 
 def _field_spec(text: str) -> tuple[str, str, list[str]]:
@@ -756,7 +793,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
                   for it in _related_elsewhere(decl, [r for r in related if r["related"]], served,
                                                {i.dataset for i in items if i.status == "in"})]
     kept = _declared_only(decl, [it for _, it in extra], excluded)
-    items += _within_time(decl, items, [(w, it) for w, it in extra if it in kept])
+    # one field once before ranking: a related code read where the topic's own field already reads it (SIH's B58)
+    # took a place among the strongest and was then dropped (`_one_per_field`), and the next ones listed it thrice
+    kept = [it for it in _one_per_field(items + kept) if any(it is k for k in kept)]
+    items += _strongest(decl, [(w, it) for w, it in extra if any(it is k for k in kept)])
     if decl.depth in ("deep", "exhaustive"):
         # replication in later years (ARCHITECTURE §8.3, acceptance item 6): selected on the years up to the last
         # LATER_YEARS held out, tested once on them; the survey's findings stood at R0 with nothing to replicate them
@@ -830,30 +870,28 @@ def _declared_only(decl: Declaration, items: list[Item], excluded: list[dict]) -
 LATER_YEARS = 3
 
 
-#: the wall clock a depth may spend on the related codes' fields beyond the topic's own (minutes; the topic's items are
-#: always read): the standard scope held 240 related fields beside 36 of the topic's, about 16 hours (2026-10-11)
-TIME_BUDGET_MIN = {"survey": 0.0, "standard": 240.0, "deep": 720.0, "exhaustive": float("inf")}
+#: how many related codes a depth reads as fields of their own, strongest first (the topic's own fields are always read):
+#: the standard scope once held 240 related fields beside 36 of the topic's, about 16 hours, and the light deep scope
+#: deferred 5,808 (2026-10-11); a count is what a person can choose, where a time budget was not (author, 2026-10-12)
+RELATED = {"survey": 0, "standard": 5, "deep": 15, "exhaustive": float("inf")}
+#: the next strongest related fields the scope prices beyond those read, so it shows what reading more would cost
+#: (every related code stays listed with its strength in ``related_codes``)
+RELATED_SHOWN = 10
 
 
-def _within_time(decl: Declaration, items: list[Item], extra: list[tuple[float, Item]]) -> list[Item]:
-    """The related fields ``extra`` (strength, item) admitted strongest first (the lower bound of the code's lift) while
-    their estimated seconds (`_estimate`) fit the depth's time budget beside the topic's items; the rest are deferred
-    with why, never dropped."""
-    if not extra:
-        return []
-    added = [it for _, it in extra]
+def _strongest(decl: Declaration, extra: list[tuple[float, Item]]) -> list[Item]:
+    """The related fields ``extra`` (strength, item): the declaration's ``related`` strongest (the lower bound of the
+    code's lift) read, the next `RELATED_SHOWN` deferred with their cost. The rest are neither priced nor items: each
+    stays in the scope's ``related_codes`` with its strength."""
+    n = RELATED[decl.depth] if decl.related is None else decl.related
+    ranked = sorted(extra, key=lambda p: -p[0])[:int(min(n, len(extra))) + RELATED_SHOWN]
+    added = [it for _, it in ranked]
     _estimate(decl, added)
-    minutes = TIME_BUDGET_MIN[decl.depth] if decl.time is None else decl.time      # the declaration's own, if it says
-    room = minutes * 60
-    spent = 0.0
-    for strength, it in sorted(extra, key=lambda p: -p[0]):
-        cost = it.est_seconds or 0.0
-        if spent + cost <= room:
-            spent += cost
-            continue
-        it.status = "deferred"
-        it.note = (f"past the {minutes / 60:g} h for related fields ({'declared' if decl.time is not None else decl.depth}) "
-                   f"(lift's lower bound {strength:.1f}; stronger ones read first)")
+    for rank, (strength, it) in enumerate(ranked, 1):
+        if rank > n:
+            it.status = "deferred"
+            it.note = (f"related field {rank} by strength (lift's lower bound {strength:.1f}), past the "
+                       f"{'declared' if decl.related is not None else decl.depth} {n:g}: related: {rank} reads it")
     return added
 
 

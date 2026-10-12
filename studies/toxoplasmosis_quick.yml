@@ -11,7 +11,7 @@ period: 2015-2023
 where: BR
 grain: [year]
 depth: deep
-time: 20
+related: 4
 chapters: false
 contexts: [sisagua_surveillance_ecoli_present, households_water_network_comparable, ans_beneficiaries]
 hypotheses:

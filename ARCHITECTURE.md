@@ -263,7 +263,7 @@ ratios:                               # optional ratio fields (§5.2): DATASET[:
   - {numerator: SINAN-TOXC, denominator: SINAN-TOXG}
   - {numerator: SIM-DOFET, denominator: SINASC.DN}
 download: 10                          # GB the study may download (default: the depth's)
-time: 240                             # minutes for the related codes' fields (default: the depth's)
+related: 5                            # how many related codes are read as fields of their own, strongest first (0, N or all; default: the depth's)
 chapters: true                        # the topic's codes inside their fitted chapters, or as code sets (default: beyond a survey)
 questions: [excess, group]            # the questions asked of every field (default: all eleven)
 readers: [compositions, intervals]    # the field kinds the depth adds (default: the depth's: measures, compositions, intervals, flows, quality, supports)
@@ -272,7 +272,7 @@ draws: 10                             # plausible link sets the persons step ave
 ```
 
 Every key has a default except `study` and `topic.seeds`. **How much a study ingests is the declaration's to set**
-(author, 2026-10-11): `where`, `only`, `exclude`, `period`, `download`, `time`, `contexts`, `chapters`, `questions`,
+(author, 2026-10-11): `where`, `only`, `exclude`, `period`, `download`, `related`, `contexts`, `chapters`, `questions`,
 `readers`, `nulls` and `draws` cut a study to the sources, years, fits and questions it needs, and a source whose latest year holds none of the topic's records is left out
 before its other years are fetched (`study._probe`). `studies/toxoplasmosis_quick.yml` is the reference study cut to
 its own four sources and nine years at deep depth: the debugging loop, minutes not hours. A topic may also be a whole system or the whole data space
@@ -288,7 +288,10 @@ depth (§10.3):
 - the related codes found in records, with their strength;
 - the person paths, with their links' viability;
 - the contexts;
-- the components and relations that will be run.
+- the components and relations that will be run;
+- `minutes_by_choice`: the estimated minutes behind each choice the declaration makes (each dataset, the related
+  fields read and the next ten with their cost, the persons step, the ratios, the fixed phases), so a person sees
+  what a key would save before running.
 
 The researcher edits `include`/`exclude` if something should change. Resolution is deterministic: the same declaration
 on the same data version gives the same scope.

@@ -78,3 +78,20 @@ def test_one_item_per_field():
 def test_a_code_set_field_is_named_with_its_codes():
     it = study.Item("SIHSUS-RD", "hospitalisation", ["*"], None, [2010], "", source={"codes": ["B58", "P371"]})
     assert study._codes_text(it) == ": B58 Toxoplasmose, P371 Toxoplasmose congênita"
+
+
+def test_related_reads_the_strongest_n_and_prices_the_next(monkeypatch, tmp_path):
+    # `time: minutes` was a budget no person could choose by; `related: N` is a count, the next ones shown with costs
+    p = tmp_path / "s.yml"
+    p.write_text("study: s\ntopic: {seeds: {icd10: [B58]}}\nrelated: 2\n", encoding="utf-8")
+    decl = study.load(p)
+    monkeypatch.setattr(study, "_estimate", lambda d, items: [setattr(i, "est_seconds", 60.0) for i in items])
+    extra = [(float(w), study.Item("SIM-DO", "death", ["*"], None, [2020], "related code", source={"codes": [c]}))
+             for w, c in [(1, "A"), (5, "B"), (3, "C"), *((0.5, f"Z{k}") for k in range(30))]]
+    out = study._strongest(decl, extra)
+    read = [i.source["codes"][0] for i in out if i.status == "in"]
+    assert read == ["B", "C"] and len(out) == 2 + study.RELATED_SHOWN
+    for bad in ("-1", "true", "some"):
+        p.write_text(f"study: s\ntopic: {{seeds: {{icd10: [B58]}}}}\nrelated: {bad}\n", encoding="utf-8")
+        with pytest.raises(study.DeclarationError, match="related"):
+            study.load(p)
