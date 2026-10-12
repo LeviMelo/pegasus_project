@@ -829,9 +829,15 @@ class Session:
             log("facility read skipped: " + ("the cube is by year, the grain here is monthly" if self._per_year > 1
                                              else "the dataset names no facility"))
         for i, ((node, train_last, tier), group) in enumerate(sorted(by_node.items())):
+            if node != "*" and node not in self.expectations.registry.level:
+                # a lead of a field this registry does not hold (an older version's node, SINAN's "notification"):
+                # left as it is, said, never a crash of every other lead's triage
+                log(f"triage: {len(group)} leads of {node!r}, not a field of {self.dataset} {self.event}: skipped")
+                continue
             ev = self._evidence(node)
+            block = self.expectations.registry.chapter(node)
             if fac is not None:
-                block_codes = self._data(self.expectations.registry.chapter(node)).leaves
+                block_codes = self._data(block).leaves
                 lead_codes = [block_codes[j] for j in self._leaves(node)[1]]
             index = {int(p): j for j, p in enumerate(self._grid_places)}
             s = (self.surprise(node, tier, train_last) if train_last else self.surprise(node, "B1")) if replicate else None
@@ -844,7 +850,7 @@ class Session:
                 if x.estimand == "group_disparity":
                     ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
                 if fac is not None and rows.size:
-                    ev.facility = fac.tally(self.expectations.registry.chapter(node), block_codes, lead_codes, rows)
+                    ev.facility = fac.tally(block, block_codes, lead_codes, rows)
                 obs, exp_ = st.get("observed"), st.get("expected")
                 if obs is None and s is not None and span:
                     # a question's answer (`survey_questions`) carries its methods' stats, not the locus's totals:

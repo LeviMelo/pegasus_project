@@ -96,6 +96,8 @@ class Registry:
         self._lists: dict[str, list[str]] | None = None
 
     def chapter(self, code: str) -> str:
+        if self.classifier == "*":
+            return "*"          # no classifier tree: the one block is "*" (its root is the event's name, no block)
         node = code
         while self.parent.get(node) is not None:
             node = self.parent[node]

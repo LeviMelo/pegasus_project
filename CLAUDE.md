@@ -187,6 +187,11 @@ $PY scripts/check_docs.py
 - **A synthetic that reproduces a symptom can validate the wrong mechanism.** Confirm every fix on the real object, and rerun the headline result after it.
 - **Locate a phenomenon in the model before fixing it.** A recurring patch means a missing abstraction.
 - **Check a fact before stating it:** a count, a date, what a document or a paper says.
+- **Tests where they guarantee working code faster than a run** (author, 2026-10-12, amending the live-only
+  directive). `tests/fast` holds contract and data-path tests, each guarding a defect a run found, on small
+  inputs or the shared store's cached objects; `scripts/prelaunch.py` runs them (minutes) and a study is launched
+  only on a commit they pass. A test is added with the fix of every crash a run finds. Meaning is still judged on
+  real data with known answers.
 - **Never run, wait on or measure outdated code** (author, 2026-10-11). A run tests the commit it was launched on and
   nothing else.
   - The moment a commit changes code a running job executes, stop that job and relaunch it on the new commit. Do not
