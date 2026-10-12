@@ -3,10 +3,10 @@
 study: toxoplasmosis_deep_slice
 topic:
   seeds:
-    icd10: [B58, P37.1]
-    sinan: [TOXC]
+    icd10: [B58, O98.6, P37.1]
+    sinan: [TOXG, TOXC]
     terms: [toxoplasm]
-  only: [SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
+  only: [SINAN-TOXG, SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
 period: 2014-2023
 where: RS
 grain: [year]
