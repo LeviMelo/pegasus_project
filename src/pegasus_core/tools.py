@@ -1343,6 +1343,14 @@ class Session:
                 # a field with no prospective form (a linked share's or a count's cell model): untested, said why
                 tested += [(x, {"tested": False, "reason": str(exc) or type(exc).__name__}) for x in group]
                 continue
+            except ValueError as exc:
+                if "must share the fit's" not in str(exc):
+                    raise
+                # a sparse field's later years hold other cells than its training years (CIHA's O98.6, 17 records):
+                # the forecast has nowhere to land; untested, said why (aligning the assembly is the remedy)
+                tested += [(x, {"tested": False, "reason": f"later years' cells differ from the fit's: {exc}"})
+                           for x in group]
+                continue
             tested += [(x, self._ledgered("prospective", x, lambda x=x, sp=sp: replication.test_lead(sp, x, level),
                                           last=last, level=level) if replication.lasting(x) else
                         {"tested": False, "reason": "a passing departure (spike or transient) does not recur: corroboration"})
