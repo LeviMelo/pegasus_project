@@ -251,7 +251,11 @@ def field_map(fields: list[tuple[str, str, str, dict | None, list[int]]], contex
             continue
         seen.add(ident)
         s = tools.Session(ds, ev, list(years), source=source)
-        su = s.surprise(node, "B0")
+        try:
+            su = s.surprise(node, "B0")
+        except LookupError:
+            continue        # a field with no events in its years (a column holding none of the codes): not in the map
+
         y, mu, _, _ = _window(su, list(years), places)
         if y.sum() <= 0:
             continue

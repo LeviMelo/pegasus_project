@@ -81,3 +81,11 @@ def test_a_study_area_holds_its_places_only(monkeypatch):
     assert len(d.places) == 497 and {int(p) // 10000 for p in d.places} == {43}
     assert d.unallocated.get("outside the study area", 0) > 0
     assert study._area(["RS", "431690"]) == [43, 431690]
+
+
+def test_the_place_level_map_leaves_out_a_field_without_events():
+    # a SIH field on a column holding none of its codes raised, and the map of every other field died with it
+    topic = [("SINAN-TOXC", "notification", "*", None, list(range(2019, 2024))),
+             ("SIHSUS-RD", "hospitalisation", "*", {"classifier": "DIAG_SECUN", "codes": ["Z999"]}, list(range(2019, 2024)))]
+    rows = dependency.field_map(topic, ["sisagua_surveillance_ecoli_present"])
+    assert {r["x"] for r in rows} == {"SINAN-TOXC:*"}

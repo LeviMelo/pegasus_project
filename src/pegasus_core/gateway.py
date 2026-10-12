@@ -2436,7 +2436,7 @@ def _scope_runs(year: int) -> list[str]:
     return sorted(p.name for p in (Path(config.data_root()) / "lake" / "links").rglob(f"*_BR_{year}*.json"))
 
 
-def person_quality(year: int, datasets=None) -> dict:
+def person_quality(year: int, datasets=None, seeds=None) -> dict:
     """What one scope's persons rest on (S2.4(d)): per link, the edges merged, already one person and refused under a
     person's constraints (pegasus_data `build_entities`), and its triangles, its pairs against the persons the other
     links make (`entities.triangles`: the same partner or another). A reading over persons carries it."""
@@ -2446,11 +2446,15 @@ def person_quality(year: int, datasets=None) -> dict:
     from pegasus_data.linkage.entities import triangles
 
     key = {"what": "person_quality", "year": year, "data": config.data_version(), "code": config.code_key(person_quality),
-           "runs": _scope_runs(year), **({"datasets": sorted(datasets)} if datasets is not None else {})}
+           "runs": _scope_runs(year), **({"datasets": sorted(datasets)} if datasets is not None else {}),
+           **({"seeds": [seeds[0], seeds[1], hashlib.sha256("|".join(map(str, sorted(seeds[2]))).encode()).hexdigest()[:16]]}
+              if seeds is not None else {})}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return json.loads(cached.column("json")[0].as_py())
-    ent = persons(year, datasets=datasets)
+    # ``seeds``: what a cohort's persons rest on, its own components (a national merge kept 539,411 deaths-to-admissions
+    # pairs for a cohort of 6,593, 2026-10-12); the triangles stay the links' own, over the year
+    ent = persons(year, datasets=datasets, seeds=seeds)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         tri = triangles(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()),

@@ -2020,7 +2020,8 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     labels = [f"{o[0]}:{o[1]}" for o in outcomes]
     # what the persons rest on, per scope (S2.4(d)): each link's refusals and its agreement with the other routes
     # ``datasets``: the persons of the links among these only (a study's own; None: every link of the year)
-    quality = {z: gateway.person_quality(z, datasets=datasets) for z in scopes}
+    id_seeds = (kind[0], kind[1], ids.to_numpy(zero_copy_only=False))
+    quality = {z: gateway.person_quality(z, datasets=datasets, seeds=id_seeds) for z in scopes}
     for z, links_ in quality.items():
         log(f"persons {z}: " + "; ".join(
             f"{name} {st['kept']} kept, {st['refused']} refused"
