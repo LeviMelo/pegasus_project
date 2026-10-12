@@ -2342,7 +2342,8 @@ def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> t
     con = duckdb.connect()
     con.register("r", raw)
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
-    t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep}, {_rep_sql([])} AS rid FROM r""").fetch_arrow_table()
+    t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep + ', ' if keep else ''}{_rep_sql([])} AS rid
+        FROM r""").fetch_arrow_table()          # no attribute column: the cells and the identity alone
     return t, t.column("rid")
 
 
@@ -2411,7 +2412,7 @@ def links_outside(datasets) -> frozenset[str]:
                      if canon(sp.left.dataset) not in mine or canon(sp.right.dataset) not in mine)
 
 
-def persons(year: int, draw: int | None = None, datasets=None):
+def persons(year: int, draw: int | None = None, datasets=None, seeds=None):
     """The persons of one scope: every viable stored national run of ``year`` merged (pegasus_data `build_entities`,
     strongest evidence first, under a person's constraints); ``draw`` merges one plausible link set (each edge kept
     with its p_match). PegaSUS reads persons, not one link's pairs (S2.4)."""
@@ -2420,8 +2421,9 @@ def persons(year: int, draw: int | None = None, datasets=None):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        # ``seeds`` (dataset, role, ids): only the components that hold those records (pegasus_data `build_entities`)
         return build_entities(period=year, geography="BR", settings=pg.load_settings(root=config.data_root()), draw=draw,
-                              exclude=reserved_links(year) | links_outside(datasets))
+                              exclude=reserved_links(year) | links_outside(datasets), seeds=seeds)
 
 
 def _scope_runs(year: int) -> list[str]:

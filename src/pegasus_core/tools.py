@@ -2023,7 +2023,7 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     for i in range(draws):
         hit: dict[tuple[str, str], set[str]] = {o: set() for o in linked}
         for z in scopes:
-            ent = gateway.persons(z, draw=i, datasets=datasets)
+            ent = gateway.persons(z, draw=i, datasets=datasets, seeds=(kind[0], kind[1], id_list))
             for o in linked:
                 hit[o] |= gateway.person_records(ent, kind, o)
         cols = {lab: pa.array(on_record[o] if o in on_record else
