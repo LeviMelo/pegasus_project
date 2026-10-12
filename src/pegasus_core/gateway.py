@@ -685,6 +685,11 @@ def extract_years(dataset: str, column: str, codes: list[str], years: list[int])
     return out
 
 
+class NoSexRecorded(LookupError):
+    """A year's records whose sex column holds no code labelled male or female (SIA's consolidated production names
+    no patient): no sex-by-age lattice can be read from them (`monolith.assemble` reads such a field collapsed)."""
+
+
 def max_download() -> int:
     """The bytes one read may download (pegasus_data's ``max_download``): 8 GB, or ``PEGASUS_MAX_DOWNLOAD``. A study
     sets 0 once its store is prepared (`study.run`): what its scope priced is on disk, and a reader reaching past it
@@ -944,7 +949,7 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...]) -> dict[str, i
     # a system of one sex is legitimate when its labels say so (HIV in pregnancy, SINAN HIVG, records only women);
     # what fails is a column no code of which is labelled either sex
     if not any(v in (1, 2) for v in out.values()):
-        raise LookupError(f"{dataset}.{column}: pegasus_data labels no male or female code among {codes} "
+        raise NoSexRecorded(f"{dataset}.{column}: pegasus_data labels no male or female code among {codes} "
                           f"(system {system}): {labelled}")
     return out
 

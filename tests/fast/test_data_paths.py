@@ -176,3 +176,12 @@ def test_a_study_never_downloads_past_its_store(monkeypatch):
         gateway.event_counts("SIASUS-PA", "procedure", 2016, cell=False)
     c = gateway.event_counts("SIASUS-PA", "procedure", 2016, codes=SEROLOGY, cell=False)    # its extract: on disk
     assert int(c.counts.column("y").to_numpy().sum()) > 0
+
+
+def test_a_source_without_sex_is_read_collapsed(monkeypatch):
+    # SIA's consolidated production records no sex: the serology field failed its item (deep17); read collapsed, every
+    # event and the place's population in one cell
+    from pegasus_core import monolith
+
+    d = monolith.assemble("SIASUS-PA", "procedure", "*", [2015, 2016], codes=SEROLOGY, support="PA_UFMUN")
+    assert float(d.y.sum()) > 9_000_000 and float(d.N[:, :, 1:].sum()) == 0.0

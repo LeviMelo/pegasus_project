@@ -424,17 +424,25 @@ def declared_flows(dataset: str) -> list[Declared]:
     return out
 
 
-def support_sources(dataset: str, event: str) -> list[tuple[str, dict]]:
+def support_sources(dataset: str, event: str, years: list[int] | None = None) -> list[tuple[str, dict]]:
     """The event type's other supports (ARCHITECTURE §5.3): each municipality column of the event's own entity
     (`declared_flows`' care flows at the residence's level: the place of infection, the notifying municipality, the
     hospital's, the place of death), its counts read there instead of at the residence (`gateway.event_counts`'s
-    ``support``), on the primary classifier."""
+    ``support``), on the primary classifier. With ``years``, only a column its roles declare for some of them: SIA-PA's
+    PA_MUNAT (1994-2007) was read for 2010-2020 and failed the item (deep17)."""
     from . import gateway
 
     et = gateway.event_type(dataset, event)
     primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
+    span = {r["column"]: (r.get("first_year"), r.get("last_year")) for r in gateway.roles(dataset)} if years else {}
+
+    def held(c: str) -> bool:
+        lo, hi = span.get(c, (None, None))
+        return not years or not ((lo and int(lo) > max(years)) or (hi and int(hi) < min(years)))
+
     return [(f"support:{c}", {"support": c, **({"classifier": primary} if primary else {})})
-            for d in declared_flows(dataset) if d.kind == "away" and "@" not in (c := d.column.split(":", 1)[1])]
+            for d in declared_flows(dataset) if d.kind == "away" and "@" not in (c := d.column.split(":", 1)[1])
+            and held(c)]
 
 
 def flow_source(dataset: str, event: str, column: str) -> dict:

@@ -255,7 +255,7 @@ def system_readers(sys_: System, plan: Plan, blocks: list[str], out: dict | None
     # a code set's places of care, infection or notification read its own codes there (SIA serology is billed by
     # the establishment and names no patient's residence: Santa Maria's 2018 outbreak shows only there)
     own = {k: v for k, v in (sys_.source or {}).items() if k in ("classifier", "structure", "codes")}
-    readers += [(name, {**source, **own}) for name, source in fields.support_sources(sys_.dataset, sys_.event)
+    readers += [(name, {**source, **own}) for name, source in fields.support_sources(sys_.dataset, sys_.event, list(plan.years))
                 if sys_.supports == "all" or name.split(":", 1)[1] in (sys_.supports or [])]
     readers += [(name, source) for name, source in fields.quality_sources(sys_.dataset, sys_.event, plan.years)
                 if sys_.quality == "all" or name.split(":", 1)[1] in (sys_.quality or [])]

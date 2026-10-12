@@ -327,7 +327,7 @@ understands, not budgets). Each key the declaration sets overrides its depth's:
 | `related` (codes read, strongest first, each wherever recorded) | 0 | 3 | 8 | 20 |
 | `related_questions` (asked of the related codes' fields: they are read to relate them to the topic) | none | none | none | none |
 | `relations` | fields | fields | + contexts | + screen |
-| `chapters` | false | true | true | true |
+| `chapters` (the topic's codes inside their chapter's fit) | false | false | false | false |
 | `persons` (cohort scan) | false | false | true | true |
 | `replicate` (later years) | false | false | true | true |
 | `download` (GB) | 2 | 10 | 40 | unbounded |

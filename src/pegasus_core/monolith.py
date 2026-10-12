@@ -301,12 +301,33 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
            **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code(),
            **({} if block == "*" else {"tree": config.resource_version("code_trees.parquet"),
                                        "attributes": config.resource_version("code_attributes.parquet")})}
+    # most events without a sex or age cell (SIA's consolidated production names no patient: 98 % of SIA-PA's
+    # serology, unallocated by sex, had been dropped, and a year with none failed its item, deep17): the field is read
+    # collapsed, every event and the place's whole population in one cell, as a ratio field's are. The collapsed read
+    # is stored under its own key beside the lattice's, which every other block keeps
+    flat = {**key, "collapse": True}
+
+    def collapsed() -> BlockData:
+        arrays, meta = store.get_arrays("blockdata", flat), store.manifest("blockdata", flat)
+        if arrays is not None and meta is not None:
+            return _blockdata_from(arrays, meta)
+        data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool,
+                         **{**source_args, "collapse": True})
+        store.put_arrays("blockdata", flat, *_blockdata_to(data))
+        return data
+
     arrays, meta = store.get_arrays("blockdata", key), store.manifest("blockdata", key)
     if arrays is not None and meta is not None:
-        return _blockdata_from(arrays, meta)
-    data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool, **source_args)
-    store.put_arrays("blockdata", key, *_blockdata_to(data))
-    return data
+        data = _blockdata_from(arrays, meta)
+    else:
+        try:
+            data = _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool,
+                             **source_args)
+        except gateway.NoSexRecorded:
+            return collapsed()
+        store.put_arrays("blockdata", key, *_blockdata_to(data))
+    lost = sum(v for k, v in data.unallocated.items() if k in ("sex", "age"))
+    return collapsed() if lost > float(np.sum(data.y)) else data
 
 
 @functools.cache
@@ -389,6 +410,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     """
     control.check_reserved(dataset, years)      # the confirmation reserve is read by claims only (ARCHITECTURE §8.3)
     structure = source_args.pop("structure", "ICD10")
+    no_cells = bool(source_args.pop("collapse", False))       # records with no sex (`assemble`'s retry)
     subset = tuple(str(c).replace(".", "").upper() for c in (source_args.pop("codes", None) or ()))
     if subset and block != "*":
         raise ValueError(f"codes={list(subset)} is a field of its own: block '*', not {block!r}")
@@ -416,7 +438,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     strata = gateway._strata(dataset, event)
     # a ratio field (another field's events as the exposure, `gateway._events_population`): the denominator has no sex or
     # age of the numerator's persons, so both stand in one cell, as a group's events do
-    collapse = str(population).startswith("events:")
+    collapse = str(population).startswith("events:") or no_cells
     if strata.get("persons") is False or collapse:
         # a group's events have no sex or age (`gateway._strata`: they stand in sex 1, band 0): the whole population of
         # the place is exposed in that one cell, every other cell unexposed (fixed at zero, as a mother's male cells)
@@ -500,7 +522,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     parts, unallocated, in_tree = [], {}, []
     for year in years:
         # a code set's codes go to the event counts, which read them from an extract where one holds them whole
-        extra = ({"codes": subset} if subset and readers[source] in (gateway.event_counts, gateway.share_moments)
+        extra = ({"codes": subset} if subset and getattr(readers[source], "func", readers[source])
+                 in (gateway.event_counts, gateway.share_moments)
                  else {})          # a share of a code set: only its records' compositions are read (`composition_counts`)
         area = config.study_area()
         # an area reads the national counts (cached, shared with Brazil's studies) and keeps its own places' rows: read

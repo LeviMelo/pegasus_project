@@ -38,17 +38,19 @@ READERS = ("measures", "compositions", "intervals", "flows", "quality", "support
 #: the relations a study reads (ARCHITECTURE §8): among its own and related fields, with every context (time-varying,
 #: over lags and distances), and the data-space screen against every fitted field
 RELATIONS = ("fields", "contexts", "screen")
+#: (``chapters`` is false at every depth: a code set is the topic's field, and its chapter's fit is a modelling choice
+#: a person makes; SIM's chapter I robust refit held 23 GB and SIH's ran out of memory, 2026-10-11)
 #: every depth is a preset of the declaration's own choices (author, 2026-10-12: choices a person understands, not
 #: budgets); a key the declaration sets overrides its depth's. ``download`` in gigabytes (years in the lake are free),
 #: ``related`` a count of related codes read strongest first (each wherever recorded), ``draws`` plausible link sets for the persons
 PRESETS = {
     "survey": {"readers": [], "related": 0, "relations": ["fields"], "chapters": False, "persons": False,
                "replicate": False, "download": 2.0, "draws": 1, "related_questions": []},
-    "standard": {"readers": list(READERS), "related": 3, "relations": ["fields"], "chapters": True, "persons": False,
+    "standard": {"readers": list(READERS), "related": 3, "relations": ["fields"], "chapters": False, "persons": False,
                  "replicate": False, "download": 10.0, "draws": 1, "related_questions": []},
-    "deep": {"readers": list(READERS), "related": 8, "relations": ["fields", "contexts"], "chapters": True,
+    "deep": {"readers": list(READERS), "related": 8, "relations": ["fields", "contexts"], "chapters": False,
              "persons": True, "replicate": True, "download": 40.0, "draws": 10, "related_questions": []},
-    "exhaustive": {"readers": list(READERS), "related": 20, "relations": list(RELATIONS), "chapters": True,
+    "exhaustive": {"readers": list(READERS), "related": 20, "relations": list(RELATIONS), "chapters": False,
                    "persons": True, "replicate": True, "download": float("inf"), "draws": 20,
                    "related_questions": []},
 }
@@ -1023,14 +1025,16 @@ def _phase_record(decl: Declaration) -> tuple[float, float]:
         return own[0], own[1]
     # a first run: the other studies' measured phases, per step, at the same depth (the smoke study's products took 19
     # of its 32 minutes, an estimate of 7 had priced none, 2026-10-11); `_estimate`'s caller scales it by the items read
-    others = []
+    # (the same depth's when there are; else every depth's: the first exhaustive run had priced no products at all)
+    others, anywhere = [], []
     for p in glob.glob(str(decl.path.parent / "*" / "provenance.json")):
         try:
             pr = json.loads(Path(p).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if pr.get("depth") == decl.depth and (r := record(pr)):
-            others.append(r)
+        if r := record(pr):
+            (others if pr.get("depth") == decl.depth else anywhere).append(r)
+    others = others or anywhere
     if not others:
         return 1.0, 0.0
     overlap = float(np.median([r[0] for r in others]))
@@ -1887,7 +1891,7 @@ def _hypothesis_readers(scope: Scope):
         if it.source and ("population" in it.source or it.source.get("source") == "linked"):
             continue
         try:
-            supports = fields.support_sources(it.dataset, it.event)
+            supports = fields.support_sources(it.dataset, it.event, list(it.years))
             span = {r["column"]: (r.get("first_year"), r.get("last_year")) for r in gateway.roles(it.dataset)}
         except Exception:  # noqa: BLE001 - a source whose supports cannot be listed is tested at its residence
             continue
