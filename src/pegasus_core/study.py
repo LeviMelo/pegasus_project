@@ -1485,6 +1485,12 @@ def _ensure_extract(items: list[Item], out: dict, log) -> None:
     item's codes on its classifier (its own, else the event type's primary); resumes where an earlier run stopped."""
     import pegasus_data as pg
 
+    # only the years no extract already holds whole for an item's codes: the slice's SIA-PA item (B58, P37.1, a subset
+    # of the national extract's filter) built an extract of its own and began reading 2,746 files (2026-10-12)
+    items = [it for it in items if set(it.years) - set(_extract_held(it, list(it.years)))]
+    if not items:
+        out["extract"] = "held whole by an existing extract"
+        return
     filters: dict[str, set[str]] = {}
     for it in items:
         column = (it.source or {}).get("classifier") or next(

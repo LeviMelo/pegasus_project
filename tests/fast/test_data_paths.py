@@ -185,3 +185,15 @@ def test_a_source_without_sex_is_read_collapsed(monkeypatch):
 
     d = monolith.assemble("SIASUS-PA", "procedure", "*", [2015, 2016], codes=SEROLOGY, support="PA_UFMUN")
     assert float(d.y.sum()) > 9_000_000 and float(d.N[:, :, 1:].sum()) == 0.0
+
+
+def test_an_extract_held_whole_is_not_built_again(monkeypatch):
+    # the slice's SIA-PA codes, a subset of the national extract's filter, began a new extract of 2,746 files
+    import pegasus_data as pg
+
+    monkeypatch.setattr(pg, "build_extract", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built again")))
+    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2015, 2016], "",
+                    source={"classifier": "PA_CIDPRI", "codes": ["B58", "P371"]}, extract=True)
+    out: dict = {}
+    study._ensure_extract([it], out, print)
+    assert out["extract"] == "held whole by an existing extract"
