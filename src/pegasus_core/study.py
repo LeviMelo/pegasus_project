@@ -1610,34 +1610,56 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 except psutil.Error:
                     pass
 
-    with cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn")) as pool:
-        try:
-            while pending or running:
-                balance()
+    def new_pool():
+        return cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn"))
+
+    # a worker that dies (a hard crash: CUDA starting while a killed run's memory was still held, deep13) breaks the
+    # whole pool, and every lane after it had run in this process, one after another; the pool is made anew and each
+    # lane it held resubmitted once, and only a lane that fails again, or raises, runs here
+    pool, broken, retried = new_pool(), False, set()
+    try:
+        while pending or running:
+            balance()
+            free_gb = room()
+            while not broken and not paused and pending and len(running) < lanes and (
+                    not running or free_gb >= max(LANE_FREE_GB, need[pending[0][0].dataset])):
+                gpu_busy = any(dev == "cuda" for dev, _ in running.values())
+                device = "cuda" if gpu and not gpu_busy else "cpu"
+                group = pending.pop(0)
+                log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
+                    f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
+                try:
+                    running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
+                except cf.process.BrokenProcessPool:
+                    pending.insert(0, group)
+                    broken = True
                 free_gb = room()
-                while not paused and pending and len(running) < lanes and (not running or free_gb >= max(LANE_FREE_GB, need[pending[0][0].dataset])):
-                    gpu_busy = any(dev == "cuda" for dev, _ in running.values())
-                    device = "cuda" if gpu and not gpu_busy else "cpu"
-                    group = pending.pop(0)
-                    log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
-                        f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
-                    try:
-                        running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
-                    except cf.process.BrokenProcessPool:
+            done, _ = cf.wait(list(running), timeout=10, return_when=cf.FIRST_COMPLETED) if running else (set(), set())
+            for f in done:
+                _device, group = running.pop(f)
+                try:
+                    steps.update(f.result())
+                except cf.process.BrokenProcessPool:
+                    broken = True
+                    if group[0].dataset in retried:
+                        log(f"study {decl.study}: the lane of {group[0].dataset} broke its pool again: run here")
                         lost.append(group)
-                    free_gb = room()
-                done, _ = cf.wait(list(running), timeout=10, return_when=cf.FIRST_COMPLETED)
-                for f in done:
-                    _device, group = running.pop(f)
-                    try:
-                        steps.update(f.result())
-                    except Exception as exc:  # noqa: BLE001 - a lane that died: its groups run again below, in this process
-                        log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
-                        lost.append(group)
-        finally:
-            for proc in paused.values():         # never leave a lane suspended: the pool waits on it at shutdown
-                with contextlib.suppress(psutil.Error):
-                    proc.resume()
+                    else:
+                        retried.add(group[0].dataset)
+                        pending.insert(0, group)
+                        log(f"study {decl.study}: the lane of {group[0].dataset} broke its pool: resubmitted to a new one")
+                except Exception as exc:  # noqa: BLE001 - a lane that raised: its group runs again below, in this process
+                    log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
+                    lost.append(group)
+            if broken and not running:
+                pool.shutdown(wait=False, cancel_futures=True)
+                pool, broken = new_pool(), False
+                paused.clear()
+    finally:
+        for proc in paused.values():         # never leave a lane suspended: the pool waits on it at shutdown
+            with contextlib.suppress(psutil.Error):
+                proc.resume()
+        pool.shutdown(wait=True)
     for group in lost:
         steps.update(_run_group(decl.study, group, others, None, None))
     return steps
