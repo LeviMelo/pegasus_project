@@ -1,0 +1,19 @@
+# A slice of the gate (scripts/prelaunch.py --slices): another condition through the same gate, so the body does not
+# depend on toxoplasmosis. Leptospirosis in Rio Grande do Sul, whose documented event is the surge after the floods of
+# May 2024 (SIM 2024 is held in reserve: SIH and SINAN read it).
+study: leptospirosis_deep_slice
+topic:
+  seeds:
+    icd10: [A27]
+    sinan: [LEPT]
+  only: [SINAN-LEPT, SIH-RD, SIM-DO]
+period: 2016-2024
+where: RS
+grain: [year]
+depth: deep
+related: 1
+nulls: quick
+draws: 2
+contexts: [sisagua_surveillance_ecoli_present]
+hypotheses:
+  - {component: transient, where: [4314902], when: 2024-05..2024-07, note: "Porto Alegre (RS) floods, May 2024"}

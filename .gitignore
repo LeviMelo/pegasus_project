@@ -9,3 +9,6 @@ reports/
 # study folders (ARCHITECTURE §3.4): products of a run, referencing the store; the declarations are tracked
 studies/*/
 !studies/siac_mulher_2026/
+# the gate's slice declarations are tracked, their study folders are not
+!studies/slices/
+studies/slices/*/

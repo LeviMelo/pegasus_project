@@ -1,0 +1,16 @@
+# A slice of the gate (scripts/prelaunch.py --slices): the standard preset on Rio Grande do Sul, 2019-2023.
+study: toxoplasmosis_standard_slice
+topic:
+  seeds:
+    icd10: [B58, P37.1]
+    sinan: [TOXC]
+    terms: [toxoplasm]
+  only: [SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
+period: 2019-2023
+where: RS
+grain: [year]
+depth: standard
+nulls: quick
+contexts: [sisagua_surveillance_ecoli_present]
+hypotheses:
+  - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}

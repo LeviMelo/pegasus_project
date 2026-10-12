@@ -1,0 +1,20 @@
+# A slice of the gate (scripts/prelaunch.py --slices): the exhaustive preset on Rio Grande do Sul, 2014-2023, reading
+# only what is on disk (download: 0).
+study: toxoplasmosis_exhaustive_slice
+topic:
+  seeds:
+    icd10: [B58, P37.1]
+    sinan: [TOXC]
+    terms: [toxoplasm]
+  only: [SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
+period: 2014-2023
+where: RS
+grain: [year]
+depth: exhaustive
+download: 0
+related: 3
+nulls: quick
+draws: 2
+contexts: [sisagua_surveillance_ecoli_present]
+hypotheses:
+  - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
