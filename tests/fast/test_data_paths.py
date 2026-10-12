@@ -153,5 +153,5 @@ def test_capture_lists_are_the_declared_population():
 
 def test_years_an_extract_holds_whole_are_free():
     # SIA-PA's serology for 2010-2018 sat extracted on disk while the scope priced it as 175 GB to download
-    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2015, 2019], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
-    assert study._extract_held(it, [2015, 2019]) == [2015]          # 2019's files are not all read yet
+    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2009, 2015], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
+    assert study._extract_held(it, [2009, 2015]) == [2015]          # the extract starts in 2010
