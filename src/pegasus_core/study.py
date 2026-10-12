@@ -1389,7 +1389,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                 except Exception as exc:  # noqa: BLE001 - a field that could not be read is a note in the report
                     log(f"study: {it.dataset} {name} {node}: {type(exc).__name__}: {exc}")
                     continue
-                label = (f.label or node) + (f" — {name}" if name else "")
+                # a share's name is COLUMN=value: named as the source labels it ("Critério de Confirmação: Laboratorial (1)")
+                shown = _group_text(it, [name]) if name and "=" in name and " " not in name else name
+                label = (f.label or node) + (f" — {shown}" if shown else "")
                 key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
                        "code": config.code_key(_expectation_table)}
                 path = store.address("study_table", key) / "table.parquet"
@@ -1687,8 +1689,13 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
                 continue
             o, e_ = float(y[np.ix_(ui, ti)].sum()), float(mu[np.ix_(ui, ti)].sum())
             if fid == r["field"]:
-                # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation
-                r["observed"], r["expected"], r["excess"] = o, e_, o - e_
+                # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation. A
+                # group answer's effect is its group's, against the place's own mix: the field's totals beside it read
+                # as its counts (Santa Maria 2019: "effect 0.0057, observed 118, expected 20"), so they are the locus's
+                if r.get("groups"):
+                    r["locus_observed"], r["locus_expected"] = o, e_
+                else:
+                    r["observed"], r["expected"], r["excess"] = o, e_, o - e_
                 continue
             if e_ <= 0:
                 continue
