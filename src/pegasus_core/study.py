@@ -721,6 +721,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
     for it in items:
         it.questions = decl.questions          # every item, the related codes' and the linked shares' too
     overlap, overhead = _phase_record(decl)
+    if overhead < 0:                     # another study's seconds per step: this scope's items read
+        overhead = -overhead * sum(1 for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
 
@@ -791,16 +793,39 @@ def _phase_record(decl: Declaration) -> tuple[float, float]:
     """From the last run of this study at this depth (its provenance's ``phases``): how many items' seconds one second
     of the lanes held (their overlap), and the scope, store and products phases' seconds. (1, 0) before any run: the
     estimate is then the items' serial sum alone, as survey9's 46.5 minutes against five hours showed it is not."""
+    import glob
+
+    def record(prov):
+        ph = prov.get("phases") or {}
+        if not ph.get("lanes"):
+            return None
+        steps = [v for v in (prov.get("steps") or {}).values() if isinstance(v, dict)]
+        summed = sum(float(v.get("seconds") or 0) for v in steps)
+        return (max(summed / float(ph["lanes"]), 1.0), float(ph.get("scope", 0) + ph.get("store", 0) + ph.get("products", 0)),
+                max(len(steps), 1))
+
     path = folder_of(decl) / "provenance.json"
     try:
         prov = json.loads(path.read_text(encoding="utf-8"))
+        own = record(prov) if prov.get("depth") == decl.depth else None
     except (OSError, ValueError):
+        own = None
+    if own:
+        return own[0], own[1]
+    # a first run: the other studies' measured phases, per step, at the same depth (the smoke study's products took 19
+    # of its 32 minutes, an estimate of 7 had priced none, 2026-10-11); `_estimate`'s caller scales it by the items read
+    others = []
+    for p in glob.glob(str(decl.path.parent / "*" / "provenance.json")):
+        try:
+            pr = json.loads(Path(p).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if pr.get("depth") == decl.depth and (r := record(pr)):
+            others.append(r)
+    if not others:
         return 1.0, 0.0
-    ph = prov.get("phases") or {}
-    if prov.get("depth") != decl.depth or not ph.get("lanes"):
-        return 1.0, 0.0
-    summed = sum(float(v.get("seconds") or 0) for v in (prov.get("steps") or {}).values() if isinstance(v, dict))
-    return max(summed / float(ph["lanes"]), 1.0), float(ph.get("scope", 0) + ph.get("store", 0) + ph.get("products", 0))
+    overlap = float(np.median([r[0] for r in others]))
+    return overlap, -float(np.median([r[1] / r[2] for r in others]))     # negative: seconds per step, to scale
 
 
 def _link_runs_needed(read: list[Item]) -> list[dict]:
