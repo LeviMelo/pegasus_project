@@ -1,0 +1,20 @@
+# The debugging loop, minutes: every deep path (scope, store, fits, the later years' replication, related codes, the
+# persons step, contexts, the hypothesis, the products) once, on the congenital disease's own records. Cut by the
+# declaration (topic.only, period, chapters, questions, readers, contexts, time), never by editing code.
+study: toxoplasmosis_smoke
+topic:
+  seeds:
+    icd10: [P37.1]
+    sinan: [TOXC]
+  only: [SINAN-TOXC, SIH-RD, SIM-DO]
+period: 2015-2023
+where: BR
+grain: [year]
+depth: deep
+chapters: false
+time: 3
+questions: [excess, group]
+readers: [compositions]
+contexts: [sisagua_surveillance_ecoli_present]
+hypotheses:
+  - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
