@@ -49,7 +49,7 @@ def test_links_touching_the_reserve_and_outside_a_study():
     assert "sinan_toxc_to_sih_admission" in kept and "sim_infant_deaths_to_sinasc" not in kept
 
 
-@pytest.mark.parametrize("path", sorted((ROOT / "studies").glob("toxoplasmosis*.yml")))
+@pytest.mark.parametrize("path", sorted((ROOT / "studies").glob("toxoplasmosis*.yml")) + sorted((ROOT / "studies" / "slices").glob("*.yml")))
 def test_every_reference_declaration_loads(path):
     d = study.load(path)
     assert d.years and d.depth in study.DEPTHS
@@ -244,6 +244,9 @@ def test_the_audit_reads_a_findings_places_as_written(tmp_path):
     import pyarrow.parquet as pq
 
     pq.write_table(pa.table({"places": ["430010, 431690 (+17)"], "class": ["signal"], "first_year": [2018],
-                             "last_year": [2018]}), tmp_path / "findings.parquet")
+                             "last_year": [2018], "label": ["serology"]}), tmp_path / "findings.parquet")
+    (tmp_path / "study.yml").write_text(
+        "hypotheses:\n  - {component: transient, where: [4316907], when: 2018-01..2018-06, note: outbreak}\n",
+        encoding="utf-8")
     item9 = next(r for r in study.audit(tmp_path) if r["item"] == 9)
-    assert item9["status"] == "met"
+    assert item9["status"] == "met" and "outbreak: 1 signals" in item9["evidence"]

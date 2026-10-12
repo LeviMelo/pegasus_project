@@ -2542,6 +2542,15 @@ def _reliability(methods) -> dict:
         f"{m}: findings in {r.get('null_worlds_with_findings')} of {r.get('null_worlds')} null worlds" for m, r in bad)}
 
 
+def _figure_name(it: Item, f, kind: str) -> str:
+    """A field's own figure file: its dataset, its codes and a digest of the field's identity. Named by dataset and node,
+    every code set of a dataset (node *) wrote one file, each over the last (the slice's SIH P37.1, B58 and H32)."""
+    import hashlib
+
+    codes = "_".join((it.source or {}).get("codes") or it.nodes or [])[:40]
+    return f"{_slug(f'{it.dataset}_{codes}' if codes else it.dataset)}_{hashlib.sha1(f.id.encode()).hexdigest()[:8]}_{kind}.png"
+
+
 def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
     """The field's national series, observed against expected (B1) with the expected's 90 % band."""
     import matplotlib
@@ -2556,7 +2565,7 @@ def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
     z = stats.norm.ppf(0.95)
     figs = out / "figures"
     figs.mkdir(exist_ok=True)
-    name = f"{_slug(it.dataset + '_' + f.node)}_series.png"
+    name = _figure_name(it, f, "series")
     fig, ax = plt.subplots(figsize=(7, 3.2), dpi=110)
     ax.fill_between(years, np.maximum(mu - z * np.sqrt(var), 0), mu + z * np.sqrt(var), alpha=0.25, label="expected, 90 %")
     ax.plot(years, mu, lw=1.5, label="expected")
@@ -2604,7 +2613,7 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
                if p.strip().isdigit()}
     figs = out / "figures"
     figs.mkdir(exist_ok=True)
-    name = f"{_slug(it.dataset + '_' + f.node)}_map.png"
+    name = _figure_name(it, f, "map")
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.6), dpi=110)
     states.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
                 legend_kwds={"shrink": 0.6, "label": "per 1,000 denominator events" if ratio else "per 100,000"})
@@ -2903,6 +2912,82 @@ def _fmt(v: Any) -> str:
 # ---------------------------------------------------------------------- export
 
 
+def body(folder: str | Path) -> list[dict]:
+    """The analytic body every study folder must hold, whatever its preset, area, period or topic (author, 2026-10-12:
+    enough data and statistics for a thorough epidemiological analysis and a paper, produced reliably across all presets
+    and scopes): each part present with content, or absent with a stated reason. What is required follows the folder's
+    own declaration (`Declaration.choice`): no persons part where persons were not asked for. Each row: part, status
+    (met / missing), evidence."""
+    import yaml
+
+    folder = Path(folder)
+    out: list[dict] = []
+
+    def part(name, ok, evidence):
+        out.append({"part": name, "status": "met" if ok else "missing", "evidence": evidence})
+
+    def table(name):
+        path = folder / f"{name}.parquet"
+        return pq.read_table(path).to_pandas() if path.exists() else None
+
+    decl = load(folder / "study.yml")
+    scope = yaml.safe_load((folder / "scope.yml").read_text(encoding="utf-8")) if (folder / "scope.yml").exists() else {}
+    read = scope.get("read") or []
+    unread = (scope.get("deferred") or []) + (scope.get("not_read") or [])
+    part("scope", bool(read) and all((x.get("note") or x.get("why") or x.get("reason")) for x in unread),
+         f"{len(read)} sources read with their reasons, {len(unread)} left out each with why")
+    desc = table("descriptive")
+    counted = {x["dataset"] for x in read if (x.get("source") or {}).get("source") != "linked"}
+    if desc is None or desc.empty:
+        part("descriptive epidemiology", False, "no descriptive table")
+    else:
+        rated = desc[desc["rate"].notna() & desc["rate_low"].notna() & desc["rate_high"].notna()]
+        missing = sorted(d for d in counted if d not in set(rated["dataset"]))
+        part("descriptive epidemiology", not missing,
+             f"{len(rated)} rates with 95 % intervals and their denominators ({', '.join(sorted(set(rated['per'])))[:120]})"
+             + (f"; none for {missing}" if missing else ""))
+    figs = sorted((folder / "figures").glob("*_series.png")) if (folder / "figures").exists() else []
+    maps = sorted((folder / "figures").glob("*_map.png")) if (folder / "figures").exists() else []
+    fields_read = [x for x in read if (x.get("source") or {}).get("source") != "linked"]
+    part("figures", len(figs) >= len(fields_read) and len(maps) >= len(fields_read),
+         f"{len(figs)} series and {len(maps)} maps for {len(fields_read)} fields read (each its own)")
+    f = table("findings")
+    if f is None:
+        part("findings", False, "no findings table")
+    else:
+        named = f["place_names"].notna().mean() if len(f) else 1.0
+        classed = f["class"].notna().mean() if len(f) else 1.0
+        part("findings", len(f) == 0 or (named > 0.95 and classed > 0.9),
+             f"{len(f)} findings, {classed:.0%} with a recording class, {named:.0%} with named places"
+             + ("" if len(f) else " (none at q: said in the report)"))
+    rel = table("relations")
+    if "fields" in decl.choice("relations"):
+        part("relations", rel is not None and len(rel) > 0, f"{0 if rel is None else len(rel)} relation rows")
+    if decl.choice("persons"):
+        pe, ca = table("persons"), table("capture")
+        part("persons", pe is not None and len(pe) > 0, f"{0 if pe is None else len(pe)} cohort rows (estimates or why none)")
+        part("completeness across systems", ca is not None and len(ca) > 0,
+             f"{0 if ca is None else len(ca)} capture rows (estimates, overlaps or why none)")
+    if "quality" in decl.choice("readers") and f is not None:
+        q = f[f["label"].astype(str).str.contains("quality:", regex=False)] if len(f) else f
+        qd = desc[desc["label"].astype(str).str.contains("—", regex=False)] if desc is not None else None
+        part("data quality", (q is not None and len(q) > 0) or (qd is not None and len(qd) > 0),
+             f"{0 if q is None else len(q)} quality findings, {0 if qd is None else len(qd)} recorded shares by year")
+    hyp = table("hypotheses")
+    if decl.hypotheses:
+        part("hypotheses", hyp is not None and len(hyp) > 0 and hyp["answer"].notna().all(),
+             f"{0 if hyp is None else len(hyp)} answers to {len(decl.hypotheses)} declared hypotheses")
+    rep = folder / "report.html"
+    text = rep.read_text(encoding="utf-8") if rep.exists() else ""
+    sections = ["Summary", "Descriptive epidemiology", "Scope", "Methods and limitations", "Provenance"]
+    part("report", all(x in text for x in sections), f"report.html, {len(text) // 1024} kB")
+    prov = json.loads((folder / "provenance.json").read_text(encoding="utf-8")) if (folder / "provenance.json").exists() else {}
+    failed = [k for k, v in (prov.get("steps") or {}).items() if isinstance(v, dict) and "error" in v]
+    part("every step ran", bool(prov) and not failed, f"{len(prov.get('steps') or {})} steps, {len(failed)} failed"
+         + (f": {failed[0][:80]}" if failed else ""))
+    return out
+
+
 def audit(folder: str | Path) -> list[dict]:
     """A study folder against the win condition's acceptance items 1–10 (BACKLOG): each item met, partial or not met,
     with the evidence read from the folder's own files, so a study is certified by what it holds, not by a reading of
@@ -2934,8 +3019,11 @@ def audit(folder: str | Path) -> list[dict]:
     sources = (i.get("source") or {} for i in read)
     sigtap = any(s_.get("structure") == "SIGTAP" for s_ in sources)
     contexts = [str(c) for c in scope.get("contexts") or []]
+    decl = yaml.safe_load((folder / "study.yml").read_text(encoding="utf-8")) if (folder / "study.yml").exists() else {}
+    agravos = [str(a).upper() for a in ((decl.get("topic") or {}).get("seeds") or {}).get("sinan") or []]
     item(1, "scope", [
-        ("SINAN-TOXG and TOXC read", bool(reads("SINAN-TOXG")) and bool(reads("SINAN-TOXC"))),
+        (f"every seeded agravo read ({', '.join(agravos) or 'none seeded'})",
+         all(reads(f"SINAN-{a}") for a in agravos)),
         ("SIH with the codes in any diagnosis", any(i.get("mentions") or (i.get("source") or {}).get("classifier") in
                                                     ("DIAG_SECUN", "mentions:admission.diagnoses") for i in reads("SIHSUS-RD"))
          or any(r.get("dataset") in ("SIHSUS-RD", "SIH-RD") for r in scope.get("related_codes") or [])),
@@ -3010,10 +3098,18 @@ def audit(folder: str | Path) -> list[dict]:
         return {int(x) for x in (raw if isinstance(raw, list) else str(raw).replace("(", " ").replace(",", " ").split())
                 if str(x).isdigit() and len(str(x)) == 6}
 
-    sm = [f for f in findings if 431690 in places_of(f) and f.get("class") == "signal"
-          and (f.get("first_year") or 0) <= 2018 <= (f.get("last_year") or 9999)]
-    item(9, "documented event", [(f"Santa Maria 2018 found by discovery: {len(sm)} findings "
-                                  + ", ".join(sorted({str(f.get('label'))[:40] for f in sm}))[:300], bool(sm))])
+    # the declaration's documented events (its hypotheses): each found by discovery, a signal at one of its places
+    # over its window, not only answered as a hypothesis
+    events = []
+    for h in decl.get("hypotheses") or []:
+        where = {int(str(w)[:6]) for w in h.get("where") or [] if str(w)[:6].isdigit()}
+        years = _when(h.get("when")) if h.get("when") else []
+        hits = [f for f in findings if where & places_of(f) and f.get("class") == "signal" and years
+                and (f.get("first_year") or 0) <= years[-1] and years[0] <= (f.get("last_year") or 9999)]
+        label = h.get("note") or json.dumps(h, ensure_ascii=False)
+        events.append((f"{label}: {len(hits)} signals by discovery "
+                       + ", ".join(sorted({str(f.get('label'))[:40] for f in hits}))[:250], bool(hits)))
+    item(9, "documented event", events or [("the declaration names no documented event (hypotheses)", False)])
     minutes = (prov.get("seconds") or 0) / 60
     est = prov.get("estimated_minutes") or scope.get("estimated_minutes")
     item(10, "cost", [(f"{minutes:.0f} min against an estimate of {est} made before running",
