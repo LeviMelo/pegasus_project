@@ -44,10 +44,16 @@ def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     con = duckdb.connect()
     con.register("r", raw)
     fm = f"coalesce(left(trim(CAST(\"{mcol}\" AS VARCHAR)), 6), '')" if mcol else "''"
+    # a facility code the source stores as a number lost its leading zeros: its declared width (pegasus_data roles'
+    # ``width``) restores them, so SINAN's "477" is CNES 0000477, Hospital Oswaldo Cruz in Recife (2026-10-12)
+    width = next((r.get("width") for r in gateway.roles(dataset) if r["column"] == fcol and r.get("width")), None)
+    fac = (f"CASE WHEN regexp_full_match(trim(CAST(\"{fcol}\" AS VARCHAR)), '[0-9]+') "
+           f"THEN lpad(trim(CAST(\"{fcol}\" AS VARCHAR)), {int(width)}, '0') ELSE trim(CAST(\"{fcol}\" AS VARCHAR)) END"
+           if width else f'trim(CAST("{fcol}" AS VARCHAR))')
     code = f'left(upper(trim(CAST("{classifier}" AS VARCHAR))), {CODE_CHARS})' if classifier else "'*'"
     named = f'WHERE "{classifier}" IS NOT NULL' if classifier else ""
     out = con.execute(f"""SELECT CAST({gateway._residence_sql(strata['residence'])} AS INTEGER) AS u,
-            coalesce(trim(CAST("{fcol}" AS VARCHAR)), '') AS facility, {fm} AS fm,
+            coalesce({fac}, '') AS facility, {fm} AS fm,
             {code} AS code, CAST({year} AS SMALLINT) AS year, CAST(sum(events) AS INTEGER) AS y
         FROM r {named} GROUP BY ALL""").fetch_arrow_table()
     store.put_table("gateway", key, out, {"source": f"pegasus_data.count_events({dataset}, {event}) by residence, {fcol}, {classifier}"})

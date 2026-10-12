@@ -718,6 +718,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         for it in items:
             if it.status == "in" and len(it.years) >= 2 * LATER_YEARS + 2:
                 it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
+    items = _one_per_field(items)
     for it in items:
         it.questions = decl.questions          # every item, the related codes' and the linked shares' too
     overlap, overhead = _phase_record(decl)
@@ -725,6 +726,28 @@ def resolve(decl: Declaration, log=print) -> Scope:
         overhead = -overhead * sum(1 for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+
+
+def _one_per_field(items: list[Item]) -> list[Item]:
+    """One item per field: a code set read on the event type's primary classifier is the same field as the code set
+    without one (SIH's B58 was read as the topic's and again as a related code found in SIM, on DIAG_PRINC, and the
+    report listed each finding twice, 2026-10-12). The first keeps its reason; the later one is dropped."""
+    out, seen = [], set()
+    for it in items:
+        src = dict(it.source or {})
+        if src.get("classifier") and src.get("codes"):
+            primary = next((c["column"] for c in gateway.event_type(it.dataset, it.event).get("classifiers") or []
+                            if c["role"] == "primary"), None)
+            if src["classifier"] == primary:
+                src.pop("classifier")
+                it.source = src
+        key = (gateway.dataset_key(it.dataset), it.event, tuple(it.blocks), tuple(it.nodes or ()),
+               json.dumps(src, sort_keys=True, default=str))       # years apart: the topic's item, first, reads more
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
 
 
 def _dataset_matches(name: str, entry: str) -> bool:
@@ -1450,7 +1473,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log) -> dict[str
                     continue
                 # a share's name is COLUMN=value: named as the source labels it ("Critério de Confirmação: Laboratorial (1)")
                 shown = _group_text(it, [name]) if name and "=" in name and " " not in name else name
-                label = (f.label or node) + (f" — {shown}" if shown else "")
+                label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "")
                 key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
                        "code": config.code_key(_expectation_table)}
                 path = store.address("study_table", key) / "table.parquet"
@@ -2403,6 +2426,21 @@ def _stories(rows: list[dict]) -> list[list[dict]]:
         for r in g:
             r["story"] = k
     return out
+
+
+@functools.cache
+def _icd_labels() -> dict:
+    return {r["code"]: r.get("label") or "" for r in gateway.code_tree("ICD10").to_pylist()}
+
+
+def _codes_text(it: Item) -> str:
+    """A code set's codes as the field's name carries them (": B58 Toxoplasmose"): stories listed B58's and P37.1's
+    admissions both as "hospitalisation" (2026-10-12)."""
+    codes = (it.source or {}).get("codes") or []
+    if not codes:
+        return ""
+    labels = _icd_labels()
+    return ": " + ", ".join(f"{c} {labels.get(c, '')}".strip() for c in codes[:4]) + (f" (+{len(codes) - 4})" if len(codes) > 4 else "")
 
 
 def _n(k: int, noun: str) -> str:
