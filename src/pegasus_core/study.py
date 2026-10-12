@@ -74,6 +74,26 @@ class Declaration:
         return self.depth != "survey" if self.chapters is None else self.chapters
 
 
+def _area(where) -> list[int] | None:
+    """A declaration's ``where`` as the codes `config.study_area` reads: None for Brazil ("BR"); else a list of states
+    (abbreviation "RS" or code 43) and municipalities (six or seven digits)."""
+    if where in (None, "BR", ["BR"]):
+        return None
+    names = {v["uf_sigla"]: int(v["uf_code"]) for v in gateway.municipality_names().values()}
+    out = []
+    for w in (where if isinstance(where, list) else [where]):
+        w = str(w).strip().upper()
+        if w in names:
+            out.append(names[w])
+        elif w.isdigit() and len(w) == 2 and int(w) in names.values():
+            out.append(int(w))
+        elif w.isdigit() and len(w) in (6, 7) and w[:6] in gateway.municipality_names():
+            out.append(int(w[:6]))
+        else:
+            raise ValueError(f"where {w!r}: BR, a state (RS or 43) or a municipality code (431690)")
+    return sorted(set(out))
+
+
 class DeclarationError(ValueError):
     """A declaration that cannot be read, with every problem named."""
 
@@ -142,14 +162,18 @@ def load(path: str | Path) -> Declaration:
         problems.append(f"download {doc['download']!r}: gigabytes the study may download, 0 or more")
     if doc.get("time") is not None and (not isinstance(doc["time"], (int, float)) or doc["time"] < 0):
         problems.append(f"time {doc['time']!r}: minutes for the related codes' fields, 0 or more")
-    if doc.get("where", "BR") != "BR":
-        problems.append("where: only BR (the whole country) is read in this version (BACKLOG 1.x)")
+    where = doc.get("where", "BR")
+    try:
+        area = _area(where)
+    except ValueError as exc:
+        problems.append(str(exc))
+        area = None
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
     return Declaration(study=str(doc["study"]), seeds={k: [str(c) for c in v] for k, v in seeds.items()}, years=years,
                        path=path, include=list(topic.get("include") or []), exclude=list(topic.get("exclude") or []),
                        only=list(topic.get("only") or []),
-                       where=doc.get("where", "BR"), grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
+                       where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
                        time=float(doc["time"]) if doc.get("time") is not None else None,
@@ -304,6 +328,8 @@ def _records(it: Item, years: list[int]) -> int:
         # every event, whatever its cell: a foetal death has no age, and counted by cells SIM-DOFET held no P37.1
         # (the Santa Maria hypothesis's own source left out, 2026-10-11)
         c = gateway.event_counts(it.dataset, it.event, y, classifier=(it.source or {}).get("classifier"), cell=False).counts
+        if config.study_area() is not None:                 # the study's area's records only
+            c = c.filter(pa.array(config.in_area(c.column("u").to_numpy())))
         if prefixes:
             hit = pc.starts_with(c.column("code"), prefixes[0])
             for n in prefixes[1:]:
@@ -544,6 +570,10 @@ def resolve(decl: Declaration, log=print) -> Scope:
     seeds' ICD-10 nodes, and the SINAN agravos named; each with the years it publishes and their download cost,
     deferred past the depth's budget."""
     _LAKE.clear()                         # the lake as it is now (`_cost`)
+    if decl.where not in (None, "BR"):    # the study's area (`config.study_area`), read by every count and block
+        os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
+    else:
+        os.environ.pop("PEGASUS_AREA", None)
     items: list[Item] = []
     excluded: list[dict] = []
     served = set(gateway.event_datasets())
@@ -1081,6 +1111,11 @@ def run(decl: Declaration, log=print) -> Path:
     import yaml
 
     t0 = time.time()
+    # the study's area for this process and its lanes (`config.study_area`): every block is the area's
+    if decl.where not in (None, "BR"):
+        os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
+    else:
+        os.environ.pop("PEGASUS_AREA", None)
     out = folder_of(decl)
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(decl.path, out / "study.yml")

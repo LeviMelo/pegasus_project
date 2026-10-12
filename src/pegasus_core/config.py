@@ -41,6 +41,29 @@ def population_root() -> str:
                           "C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home")
 
 
+def study_area() -> frozenset[int] | None:
+    """The study's area (a declaration's ``where``, set for its process and lanes as ``PEGASUS_AREA``): two-digit state
+    codes and six-digit municipality codes; None for Brazil. A block's places are the population's places inside it,
+    so every fit, null world and map is the area's, at a fraction of Brazil's cost (Rio Grande do Sul: 497 of 5,570)."""
+    raw = os.environ.get("PEGASUS_AREA", "").strip()
+    if not raw or raw.upper() == "BR":
+        return None
+    return frozenset(int(x) for x in raw.replace(";", ",").split(",") if x.strip())
+
+
+def in_area(u, area: frozenset[int] | None = None):
+    """Which municipality codes (six digits) lie in the study's area (all of them for Brazil)."""
+    import numpy as np
+
+    area = study_area() if area is None else area
+    u = np.asarray(u, dtype=np.int64)
+    if area is None:
+        return np.ones(u.shape, dtype=bool)
+    states = np.array([a for a in area if a < 100], dtype=np.int64)
+    places = np.array([a for a in area if a >= 100], dtype=np.int64)
+    return np.isin(u // 10000, states) | np.isin(u, places)
+
+
 def population_source() -> str:
     """The exposure the gateway reads unless a call names one: ``popsvs`` (IBGE's projection as the MoH
     distributes it) ``account-2`` (pegasus_data's modelled population account, with intervals; ADR-0010) or ``account-3`` / ``account-4``

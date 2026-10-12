@@ -70,3 +70,14 @@ def test_a_cohorts_seeded_persons_are_the_whole_merges(draw):
 
     assert hits(gateway.persons(2022, draw=draw, datasets=ds)) == hits(gateway.persons(2022, draw=draw, datasets=ds,
                                                                                          seeds=seeds))
+
+
+def test_a_study_area_holds_its_places_only(monkeypatch):
+    # `where: RS`: a block is the area's 497 places, its events those of residents of the area
+    from pegasus_core import monolith
+
+    monkeypatch.setenv("PEGASUS_AREA", "43")
+    d = monolith.assemble("SINAN-TOXC", "notification", "*", list(range(2019, 2024)))
+    assert len(d.places) == 497 and set(int(p) // 10000 for p in d.places) == {43}
+    assert d.unallocated.get("outside the study area", 0) > 0
+    assert study._area(["RS", "431690"]) == [43, 431690]

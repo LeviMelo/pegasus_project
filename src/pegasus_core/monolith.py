@@ -283,7 +283,9 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     h = hashlib.sha256()
     for name in pop.column_names:
         h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
+    area = config.study_area()
     key = {"what": "blockdata", "dataset": dataset, "event": event, "block": block, "years": ys.tolist(),
+           **({"area": sorted(area)} if area else {}),
            "profile": profile, "geography": geography, **({"geo_pool": geo_pool} if geo_pool else {}),
            "source": source, "grain": grain, "args": source_args,
            "data": config.data_version(),
@@ -388,6 +390,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     edges = gateway.age_edges(population, dataset, event)   # the population source and the events fix the bands (never padded or split)
     nB = len(edges)
     pop = gateway.population(years.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
+    if config.study_area() is not None:      # the study's area (`config.study_area`): its places only
+        pop = pop.filter(pa.array(config.in_area(pop.column("u").to_numpy())))
     places = np.array(sorted(pop.column("u").unique().to_pylist()))
     tidx = {int(y): i for i, y in enumerate(years)}
     N = np.zeros((len(places), len(years), 2 * nB))
@@ -489,8 +493,17 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         # a code set's codes go to the event counts, which read them from an extract where one holds them whole
         extra = ({"codes": subset} if subset and readers[source] in (gateway.event_counts, gateway.share_moments)
                  else {})          # a share of a code set: only its records' compositions are read (`composition_counts`)
-        ec = readers[source](dataset, event, int(year), places=pa.array(places, pa.int32()), **source_args, **extra)
+        area = config.study_area()
+        # an area reads the national counts (cached, shared with Brazil's studies) and keeps its own places' rows: read
+        # against the area's places, the rest would be "unallocated by municipality", which they are not
+        ec = readers[source](dataset, event, int(year), places=None if area else pa.array(places, pa.int32()),
+                             **source_args, **extra)
         tab = ec.counts
+        if area:
+            inside = pa.array(config.in_area(tab.column("u").to_numpy()))
+            unallocated["outside the study area"] = unallocated.get("outside the study area", 0) + int(
+                pc.sum(tab.filter(pc.invert(inside)).column(weight)).as_py() or 0)
+            tab = tab.filter(inside)
         if subset:
             keep = pc.starts_with(tab.column("code"), subset[0])
             for c in subset[1:]:

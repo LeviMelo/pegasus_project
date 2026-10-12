@@ -378,7 +378,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
     """Every stage of ``plan`` (module docstring); returns what each step did or why it was skipped."""
     from . import report, tools
 
-    out: dict[str, Any] = {}
+    out: dict[str, Any] = _Timed()
     sessions = {}
     resolved.clear()
     _ensure_lake(plan, out, log)
@@ -532,4 +532,20 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         out["report"] = str(report.write(plan.report))
     merged = control.Ledger().compact()          # stage E writes a part per batch: one file again, rows unchanged
     out["ledger"] = f"{merged} parts merged"
-    return out
+    return {**out, "step_seconds": out.seconds}
+
+
+class _Timed(dict):
+    """A run's step record that also times each step: the seconds since the previous entry, under its key (a study's
+    provenance said what each step did and never how long it took, 2026-10-12)."""
+
+    def __init__(self):
+        super().__init__()
+        self.seconds: dict[str, float] = {}
+        self._t = time.time()
+
+    def __setitem__(self, key, value):
+        now = time.time()
+        self.seconds[key] = round(self.seconds.get(key, 0.0) + now - self._t, 1)
+        self._t = now
+        super().__setitem__(key, value)

@@ -2344,6 +2344,9 @@ def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> t
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
     t = con.execute(f"""SELECT {_cells_sql(strata, dataset, raw)}, {keep + ', ' if keep else ''}{_rep_sql([])} AS rid
         FROM r""").fetch_arrow_table()          # no attribute column: the cells and the identity alone
+    if config.study_area() is not None:         # the study's area's persons (identities numbered before, nationally)
+        t = t.filter(pa.array(config.in_area(np.nan_to_num(t.column("u").to_numpy(zero_copy_only=False)
+                                                            .astype(float)).astype(np.int64))))
     return t, t.column("rid")
 
 

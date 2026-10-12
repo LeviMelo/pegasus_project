@@ -242,6 +242,7 @@ def field_map(fields: list[tuple[str, str, str, dict | None, list[int]]], contex
 
     span = sorted({y for *_, ys in fields for y in ys})
     places = np.sort(gateway.population([span[-1]]).column("u").unique().to_numpy())
+    places = places[config.in_area(places)]                  # the study's area (`config.study_area`)
     names, groups, labels, B, SD = [], [], [], [], []
     seen = set()
     for ds, ev, node, source, years in fields:
