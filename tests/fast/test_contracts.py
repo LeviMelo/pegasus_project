@@ -217,3 +217,22 @@ def test_capture_gives_no_total_on_links_not_viable(monkeypatch):
     viable = capture.capture(["A", "B"], ["P371"], [2021], lambda links, y: "viable", log=lambda *a: None)
     assert caution[0]["estimate"] is None and "no total" in caution[0]["note"] and caution[0]["patterns"]
     assert viable[0]["estimate"] is not None
+
+
+def test_a_compacted_register_keeps_every_state(tmp_path):
+    # 1,941 parts were read on every write (deep18): merged into one, the latest state of each lead is unchanged
+    reg = leads.Register(tmp_path / "leads")
+
+    def lead(i, status="open"):
+        return leads.Lead(kind="answer", estimand="excess", tier="B1", fields=[f"X:e:{i % 7}"], locus={"places": [i]},
+                          effect=1.0 + i, scale="rate_ratio", interval=None, p=0.01, q=0.01, family=f"f{i % 3}",
+                          null="", calibrated=True, status=status)
+
+    reg.COMPACT_AT = 10**6
+    for i in range(30):
+        reg.add([lead(i)])
+    reg.add([lead(3, "retired")])
+    before = {x.id: x.status for x in reg.current()}
+    assert reg.compact() == 31 and len(list(reg.path.glob("part-*.parquet"))) == 1
+    assert {x.id: x.status for x in reg.current()} == before and before[lead(3).id] == "retired"
+    assert len(reg.current(family="f1")) == 10

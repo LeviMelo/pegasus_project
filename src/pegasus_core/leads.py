@@ -113,12 +113,19 @@ class Register:
             v, mine = stored.get(x.id), x.robustness.get("verdict")
             if v and (not mine or v.get("at", "") > mine.get("at", "")):
                 x.robustness = {**x.robustness, "verdict": v}
-        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        # to the microsecond: two states of one lead written within a second had tied, and the latest was whichever part
+        # was read last (a compaction reorders them); the old second-resolution stamps still sort before
+        import datetime
+
+        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
         rows = [{"id": x.id, "at": now, "rank": x.rank, "status": x.status, "kind": x.kind, "family": x.family,
                  "q": x.q, "effect": x.effect, "replication": x.replication,
                  "calibrated": bool(x.method.get("calibrated", True)), "body": json.dumps(asdict(x), default=_json)}
                 for x in leads]
-        pq.write_table(pa.Table.from_pylist(rows), self.path / f"part-{now.replace(':', '')}-{uuid.uuid4().hex[:8]}.parquet")
+        pq.write_table(pa.Table.from_pylist(rows),
+                       self.path / f"part-{now.replace(':', '').replace('.', '')}-{uuid.uuid4().hex[:8]}.parquet")
+        if sum(1 for _ in self.path.glob("part-*.parquet")) > self.COMPACT_AT:
+            self.compact()
 
     def _latest_verdicts(self, ids: set[str]) -> dict[str, dict]:
         """The newest verdict on record for each of ``ids`` (only their rows are parsed)."""
@@ -126,8 +133,7 @@ class Register:
 
         out: dict[str, dict] = {}
         want = pa.array(sorted(ids))
-        for f in sorted(self.path.glob("part-*.parquet")):
-            tab = pq.read_table(f, columns=["id", "body"])
+        for tab in self._parts(["id", "body"], [("id", "in", sorted(ids))]):
             for r in tab.filter(pc.is_in(tab.column("id"), value_set=want)).to_pylist():
                 v = (json.loads(r["body"]).get("robustness") or {}).get("verdict")
                 if v and v.get("at", "") > out.get(r["id"], {}).get("at", ""):
@@ -140,12 +146,8 @@ class Register:
         bodies: 10 s; a question pass retiring its answers, 12 % of a lane, 2026-10-12)."""
         import pyarrow.compute as pc
 
-        files = sorted(self.path.glob("part-*.parquet"))
-        if not files:
-            return []
         tabs = []
-        for f in files:
-            tab = pq.read_table(f)
+        for tab in self._parts():
             for col, want in (("family", family), ("kind", kind)):
                 if isinstance(want, str):
                     tab = tab.filter(pc.equal(tab.column(col), want))
@@ -153,6 +155,8 @@ class Register:
                     tab = tab.filter(pc.fill_null(pc.is_in(tab.column(col), value_set=pa.array(sorted(want),
                                                                                                 pa.string())), False))
             tabs.append(tab)
+        if not tabs:
+            return []
         rows = pa.concat_tables(tabs, promote_options="default").to_pylist()   # parts differ in nullability
         latest: dict[str, dict] = {}
         for r in sorted(rows, key=lambda r: r["at"]):
@@ -165,12 +169,53 @@ class Register:
         import pyarrow.compute as pc
 
         rows = []
-        for f in sorted(self.path.glob("part-*.parquet")):
-            tab = pq.read_table(f, columns=["id", "at", "body"])
+        for tab in self._parts(["id", "at", "body"], [("id", "=", lead_id)]):
             rows += tab.filter(pc.equal(tab.column("id"), lead_id)).to_pylist()
         if not rows:
             raise KeyError(lead_id)
         return Lead(**_body(json.loads(max(rows, key=lambda r: r["at"])["body"])))
+
+    #: parts beyond which `add` compacts the register: every write read every part, and a study's register of 1,941
+    #: parts (407 MB) held a lane minutes on each write (deep18)
+    COMPACT_AT = 64
+
+    def _parts(self, columns: list[str] | None = None, filters: list | None = None):
+        """Each part's table (only ``columns``, rows matching ``filters`` where the reader can skip the rest). A part a
+        compaction removed while it was listed is read again from the new listing."""
+        for _ in range(3):
+            out = []
+            try:
+                for f in sorted(self.path.glob("part-*.parquet")):
+                    out.append(pq.read_table(f, columns=columns, filters=filters))
+                return out
+            except FileNotFoundError:
+                continue
+        raise RuntimeError(f"{self.path}: the parts kept changing under three readings")
+
+    def compact(self) -> int:
+        """Every part merged into one, every row kept (the register is append-only history; `current` takes each
+        lead's latest), under the register's lock: one writer compacts at a time, and a reader re-lists a part
+        removed under it (`_parts`). Returns the parts merged."""
+        from filelock import FileLock, Timeout
+
+        try:
+            lock = FileLock(str(self.path / ".compact.lock"))
+            lock.acquire(timeout=0)
+        except Timeout:
+            return 0                       # another process is compacting
+        try:
+            files = sorted(self.path.glob("part-*.parquet"))
+            if len(files) < 2:
+                return 0
+            merged = pa.concat_tables([pq.read_table(f) for f in files], promote_options="default")
+            now = time.strftime("%Y-%m-%dT%H%M%S")
+            target = self.path / f"part-{now}-compact-{uuid.uuid4().hex[:8]}.parquet"
+            pq.write_table(merged, target)               # in the parts' order: the history as written
+            for f in files:
+                f.unlink(missing_ok=True)
+            return len(files)
+        finally:
+            lock.release()
 
     def update(self, lead: Lead, **changes: Any) -> Lead:
         for k, v in changes.items():
