@@ -1607,9 +1607,12 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
             if time.time() - grew < LANE_QUIET_S:
                 working.add(c.pid)
         active = {pid: v for pid, v in lanes_now.items() if pid not in paused}
-        if avail < LANE_PRESSURE_GB and len(active) > 1:
-            keep = max(active, key=lambda pid: active[pid][1])
-            for pid, (proc, gb) in active.items():
+        # only a lane computing is ever suspended: an idle pool worker waits for its next lane holding the queue's
+        # lock, and suspended there it blocked every other worker's next lane (deep15)
+        computing = {pid: v for pid, v in active.items() if pid in working}
+        if avail < LANE_PRESSURE_GB and len(computing) > 1:
+            keep = max(computing, key=lambda pid: computing[pid][1])
+            for pid, (proc, gb) in computing.items():
                 if pid != keep and gb > 1.0:
                     try:
                         proc.suspend()
@@ -1632,7 +1635,8 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                     pass
 
     def new_pool():
-        return cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn"))
+        # a fresh process per lane: a finished lane's worker kept its 9.7 GB while it waited for the next (deep15)
+        return cf.ProcessPoolExecutor(max_workers=lanes, mp_context=mp.get_context("spawn"), max_tasks_per_child=1)
 
     # a worker that dies (a hard crash: CUDA starting while a killed run's memory was still held, deep13) breaks the
     # whole pool, and every lane after it had run in this process, one after another; the pool is made anew and each
