@@ -1,4 +1,4 @@
-# The reference study at deep depth (milestone 6.5), light: the topic's codes as code sets (no chapter fits), its four strongest related codes.
+# The reference study at deep depth (milestone 6.5), light: the topic's codes as code sets (no chapter fits), its two strongest related codes.
 study: toxoplasmosis_deep
 topic:
   seeds:
@@ -9,7 +9,7 @@ period: 2010-2025
 where: BR
 grain: [year]
 depth: deep
-related: 4
+related: 2
 chapters: false
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}

@@ -263,7 +263,7 @@ ratios:                               # optional ratio fields (§5.2): DATASET[:
   - {numerator: SINAN-TOXC, denominator: SINAN-TOXG}
   - {numerator: SIM-DOFET, denominator: SINASC.DN}
 download: 10                          # GB the study may download (default: the depth's)
-related: 5                            # how many related codes are read as fields of their own, strongest first (0, N or all; default: the depth's)
+related: 3                            # how many related codes are read, strongest first, each wherever recorded (0, N or all)
 chapters: true                        # the topic's codes inside their fitted chapters, or as code sets (default: beyond a survey)
 questions: [excess, group]            # the questions asked of every field (default: all eleven)
 readers: [compositions, intervals]    # the field kinds read beyond counts: measures, compositions, intervals, flows, quality, supports, linked
@@ -324,7 +324,7 @@ understands, not budgets). Each key the declaration sets overrides its depth's:
 | key | survey | standard | deep | exhaustive |
 |---|---|---|---|---|
 | `readers` | none | measures, compositions, intervals, flows, quality, supports, linked | same | same |
-| `related` (codes read, strongest first) | 0 | 5 | 15 | 30 |
+| `related` (codes read, strongest first, each wherever recorded) | 0 | 3 | 8 | 20 |
 | `relations` | fields | fields | + contexts | + screen |
 | `chapters` | false | true | true | true |
 | `persons` (cohort scan) | false | false | true | true |

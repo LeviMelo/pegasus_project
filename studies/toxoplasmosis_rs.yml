@@ -10,7 +10,7 @@ where: RS
 grain: [year]
 depth: deep
 chapters: false
-related: 2
+related: 1
 questions: [excess, group]
 readers: [compositions, linked]
 contexts: [sisagua_surveillance_ecoli_present]

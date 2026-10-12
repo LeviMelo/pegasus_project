@@ -499,13 +499,26 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 @app.command("scope")
 def scope_command(declaration: str) -> None:
     """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
-    download cost, what is deferred past the depth's budget, what a seed named and is not read."""
+    download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes
+    ``scope.yml`` in the study's folder and shows what each choice costs."""
     import yaml
 
     from . import study
 
     decl = study.load(declaration)
-    console.print(yaml.safe_dump(study.resolve(decl).to_dict(), sort_keys=False, allow_unicode=True))
+    scope = study.resolve(decl).to_dict()
+    out = study.folder_of(decl)
+    out.mkdir(parents=True, exist_ok=True)
+    # written, not printed: the console wraps long lines and the printed YAML did not parse (2026-10-12)
+    (out / "scope.yml").write_text(yaml.safe_dump(scope, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    t = Table("read", "dataset", "event", "years", "minutes", "why")
+    for i in scope["read"]:
+        t.add_row("", i["dataset"], i["event"], f"{i['years'][0]}-{i['years'][-1]}" if i["years"] else "",
+                  f"{(i['est_seconds'] or 0) / 60:.1f}", i["reason"][:90])
+    console.print(t)
+    console.print_json(json.dumps(scope["minutes_by_choice"], ensure_ascii=False))
+    console.print(f"{len(scope['read'])} read, {len(scope['deferred'])} deferred, {len(scope['not_read'])} not read; "
+                  f"estimated {scope['estimated_minutes']} min; written to {out / 'scope.yml'}")
 
 
 @app.command("study")

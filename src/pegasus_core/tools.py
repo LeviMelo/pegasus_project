@@ -756,7 +756,7 @@ class Session:
         # an earlier answer of the same families and fields that this pass no longer selects is retired (the data,
         # the model or the code changed), never left open beside the current answers; a person's verdict keeps it
         new = {x.id for x in admitted}
-        stale = [x for x in self.register.current() if x.kind == "answer" and x.family in asked_families
+        stale = [x for x in self.register.current(kind="answer") if x.family in asked_families
                  and x.fields and x.fields[0] in asked_fields and x.id not in new
                  and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
         when = time.strftime("%Y-%m-%d")
@@ -2088,7 +2088,7 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
                 for r, qq in zip(res, qv, strict=True) if qq <= q]
     reg = leads.Register()
     new = {x.id for x in admitted}
-    stale = [x for x in reg.current() if x.kind == "cohort" and x.family == family and x.id not in new
+    stale = [x for x in reg.current(family=family, kind="cohort") if x.id not in new
              and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
     for x in stale:                        # an earlier reading of this cohort that this one no longer gives
         x.status, x.note = "retired", f"not selected by the cohort reading of {time.strftime('%Y-%m-%d')}"
@@ -2167,7 +2167,7 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
                 for (k, u, rr, theta, p, o_k, o_r), kp, qq in zip(out_rows, keep, qv, strict=True) if kp]
     reg = leads.Register()
     new = {x.id for x in admitted}
-    stale = [x for x in reg.current() if x.family == f"disparity|{field_id}" and x.id not in new
+    stale = [x for x in reg.current(family=f"disparity|{field_id}") if x.id not in new
              and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
     for x in stale:                        # an earlier reading this one no longer selects
         x.status, x.note = "retired", f"not selected by the disparity reading of {time.strftime('%Y-%m-%d')}"

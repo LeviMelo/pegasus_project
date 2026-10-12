@@ -90,7 +90,11 @@ def test_related_reads_the_strongest_n_and_prices_the_next(monkeypatch, tmp_path
              for w, c in [(1, "A"), (5, "B"), (3, "C"), *((0.5, f"Z{k}") for k in range(30))]]
     out = study._strongest(decl, extra)
     read = [i.source["codes"][0] for i in out if i.status == "in"]
-    assert read == ["B", "C"] and len(out) == 2 + study.RELATED_SHOWN
+    assert sorted(read) == ["B", "C"] and len(out) == 2 + study.RELATED_SHOWN
+    # a code is read wherever it is recorded: its places count once
+    extra += [(5.0, study.Item("SIH-RD", "hospitalisation", ["*"], None, [2020], "related code", source={"codes": ["B"]}))]
+    out = study._strongest(decl, extra)
+    assert sorted(i.source["codes"][0] for i in out if i.status == "in") == ["B", "B", "C"]
     for bad in ("-1", "true", "some"):
         p.write_text(f"study: s\ntopic: {{seeds: {{icd10: [B58]}}}}\nrelated: {bad}\n", encoding="utf-8")
         with pytest.raises(study.DeclarationError, match="related"):

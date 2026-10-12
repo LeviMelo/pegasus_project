@@ -40,15 +40,15 @@ READERS = ("measures", "compositions", "intervals", "flows", "quality", "support
 RELATIONS = ("fields", "contexts", "screen")
 #: every depth is a preset of the declaration's own choices (author, 2026-10-12: choices a person understands, not
 #: budgets); a key the declaration sets overrides its depth's. ``download`` in gigabytes (years in the lake are free),
-#: ``related`` a count of related codes read strongest first, ``draws`` plausible link sets for the persons
+#: ``related`` a count of related codes read strongest first (each wherever recorded), ``draws`` plausible link sets for the persons
 PRESETS = {
     "survey": {"readers": [], "related": 0, "relations": ["fields"], "chapters": False, "persons": False,
                "replicate": False, "download": 2.0, "draws": 1},
-    "standard": {"readers": list(READERS), "related": 5, "relations": ["fields"], "chapters": True, "persons": False,
+    "standard": {"readers": list(READERS), "related": 3, "relations": ["fields"], "chapters": True, "persons": False,
                  "replicate": False, "download": 10.0, "draws": 1},
-    "deep": {"readers": list(READERS), "related": 15, "relations": ["fields", "contexts"], "chapters": True,
+    "deep": {"readers": list(READERS), "related": 8, "relations": ["fields", "contexts"], "chapters": True,
              "persons": True, "replicate": True, "download": 40.0, "draws": 10},
-    "exhaustive": {"readers": list(READERS), "related": 30, "relations": list(RELATIONS), "chapters": True,
+    "exhaustive": {"readers": list(READERS), "related": 20, "relations": list(RELATIONS), "chapters": True,
                    "persons": True, "replicate": True, "download": float("inf"), "draws": 20},
 }
 KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "questions",
@@ -892,24 +892,35 @@ def _declared_only(decl: Declaration, items: list[Item], excluded: list[dict]) -
 LATER_YEARS = 3
 
 
-#: the next strongest related fields the scope prices beyond those read, so it shows what reading more would cost
-#: (every related code stays listed with its strength in ``related_codes``)
-RELATED_SHOWN = 10
+#: the next strongest related codes the scope prices beyond those read, so it shows what reading more would cost (every
+#: related code stays listed with its strength in ``related_codes``)
+RELATED_SHOWN = 3
+
+
+def _related_code(it: Item) -> str:
+    return ((it.source or {}).get("codes") or it.nodes or [""])[0]
 
 
 def _strongest(decl: Declaration, extra: list[tuple[float, Item]]) -> list[Item]:
-    """The related fields ``extra`` (strength, item): the declaration's ``related`` strongest (the lower bound of the
-    code's lift) read, the next `RELATED_SHOWN` deferred with their cost. The rest are neither priced nor items: each
-    stays in the scope's ``related_codes`` with its strength."""
+    """The related fields ``extra`` (strength, item), by code: every field of the declaration's ``related`` strongest
+    codes read (the lower bound of the code's lift; a code is read wherever it is recorded: "related: 4" had read one
+    code, H32, in four of its fourteen places, 2026-10-12), those of the next `RELATED_SHOWN` codes deferred with their
+    cost. The rest are neither priced nor items: each stays in the scope's ``related_codes`` with its strength."""
     n = decl.choice("related")
-    ranked = sorted(extra, key=lambda p: -p[0])[:int(min(n, len(extra))) + RELATED_SHOWN]
-    added = [it for _, it in ranked]
+    best: dict[str, float] = {}
+    for w, it in extra:
+        best[_related_code(it)] = max(best.get(_related_code(it), float("-inf")), w)
+    order = sorted(best, key=lambda c: -best[c])
+    rank = {c: k for k, c in enumerate(order[:int(min(n, len(order))) + RELATED_SHOWN], 1)}
+    added = [it for _, it in extra if _related_code(it) in rank]
     _estimate(decl, added)
-    for rank, (strength, it) in enumerate(ranked, 1):
-        if rank > n:
+    for it in added:
+        k = rank[_related_code(it)]
+        if k > n:
             it.status = "deferred"
-            it.note = (f"related field {rank} by strength (lift's lower bound {strength:.1f}), past the "
-                       f"{'declared' if decl.related is not None else decl.depth} {n:g}: related: {rank} reads it")
+            it.note = (f"related code {k} by strength ({_related_code(it)}, lift's lower bound "
+                       f"{best[_related_code(it)]:.1f}), past the {'declared' if decl.related is not None else decl.depth} "
+                       f"{n:g}: related: {k} reads it")
     return added
 
 
