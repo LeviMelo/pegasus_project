@@ -1,5 +1,5 @@
 # The gate before any national study (scripts/prelaunch.py): every path the deep preset runs, on Rio Grande do Sul and
-# eight years, in minutes. Lanes, an extract source (SIA-PA's serology), every reader, the later years, persons and
+# ten years, in minutes. Lanes, an extract source (SIA-PA's serology), every reader, the later years, persons and
 # capture, one context, the products, the report and the audit. A national run is launched only after this one passes
 # cleanly and on time (2026-10-12: thirteen national runs had served as the debugging loop).
 study: toxoplasmosis_slice
@@ -9,7 +9,7 @@ topic:
     sinan: [TOXC]
     terms: [toxoplasm]
   only: [SINAN-TOXC, SIH-RD, SIM-DO, SIASUS-PA]
-period: 2014-2021
+period: 2014-2023
 where: RS
 grain: [year]
 depth: deep
