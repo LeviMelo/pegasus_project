@@ -37,6 +37,28 @@ PLACE = ("s_all", "v_all", "s_grp", "v_grp")
 RIDGE = 1e-9            # relative ridge on the reduced system's diagonal: the flat directions kriging removes
 
 
+def shifted_cholesky(S: np.ndarray) -> np.ndarray:
+    """The Cholesky factor of S, or of S + τI with the smallest τ of a tenfold ladder that has one: Cholesky with an
+    added multiple of the identity (Nocedal & Wright 2006, Algorithm 3.3). The Schur complement C − YᵀY loses
+    definiteness to cancellation when a field's events are few against its places (SINAN-LEPT's onset-to-discharge
+    days among Rio Grande do Sul's confirmed cases, 2026-10-12: the whole study failed on it); the shifted system is a
+    damped Newton step, still a descent direction, and the line search keeps the fit's objective decreasing."""
+    try:
+        return np.linalg.cholesky(S)
+    except np.linalg.LinAlgError:
+        pass
+    d = np.diag(S)
+    beta = 1e-3 * max(float(np.mean(np.abs(d))), 1e-300)
+    tau = max(-float(d.min()) + beta, beta)
+    eye = np.eye(S.shape[0])
+    for _ in range(40):
+        try:
+            return np.linalg.cholesky(S + tau * eye)
+        except np.linalg.LinAlgError:
+            tau *= 10.0
+    return np.linalg.cholesky(S + tau * eye)    # raises: no shift on the ladder gave a factor
+
+
 def _np(t: torch.Tensor) -> np.ndarray:
     return t.detach().cpu().numpy().astype(np.float64, copy=False)
 
@@ -713,7 +735,7 @@ class StructuredNewton:
         S = self.Cg.T @ (((Hgg + Hgg.T) * 0.5 - YtY) @ self.Cg)
         ds = np.diag(S)
         S = S + np.diag(RIDGE * np.maximum(ds, ds.max() * 1e-12))
-        Sc = np.linalg.cholesky(S)
+        Sc = shifted_cholesky(S)
         self.timing.update(factor=t1 - t0, schur_solve=t2 - t1, schur=time.time() - t2)
         return Arrowhead(fa, Y, self.Cg, Sc, self.nl_red, L)
 

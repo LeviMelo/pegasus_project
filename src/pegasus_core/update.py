@@ -445,6 +445,11 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                         # Sul, read as 23 failures, 2026-10-12)
                         log(f"not fitted {sys_.dataset} {column} {block}: {exc}")
                         out[f"fit {sys_.dataset} {column} {block}"] = f"not fitted: {exc}"
+                    except Exception as exc:  # noqa: BLE001 - one field's failure is recorded and the item's other fields go on
+                        # (a solver failure on one SINAN-LEPT interval had lost the item's other 140 fields, 2026-10-12);
+                        # recorded as "failed", which `study.body` counts against "every step ran"
+                        log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
+                        out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {type(exc).__name__}: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
             _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,

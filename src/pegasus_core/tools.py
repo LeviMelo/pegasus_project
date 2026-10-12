@@ -2086,6 +2086,20 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
                 for lab, o in zip(labels, outcomes, strict=True)}
         tables.append(pa.table({**base, **cols}))
         log(f"draw {i + 1}/{draws}: " + ", ".join(f"{lab} {int(cols[lab].to_numpy().sum())}" for lab in labels))
+    if notes is not None:
+        # each outcome's proportion among the persons, whatever the contrasts find: the cohort's description (a paper
+        # reports how many of the confirmed cases were admitted or died before any contrast); over the link draws by
+        # Rubin's rules, the within-draw binomial variance and the between-draw variance (the table held notes only,
+        # 2026-10-12)
+        n = max(t.num_rows, 1)
+        for lab in labels:
+            k = np.array([float(tb[lab].to_numpy().sum()) for tb in tables])
+            ph = k / n
+            pbar = float(ph.mean())
+            var = float((ph * (1 - ph) / n).mean()) + (1 + 1 / len(ph)) * (float(ph.var(ddof=1)) if len(ph) > 1 else 0.0)
+            notes.append({"outcome": lab, "persons": t.num_rows, "with_outcome": float(k.mean()), "share": pbar,
+                          "share_low": max(pbar - 1.96 * var ** 0.5, 0.0), "share_high": min(pbar + 1.96 * var ** 0.5, 1.0),
+                          "note": f"proportion with the outcome over {len(ph)} link draws (Rubin's rules)"})
     family = f"cohort|{kind[0]}:{kind[1]}|{dataset}|{year}"
     res = cohort_mod.scan(tables[0], [d.column for d in attrs], labels, control.Ledger(), family, draws=tables)
     log(f"{family}: {len(res)} contrasts over {len(attrs)} attributes and {len(labels)} outcomes, {t.num_rows} persons")

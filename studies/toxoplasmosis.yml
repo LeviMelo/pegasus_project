@@ -1,14 +1,15 @@
-# The reference study (ARCHITECTURE §3.8; BACKLOG: the win condition). Depth rises as the phases land.
+# The reference study (ARCHITECTURE §3.8; BACKLOG: the win condition). 2025 is left out: SINAN publishes it as
+# preliminary, and a year still filling in reads as a fall in every series.
 study: toxoplasmosis
 topic:
   seeds:
     icd10: [B58, O98.6, P37.1]
     sinan: [TOXG, TOXC]
     terms: [toxoplasm]
-period: 2010-2025
+period: 2010-2024
 where: BR
 grain: [year]
-depth: survey
+depth: exhaustive
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
 ratios:
