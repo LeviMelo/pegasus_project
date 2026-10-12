@@ -408,8 +408,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 except (ValueError, LookupError) as exc:     # "all": a chapter the events never use
                     if sys_.blocks != ["all"]:
                         raise
-                    log(f"FAIL fit {sys_.dataset} {block}: {type(exc).__name__}: {exc}")
-                    out[f"fit {sys_.dataset} {block}"] = f"failed: {exc}"
+                    log(f"not fitted {sys_.dataset} {block}: {exc}")
+                    out[f"fit {sys_.dataset} {block}"] = f"not fitted: {exc}"
                     blocks.remove(block)
                     continue
                 _mark(key, {})
@@ -421,10 +421,12 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         if plan.questions == []:                  # an empty list asks none (a plan of disparities, of fits)
             out[f"questions {sys_.dataset}"] = "none asked"
         elif force or not _done(key):
+            t0 = time.perf_counter()
             leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                        levels=tuple(sys_.levels) if sys_.levels else None, log=log,
                                        nodes=tuple(sys_.nodes) if sys_.nodes else None)
-            _mark(key, {"answers": len(leads)})
+            # its seconds: what a scope prices one field's questions at (`study._estimate`)
+            _mark(key, {"answers": len(leads), "seconds": round(time.perf_counter() - t0, 2)})
             out[f"questions {sys_.dataset}"] = len(leads)
         else:
             out[f"questions {sys_.dataset}"] = "done on these versions"
@@ -437,9 +439,12 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 except LookupError:
                     try:
                         monolith.fit_block(sys_.dataset, sys_.event, block, ms.years, plan.graph, source=source, log=log)
-                    except (ValueError, LookupError) as exc:     # a chapter of another tree the events never use
-                        log(f"FAIL fit {sys_.dataset} {column} {block}: {type(exc).__name__}: {exc}")
-                        out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {exc}"
+                    except (ValueError, LookupError) as exc:
+                        # a recorded gap, not a failure: a chapter of another tree the events never use, a field the
+                        # area's events never fill (leptospirosis' risk dates and places of infection in Rio Grande do
+                        # Sul, read as 23 failures, 2026-10-12)
+                        log(f"not fitted {sys_.dataset} {column} {block}: {exc}")
+                        out[f"fit {sys_.dataset} {column} {block}"] = f"not fitted: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
             _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
@@ -448,10 +453,11 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             if plan.questions == []:
                 out[f"questions {sys_.dataset} {column}"] = "none asked"
             elif force or not _done(key):
+                t0 = time.perf_counter()
                 leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                             levels=tuple(sys_.levels) if sys_.levels else None, log=log,
                                             nodes=tuple(sys_.nodes) if sys_.nodes else None)
-                _mark(key, {"answers": len(leads)})
+                _mark(key, {"answers": len(leads), "seconds": round(time.perf_counter() - t0, 2)})
                 out[f"questions {sys_.dataset} {column}"] = len(leads)
             else:
                 out[f"questions {sys_.dataset} {column}"] = "done on these versions"

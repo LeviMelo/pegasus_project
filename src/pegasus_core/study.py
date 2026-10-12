@@ -458,55 +458,62 @@ def _records(it: Item, years: list[int]) -> int:
 
 
 def _estimate(decl: Declaration, items: list[Item]) -> None:
-    """Each item's predicted wall clock (BACKLOG 9.1), from measured throughput: an item a past study ran is predicted
-    by its own measured seconds (provenance of studies beside this one, scaled by its years); otherwise its fits by the
-    nearest stored fit of the same dataset and block (scaled by years), or, for a source never fitted, by the stores'
-    log-log relation of fit seconds to events; plus its questions at the median measured seconds per item."""
-    import glob
-    import json
+    """Each item's predicted wall clock (BACKLOG 9.1), from measured throughput, as if nothing were stored: a cap must
+    hold when a code edit re-keys every step (slice5's estimate, priced from a cached run, priced no refit, 2026-10-12).
+    Every field the item reads (its primary counts and each reader its depth adds, `update.system_readers`) costs one
+    fit, by the nearest stored fit of the same dataset and block scaled by years, or by the stores' log-log relation of
+    fit seconds to events; and one pass of its questions, at the median measured seconds of a field's questions in the
+    same dataset and area (`update` records them), else in any (the leptospirosis slice: 130 fields priced as one,
+    17.6 min estimated, over 35 run)."""
+    from . import update
 
-    from . import store
-
-    measured, per_item = {}, []
-    for path in glob.glob(str(decl.path.parent / "*" / "provenance.json")):
-        try:
-            prov = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        for step, v in (prov.get("steps") or {}).items():
-            if isinstance(v, dict) and v.get("seconds") and "error" not in v:
-                measured[step] = float(v["seconds"])
-                per_item.append(float(v["seconds"]))
     fits = [m for m in store.manifests("monolith") if m.get("fit_seconds")]
     if len(fits) >= 10:
         e = np.log([max(float(m.get("events") or 1.0), 1.0) for m in fits])
         b, a = np.polyfit(e, np.log([float(m["fit_seconds"]) for m in fits]), 1)
     else:
         a, b = 3.0, 0.3
-    questions = float(np.median(per_item)) if per_item else 120.0
+    area = sorted(config.study_area() or []) or None
+    asked = [m for m in store.manifests("update") if m.get("step") == "questions" and m.get("seconds") is not None]
     from .questions import QUESTIONS
 
-    # each item's questions only: their share of the eleven (a measured step asked them all)
-    def share_of(it):
-        asked = it.questions if it.questions is not None else decl.questions
-        return len(asked) / len(QUESTIONS) if asked is not None else 1.0
+    codes = [int(c) for c in gateway.municipality_names() if str(c).isdigit()]
+    size = functools.cache(lambda area: max(int(config.in_area(codes, frozenset(area) if area else None).sum()), 1))
+
+    def per_field(dataset, years):
+        # a measurement scaled by years and by the places its area holds (a question's cost is per place and period:
+        # Rio Grande do Sul's 497 municipalities against Brazil's 5,570)
+        for pool in ([m for m in asked if m.get("dataset") == dataset and m.get("area") == area],
+                     [m for m in asked if m.get("dataset") == dataset],
+                     [m for m in asked if m.get("area") == area], asked):
+            if pool:
+                return float(np.median([float(m["seconds"]) * len(years) / max(len(m.get("years") or [1]), 1)
+                                        * size(tuple(area or ())) / size(tuple(m.get("area") or ())) for m in pool]))
+        # nothing measured yet: the leptospirosis slice's ~390 fields' fits and questions in Rio Grande do Sul, 9 years,
+        # took ~33 min (2026-10-12), about 5 s each, scaled the same way; replaced by the store's own once one ran
+        return 5.0 * len(years) / 9 * size(tuple(area or ())) / size((43,))
     for it in items:
         if it.status != "in" or not it.years:
             continue
-        step = f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
-        share = share_of(it)
-        if step in measured and share == 1.0:
-            it.est_seconds = round(measured[step], 1)
-            continue
+        share = len(it.questions if it.questions is not None else decl.questions or QUESTIONS) / len(QUESTIONS)
+        try:
+            n = 1 + len(update.system_readers(_plan(it).systems[0], _plan(it), list(it.blocks)))
+        except Exception:  # noqa: BLE001 - a reader list that cannot be built here is built (and fails) in the run
+            n = 1
         fit = 0.0
         for block in it.blocks:
+            # the nearest stored fit: same dataset and block, the same area and event first, scaled by years and
+            # places (a national fit of 14 years, 354 s, had priced each of Rio Grande do Sul's fields)
             same = [m for m in fits if m["key"].get("dataset") == it.dataset and m["key"].get("block") == block]
+            same = ([m for m in same if m["key"].get("area") == area and m["key"].get("event") == it.event]
+                    or [m for m in same if m["key"].get("area") == area] or same)
             if same:
                 m = max(same, key=lambda m: len(m["key"].get("years") or []))
-                fit += float(m["fit_seconds"]) * len(it.years) / max(len(m["key"].get("years") or [1]), 1)
+                fit += (float(m["fit_seconds"]) * len(it.years) / max(len(m["key"].get("years") or [1]), 1)
+                        * size(tuple(area or ())) / size(tuple(m["key"].get("area") or ())))
             else:
                 fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
-        it.est_seconds = round(fit + questions * share, 1)
+        it.est_seconds = round(n * (fit + per_field(it.dataset, it.years) * share), 1)
 
 
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:
@@ -848,6 +855,16 @@ def resolve(decl: Declaration, log=print) -> Scope:
         coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
         if coded and "supports" in chosen:
             it.readers = {"supports": "all"}     # the code set at its other places
+    # a dataset read as nested events (SINAN's notification, every row; its case, the rows its classification
+    # confirms): its fields are asked of the narrower, the topic's own object, and the wider is counted only; asked of
+    # both, every field ran twice and every finding came twice (the leptospirosis slice: 130 fields twice, over its
+    # cap, 2026-10-12)
+    narrower = {it.dataset for it in items if not it.source and gateway.event_type(it.dataset, it.event).get("status")}
+    for it in items:
+        if (it.readers and not it.source and it.dataset in narrower
+                and not gateway.event_type(it.dataset, it.event).get("status")):
+            it.readers = {}
+            it.note = (it.note + "; " if it.note else "") + "counted only: its fields are asked of its confirmed events"
     runs = _link_runs()
     paths = _person_paths(items, runs)
     if "linked" in decl.choice("readers"):
