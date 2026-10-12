@@ -22,7 +22,7 @@ from dataclasses import replace
 import numpy as np
 import pyarrow as pa
 
-from . import gateway
+from . import config, gateway
 
 
 def lists_of(datasets: list[str], codes: list[str]) -> dict | None:
@@ -75,9 +75,16 @@ def records(lst: dict, year: int, deaths: bool) -> pa.Table | None:
             return None
         where = f"({where}) AND ({lst['death']})" if where else lst["death"]
     side = replace(Side(lst["dataset"]), where=where)
-    # the grouping roles, else any one role: the identity columns come with every side table
-    roles = list(lst["group"]) or [next(iter(load_roles()[lst["dataset"]].roles))]
-    return _side_table(side, roles, period=year, geography="BR")
+    declared = load_roles()[lst["dataset"]].roles
+    home = next((r for r in declared if r.endswith(".residence")), None)
+    # the grouping roles and the residence (any one role else: the identity columns come with every side table)
+    roles = list(dict.fromkeys([*lst["group"], *([home] if home else [])])) or [next(iter(declared))]
+    table = _side_table(side, roles, period=year, geography="BR")
+    if config.study_area() is not None and home:
+        # an area's study captures its residents (the national persons, cut to them)
+        codes = [str(v or "")[:6] for v in table.column(home).to_pylist()]
+        table = table.filter(pa.array(config.in_area(np.array([int(c) if c.isdigit() else -1 for c in codes]))))
+    return table
 
 
 def patterns(lists: dict[str, dict], year: int, deaths: bool, datasets: list[str], draw: int | None = None):
@@ -170,9 +177,12 @@ def chapman(n1: int, n2: int, m: int) -> dict:
 
 def capture(datasets: list[str], codes: list[str], years: list[int], usable_years, draw: int | None = None,
             log=print) -> list[dict]:
-    """Every population the read systems list (the topic's cases; its deaths), pooled over ``usable_years`` (the years
-    whose covering runs of every link are usable): its patterns, the estimate, each list's completeness against it,
-    and what it rests on. ``datasets`` are pegasus_data codes."""
+    """Every population the read systems list (the topic's cases; its deaths), pooled over the years whose run of
+    every link between its lists is usable (``usable_years(links, year)``: the worst verdict, "viable" or "use with
+    caution", else None): its patterns, and where every link is viable the estimate and each list's completeness
+    against it. A link rated "use with caution" misses pairs, and each counts a person twice: the overlap is reported
+    and no total (acceptance item 5: where links are not viable, the report says so; TOXC × SIH 2019-2021 gave 47,029
+    cases against some 8.4 M births). ``datasets`` are pegasus_data codes."""
     found = lists_of(datasets, codes)
     if found is None:
         return []
@@ -181,7 +191,14 @@ def capture(datasets: list[str], codes: list[str], years: list[int], usable_year
         lists = {k: v for k, v in found["lists"].items() if deaths or not v["deaths"]}
         if len(lists) < 2:
             continue
-        ys = [y for y in years if usable_years(found["links"], y)]
+        # the links between this population's lists only (the cases' are TOXC-SIH's; a death certificate's link is
+        # not theirs)
+        keys = set(lists)
+        own = [name for name in found["links"]
+               if {gateway.dataset_key(gateway.link_specs()[name].left.dataset),
+                   gateway.dataset_key(gateway.link_specs()[name].right.dataset)} <= keys]
+        verdicts = {y: usable_years(own, y) for y in years}
+        ys = [y for y in years if verdicts[y]]
         if not ys:
             out.append({"population": "deaths" if deaths else "cases", "lists": " × ".join(lists),
                         "note": "no year has a usable run of every link between the lists"})
@@ -195,7 +212,10 @@ def capture(datasets: list[str], codes: list[str], years: list[int], usable_year
                 f"{''.join('1' if b else '0' for b in k)} {v}" for k, v in sorted(c.items())))
         if order is None or len(order) < 2:
             continue
-        if len(order) == 3:
+        viable = all(verdicts[y] == "viable" for y in ys)
+        if not viable:
+            est = {"observed": sum(total.values())}
+        elif len(order) == 3:
             est = loglinear(total)
         else:
             n1 = sum(v for k, v in total.items() if k[0])
@@ -210,7 +230,10 @@ def capture(datasets: list[str], codes: list[str], years: list[int], usable_year
                "high": est.get("high"), "model": est.get("model"),
                "completeness": ", ".join(f"{k} {sizes[k] / est['estimate']:.0%}" for k in order)
                if est.get("estimate") else None,
-               "note": ("two lists: a lower bound if they are positively dependent, which they cannot test"
+               "note": ("no total estimated: a link between the lists is rated 'use with caution', and the pairs it "
+                        "misses would each count a person twice; the overlap is the persons the lists share"
+                        if not viable else
+                        "two lists: a lower bound if they are positively dependent, which they cannot test"
                         if len(order) == 2 else f"log-linear, least AIC of {len(est.get('models') or [])} models")}
         out.append(row)
     return out

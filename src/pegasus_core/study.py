@@ -1187,14 +1187,14 @@ def _capture(decl: Declaration, scope: Scope, log) -> list[dict]:
     read = sorted({gateway.data_code(i.dataset) for i in scope.items if i.status == "in"})
     codes = list(decl.seeds.get("icd10") or [])
 
-    def usable(links: list[str], year: int) -> bool:
-        for link in links:
-            for side in ("left", "right"):
-                for z in gateway.covering_runs(link, side, year):
-                    rep = gateway.link_report(link, z) or {}
-                    if gateway.run_touches_reserve(link, z) or rep.get("verdict") not in USABLE_LINKS:
-                        return False
-        return True
+    def usable(links: list[str], year: int) -> str | None:
+        # a year's persons are its own runs' (`gateway.persons`): each link's run of that year, stored usable and
+        # touching no reserve (every padded neighbour had been required, and no year passed); the worst verdict
+        verdicts = [None if gateway.run_touches_reserve(link, year) else
+                    (gateway.link_report(link, year) or {}).get("verdict") for link in links]
+        if not links or any(v not in USABLE_LINKS for v in verdicts):
+            return None
+        return "viable" if all(v == "viable" for v in verdicts) else "use with caution"
 
     try:
         return capture.capture(read, codes, list(decl.years), usable, log=log)
@@ -1450,9 +1450,34 @@ def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
             update._ensure_links(plan, out, log)
         except Exception as exc:  # noqa: BLE001 - the item's own run tries again and records its failure
             out[f"store {_step_name(it)}"] = f"failed: {type(exc).__name__}: {exc}"
+    if decl.choice("persons"):
+        _capture_links(decl, read, out, log)
     out["seconds"] = round(time.time() - t0, 1)
     log(f"study {decl.study}: store prepared in {out['seconds']:.0f} s")
     return out
+
+
+def _capture_links(decl: Declaration, read: list[Item], out: dict, log) -> None:
+    """The national runs of the links between the capture population's lists (`capture.lists_of`), for the study's
+    years every list publishes: no item's plan reads them (SIH's toxoplasmosis admissions to SIM had no run for
+    2019-2021, and no year could be captured). A run that cannot be made is said, as an item's link is."""
+    from . import capture
+
+    found = capture.lists_of(sorted({gateway.data_code(i.dataset) for i in read}), list(decl.seeds.get("icd10") or []))
+    if not found:
+        return
+    sides = [v["dataset"] for v in found["lists"].values()]
+    years = [y for y in decl.years if all(y in gateway.published_years(d) for d in sides)]
+    for link in found["links"]:
+        for y in years:
+            if gateway.run_touches_reserve(link, y) or gateway.link_report(link, y) is not None:
+                continue
+            t = time.time()
+            try:
+                pairs = gateway.stored_pairs(link, y, compute=True)
+                log(f"link {link} {y}: {pairs.num_rows} pairs ({time.time() - t:.0f} s)")
+            except Exception as exc:  # noqa: BLE001 - a year that cannot be linked is not captured, and said
+                out[f"link {link} {y}"] = f"failed: {type(exc).__name__}: {exc}"
 
 
 def _ensure_extract(items: list[Item], out: dict, log) -> None:
@@ -2661,7 +2686,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                 + "<p>Every estimate assumes the links find every pair: a pair a link misses (SINAN carries an age, "
                   "not a birth date, for the link to match) raises the estimate, and lists that record the same "
                   "persons more often than chance lower it.</p>"
-                if any(r.get("estimate") for r in captured or []) else f"<p>{e(_capture_note(scope))}</p>"),
+                if any(r.get("patterns") for r in captured or []) else f"<p>{e(_capture_note(scope))}</p>"),
              "<h2>3b. Findings with a recording explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
@@ -2929,7 +2954,7 @@ def audit(folder: str | Path) -> list[dict]:
         ("intervals", "interval" in fields_ or any("intervals" in (i.get("readers") or {}) for i in read)),
         ("ratios", "population" in fields_),
         ("linked shares", "linked" in fields_),
-        ("a capture of TOXC × SIH × SIM", any(r.get("estimate") and str(r.get("lists", "")).count("×") >= 2 for r in captured)),
+        ("a capture of TOXC × SIH × SIM", any(r.get("patterns") and str(r.get("lists", "")).count("×") >= 2 for r in captured)),
         ("quality fields", any("quality:" in str(f.get("label")) for f in findings)
          or any("quality" in (i.get("readers") or {}) for i in read)),
     ])
@@ -2949,7 +2974,9 @@ def audit(folder: str | Path) -> list[dict]:
     item(5, "persons", [
         (f"cohort contrasts {sum(1 for r in persons if r.get('rr') is not None)}", any(r.get("rr") is not None for r in persons)
          or any("contrasts" in str(r.get("note")) for r in persons)),
-        (f"capture–recapture {len([r for r in captured if r.get('estimate')])} populations", any(r.get("estimate") for r in captured)),
+        (f"capture–recapture: {len([r for r in captured if r.get('estimate')])} populations estimated, "
+         f"{len([r for r in captured if r.get('patterns') and not r.get('estimate')])} reported without a total for "
+         "links not viable", any(r.get("patterns") for r in captured)),
     ])
     def share(k):
         return sum(1 for f in findings if f.get(k) not in (None, "", [], {})) / max(len(findings), 1)

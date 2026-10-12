@@ -202,3 +202,18 @@ def test_a_triage_without_an_institution_is_read():
             self.robustness = {"triage": {"facility": fac}}
 
     assert study._one_institution(X(False)) is None and study._one_institution(X({"one_institution": "0000477"})) == "0000477"
+
+
+def test_capture_gives_no_total_on_links_not_viable(monkeypatch):
+    # TOXC x SIH 2019-2021 through links "use with caution" gave 47,029 cases against some 8.4 M births: the pairs
+    # the link misses count persons twice; where links are not viable the overlap is reported, not a total
+    from pegasus_core import capture
+
+    lists = {"A": {"deaths": False}, "B": {"deaths": False}}
+    monkeypatch.setattr(capture, "lists_of", lambda d, c: {"capture": "x", "lists": lists, "links": []})
+    monkeypatch.setattr(capture, "patterns", lambda *a, **k: (["A", "B"], {(True, False): 50, (False, True): 40,
+                                                                            (True, True): 10}))
+    caution = capture.capture(["A", "B"], ["P371"], [2021], lambda links, y: "use with caution", log=lambda *a: None)
+    viable = capture.capture(["A", "B"], ["P371"], [2021], lambda links, y: "viable", log=lambda *a: None)
+    assert caution[0]["estimate"] is None and "no total" in caution[0]["note"] and caution[0]["patterns"]
+    assert viable[0]["estimate"] is not None
