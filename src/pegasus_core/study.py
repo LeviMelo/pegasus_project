@@ -1157,7 +1157,12 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
         kinds.setdefault(a, set()).add(b)
         kinds.setdefault(b, set()).add(a)
     out, done = [], set()
-    for it in (i for i in scope.items if i.status == "in"):
+    # the narrower event first (a confirmed case before the notification it is one of): the cohort is the topic's
+    # cases, and the notifications had been scanned, discarded ones included (257 of 2023's congenital
+    # notifications in Rio Grande do Sul against 186 confirmed, 2026-10-12)
+    ordered = sorted((i for i in scope.items if i.status == "in"),
+                     key=lambda i: not gateway.event_type(i.dataset, i.event).get("status"))
+    for it in ordered:
         for kind, reach in kinds.items():
             if not gateway.same_dataset(kind[0], it.dataset) or (it.dataset, kind) in done:
                 continue
@@ -3144,6 +3149,9 @@ COLUMNS = {
     "field_reader": "the field's reader",
     "answer": "the answer: supported, not supported, or not testable and why",
     "p_holm": "p adjusted by Holm over the hypothesis's tests",
+    "institution_facts": "each establishment of an institutional finding: its CNES registration (name, type, care "
+                         "level, SUS link, beds, obstetric centre, neonatal unit) at the finding's first and last year",
+    "institution_volume": "each establishment's events of every code the year before the finding and in its last",
     # a name that means another thing in one table
     "context_profile.parquet:value": "the context's value at the finding's locus",
     "capture.parquet:population": "what is counted: cases or deaths",

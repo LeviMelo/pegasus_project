@@ -2091,15 +2091,31 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
         # reports how many of the confirmed cases were admitted or died before any contrast); over the link draws by
         # Rubin's rules, the within-draw binomial variance and the between-draw variance (the table held notes only,
         # 2026-10-12)
+        from scipy.stats import beta
+
         n = max(t.num_rows, 1)
-        for lab in labels:
+        blocked = {x["outcome"] for x in notes if str(x.get("note", "")).startswith("no direct link")}
+        for lab, o in zip(labels, outcomes, strict=True):
+            if lab in blocked:
+                # no direct link merges a pair this year: its count is not the persons' outcome (2022's congenital
+                # cases read 0 deaths, the link to SIM not viable), so no proportion is given
+                notes.append({"outcome": lab, "persons": t.num_rows, "note": "no proportion: no direct link "
+                              "merges a pair this year (above), so the count is not the persons' outcome"})
+                continue
             k = np.array([float(tb[lab].to_numpy().sum()) for tb in tables])
             ph = k / n
             pbar = float(ph.mean())
-            var = float((ph * (1 - ph) / n).mean()) + (1 + 1 / len(ph)) * (float(ph.var(ddof=1)) if len(ph) > 1 else 0.0)
-            notes.append({"outcome": lab, "persons": t.num_rows, "with_outcome": float(k.mean()), "share": pbar,
-                          "share_low": max(pbar - 1.96 * var ** 0.5, 0.0), "share_high": min(pbar + 1.96 * var ** 0.5, 1.0),
-                          "note": f"proportion with the outcome over {len(ph)} link draws (Rubin's rules)"})
+            kbar = float(k.mean())
+            # the exact (Clopper-Pearson) interval of the mean count, widened by the draws' spread (Rubin's
+            # between-draw variance): a Wald interval read 0 of 257 as [0, 0]
+            between = (1 + 1 / len(ph)) * (float(ph.var(ddof=1)) if len(ph) > 1 else 0.0)
+            lo = float(beta.ppf(0.025, kbar, n - kbar + 1)) if kbar > 0 else 0.0
+            hi = float(beta.ppf(0.975, kbar + 1, n - kbar)) if kbar < n else 1.0
+            notes.append({"outcome": lab, "persons": t.num_rows, "with_outcome": kbar, "share": pbar,
+                          "share_low": max(lo - 1.96 * between ** 0.5, 0.0),
+                          "share_high": min(hi + 1.96 * between ** 0.5, 1.0),
+                          "note": f"proportion with the outcome over {len(ph)} link draws: exact interval, widened by "
+                                  "the draws' spread" + (" (on the person's own record)" if o[0] == "record" else "")})
     family = f"cohort|{kind[0]}:{kind[1]}|{dataset}|{year}"
     res = cohort_mod.scan(tables[0], [d.column for d in attrs], labels, control.Ledger(), family, draws=tables)
     log(f"{family}: {len(res)} contrasts over {len(attrs)} attributes and {len(labels)} outcomes, {t.num_rows} persons")

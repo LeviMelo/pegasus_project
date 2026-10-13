@@ -22,7 +22,7 @@ from dataclasses import replace
 import numpy as np
 import pyarrow as pa
 
-from . import config, gateway
+from . import config, gateway, store
 
 
 def lists_of(datasets: list[str], codes: list[str]) -> dict | None:
@@ -79,11 +79,20 @@ def records(lst: dict, year: int, deaths: bool) -> pa.Table | None:
     home = next((r for r in declared if r.endswith(".residence")), None)
     # the grouping roles and the residence (any one role else: the identity columns come with every side table)
     roles = list(dict.fromkeys([*lst["group"], *([home] if home else [])])) or [next(iter(declared))]
+    # stored: a list's year is a national read cut to the area (DATASUS files a record by its place of care, not of
+    # residence), 2.3 minutes a year in a slice's capture, read again on every run (2026-10-12)
+    area = config.study_area()
+    key = {"what": "capture_records", "dataset": lst["dataset"], "where": where, "roles": roles, "year": int(year),
+           **({"area": sorted(area)} if area else {}), "data": config.data_version(), "code": config.code_key(records)}
+    hit = store.get_table("gateway", key)
+    if hit is not None:
+        return hit
     table = _side_table(side, roles, period=year, geography="BR")
-    if config.study_area() is not None and home:
+    if area is not None and home:
         # an area's study captures its residents (the national persons, cut to them)
         codes = [str(v or "")[:6] for v in table.column(home).to_pylist()]
         table = table.filter(pa.array(config.in_area(np.array([int(c) if c.isdigit() else -1 for c in codes]))))
+    store.put_table("gateway", key, table)
     return table
 
 
