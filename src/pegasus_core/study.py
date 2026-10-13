@@ -553,6 +553,30 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
         it.est_seconds = round(again * n * (fit + per_field(it.dataset, it.years) * share) + steps, 1)
 
 
+def _associated(decl: Declaration, scope: Scope, log) -> list[dict]:
+    """The conditions named beside the topic on its own records (`cooccur.associated`): every read source whose records
+    carry several codes (`fields.declared_mentions`: a certificate's lines, an admission's diagnoses), over the years
+    its topic item reads, in the study's area."""
+    from . import cooccur
+
+    seeds = sorted(set(decl.seeds.get("icd10") or []))
+    if not seeds:
+        return []
+    out, done = [], set()
+    for it in (i for i in scope.items if i.status == "in" and i.years):
+        if it.dataset in done or (it.source or {}).get("population"):
+            continue
+        done.add(it.dataset)
+        for role, cols in gateway.code_groups(it.dataset).items():
+            try:
+                rows = cooccur.associated(it.dataset, it.event, list(it.years), list(cols), seeds)
+            except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said
+                log(f"study: associated {it.dataset} {role}: {type(exc).__name__}: {exc}")
+                continue
+            out += [{"dataset": it.dataset, "where": role, "years": f"{min(it.years)}-{max(it.years)}", **r} for r in rows]
+    return out
+
+
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:
     """The codes related to the seeds on the same records (BACKLOG 4.2, `cooccur.related_codes`), wherever a read item's
     records carry several codes (`fields.declared_mentions`: certificate lines, all diagnoses, anomaly lists), over the
@@ -638,7 +662,10 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
     out = []
     for p in (p for p in paths if p["verdict"] in USABLE_LINKS):
         method = link_method(p["link"])
-        for it in (i for i in items if i.status == "in" and i.source is None):
+        # a source's own events, or a code set of them (SIM's infarction deaths: the share that died after an admission,
+        # the rest without one; code sets had no linked share, and a study of a cause of death no linkage, 2026-10-13)
+        for it in (i for i in items if i.status == "in" and (i.source is None or (
+                (i.source or {}).get("codes") and set(i.source) <= {"codes", "classifier", "structure"}))):
             for side in (s for s in p["sides_read"] if gateway.same_dataset(p[s], it.dataset)):
                 column = f"link:{p['link']}:{side}"
                 other = p["right" if side == "left" else "left"]
@@ -667,7 +694,8 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
                 items.append(Item(it.dataset, it.event, list(it.blocks), it.nodes, ys,
                                   f"person path {p['link']}: the share of its {side} side's events paired with "
                                   f"{p['right' if side == 'left' else 'left']} ({', '.join(verdict)})",
-                                  source=fields.link_source(it.dataset, it.event, column), records=it.records,
+                                  source={**fields.link_source(it.dataset, it.event, column), **(it.source or {})},
+                                  records=it.records,
                                   note="" if ys == it.years else f"years {sorted(set(it.years) - set(ys))} have no usable run"))
                 out.append(items[-1])
     return out
@@ -2001,6 +2029,10 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     pq.write_table(_rows_table(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
     lap("related")
+    assoc = _associated(decl, scope, log)
+    pq.write_table(_rows_table(assoc) if assoc else pa.table({"code": pa.array([], pa.string())}),
+                   out / "associated.parquet")
+    lap("associated")
     chosen = decl.choice("relations")
     rel = _relations(scope, decl, log) if "fields" in chosen else []
     lap("relations")
@@ -3681,6 +3713,17 @@ COLUMNS = {
     "field_reader": "the field's reader",
     "answer": "the answer: supported, not supported, or not testable and why",
     "p_holm": "p adjusted by Holm over the hypothesis's tests",
+    "with_code": "the topic's records (in the area and years) that also name the category",
+    "topic_records": "the topic's records (in the area and years) the share is of: those naming a seed code on any of "
+                     "the group's columns (a certificate's lines: the deaths the infarction took part in, beside those it "
+                     "is the underlying cause of)",
+    "lift_low": "lower 95 % bound of the lift (exact Poisson, the expected fixed)",
+    "lift_high": "upper 95 % bound of the lift",
+    "associated.parquet:code": "the ICD-10 category named beside the topic on its records",
+    "associated.parquet:where": "the group of columns read together (a certificate's lines, an admission's diagnoses)",
+    "associated.parquet:share": "the share of the topic's records naming the category, most frequent first",
+    "associated.parquet:lift": "observed over expected records naming both, against the other records of the same sex "
+                               "and ten-year age band: how specific to the topic the category is, beside how common",
     "hypotheses.parquet:tier": "the expectation tested against: BPA (trained on the years before the window, extrapolated) or B1, and the grain",
     "institution_facts": "each establishment of an institutional finding: its CNES registration (name, type, care "
                          "level, SUS link, beds, obstetric centre, neonatal unit) at the finding's first and last year",

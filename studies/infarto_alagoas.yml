@@ -1,0 +1,17 @@
+# Perfil epidemiológico da mortalidade por infarto agudo do miocárdio em Alagoas: a study of narrow scope read deeply.
+# The deaths (SIM), the admissions that preceded or did not precede them (SIH, linked), the codes certificates name
+# beside the infarction, and the contexts of care and of living the state's municipalities differ in.
+study: infarto_alagoas
+topic:
+  seeds:
+    icd10: [I21, I22]          # acute myocardial infarction and its recurrence; no term: "infarto" names I63 too
+  only: [SIM-DO, SIH-RD]
+period: 2014-2023
+where: AL
+grain: [year]
+depth: deep
+download: 0                    # the held lake: SIM and SIH are held nationally
+related: 0                    # the conditions named beside it are the associated causes (associated.parquet), by prevalence
+contexts: [cnes_beds_icu_sus, cnes_beds_icu_total, cnes_physicians_professionals, cnes_teams_esf,
+           cnes_community_health_agents_professionals, ans_beneficiaries, persons_low_income, persons_15_plus_literate,
+           population_urban, climate]

@@ -1358,9 +1358,10 @@ def cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds:
     (a certificate's lines, an admission's diagnoses, a birth's anomaly list), the seeds matched on the full code (P37.1
     is not P37) and the related codes read at their category; the seed's own categories are left out."""
     seeds = sorted({s_.replace(".", "").upper() for s_ in seeds})
+    area = config.study_area()
     key = {"what": "cooccurrence", "code": config.code_key(cooccurrence), "dataset": dataset, "event": event,
            **_declared_key(dataset, event), "year": year, "columns": list(columns), "seeds": seeds,
-           "data": config.data_version()}
+           "data": config.data_version(), **({"area": sorted(area)} if area else {})}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
@@ -1368,6 +1369,10 @@ def cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds:
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *columns] + ([strata["sex"]] if strata["sex"] else [])
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
+    if area is not None:
+        # an area's residents (a study of one state reads its own records' co-mentions, never Brazil's)
+        res = [str(v or "")[:6] for v in raw.column(strata["residence"]).to_pylist()]
+        raw = raw.filter(pa.array(config.in_area(np.array([int(c) if c.isdigit() else -1 for c in res]))))
     con.register("r", raw)
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     seed_hit = " OR ".join(f"list_contains(list_transform(codes, x -> starts_with(x, '{s_}')), true)" for s_ in seeds) or "false"

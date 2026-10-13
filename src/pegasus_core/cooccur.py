@@ -16,6 +16,50 @@ from __future__ import annotations
 from . import control, gateway
 
 
+def associated(dataset: str, event: str, years: list[int], columns: list[str], seeds: list[str]) -> list[dict]:
+    """The conditions the topic's records name beside it (multiple-cause analysis): for every ICD-10 category on the
+    records carrying a seed (a certificate's lines, an admission's diagnoses) in the study's area and ``years``, the
+    records carrying it, their share of the topic's records with its exact (Clopper–Pearson) interval, and its lift
+    against the other records of the same sex and age band (`related_codes`'s O/E). Most frequent first: a profile of
+    mortality reports the associated causes by how often they are named (hypertension, diabetes), where the lift ranks
+    the codes most specific to the topic (chest pain, the infarction's own complications: Alagoas's infarction study
+    read these as its related codes, 2026-10-13)."""
+    import pyarrow as pa
+    from scipy.stats import beta, chi2
+
+    parts = []
+    for y in years:
+        try:
+            c = gateway.cooccurrence(dataset, event, int(y), columns, seeds)
+        except gateway.nothing_published():
+            continue
+        parts.append(c.append_column("year", pa.array([int(y)] * c.num_rows, pa.int32())))
+    if not parts:
+        return []
+    t = pa.concat_tables(parts).to_pandas()
+    for c in ("n_code", "n_both", "n", "n_seed"):
+        t[c] = t[c].astype(float)
+    t["e"] = t["n_code"] * t["n_seed"] / t["n"].clip(lower=1)
+    # the topic's records (naming a seed on any of the columns): each (year, stratum) once, whatever its categories
+    topic = float(t.drop_duplicates(["year", "sex", "band"])["n_seed"].sum())
+    g = t.groupby("code").agg(o=("n_both", "sum"), e=("e", "sum")).reset_index()
+    g = g[g["o"] > 0]
+    if g.empty or topic <= 0:
+        return []
+    labels = {r["code"]: r["label"] for r in gateway.code_tree("ICD10").to_pylist()}
+    out = []
+    for _, r in g.iterrows():
+        o, e = float(r["o"]), float(r["e"])
+        out.append({"code": r["code"], "label": labels.get(r["code"]), "with_code": o, "topic_records": topic,
+                    "share": o / topic,
+                    "share_low": float(beta.ppf(0.025, o, topic - o + 1)),
+                    "share_high": float(beta.ppf(0.975, o + 1, topic - o)) if o < topic else 1.0,
+                    "lift": o / e if e > 0 else None,
+                    "lift_low": chi2.ppf(0.025, 2 * o) / 2 / e if e > 0 else None,
+                    "lift_high": chi2.ppf(0.975, 2 * o + 2) / 2 / e if e > 0 else None})
+    return sorted(out, key=lambda r: -r["share"])
+
+
 def related_codes(dataset: str, event: str, years: list[int], columns: list[str], seeds: list[str],
                   q: float = 0.05, min_both: int = 3) -> list[dict]:
     """The categories related to ``seeds`` on ``dataset``'s records over ``years`` (their ``columns`` read together),
