@@ -1207,6 +1207,13 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 rows += [{"cohort": label, "year": y, **n} for n in notes]     # an outcome no direct link reached
                 store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
                 out.extend(rows)
+    if not out:
+        # said, never an empty table: leptospirosis' slice wrote none, read as a part missing (2026-10-12)
+        topic = sorted({i.dataset for i in scope.items if i.status == "in" and i.reason.startswith("seed sinan:")})
+        out.append({"cohort": ", ".join(topic) or "the topic's sources",
+                    "note": "no persons scanned: no declared person link with a usable run reaches the topic's own "
+                            "records (pegasus_data links.yml)" if not usable else
+                            "no persons scanned: the usable links reach no source whose records are the topic's persons"})
     return out
 
 
@@ -1230,6 +1237,10 @@ def _capture(decl: Declaration, scope: Scope, log) -> list[dict]:
         return "viable" if all(v == "viable" for v in verdicts) else "use with caution"
 
     try:
+        if capture.lists_of(read, codes) is None:
+            # said, never an empty table
+            return [{"population": "", "note": f"no capture population declared for {', '.join(codes) or 'the topic'} "
+                     "whose lists are among the read sources (pegasus_data captures.yml)"}]
         return capture.capture(read, codes, list(decl.years), usable, log=log)
     except Exception as exc:  # noqa: BLE001 - a capture that cannot be read is said; the folder stands
         log(f"study: capture: {type(exc).__name__}: {exc}")
@@ -1976,9 +1987,18 @@ def _hypothesis_readers(scope: Scope):
             yield it, {**src, **(it.source or {}), "support": src["support"]}, name.removeprefix("support:")
 
 
+#: the years before a hypothesis's window its prospective expectation is trained on, at least
+HYPOTHESIS_TRAIN = 3
+
+
 def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
     """The declared hypotheses (ARCHITECTURE §7.7, version 1): each tested once, at its locus, in every source of the
-    scope whose years and places hold it, against the B1 expectation; its own test, not a member of a discovery family.
+    scope whose years and places hold it; its own test, not a member of a discovery family. A level or transient
+    hypothesis is tested against what was expected before it happened: the prospective alarm tier (BPA, `surprise`),
+    trained on the source's years before the window and extrapolated, whose flat history takes no past epidemic as
+    normal. B1, fitted on the window's own years, learns the event as normal: Porto Alegre's leptospirosis in the
+    May 2024 floods, a statewide rise absorbed by the year's effect, read "not supported" (2026-10-12). With fewer
+    than `HYPOTHESIS_TRAIN` years before the window the test falls back to B1 and says so.
     level and transient: observed against expected over the locus, the upper tail of the sum under its negative
     binomial (moments of the cells' predictive), the rate ratio with an exact Poisson interval; step: the ratio of
     observed to expected after the declared year against before it.
@@ -2006,8 +2026,20 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
                 out.append({**base, "answer": f"not testable: {it.dataset} holds {it.years[0]}-{it.years[-1]}, "
                                               f"the hypothesis {years[0]}-{years[-1]}"})
                 continue
+            before = [y for y in it.years if y < years[0]]
+            tier = "BPA" if comp != "step" and len(before) >= HYPOTHESIS_TRAIN else "B1"
+            # the grain the test reads: an annual study reads a window of months as its whole years
+            grain = (f"tier {tier} (trained on {before[0]}-{before[-1]})" if tier == "BPA" else
+                     f"tier B1 ({len(before)} years before the window, fewer than {HYPOTHESIS_TRAIN})"
+                     if comp != "step" else "tier B1")
+            if str(h.get("when", "")).count("-") >= 2 and "year" in (decl.grain or ["year"]):
+                grain += f"; at the annual grain, {h.get('when')} read as {years[0]}-{years[-1]} whole"
+            base["tier"] = grain
             try:
-                sv = _session(it, reader).surprise(_study_nodes(it, None)[0], "B1")
+                ss = _session(it, reader)
+                node = _study_nodes(it, None)[0]
+                sv = (ss.expectations.prospective(node, before[-1], purpose="alarm") if tier == "BPA"
+                      else ss.surprise(node, "B1"))
             except Exception as exc:  # noqa: BLE001 - said in the answer
                 out.append({**base, "answer": f"not read: {type(exc).__name__}: {exc}"})
                 continue
@@ -3149,6 +3181,7 @@ COLUMNS = {
     "field_reader": "the field's reader",
     "answer": "the answer: supported, not supported, or not testable and why",
     "p_holm": "p adjusted by Holm over the hypothesis's tests",
+    "hypotheses.parquet:tier": "the expectation tested against: BPA (trained on the years before the window, extrapolated) or B1, and the grain",
     "institution_facts": "each establishment of an institutional finding: its CNES registration (name, type, care "
                          "level, SUS link, beds, obstetric centre, neonatal unit) at the finding's first and last year",
     "institution_volume": "each establishment's events of every code the year before the finding and in its last",
