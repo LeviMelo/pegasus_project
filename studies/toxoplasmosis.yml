@@ -6,16 +6,30 @@ topic:
     icd10: [B58, O98.6, P37.1]
     sinan: [TOXG, TOXC]
     terms: [toxoplasm]
+  # the sources a toxoplasmosis paper rests on: the two agravos (cases), births (the denominator), admissions, deaths and
+  # foetal deaths, serology (prenatal screening, Santa Maria), and food- and waterborne outbreaks. Left out: tables
+  # whose columns can carry the codes but hold a negligible share of the topic's events (CIH-CR 139 records in two
+  # years, SIA-PS 157 in thirteen, SIA-SAD, CIHA), read before only because they could (author, 2026-10-13)
+  only: [SINAN-TOXG, SINAN-TOXC, SINASC-DN, SIH-RD, SIM-DO, SIM-DOFET, SIASUS-PA, SINAN-SDTA]
 period: 2010-2024
 where: BR
 grain: [year]
 depth: exhaustive
-# the held lake only: a national run within the hour cannot also build the lakes of SIA-BI, SIH-SP, SIA-PS, SIA-SAD,
-# CIH and CIHA over the FTP (a single probe year of SIA-BI ran 45 minutes, 2026-10-13); the scope lists what it defers
+# the held lake only: the sources above are held; a run builds no lake over the FTP within the hour
 download: 0
-# three related codes, not the preset's twenty: each is a field in every source (2 min a field nationally, measured on
-# SIM-DO P37.1 2010-2024: 17.6 min against 67.7 estimated); twenty put the SIM-DO lane alone past the hour
-related: 3
+# the related conditions read as fields: the disease's clinical forms only, H32 (ocular toxoplasmosis); G05 (encephalitis
+# in diseases classified elsewhere) and B24 (every HIV admission and death, 137,000 and 23,000) are other diseases' fields
+related: [H32]
+# the contexts the disease's transmission and care run through, not every series held (dialysis machines, MRI and
+# yellow-fever epizootics had been read, 2026-10-13): drinking water (SISAGUA), sanitation, income and literacy and
+# urbanisation (IBGE census, SIDRA), agriculture's share of the economy (soil and livestock), and primary care, the
+# route of prenatal screening (CNES); the treatments (spiramycin, pyrimethamine, sulfadiazine, folinic acid, Nota
+# Técnica 163/2018) are added by the scope from the topic's codes
+contexts: [sisagua_surveillance_ecoli_present, sisagua_surveillance_total_coliforms_present,
+           sisagua_surveillance_turbidity_above_5, sisagua_surveillance_chlorine_below_0_2,
+           households_water_network, households_sewer_network, households_waste_collected, households_without_bathroom,
+           persons_low_income, persons_15_plus_literate, population_urban, gross_value_added_agriculture,
+           cnes_teams_esf, cnes_community_health_agents_professionals]
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
 ratios:

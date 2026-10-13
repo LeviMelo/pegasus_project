@@ -83,7 +83,7 @@ class Declaration:
     nulls: float = 1.0                   # replicate null worlds per test, as a factor on each method's own (`NULLS`)
     # the choices each depth presets (`PRESETS`), None where the declaration leaves them to its depth (`choice`)
     readers: list[str] | None = None     # the field kinds read beyond counts (`READERS`)
-    related: float | None = None         # how many related codes are read as fields of their own, strongest first
+    related: float | list | None = None  # how many related codes are read as fields of their own, strongest first, or which
     relations: list[str] | None = None   # the relations read (`RELATIONS`)
     chapters: bool | None = None         # the topic's nodes read inside their fitted chapters, or as code sets
     persons: bool | None = None          # the cohort scan over linked persons
@@ -201,9 +201,10 @@ def load(path: str | Path) -> Declaration:
     if doc.get("download") is not None and (not isinstance(doc["download"], (int, float)) or doc["download"] < 0):
         problems.append(f"download {doc['download']!r}: gigabytes the study may download, 0 or more")
     rel = doc.get("related")
-    if rel is not None and rel != "all" and (isinstance(rel, bool) or not isinstance(rel, int) or rel < 0):
+    named = isinstance(rel, list) and all(isinstance(c, str) for c in rel)
+    if rel is not None and rel != "all" and not named and (isinstance(rel, bool) or not isinstance(rel, int) or rel < 0):
         problems.append(f"related {rel!r}: how many related codes to read as fields of their own, strongest first "
-                        "(0 for none, or all)")
+                        "(0 for none, or all), or the codes themselves ([H32])")
     where = doc.get("where", "BR")
     try:
         area = _area(where)
@@ -218,7 +219,7 @@ def load(path: str | Path) -> Declaration:
                        where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
-                       related=(float("inf") if rel == "all" else float(rel)) if rel is not None else None,
+                       related=(float("inf") if rel == "all" else list(rel) if isinstance(rel, list) else float(rel)) if rel is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
                        chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
                        relations=doc.get("relations"), persons=doc.get("persons"), replicate=doc.get("replicate"),
@@ -906,7 +907,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
     contexts += _medicines(nodes + codes)
     related = _related_codes(decl, items, sorted(set(nodes) | set(codes)), log)
     extra: list[tuple[float, Item]] = []            # (strength, item): the related codes' fields, the strongest read
-    if decl.choice("related") > 0:
+    if decl.choice("related"):
         # each related code read as one field in each source that records it (a lead, never a cause)
         strength: dict[str, float] = {}
         for r in (r for r in related if r["related"]):
@@ -1038,6 +1039,12 @@ def _strongest(decl: Declaration, extra: list[tuple[float, Item]]) -> list[Item]
     for w, it in extra:
         best[_related_code(it)] = max(best.get(_related_code(it), float("-inf")), w)
     order = sorted(best, key=lambda c: -best[c])
+    if isinstance(n, list):
+        # the codes the declaration names, read whatever their strength (a paper's related conditions are chosen by
+        # their meaning: ocular toxoplasmosis, not every HIV admission, 2026-10-13); the strongest others shown
+        wanted = [c.replace(".", "") for c in n]
+        order = [c for c in wanted if c in best] + [c for c in order if c not in wanted]
+        n = len([c for c in wanted if c in best])
     rank = {c: k for k, c in enumerate(order[:int(min(n, len(order))) + RELATED_SHOWN], 1)}
     added = [it for _, it in extra if _related_code(it) in rank]
     for it in added:
