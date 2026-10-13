@@ -10,6 +10,12 @@ period: 2010-2024
 where: BR
 grain: [year]
 depth: exhaustive
+# the held lake only: a national run within the hour cannot also build the lakes of SIA-BI, SIH-SP, SIA-PS, SIA-SAD,
+# CIH and CIHA over the FTP (a single probe year of SIA-BI ran 45 minutes, 2026-10-13); the scope lists what it defers
+download: 0
+# three related codes, not the preset's twenty: each is a field in every source (2 min a field nationally, measured on
+# SIM-DO P37.1 2010-2024: 17.6 min against 67.7 estimated); twenty put the SIM-DO lane alone past the hour
+related: 3
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
 ratios:
