@@ -486,7 +486,26 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
     else:
         a, b = 3.0, 0.3
     area = sorted(config.study_area() or []) or None
-    asked = [m for m in store.manifests("update") if m.get("step") == "questions" and m.get("seconds") is not None]
+    marks = [m for m in store.manifests("update") if m.get("seconds") is not None]
+    asked = [m for m in marks if m.get("step") == "questions"]
+    # an item's own steps, once per item whatever its fields: the later years' retraining and confirmation, triage over
+    # its answers, the prospective questions of its held-out years; priced at nothing, a recomputing slice ran twice
+    # its estimate (the leptospirosis slice past its cap, 2026-10-13)
+    item_steps = [m for m in marks if m.get("step") in ("later_years", "triage", "prospective")]
+
+    def per_item(dataset, years):
+        total = 0.0
+        for step in ("later_years", "triage", "prospective"):
+            for pool in ([m for m in item_steps if m.get("step") == step and m.get("dataset") == dataset
+                          and m.get("area") == area],
+                         [m for m in item_steps if m.get("step") == step and m.get("dataset") == dataset],
+                         [m for m in item_steps if m.get("step") == step]):
+                if pool:
+                    total += float(np.median([float(m["seconds"]) * len(years) / max(len(m.get("years") or [1]), 1)
+                                              * size(tuple(area or ())) / size(tuple(m.get("area") or ()))
+                                              for m in pool]))
+                    break
+        return total
     from .questions import QUESTIONS
 
     codes = [int(c) for c in gateway.municipality_names() if str(c).isdigit()]
@@ -530,7 +549,8 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
         # ones and confirmed on them (`update._later_years`), its fits and questions again (the leptospirosis slice's
         # later years, priced at nothing, took two thirds of its run, 2026-10-13)
         again = 2.0 if decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2 else 1.0
-        it.est_seconds = round(again * n * (fit + per_field(it.dataset, it.years) * share), 1)
+        steps = per_item(it.dataset, it.years) if again > 1 else 0.0
+        it.est_seconds = round(again * n * (fit + per_field(it.dataset, it.years) * share) + steps, 1)
 
 
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:

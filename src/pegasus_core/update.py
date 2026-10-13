@@ -498,9 +498,10 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         key = _key("prospective", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                    blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years)
         if force or not _done(key):
+            t0_ = time.perf_counter()
             found = s.survey_questions(blocks, levels=tuple(sys_.levels) if sys_.levels else None, log=log,
                                        train_last=int(t0), nodes=tuple(sys_.nodes) if sys_.nodes else None)
-            _mark(key, {"answers": len(found)})
+            _mark(key, {"answers": len(found), "seconds": round(time.perf_counter() - t0_, 2)})
             out[f"prospective {sys_.dataset}"] = len(found)
         else:
             out[f"prospective {sys_.dataset}"] = "done on these versions"
@@ -526,6 +527,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
                        leads=sorted(f"{x.id}:{x.effect!r}:{x.q!r}" for x in answers), served=sorted(served))
             if answers and (force or not _done(key)):
+                t_triage = time.perf_counter()
                 # each reader's answers by its own session (S4.3): a measure's are read on its admissions, not on counts
                 by_reader: dict[str, list] = {}
                 for x in answers:
@@ -543,7 +545,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
                 corr = s.corroborate(done, served=served, log=log)
                 s.register.add(corr)
-                _mark(key, {"leads": len(answers), "corroborated": len(corr)})
+                _mark(key, {"leads": len(answers), "corroborated": len(corr),
+                            "seconds": round(time.perf_counter() - t_triage, 2)})
                 out[f"triage {sys_.dataset}"] = len(answers)
                 out[f"corroboration {sys_.dataset}"] = sum(bool(x.replications.get("corroboration", {}).get("ok"))
                                                           for x in corr)
