@@ -137,8 +137,11 @@ class Register:
                  "q": x.q, "effect": x.effect, "replication": x.replication,
                  "calibrated": bool(x.method.get("calibrated", True)), "body": json.dumps(asdict(x), default=_json)}
                 for x in leads]
-        pq.write_table(pa.Table.from_pylist(rows),
-                       self.path / f"part-{now.replace(':', '').replace('.', '')}-{uuid.uuid4().hex[:8]}.parquet")
+        # whole or not there: a lane reading the register opened a part another was writing (2026-10-13)
+        name = self.path / f"part-{now.replace(':', '').replace('.', '')}-{uuid.uuid4().hex[:8]}.parquet"
+        tmp = name.with_suffix(".tmp")
+        pq.write_table(pa.Table.from_pylist(rows), tmp)
+        tmp.replace(name)
         if sum(1 for _ in self.path.glob("part-*.parquet")) > self.COMPACT_AT:
             self.compact()
 
@@ -214,7 +217,8 @@ class Register:
                 for f in sorted(self.path.glob("part-*.parquet")):
                     out.append(pq.read_table(f, columns=columns, filters=filters))
                 return out
-            except FileNotFoundError:
+            except (FileNotFoundError, PermissionError):
+                time.sleep(0.2)
                 continue
         raise RuntimeError(f"{self.path}: the parts kept changing under three readings")
 
@@ -236,7 +240,9 @@ class Register:
             merged = pa.concat_tables([pq.read_table(f) for f in files], promote_options="default")
             now = time.strftime("%Y-%m-%dT%H%M%S")
             target = self.path / f"part-{now}-compact-{uuid.uuid4().hex[:8]}.parquet"
-            pq.write_table(merged, target)               # in the parts' order: the history as written
+            tmp = target.with_suffix(".tmp")
+            pq.write_table(merged, tmp)                  # in the parts' order: the history as written
+            tmp.replace(target)
             for f in files:
                 f.unlink(missing_ok=True)
             return len(files)

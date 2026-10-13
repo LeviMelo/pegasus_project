@@ -71,10 +71,19 @@ class Ledger:
     def table(self) -> pa.Table:
         """Every row. The part files are immutable, so each is read once per process (thousands of small files
         make a full read take minutes)."""
-        files = sorted(self.path.glob("part-*.parquet"))
-        for f in files:
-            if f not in _PARTS:
-                _PARTS[f] = pq.read_table(f)
+        # lanes write and compact one ledger at once: a part listed and then merged away by another process is read
+        # from the new listing (an area slice's items failed on it, FileNotFoundError and PermissionError, 2026-10-13)
+        for attempt in range(5):
+            files = sorted(self.path.glob("part-*.parquet"))
+            try:
+                for f in files:
+                    if f not in _PARTS:
+                        _PARTS[f] = pq.read_table(f)
+                break
+            except (FileNotFoundError, PermissionError):
+                if attempt == 4:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
         if not files:
             return pa.table({})
         t = pa.concat_tables([_PARTS[f] for f in files])
@@ -87,19 +96,32 @@ class Ledger:
         """Merge the part files into one (the rows unchanged): stage E writes a part per batch, and a field's triage
         left tens of thousands of small files whose full read took minutes (89,361 parts, 2026-10-08). A part that
         cannot be removed (open elsewhere) stays, and `table` reads its rows once. Returns the parts merged."""
-        files = sorted(self.path.glob("part-*.parquet"))
-        if len(files) < 2:
-            return 0
-        merged = pa.concat_tables([_PARTS.get(f) or pq.read_table(f) for f in files])
-        name = self.path / f"part-{time.strftime('%Y%m%d%H%M%S')}-compact-{uuid.uuid4().hex[:8]}.parquet"
-        tmp = name.with_suffix(".tmp")
-        pq.write_table(merged, tmp)
-        tmp.replace(name)
-        for f in files:
-            _PARTS.pop(f, None)
-            with contextlib.suppress(OSError):
-                f.unlink()
-        return len(files)
+        from filelock import FileLock, Timeout
+
+        try:
+            lock = FileLock(str(self.path / ".compact.lock"))
+            lock.acquire(timeout=0)
+        except Timeout:
+            return 0                       # another process is compacting
+        try:
+            files = sorted(self.path.glob("part-*.parquet"))
+            if len(files) < 2:
+                return 0
+            try:
+                merged = pa.concat_tables([_PARTS.get(f) or pq.read_table(f) for f in files])
+            except (FileNotFoundError, PermissionError):
+                return 0                   # the listing changed under it: the next compaction merges it
+            name = self.path / f"part-{time.strftime('%Y%m%d%H%M%S')}-compact-{uuid.uuid4().hex[:8]}.parquet"
+            tmp = name.with_suffix(".tmp")
+            pq.write_table(merged, tmp)
+            tmp.replace(name)
+            for f in files:
+                _PARTS.pop(f, None)
+                with contextlib.suppress(OSError):
+                    f.unlink()
+            return len(files)
+        finally:
+            lock.release()
 
     def family(self, family: str) -> list[dict[str, Any]]:
         """Registered tests of a family with their results (a test without a result counts as p = 1)."""
@@ -117,7 +139,10 @@ class Ledger:
                             ("code_version", pa.string()), ("data_version", pa.string()), ("at", pa.string())])
         with _LOCK:
             name = self.path / f"part-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}.parquet"
-            pq.write_table(pa.Table.from_pylist(rows, schema=schema), name)
+            # whole or not there: a reader in another lane opened a part being written (PermissionError on Windows)
+            tmp = name.with_suffix(".tmp")
+            pq.write_table(pa.Table.from_pylist(rows, schema=schema), tmp)
+            tmp.replace(name)
 
 
 # ---------------------------------------------------------------------- FDR
