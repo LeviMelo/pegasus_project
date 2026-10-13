@@ -1567,6 +1567,29 @@ def _step_name(it: Item) -> str:
     return f"{it.dataset} {it.event} {','.join(it.blocks)}" + (f" {json.dumps(it.source, sort_keys=True)}" if it.source else "")
 
 
+def _lane_file(study_name: str, pid: int) -> Path:
+    return config.home() / "lanes" / study_name / f"{pid}.json"
+
+
+def _lane_left(study_name: str, seconds: float) -> None:
+    """This lane's estimated seconds still to run, for the scheduler (`_run_items`), which ranks lanes by it."""
+    path = _lane_file(study_name, os.getpid())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"left": float(seconds)}), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _lanes_left(study_name: str) -> dict[int, float]:
+    out = {}
+    for f in (config.home() / "lanes" / study_name).glob("*.json"):
+        try:
+            out[int(f.stem)] = float(json.loads(f.read_text(encoding="utf-8"))["left"])
+        except (OSError, ValueError, KeyError):
+            continue
+    return out
+
+
 def _run_group(decl_study: str, group: list[Item], others: list, device: str | None, threads: int | None) -> dict:
     """One lane's work: a dataset's items in order (they share its fits and caches), on ``device`` with ``threads``.
     A module function so a spawned process can run it."""
@@ -1577,7 +1600,8 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
     if threads:
         jobs.threads(threads)
     steps = {}
-    for it in group:
+    for k, it in enumerate(group):
+        _lane_left(decl_study, sum(i.est_seconds or 0.0 for i in group[k:]))
         print(f"study {decl_study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}"
               + (f" [{device}]" if device else ""), flush=True)
         step = _step_name(it)
@@ -1664,6 +1688,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     import psutil
 
     others = [[o.dataset, o.event] for o in read]
+    shutil.rmtree(config.home() / "lanes" / decl.study, ignore_errors=True)     # an earlier run's lanes: reused pids
     groups: dict[str, list[Item]] = {}
     for it in read:
         groups.setdefault(it.dataset, []).append(it)
@@ -1715,8 +1740,15 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
         # only a lane computing is ever suspended: an idle pool worker waits for its next lane holding the queue's
         # lock, and suspended there it blocked every other worker's next lane (deep15)
         computing = {pid: v for pid, v in active.items() if pid in working}
+        # the critical path first: the lane with the most work left (its own estimate, `_lane_left`) is kept and resumed
+        # first; ranked by memory, the national study paused its 24-item SIM-DO lane for its SIH lane and then resumed
+        # the small SIA lane, and the longest lane waited past the hour (2026-10-13). Memory breaks ties.
+        left = _lanes_left(decl.study)
+
+        def rank(pid):
+            return (left.get(pid, 0.0), lanes_now.get(pid, (None, 0.0))[1])
         if avail < LANE_PRESSURE_GB and len(computing) > 1:
-            keep = max(computing, key=lambda pid: computing[pid][1])
+            keep = max(computing, key=rank)
             for pid, (proc, gb) in computing.items():
                 if pid != keep and gb > 1.0:
                     try:
@@ -1731,8 +1763,9 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
             # lanes took turns pausing each other (the survey, 2026-10-11)
             # or when no other lane computes: the pool's idle workers had counted as active, and deep8 waited with
             # two lanes paused for 10 GB that nothing running would free (2026-10-12)
-            pid = min(paused, key=lambda p: lanes_now.get(p, (None, 0.0))[1])
-            if _may_resume(avail, lanes_now.get(pid, (None, 0.0))[1], bool(working - set(paused))):
+            fits = [p for p in paused if _may_resume(avail, lanes_now.get(p, (None, 0.0))[1], bool(working - set(paused)))]
+            pid = max(fits, key=rank) if fits else max(paused, key=rank)
+            if fits:
                 try:
                     paused.pop(pid).resume()
                     log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
