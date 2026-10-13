@@ -177,7 +177,7 @@ class Register:
         import pyarrow.compute as pc
 
         tabs = []
-        for tab in self._parts():
+        for tab in self._parts(["id", "at", "body", "family", "kind"]):
             for col, want in (("family", family), ("kind", kind)):
                 if isinstance(want, str):
                     tab = tab.filter(pc.equal(tab.column(col), want))
@@ -187,11 +187,23 @@ class Register:
             tabs.append(tab)
         if not tabs:
             return []
-        rows = pa.concat_tables(tabs, promote_options="default").to_pylist()   # parts differ in nullability
-        latest: dict[str, dict] = {}
-        for r in sorted(rows, key=lambda r: r["at"]):
-            latest[r["id"]] = r
-        out = [Lead(**_body(json.loads(r["body"]))) for r in latest.values()]
+        # each lead's latest state chosen from its ids and times alone, and only those bodies parsed: the register keeps
+        # every state, and turning its 1.5 million rows into Python rows to keep 30,000 took a test past ten minutes;
+        # the bodies together pass Arrow's 2 GB of a string column (2026-10-13)
+        keys = pa.concat_tables([pa.table({"id": x.column("id"), "at": x.column("at"),
+                                           "part": pa.array(np.full(x.num_rows, i, dtype=np.int32)),
+                                           "row": pa.array(np.arange(x.num_rows, dtype=np.int64))})
+                                 for i, x in enumerate(tabs)], promote_options="default")
+        if keys.num_rows == 0:
+            return []
+        keys = keys.take(pc.sort_indices(keys, sort_keys=[("id", "ascending"), ("at", "ascending")]))
+        ids = keys.column("id").to_numpy(zero_copy_only=False)
+        keep = keys.filter(pa.array(np.append(ids[1:] != ids[:-1], True)))
+        part, row = keep.column("part").to_numpy(), keep.column("row").to_numpy()
+        bodies = []
+        for i in np.unique(part):
+            bodies += tabs[int(i)].column("body").cast(pa.large_string()).take(pa.array(row[part == i])).to_pylist()
+        out = [Lead(**_body(json.loads(b))) for b in bodies]
         return sorted(out, key=reading_order)
 
     def get(self, lead_id: str) -> Lead:
