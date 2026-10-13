@@ -330,7 +330,8 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
             return collapsed()
         store.put_arrays("blockdata", key, *_blockdata_to(data))
     lost = sum(v for k, v in data.unallocated.items() if k in ("sex", "age"))
-    return collapsed() if lost > float(np.sum(data.y)) else data
+    held = float(np.sum(data.y)) + data.unallocated.get("outside the study area", 0)
+    return collapsed() if lost > held else data
 
 
 @functools.cache
@@ -534,16 +535,22 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         ec = readers[source](dataset, event, int(year), places=None if area else pa.array(places, pa.int32()),
                              **source_args, **extra)
         tab = ec.counts
+
+        def of_subset(t):
+            keep = pc.starts_with(t.column("code"), subset[0])
+            for c in subset[1:]:
+                keep = pc.or_(keep, pc.starts_with(t.column("code"), c))
+            return t.filter(pc.fill_null(keep, False))
+        # the code set first, then the area: both "outside the study area" and the events lost to a missing sex or age
+        # are the field's own (they had counted every code of the dataset, and every rare code set read collapsed:
+        # SIM's 31 B58 deaths in Rio Grande do Sul against Brazil's 15,670 deaths of no recorded age or sex, 2026-10-13)
+        if subset:
+            tab = of_subset(tab)
         if area:
             inside = pa.array(config.in_area(tab.column("u").to_numpy()))
             unallocated["outside the study area"] = unallocated.get("outside the study area", 0) + int(
                 pc.sum(tab.filter(pc.invert(inside)).column(weight)).as_py() or 0)
             tab = tab.filter(inside)
-        if subset:
-            keep = pc.starts_with(tab.column("code"), subset[0])
-            for c in subset[1:]:
-                keep = pc.or_(keep, pc.starts_with(tab.column("code"), c))
-            tab = tab.filter(pc.fill_null(keep, False))
         # the codes are few and the rows many: decide once per distinct code, then index
         enc = pc.dictionary_encode(tab.column("code").combine_chunks() if block == "*" else
                                    pc.utf8_slice_codeunits(tab.column("code").combine_chunks(), 0, width))
@@ -562,7 +569,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         absent = "code not in ICD-10 tree" if structure == "ICD10" else f"code not in the {structure} tree"
         unallocated[absent] = unallocated.get(absent, 0) + int(tab.column(weight).to_numpy()[other].sum())
         in_tree.append(float(tab.column(weight).to_numpy()[~other].sum()))
-        for r in ec.unallocated.to_pylist():
+        lost_rows = of_subset(ec.unallocated) if subset and "code" in ec.unallocated.column_names else ec.unallocated
+        for r in lost_rows.to_pylist():
             if block == "*" or _chapter(str(r["code"] or "")[:width], parent_of) == block:
                 unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
         if grain == "month":
@@ -618,6 +626,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
            **({} if source == "events" and not {"classifier", "support"} & set(source_args) and structure == "ICD10" else
               {"source": source, **source_args, **({} if structure == "ICD10" else {"structure": structure})}),
            **({} if grain == "year" else {"grain": grain}),
+           **({"cells": "collapsed" if no_cells else "sex-age"} if subset else {}),
            **({"codes": list(subset)} if subset else {}),
            **({"admissible": 2} if not group_cells.all() or never else {}),
            **({} if group_outer is None else {"geography": geography})}

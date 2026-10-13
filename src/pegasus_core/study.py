@@ -1929,7 +1929,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 if not path.exists():
                     store.put_table("study_table", key, _expectation_table(sv, names))
                 views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
-                rows_ = _descriptive(it, s, f, label)
+                rows_ = _descriptive(it, s, f, label) + (_race_rates(it, s, f, label) if not name else [])
+                if not name and (not it.source or (it.source or {}).get("codes")):
+                    shares = _allocation(it, list(it.years))
+                    for r in rows_:
+                        if r.get("year") in shares and r["level"] == _whole()[0]:
+                            r["allocated_share"] = shares[r["year"]]
                 desc.extend(rows_ + _apc(rows_))
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
@@ -1942,7 +1947,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
                     series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu)
-                    figs.append(_series_figure(out, sv, f, label, it))
+                    figs.append(_series_figure(out, sv, f, label, it, session=s))
                     try:
                         d = s.expectations.model(f.block).data
                         expo = dict(zip(np.asarray(d.places).tolist(), d.N.sum(axis=(1, 2)).tolist(), strict=True))
@@ -1967,6 +1972,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
     _institution_facts(rows, log)
+    _institution_explains(rows)
     lap("institutions")
     persons = _persons(decl, scope, log) if decl.choice("persons") else []
     lap("persons")
@@ -2137,12 +2143,29 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
             if M <= 0:
                 out.append({**base, "answer": "not testable: no expected events at the locus"})
                 continue
+            if support == "residence" and comp != "step":
+                # the expectation of the window scaled by the change in the share of the field's events placed at all
+                # (`_allocation`): a recording change, not the place's events, had read as the hypothesis
+                shares = _allocation(it, sorted(set(before) | set(years)))
+                was = [shares[y] for y in before if y in shares]
+                now = [shares[y] for y in years if y in shares]
+                if was and now and min(was) > 0:
+                    k = float(np.mean(now)) / float(np.mean(was))
+                    base = {**base, "allocated_before": float(np.mean(was)), "allocated_window": float(np.mean(now))}
+                    M, V = M * k, V * k * k
             size = M ** 2 / max(V - M, 1e-9)                      # the sum's NB by moments (Poisson when V = M)
             pval = float(stats.nbinom.sf(Y - 1, size, size / (size + M))) if V > M * 1.0001 else                 float(stats.poisson.sf(Y - 1, M))
             lo = stats.chi2.ppf(0.025, 2 * Y) / 2 / M if Y > 0 else 0.0
             hi = stats.chi2.ppf(0.975, 2 * Y + 2) / 2 / M
             out.append({**base, "observed": Y, "expected": M, "effect": Y / M, "effect_unit": "rate ratio",
                         "low": float(lo), "high": float(hi), "p": pval, "answer": "tested"})
+    seen, kept = set(), []
+    for r in out:                          # a source read under several readers says "not testable" once
+        k = (r["hypothesis"], r["source"], r["support"], r["field_reader"], r.get("answer") if r.get("p") is None else id(r))
+        if k not in seen:
+            seen.add(k)
+            kept.append(r)
+    out = kept
     # each hypothesis is its own family (its own budget, ARCHITECTURE §7.7): Holm over the sources that test it
     for hyp in {r["hypothesis"] for r in out}:
         tested = sorted((r for r in out if r["hypothesis"] == hyp and r.get("p") is not None), key=lambda r: r["p"])
@@ -2166,6 +2189,129 @@ def _expectation_table(sv, names: dict) -> pa.Table:
             .append_column("state", pa.array([(names.get(c) or {}).get("uf_sigla") for c in u]))
 
 
+#: the population account's race slices by the label a source gives its race codes (labels, never code numbers: SIH's
+#: 03 is parda and 04 amarela, SIM's, SINAN's and SINASC's the reverse)
+ACCOUNT_RACE = {"branca": "branca", "preta": "preta", "amarela": "amarela", "parda": "parda", "indigena": "indigena"}
+
+
+def _race_rates(it: Item, s, f, label: str) -> list[dict]:
+    """A person-year field's standardised ratio by race, with its exact Poisson interval: each race's events (the
+    subject's declared race, `gateway._strata`; each code mapped to the population account's race slice by its label,
+    never its number) against those expected of its population at the field's own age-sex rates (indirect
+    standardisation, the rates of each year's cells over every race): the tensor's race slices (tools.RACE_POPULATION)
+    in the model's cells. A crude rate per all-age person-years of a race confounds race with age (P37.1's newborn
+    admissions over each race's whole population, the first reading, 2026-10-13); the ratio does not. Fields rated per
+    other events (the agravos: a birth's race is the mother's), and fields read collapsed (no age-sex cells), have none.
+    Events of no recorded race are in no race's ratio."""
+    import unicodedata
+
+    from scipy.stats import chi2
+
+    from . import monolith, tools
+
+    d = s.expectations.model(f.block).data
+    if d.n is not None or str(d.population).startswith("events:") or (it.source or {}).get("population")             or d.key.get("collapse"):
+        return []
+    column = gateway._strata(it.dataset, it.event).get("race")
+    if not column:
+        return []
+    leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
+    sel_e = np.isin(d.e, leaves)
+    if np.unique(d.g[sel_e]).size <= 1:
+        return []
+    try:
+        y, _, values = s.by_composition(f.node, column)
+        import pegasus_data as pg
+
+        labels = pg.levels(it.dataset, column, [v for v in values if v not in ("not recorded", "value missing")],
+                           root=config.data_root())
+    except Exception:  # noqa: BLE001 - a field whose race cannot be read has no race ratios; its shares say why
+        return []
+
+    def plain(x):
+        return unicodedata.normalize("NFKD", str(x)).encode("ascii", "ignore").decode().strip().lower()
+    U, T, G = d.N.shape
+    nB = G // 2
+    edges = gateway.age_edges(d.population, it.dataset, it.event)
+    if len(edges) != nB:
+        return []
+    # the field's rate in each year and age-sex cell, over every race (the place's events summed)
+    yg = np.zeros((U, T, G))
+    np.add.at(yg, (d.u[sel_e], d.t[sel_e], d.g[sel_e]), d.y[sel_e])
+    N = d.N.astype(float)
+    rate = np.divide(yg.sum(0), N.sum(0), out=np.zeros((T, G)), where=N.sum(0) > 0)          # [T, G]
+    years = [int(x) for x in np.asarray(d.years)]
+    index = {int(p_): i for i, p_ in enumerate(np.asarray(d.places))}
+    state = np.asarray(d.places) // 10000
+    races = {k: ACCOUNT_RACE.get(plain(labels.get(v, ""))) for k, v in enumerate(values)}
+    races = {k: r for k, r in races.items() if r}
+    # what the source says of its race column (pegasus_data's role note: SIH's code 04), on every row it makes
+    note = next((r.get("note") for r in gateway.roles(it.dataset) if r.get("column") == column), None)
+    expected = {}
+    for k, race in races.items():
+        tab = gateway._tensor_population(years, tools.RACE_POPULATION, race)
+        u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
+        t = np.searchsorted(np.asarray(years), tab.column("year").to_numpy())
+        g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
+        ok = (u >= 0) & (t < len(years)) & (g >= 0) & (g < G)
+        expected[k] = np.zeros((U, T))
+        np.add.at(expected[k], (u[ok], t[ok]), tab.column("n").to_numpy()[ok] * rate[t[ok], g[ok]])
+    out = []
+    for k, race in races.items():
+        v = values[k]
+        for ti, year in enumerate(years):
+            for level, unit, sel in [(*_whole(), np.ones(U, bool))] +                     [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
+                # the expectation of the events whose race is recorded: each race's share of the population's expected
+                # events times them (the unrecorded had lowered every race's ratio alike)
+                recorded = float(sum(y[sel, ti, j].sum() for j in races))
+                total_ex = float(sum(expected[j][sel, ti].sum() for j in races))
+                ev = float(y[sel, ti, k].sum())
+                ex = float(expected[k][sel, ti].sum()) * (recorded / total_ex if total_ex > 0 else 0.0)
+                if ex <= 0:
+                    continue
+                lo = chi2.ppf(0.025, 2 * ev) / 2 if ev > 0 else 0.0
+                hi = chi2.ppf(0.975, 2 * ev + 2) / 2
+                out.append({"field": f.id, "label": f"{label} — race: {labels.get(v, v)}", "dataset": it.dataset,
+                            "level": level, "unit": unit, "year": year, "events": ev, "population": ex,
+                            "per": f"standardised ratio, race {race} (age-sex indirect, population account)",
+                            "rate": ev / ex, "rate_low": lo / ex, "rate_high": hi / ex,
+                            "crude_per_100k": None, "standardised_per_100k": None,
+                            **({"note": note} if note else {})})
+    return out
+
+
+def _allocation(it: Item, years: list[int]) -> dict[int, float]:
+    """Each year's share of the field's events, nationally, that its counts can place (a residence, a sex, an age): the
+    rest are unallocated and in no rate. A rate series whose share moves reads a recording change: SIA-PA's toxoplasma
+    serology by residence rose 65-fold in Rio Grande do Sul over 2014-2023 while the tests billed stayed near five million
+    a year, its consolidated production (no patient, no residence) giving way to individual records: 0.15 % of the
+    tests placed in 2014, 9.7 % in 2023 (2026-10-13). The field's own codes for a code set."""
+    import pyarrow.compute as pc
+
+    src = it.source or {}
+    codes = list(src.get("codes") or [])
+    out = {}
+    for y in years:
+        try:
+            ec = gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"), cell=False,
+                                      codes=tuple(codes) if it.extract else ())
+        except Exception:  # noqa: BLE001 - a year that cannot be counted has no share
+            continue
+        tabs = [ec.counts, ec.unallocated]
+        if codes:
+            def mine(t):
+                hit = pc.starts_with(t.column("code"), codes[0])
+                for c in codes[1:]:
+                    hit = pc.or_(hit, pc.starts_with(t.column("code"), c))
+                return t.filter(pc.fill_null(hit, False))
+            tabs = [mine(t) if "code" in t.column_names else t for t in tabs]
+        placed = float(pc.sum(tabs[0].column("y")).as_py() or 0)
+        lost = float(pc.sum(tabs[1].column("y")).as_py() or 0) if tabs[1].num_rows else 0.0
+        if placed + lost > 0:
+            out[int(y)] = placed / (placed + lost)
+    return out
+
+
 def _apc(rows: list[dict]) -> list[dict]:
     """Each series' annual percent change (the descriptive's rows of one field, level, unit and denominator over the
     years): a Poisson regression of the events on the year with the denominator as offset, the slope's interval
@@ -2182,8 +2328,8 @@ def _apc(rows: list[dict]) -> list[dict]:
         t = np.array([float(r["year"]) for r in rs])
         y = np.array([float(r["events"]) for r in rs])
         n = np.array([float(r["population"]) for r in rs])
-        if len(rs) < 3 or y.sum() <= 0 or (n <= 0).any():
-            continue
+        if len(rs) < 3 or int((y > 0).sum()) < 3 or (n <= 0).any():
+            continue                       # a slope needs events in three years at least (one event read 9e16 %/year)
         x = t - t.mean()
         b0, b1 = np.log(y.sum() / n.sum()), 0.0
         for _ in range(50):                                   # Newton on the Poisson log-likelihood
@@ -2253,7 +2399,7 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
 
     for t in range(T):
         out.append(row(*_whole(), t, y[:, t].sum(0), N[:, t].sum(0)))
-        for st in np.unique(state):
+        for st in _states_besides_whole(state):
             sel_u = state == st
             out.append(row("state", str(int(st)), t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
     if not ratio and _birth_related(it, d):
@@ -2270,7 +2416,7 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
                                        "rate_high": r["rate_high"] / scale * 1e3} if pop else {})}
         for t in range(T):
             out.append(per_births(*_whole(), t, np.ones(U, bool)))
-            for st in np.unique(state):
+            for st in _states_besides_whole(state):
                 out.append(per_births("state", str(int(st)), t, state == st))
     return out
 
@@ -2301,6 +2447,14 @@ def _births(d) -> np.ndarray:
     return B
 
 
+def _states_besides_whole(state: np.ndarray) -> list:
+    """The states whose rows the descriptive tables write beside the whole: none when the area is one state (its rows
+    would repeat the area's)."""
+    area = config.study_area()
+    states = list(np.unique(state))
+    return [] if area is not None and len(states) == 1 and set(area) == {int(states[0])} else states
+
+
 def _whole() -> tuple[str, str]:
     """The level and unit of the study's whole: Brazil's, or its declared area's (`config.study_area`). An area study's
     total was written as "national, BR", the same numbers as its state's rows: the area labelled as Brazil (2026-10-12)."""
@@ -2315,7 +2469,10 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
     from scipy.stats import beta
 
     d = s.expectations.model(f.block).data
-    if d.n is not None:
+    # the cells are the subject's sex and age only for a person-year field read whole: a field read collapsed holds every
+    # event in its first cell, and one rated per births in the births' cells (the newborn's), so gestational cases read
+    # as 100 % male at age 0 (the review of the RS slice, 2026-10-13)
+    if d.n is not None or d.key.get("collapse") or str(d.population).startswith("events:"):
         return []
     G = d.N.shape[2]
     nB = G // 2
@@ -2326,6 +2483,8 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
         return []
     leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
     sel = np.isin(d.e, leaves)
+    if np.unique(d.g[sel]).size <= 1:
+        return []                          # one cell holds every event: no sex or age is recorded in them
     yg = np.zeros(d.N.shape)
     np.add.at(yg, (d.u[sel], d.t[sel], d.g[sel]), d.y[sel])
     by_sex = yg.reshape(*yg.shape[:2], 2, nB).sum(3)       # [U, T, 2]: sex 1, 2
@@ -2338,7 +2497,7 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
                                      ("age band", "Faixa etária (anos)", by_age, [(b, b) for b in bands])):
         for t, year in enumerate(np.asarray(d.years)):
             for level, unit, rows_u in [(*_whole(), np.ones(len(state), bool))] + \
-                    [("state", str(int(st)), state == st) for st in np.unique(state)]:
+                    [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
                 obs = arr[rows_u, t].sum(0)
                 tot = float(obs.sum())
                 if tot <= 0:
@@ -2388,7 +2547,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
         shown = {v: (vl[str(v)] if str(v) in vl else (str(v) if str(v) in ("not recorded", "value missing")
                                                        else f"{v} (undecoded)")) for v in values}
         for t, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     [("state", str(int(st)), state == st) for st in np.unique(state)]:
+            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
                 obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
                 # each value's share of the field's events, with its exact (Clopper–Pearson) interval: a case mix is
                 # described by proportions, and the table gave counts against a model's expectation only (2026-10-12)
@@ -2637,6 +2796,27 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     return out
 
 
+def _institution_explains(rows: list[dict]) -> None:
+    """A finding of a source at a place and period where an establishment of that source stepped up (an institution
+    finding: a unit that began notifying, a ward that opened) is read as recording, not as the events: its class
+    becomes "system", the institution named in its reason (São Leopoldo's health secretariat went from 0 notifications
+    in 2021 to 81 in 2022, and the region's excess, schooling and autochthony findings there read as signals, the RS
+    slice's review, 2026-10-13). Above-expectation findings only; the institution finding itself keeps its class."""
+    steps = [r for r in rows if str(r.get("question")) == "institution" and r.get("first_year")]
+    for r in rows:
+        if str(r.get("question")) == "institution" or r.get("class") != "signal" or (r.get("ratio") or 0) <= 1:
+            continue
+        mine = set(r.get("_places") or [])
+        for st in steps:
+            if (st["dataset"] == r["dataset"] and mine & set(st.get("_places") or [])
+                    and int(st["first_year"]) <= int(r.get("last_year") or 0)
+                    and int(r.get("first_year") or 0) <= int(st.get("last_year") or st["first_year"])):
+                r["class_reason"] = (f"an establishment stepped up there in {st['first_year']} (institution finding "
+                                     f"{st['id']}): recording, not the events; was signal ({r.get('class_reason')})")
+                r["class"] = "system"
+                break
+
+
 def _institution_facts(rows: list[dict], log) -> None:
     """A finding concentrated in an establishment is an institutional finding, read with the establishment's facts
     (ARCHITECTURE §9.1, BACKLOG 7.1): each institution's CNES registration at the finding's first and last year (name,
@@ -2788,7 +2968,7 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     for t in range(len(d.years)):
         at = t_of == t
         out.append(row(*_whole(), t, at))
-        for st in np.unique(state):
+        for st in _states_besides_whole(state):
             out.append(row("state", str(int(st)), t, at & (state == st)))
     return out
 
@@ -2885,8 +3065,12 @@ def _figure_name(it: Item, f, kind: str) -> str:
     return f"{_slug(f'{it.dataset}_{codes}' if codes else it.dataset)}_{hashlib.sha1(f.id.encode()).hexdigest()[:8]}_{kind}.png"
 
 
-def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
-    """The field's national series, observed against expected (B1) with the expected's 90 % band."""
+def _series_figure(out: Path, sv, f, label: str, it: Item, session=None) -> str | None:
+    """The field's national series: the observed events with their exact Poisson 95 % interval, and what was expected
+    of the later years from the earlier ones (the prospective tier, BP: fitted on the years up to the item's held-out
+    later years, `Item.confirm_last`, and extrapolated), with its 90 % band. B1, fitted on every year with each year's
+    effect, reproduces the national totals by construction: drawn as "expected", it tracked the observations 1:1 and
+    tested nothing (author, 2026-10-13). A series too short to hold years out is drawn observed only, and says so."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -2894,17 +3078,32 @@ def _series_figure(out: Path, sv, f, label: str, it: Item) -> str | None:
     from scipy import stats
 
     years = np.asarray(sv.years)
-    obs, mu = sv.y.sum(0), sv.mu.sum(0)
-    var = (sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)).sum(0)
-    z = stats.norm.ppf(0.95)
+    obs = sv.y.sum(0)
+    lo = np.where(obs > 0, stats.chi2.ppf(0.025, 2 * obs) / 2, 0.0)
+    hi = stats.chi2.ppf(0.975, 2 * obs + 2) / 2
     figs = out / "figures"
     figs.mkdir(exist_ok=True)
     name = _figure_name(it, f, "series")
     fig, ax = plt.subplots(figsize=(7, 3.2), dpi=110)
-    ax.fill_between(years, np.maximum(mu - z * np.sqrt(var), 0), mu + z * np.sqrt(var), alpha=0.25, label="expected, 90 %")
-    ax.plot(years, mu, lw=1.5, label="expected")
-    ax.plot(years, obs, "o-", lw=1.5, label="observed")
-    ax.set_title(f"{label} — {it.dataset}", fontsize=10)
+    note = ""
+    if session is not None and it.confirm_last:
+        try:
+            bp = session.expectations.prospective(f.id.split(":")[-1] if f.id.split(":")[-1] in
+                                                  session.expectations.registry.level else f.node, it.confirm_last)
+            by = np.asarray(bp.years)
+            mu = bp.mu.sum(0)
+            var = (bp.mu + np.where(np.isfinite(bp.phi), bp.mu ** 2 / np.where(np.isfinite(bp.phi), bp.phi, 1.0), 0.0)).sum(0)
+            z = stats.norm.ppf(0.95)
+            ax.fill_between(by, np.maximum(mu - z * np.sqrt(var), 0), mu + z * np.sqrt(var), alpha=0.25,
+                            label=f"expected from {int(years[0])}-{it.confirm_last}, 90 %")
+            ax.plot(by, mu, lw=1.5, label="expected (prospective)")
+            ax.axvline(it.confirm_last + 0.5, color="grey", lw=0.8, ls=":")
+        except Exception as exc:  # noqa: BLE001 - a field with no prospective tier (a measure, a share): observed only
+            note = f"no prospective expectation: {type(exc).__name__}"
+    else:
+        note = "too few years to hold any out: observed only"
+    ax.errorbar(years, obs, yerr=[obs - lo, hi - obs], fmt="o-", lw=1.5, capsize=2, label="observed, exact 95 %")
+    ax.set_title(f"{label} — {it.dataset}" + (f"\n({note})" if note else ""), fontsize=9)
     ax.set_ylabel("events")
     ax.legend(fontsize=8, frameon=False)
     fig.tight_layout()
@@ -3214,7 +3413,11 @@ def _story_html(k: int, rows: list[dict], e) -> str:
     span = f"{min(years)}–{max(years)}" if years else ""
     items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
                     + (f" in {e(r['groups'])}" if r.get("groups") else "")
-                    + _direction(r) + f", effect {_fmt(r['effect'])} {e(str(r['effect_unit']))}, q {_fmt(r['q'])}"
+                    + _direction(r) + (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected, "
+                                       f"O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]"
+                                       if r.get("ratio") is not None else
+                                       f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} (the method's statistic)")
+                    + f", q {_fmt(r['q'])}"
                     + (", corroborated" if r.get("corroborated") else "")
                     + (f" (method not calibrated: {e(r['reliability'])})" if r.get("uncalibrated") else "") + "</li>"
                     for r in rows[:6])
@@ -3276,6 +3479,8 @@ COLUMNS = {
     "year": "the year of the events (the event type's own date)",
     "events": "the field's events in the row's geography and year",
     "population": "the denominator: person-years of residents (POPSVS; with the account's age 0 for a newborn field), "
+                  "or, for a standardised ratio by race, the events expected of that race's population at the field's "
+                  "own age-sex rates; "
                   "or the events named in per",
     "per": "the denominator's unit: 100,000 person-years, 1,000 of the named events (live births: SINASC-DN), share, "
            "days, median",
@@ -3285,18 +3490,24 @@ COLUMNS = {
     "crude_per_100k": "crude rate per 100,000 person-years (none for a rate per other events)",
     "standardised_per_100k": "directly age-sex-standardised rate per 100,000, standard the period's national structure",
     "p90": "90th percentile of an interval's days",
+    "allocated_share": "the year's share of the field's events, nationally, that carry the place, sex and age a rate needs; "
+                       "the rest are in no rate, and a share that moves makes the series a recording change (SIA's "
+                       "consolidated production names no residence)",
     "id": "the finding's stable id in the register",
     "component": "the kind of departure (transient, level, trend, cluster, share, group, divergence)",
     "question": "the question that found it (excess, step, trend, cluster, propagation, share, institution, group, "
                 "divergence)",
-    "tier": "the expectation it departs from (B0 national, B1 the place's own model, cohort)",
+    "tier": "the expectation it departs from: B0 national rates without place effects; B1 the place's own model fitted on "
+            "the same years (a local departure only); BP/BPA prospective, fitted on earlier years and extrapolated; cohort",
     "places": "IBGE municipality codes of the finding's locus (first 20)",
     "place_names": "the locus's municipality names",
     "n_places": "the number of municipalities in the locus",
     "groups": "the finding's population group (column: label (code)), if any",
     "first_year": "first year of the locus",
     "last_year": "last year of the locus",
-    "effect": "the method's own effect statistic, in effect_unit (a cluster's level, a step, a rate ratio)",
+    "effect": "the method's own statistic, in effect_unit: for a scan (cluster, excess level) the ratio of its scanned "
+              "cells against the expectation raised by the minimum effect it tests, not the locus's observed over "
+              "expected; read `ratio` and its interval for the size of the departure",
     "effect_unit": "the unit of effect",
     "interval_low": "lower 95 % bound of effect where the method gives one (see ratio_low otherwise)",
     "interval_high": "upper 95 % bound of effect where the method gives one",
@@ -3315,14 +3526,16 @@ COLUMNS = {
     "locus_observed": "a group finding's locus: all the field's events there",
     "locus_expected": "a group finding's locus: their expected count",
     "observed": "the field's events at the finding's locus (places and years)",
-    "expected": "the expected count there under the model (tier B1)",
+    "expected": "the expected count there under the model, tier B1: fitted on the same years with each year's own effect, "
+                "so it reads a departure of the place from its own level and from the shared course, never a rise every "
+                "place shares (a national or statewide one is absorbed: those are read prospectively, hypotheses and series)",
     "excess": "observed minus expected",
     "ratio": "observed over expected at the locus (a standardised ratio)",
     "ratio_low": "lower 95 % bound of ratio: exact Poisson, expected fixed (Breslow and Day 1987)",
     "ratio_high": "upper 95 % bound of ratio, as ratio_low",
     "related": "other fields departing at the same locus, with their ratio and interval",
     "context": "contexts (water, sanitation, ...) in which the locus stands out",
-    "story": "the finding's account in words",
+    "story": "the number of the story (findings of one place and period, read together in the report) it belongs to",
     "by": "the column the field is split by",
     "by_name": "that column's name in the source's dictionary",
     "value": "the column's code as recorded",
