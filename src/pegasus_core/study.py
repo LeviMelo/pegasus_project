@@ -1851,7 +1851,12 @@ def _plan(it: Item, others: list | None = None):
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
                                                               **it.readers)],
                        relations=False, triage=True, report=None, questions=it.questions,
-                       extra={"corroborators": others or [], **({"confirm_last": it.confirm_last} if it.confirm_last else {})})
+                       # the held-out later years read prospectively as well: their events against fits on the years
+                       # before (BPA for an outbreak), so an event of the later years is discovered, not only replicated;
+                       # read retrospectively, B1 learns a statewide one as normal (Porto Alegre's 2024 floods were found
+                       # by no discovery, the review of the RS slices, 2026-10-13)
+                       extra={"corroborators": others or [],
+                              **({"confirm_last": it.confirm_last, "prospective": it.confirm_last} if it.confirm_last else {})})
 
 
 def _session(it: Item, source: dict | None = None):
@@ -1930,8 +1935,18 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     store.put_table("study_table", key, _expectation_table(sv, names))
                 views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
                 rows_ = _descriptive(it, s, f, label) + (_race_rates(it, s, f, label) if not name else [])
-                if not name and (not it.source or (it.source or {}).get("codes")):
-                    shares = _allocation(it, list(it.years))
+                # a year the source says is not final yet (pegasus_data's ``final_after_years``: SINAN's notifications
+                # are closed over three years; RS's 2023 congenital records had no closing date, the review, 2026-10-13)
+                final = ((gateway.event_type(it.dataset, it.event) or {}).get("source_notes") or {}).get("final_after_years")
+                if final:
+                    for r in rows_:
+                        if r.get("year") is not None:
+                            r["provisional"] = int(r["year"]) > int(time.strftime("%Y")) - int(final)
+                # the share placed, for the counts and for each other place they are read at: a place of infection
+                # or of care left blank for 35-44 % of gestational cases makes its rates lower bounds (the review)
+                support = (src or {}).get("support") if name and str(name).startswith("support:") else None
+                if (not name or support) and (not it.source or (it.source or {}).get("codes")):
+                    shares = _allocation(it, list(it.years), support=support)
                     for r in rows_:
                         if r.get("year") in shares and r["level"] == _whole()[0]:
                             r["allocated_share"] = shares[r["year"]]
@@ -1946,7 +1961,11 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                             if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
                             and list(x.provenance.get("years") or []) == list(it.years))
                 if not name:
-                    series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu)
+                    try:                   # B0 beside B1: a finding's O/E is against its own tier's expectation
+                        mu0 = s.surprise(node, "B0").mu
+                    except Exception:  # noqa: BLE001 - a field with no B0: its B0 findings' O/E are said missing
+                        mu0 = None
+                    series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu, mu0)
                     figs.append(_series_figure(out, sv, f, label, it, session=s))
                     try:
                         d = s.expectations.model(f.block).data
@@ -2035,6 +2054,15 @@ def _when(text: Any) -> list[int]:
     return list(range(first, last + 1))
 
 
+def _when_months(text: Any) -> list[int]:
+    """The months (YYYYMM) a ``when`` written in months covers (``2018-01..2018-06``, ``2024-05``); [] for years."""
+    parts = [x.strip() for x in str(text).split("..")]
+    if not all(len(x) >= 7 and x[4] == "-" for x in parts):
+        return []
+    first, last = int(parts[0][:4]) * 12 + int(parts[0][5:7]) - 1, int(parts[-1][:4]) * 12 + int(parts[-1][5:7]) - 1
+    return [(m // 12) * 100 + m % 12 + 1 for m in range(first, last + 1)]
+
+
 def _hypothesis_readers(scope: Scope):
     """(item, reader, support) for every read item at its residence and, for a field read at the residence by its own
     counts or a code set, at each other place it declares (`fields.support_sources`, the item's codes kept). A ratio or
@@ -2103,11 +2131,35 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
             if str(h.get("when", "")).count("-") >= 2 and "year" in (decl.grain or ["year"]):
                 grain += f"; at the annual grain, {h.get('when')} read as {years[0]}-{years[-1]} whole"
             base["tier"] = grain
+            months = _when_months(h.get("when")) if comp != "step" else []
+            sv = None
+            if months and tier == "BPA":
+                # a window of months read in months: the monthly series of the hypothesis's states, against its
+                # prospective expectation (Porto Alegre's May-July 2024 floods had been read as the whole of 2024);
+                # the states' own monthly fit (`config.study_area`), the national one would cost every place's months
+                saved = os.environ.get("PEGASUS_AREA")
+                states = sorted({(p // 100000 if p > 999999 else p // 10000) for p in places}) if places else []
+                try:
+                    if states and decl.where in (None, "BR"):
+                        os.environ["PEGASUS_AREA"] = ",".join(str(x) for x in states)
+                    sm = _session(it, {**(reader or {}), "grain": "month"})
+                    sv = sm.expectations.prospective(_study_nodes(it, None)[0], before[-1], purpose="alarm")
+                    base["tier"] = (f"tier BPA, monthly (trained on {before[0]}-{before[-1]}), "
+                                    f"{months[0] // 100}-{months[0] % 100:02d}..{months[-1] // 100}-{months[-1] % 100:02d}")
+                except Exception as exc:  # noqa: BLE001 - the annual reading stands, and says why
+                    base["tier"] += f"; the monthly series could not be read ({type(exc).__name__}): annual"
+                    sv = None
+                finally:
+                    if saved is None:
+                        os.environ.pop("PEGASUS_AREA", None)
+                    else:
+                        os.environ["PEGASUS_AREA"] = saved
             try:
-                ss = _session(it, reader)
-                node = _study_nodes(it, None)[0]
-                sv = (ss.expectations.prospective(node, before[-1], purpose="alarm") if tier == "BPA"
-                      else ss.surprise(node, "B1"))
+                if sv is None:
+                    ss = _session(it, reader)
+                    node = _study_nodes(it, None)[0]
+                    sv = (ss.expectations.prospective(node, before[-1], purpose="alarm") if tier == "BPA"
+                          else ss.surprise(node, "B1"))
             except Exception as exc:  # noqa: BLE001 - said in the answer
                 out.append({**base, "answer": f"not read: {type(exc).__name__}: {exc}"})
                 continue
@@ -2126,7 +2178,8 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
                 V = float(var[np.ix_(rows_u, sel_t)].sum())
                 return Y, M, V
 
-            inside = np.isin(yrs, years)
+            monthly = bool(yrs.size) and int(yrs.max()) > 9999
+            inside = np.isin(yrs, months) if monthly else np.isin(yrs, years)
             Y, M, V = window(inside)
             if comp == "step":
                 Yb, Mb, _ = window(yrs < years[0])
@@ -2260,7 +2313,7 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     for k, race in races.items():
         v = values[k]
         for ti, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(U, bool))] +                     [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
+            for level, unit, sel in [(*_whole(), np.ones(U, bool))] +                     _levels_below(state):
                 # the expectation of the events whose race is recorded: each race's share of the population's expected
                 # events times them (the unrecorded had lowered every race's ratio alike)
                 recorded = float(sum(y[sel, ti, j].sum() for j in races))
@@ -2280,7 +2333,7 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     return out
 
 
-def _allocation(it: Item, years: list[int]) -> dict[int, float]:
+def _allocation(it: Item, years: list[int], support: str | None = None) -> dict[int, float]:
     """Each year's share of the field's events, nationally, that its counts can place (a residence, a sex, an age): the
     rest are unallocated and in no rate. A rate series whose share moves reads a recording change: SIA-PA's toxoplasma
     serology by residence rose 65-fold in Rio Grande do Sul over 2014-2023 while the tests billed stayed near five million
@@ -2294,7 +2347,7 @@ def _allocation(it: Item, years: list[int]) -> dict[int, float]:
     for y in years:
         try:
             ec = gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"), cell=False,
-                                      codes=tuple(codes) if it.extract else ())
+                                      codes=tuple(codes) if it.extract else (), support=support)
         except Exception:  # noqa: BLE001 - a year that cannot be counted has no share
             continue
         tabs = [ec.counts, ec.unallocated]
@@ -2319,7 +2372,7 @@ def _apc(rows: list[dict]) -> list[dict]:
     a number with an interval; the folder had the yearly rates only (2026-10-12)."""
     series: dict[tuple, list[dict]] = {}
     for r in rows:
-        if r.get("year") is not None and r.get("population") and r.get("per") not in ("share", "mean per event") \
+        if r.get("year") is not None and not r.get("provisional") and r.get("population") and r.get("per") not in ("share", "mean per event") \
                 and not str(r.get("per", "")).startswith(("days", "median")):
             series.setdefault((r["field"], r["level"], r["unit"], r["per"]), []).append(r)
     out = []
@@ -2399,9 +2452,8 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
 
     for t in range(T):
         out.append(row(*_whole(), t, y[:, t].sum(0), N[:, t].sum(0)))
-        for st in _states_besides_whole(state):
-            sel_u = state == st
-            out.append(row("state", str(int(st)), t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
+        for level, unit, sel_u in _levels_below(state):
+            out.append(row(level, unit, t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
     if not ratio and _birth_related(it, d):
         # a perinatal or pregnancy field's rate is per live births, the convention of infant and maternal mortality
         # (RIPSA C.1, C.3): congenital toxoplasmosis' deaths had been given per 100,000 person-years of everyone
@@ -2416,8 +2468,8 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
                                        "rate_high": r["rate_high"] / scale * 1e3} if pop else {})}
         for t in range(T):
             out.append(per_births(*_whole(), t, np.ones(U, bool)))
-            for st in _states_besides_whole(state):
-                out.append(per_births("state", str(int(st)), t, state == st))
+            for level, unit, sel_u in _levels_below(state):
+                out.append(per_births(level, unit, t, sel_u))
     return out
 
 
@@ -2453,6 +2505,23 @@ def _states_besides_whole(state: np.ndarray) -> list:
     area = config.study_area()
     states = list(np.unique(state))
     return [] if area is not None and len(states) == 1 and set(area) == {int(states[0])} else states
+
+
+#: IBGE's macro-regions, the first digit of a state's code: how Brazil's epidemiology reports between the nation and
+#: its states (a paper's North-to-South gradient had no row of its own)
+REGIONS = {1: "Norte", 2: "Nordeste", 3: "Sudeste", 4: "Sul", 5: "Centro-Oeste"}
+
+
+def _levels_below(state: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
+    """The geographies below the whole a descriptive table writes, each (level, unit, mask over ``state``): the macro-
+    regions when the study spans more than one, then the states (none when the area is one state)."""
+    state = np.asarray(state)
+    region = state // 10
+    out = []
+    if len(np.unique(region)) > 1:
+        out += [("region", f"{int(rg)} {REGIONS.get(int(rg), '')}".strip(), region == rg) for rg in np.unique(region)]
+    out += _levels_below(state)
+    return out
 
 
 def _whole() -> tuple[str, str]:
@@ -2497,7 +2566,7 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
                                      ("age band", "Faixa etária (anos)", by_age, [(b, b) for b in bands])):
         for t, year in enumerate(np.asarray(d.years)):
             for level, unit, rows_u in [(*_whole(), np.ones(len(state), bool))] + \
-                    [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
+                    _levels_below(state):
                 obs = arr[rows_u, t].sum(0)
                 tot = float(obs.sum())
                 if tot <= 0:
@@ -2547,7 +2616,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
         shown = {v: (vl[str(v)] if str(v) in vl else (str(v) if str(v) in ("not recorded", "value missing")
                                                        else f"{v} (undecoded)")) for v in values}
         for t, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]:
+            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     _levels_below(state):
                 obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
                 # each value's share of the field's events, with its exact (Clopper–Pearson) interval: a case mix is
                 # described by proportions, and the table gave counts against a model's expectation only (2026-10-12)
@@ -2577,13 +2646,18 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
             continue
         lo_y, hi_y = int(r["first_year"]), int(r["last_year"] or r["first_year"])
         notes = []
-        for fid, (label, dataset, pl, yrs, y, mu) in series.items():
+        for fid, (label, dataset, pl, yrs, y, mu, mu0) in series.items():
             ui = np.flatnonzero(np.isin(pl, list(places)))
             year_of = yrs // 100 if yrs.max() > 9999 else yrs          # YYYYMM periods at the monthly grain
             ti = np.flatnonzero((year_of >= lo_y) & (year_of <= hi_y))
             if not len(ui) or not len(ti):
                 continue
             o, e_ = float(y[np.ix_(ui, ti)].sum()), float(mu[np.ix_(ui, ti)].sum())
+            if fid == r["field"] and str(r.get("tier")) == "B0":
+                # a B0 finding (a cluster, a level, a group) departs from national rates without place effects: its O/E
+                # is against them; read against B1, a region persistently 13x the national rate read as 1.05, its own
+                # usual level (the review of the RS slice, 2026-10-13)
+                e_ = float(mu0[np.ix_(ui, ti)].sum()) if mu0 is not None else float("nan")
             if fid == r["field"]:
                 # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation. A
                 # group answer's effect is its group's, against the place's own mix: the field's totals beside it read
@@ -2953,7 +3027,8 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
                 quant[year] = {int(r["state"]): r for r in gateway.mark_quantiles(
                     it.dataset, it.event, year, src["mark"], tuple(src["bounds"]), src.get("classifier"),
                     tuple(src.get("missing") or ()), src.get("anchor"), int(src.get("sign", 1)), tuple(codes)).to_pylist()}
-            q = quant[year].get(0 if unit == "BR" else int(unit))
+            # a median per state or Brazil: a region's or a several-state area's is not read (int("43+42") had raised)
+            q = quant[year].get(0 if unit == "BR" else int(unit) if str(unit).isdigit() else None)
             if q is None:
                 return base
             return {**base, "events": float(q["n"]), "per": "days, median" if days else "median",
@@ -2968,8 +3043,8 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     for t in range(len(d.years)):
         at = t_of == t
         out.append(row(*_whole(), t, at))
-        for st in _states_besides_whole(state):
-            out.append(row("state", str(int(st)), t, at & (state == st)))
+        for level, unit, sel_u in _levels_below(state):
+            out.append(row(level, unit, t, at & sel_u))
     return out
 
 
@@ -3184,7 +3259,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     signal = [r for r in rows if r.get("class") == "signal"]
     institutional = [r for r in rows if r.get("class") == "facility" or r.get("institution_facts")]
     other = [r for r in rows if r.get("class") not in ("signal", "facility") and not r.get("institution_facts")]
-    rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["effect"])) if r["effect"] and r["effect"] > 0 else 0))
+    rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["ratio"])) if r.get("ratio") and r["ratio"] > 0 else 0))
     stories = _stories(signal)
 
     def table(rs: list[dict], cols: list[tuple[str, str]], cap: int = 40) -> str:
@@ -3422,7 +3497,7 @@ def _story_html(k: int, rows: list[dict], e) -> str:
                     + (f" (method not calibrated: {e(r['reliability'])})" if r.get("uncalibrated") else "") + "</li>"
                     for r in rows[:6])
     excess = sum(max(r.get("excess") or 0.0, 0.0) for r in rows)
-    return (f"<h3>Story {k}: {e(lead.get('place_names') or '')}, {span}</h3><p>{_n(len(rows), 'finding')} in "
+    return (f"<h3>Story {k}: {e(lead.get('place_names') or 'the whole study area')}, {span}</h3><p>{_n(len(rows), 'finding')} in "
             f"{_n(len(fields_), 'field')} from {_n(len(sources), 'source')} ({e(', '.join(sources))})"
             + (f"; {excess:,.0f} events above expectation" if excess else "") + f".</p><ul>{items}</ul>")
 
@@ -3474,8 +3549,9 @@ COLUMNS = {
     "field": "the field's id: dataset, event, classifier and codes or reader, block",
     "label": "the field's name as a reader reads it: event, codes with their labels, reader",
     "dataset": "the source (DATASUS system and series)",
-    "level": "the row's geography: national (Brazil), area (the declared study area) or state",
-    "unit": "the geography's code: BR, the area's IBGE codes joined by +, or the state's two-digit IBGE code",
+    "level": "the row's geography: national (Brazil), area (the declared study area), region (IBGE macro-region) or state",
+    "unit": "the geography's code: BR, the area's IBGE codes joined by +, the region's digit and name, or the state's "
+            "two-digit IBGE code",
     "year": "the year of the events (the event type's own date)",
     "events": "the field's events in the row's geography and year",
     "population": "the denominator: person-years of residents (POPSVS; with the account's age 0 for a newborn field), "
@@ -3490,6 +3566,8 @@ COLUMNS = {
     "crude_per_100k": "crude rate per 100,000 person-years (none for a rate per other events)",
     "standardised_per_100k": "directly age-sex-standardised rate per 100,000, standard the period's national structure",
     "p90": "90th percentile of an interval's days",
+    "provisional": "true for a year the source declares not yet final (its notifications still being investigated "
+                   "and closed): a fall in it may be the year still filling in",
     "allocated_share": "the year's share of the field's events, nationally, that carry the place, sex and age a rate needs; "
                        "the rest are in no rate, and a share that moves makes the series a recording change (SIA's "
                        "consolidated production names no residence)",
@@ -3511,7 +3589,9 @@ COLUMNS = {
     "effect_unit": "the unit of effect",
     "interval_low": "lower 95 % bound of effect where the method gives one (see ratio_low otherwise)",
     "interval_high": "upper 95 % bound of effect where the method gives one",
-    "q": "false-discovery-rate q value in its question family (Benjamini-Hochberg 1995)",
+    "q": "false-discovery-rate q value in its question family (Benjamini-Hochberg 1995); a scan's p comes from a Gumbel "
+         "tail fitted to its null replicates' maxima (200 replicates), so a q far below 1/200 is that tail extrapolated: "
+         "read it as beyond every replicate, not as a precise probability (1e-83 on a cluster, the review, 2026-10-13)",
     "family": "the multiple-testing family q is adjusted in",
     "methods": "the methods the question used",
     "class": "recording class: signal (a change in the events), system (a change in recording), noise",
@@ -3591,6 +3671,9 @@ COLUMNS = {
     "capture.parquet:observed": "persons on at least one list",
     "capture.parquet:years": "the years pooled",
     "hypotheses.parquet:places": "the hypothesis's municipalities (IBGE codes)",
+    "hypotheses.parquet:allocated_before": "the mean share of the field's events placed at a residence in the years before "
+                                           "the window (`allocated_share`); the expectation is scaled by window over before",
+    "hypotheses.parquet:allocated_window": "the mean share of the field's events placed at a residence in the window",
     "hypotheses.parquet:years": "the hypothesis's years",
     "hypotheses.parquet:observed": "the field's events at the hypothesis's places and time",
     "hypotheses.parquet:expected": "their expected count under the model",
@@ -3691,7 +3774,7 @@ def body(folder: str | Path) -> list[dict]:
         # the meaning of the numbers, not their presence (2026-10-12): an area's total is not Brazil's; a notified
         # condition with a confirmed-case event is rated on its cases; a pregnancy or perinatal field per live births
         whole = "national" if decl.where in (None, "BR") else "area"
-        wrong = sorted(set(desc["level"]) - {whole, "state"})
+        wrong = sorted(set(desc["level"]) - {whole, "region", "state"})
         part("descriptive: geography", not wrong, f"the whole at level {whole}" + (f"; also {wrong}" if wrong else ""))
         cased = sorted({x["dataset"] for x in read if x.get("event") == "case"})
         uncased = sorted({x["dataset"] for x in read if not x.get("source") and any(

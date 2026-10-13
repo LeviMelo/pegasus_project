@@ -70,10 +70,16 @@ def records(lst: dict, year: int, deaths: bool) -> pa.Table | None:
     from pegasus_data.linkage.roles import load_roles
 
     where = lst["where"]
-    if deaths and not lst["deaths"]:
-        if not lst.get("death"):
+    if deaths:
+        # a list's declared death, a list of certificates included: its deaths are the condition's (P37.1 as the
+        # underlying cause), as SINAN's are "óbito pelo agravo" and SIH's an admission ending in death with it as its
+        # principal diagnosis; read as any certificate naming it, the three lists counted three different deaths (the
+        # semantic review, 2026-10-13). A list that is not of deaths and declares none cannot list them.
+        if not lst["deaths"] and not lst.get("death"):
             return None
-        where = f"({where}) AND ({lst['death']})" if where else lst["death"]
+        if lst.get("death"):
+            death = " ".join(str(lst["death"]).split())
+            where = f"({where}) AND ({death})" if where else death
     side = replace(Side(lst["dataset"]), where=where)
     declared = load_roles()[lst["dataset"]].roles
     home = next((r for r in declared if r.endswith(".residence")), None)

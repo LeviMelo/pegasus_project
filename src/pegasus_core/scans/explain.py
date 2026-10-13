@@ -391,12 +391,19 @@ def triage(estimand: str, rows: np.ndarray, span: list[int] | None, direction: i
             return Triage(NOISE, "the groups' log SIR spreads little more than the minimum effect", info, TESTED)
         return Triage(SIGNAL, "age-sex pattern differs from the nation's in a specific category", info)
 
-    # 6. noise: few events above or below the expectation, or an effect near the minimum with few events
+    # 6. noise: the locus's events cannot be told from its expectation, the exact Poisson interval of their ratio
+    #    holding 1 (the expectation fixed). A count of events was the rule (fewer than 10 above it), and it called noise
+    #    4 pregnancy admissions with toxoplasmosis against 0.20 expected in Santa Maria's 2018 outbreak, a departure no
+    #    chance gives a rare condition (the review of the RS slice, 2026-10-13)
     if observed is not None and expected is not None:
         info["observed"], info["expected"] = round(observed, 1), round(expected, 1)
-        rr = observed / max(expected, 1e-9)
-        if abs(observed - expected) < MIN_EXCESS or (observed < 30 and 1 / (THETA * 1.25) < rr < THETA * 1.25):
-            return Triage(NOISE, f"small count: {abs(observed - expected):.0f} events from the expectation", info, TESTED)
+        e = max(expected, 1e-9)
+        lo = (stats.chi2.ppf(0.025, 2 * observed) / 2 if observed > 0 else 0.0) / e
+        hi = stats.chi2.ppf(0.975, 2 * observed + 2) / 2 / e
+        info["ratio_interval"] = [round(float(lo), 3), round(float(hi), 3)]
+        if lo <= 1.0 <= hi:
+            return Triage(NOISE, f"{observed:.0f} events against {expected:.1f} expected: the exact 95 % interval of "
+                                 f"their ratio, [{lo:.2f}, {hi:.2f}], holds 1", info, TESTED)
     elif estimand == "trend_divergence" and ev.y[rows].sum() < 100:
         return Triage(NOISE, f"small count: {ev.y[rows].sum():.0f} events in the place over the period", info, TESTED)
     # 7. one institution: the change is carried by one (or a few) recording facilities whose own behaviour steps
@@ -432,9 +439,14 @@ def share_triage(K: np.ndarray, N: np.ndarray, rows: np.ndarray, span: list[int]
             "log_denominator_change": round(float(ln), 3), "log_denominator_national": round(float(ln_nat), 3),
             "not_read": (["a 'not recorded' level moving opposite"] if M is None else [])
             + (["one institution on the numerator"] if facilities is None or not direction else [])}
-    if abs(kw - expected) * max(win.sum(), 1) < MIN_EXCESS:
-        return Triage(NOISE, f"small count: {abs(kw - expected) * max(win.sum(), 1):.0f} numerator events from the base "
-                             "share's expectation", info, TESTED)
+    # noise when the window's numerator events cannot be told from the base share's expectation (exact Poisson
+    # interval of their ratio holding 1), not below a count of events (the counts' rule, above)
+    o_ev, e_ev = kw * max(win.sum(), 1), max(expected * max(win.sum(), 1), 1e-9)
+    lo_r = (stats.chi2.ppf(0.025, 2 * o_ev) / 2 if o_ev > 0 else 0.0) / e_ev
+    hi_r = stats.chi2.ppf(0.975, 2 * o_ev + 2) / 2 / e_ev
+    if lo_r <= 1.0 <= hi_r:
+        return Triage(NOISE, f"{o_ev:.0f} numerator events against {e_ev:.1f} from the base share: the exact 95 % "
+                             f"interval of their ratio, [{lo_r:.2f}, {hi_r:.2f}], holds 1", info, TESTED)
     if M is not None:
         d_k, _ = _moves(K, rows, win, base)
         d_m, z_m = _moves(M, rows, win, base)

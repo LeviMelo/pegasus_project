@@ -392,6 +392,20 @@ outcome's proportion over link draws (Rubin's rules); and the folder's `README.m
 (`study.COLUMNS`) and every field's definition, case status and denominator with their evidence, an undescribed column
 failing the gate.
 
+What a row of numbers must carry so that it cannot mislead (the review of the RS slices, 2026-10-13):
+- every rate row: the year's `allocated_share` of the field's events its counts can place (SIA's serology by
+  residence rose 65-fold as its consolidated production gave way to individual records), and `provisional` where the
+  source declares the year not final; trends (APC) are fitted on final years only;
+- every finding: its locus's observed over expected against its own tier (B0 national rates for clusters and levels,
+  B1 the place's own level), with the exact interval, and "noise" only where that interval holds 1, never below a
+  count of events (4 pregnancy admissions against 0.2 expected were noise);
+- every series figure: the observed with exact intervals and the prospective expectation of the held-out years, never
+  B1 (fitted on the same years, it reproduces the totals by construction);
+- every race row: a standardised ratio (indirect, age-sex, the population account's race slices), codes mapped by
+  label, normalised to the events of recorded race, with the source's note on its race column;
+- every hypothesis: tested against the prospective tier, in months when its window is written in months, its
+  expectation scaled by the change in the share of events placed.
+
 ### 3.5 The report
 
 `report.html`, static, offline, generated from the folder's tables and the declarations:

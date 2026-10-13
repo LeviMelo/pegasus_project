@@ -865,7 +865,7 @@ def _date_sql(column: str) -> str:
 
 
 def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                   places: pa.Array | None = None, code_list: bool = False) -> EventCounts:
+                   places: pa.Array | None = None, code_list: bool = False, support: str | None = None) -> EventCounts:
     """Events of one publication year by (u, year, month of the event's date, sex, age, code).
     The month and year come from the event's date (`_when`), so a file's events may fall in the
     year before it (onset in December, notified in January); a missing or unparsable date is
@@ -874,6 +874,12 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     category it carries (as `code_list_counts`), and events carrying none are not counted."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     strata = _strata(dataset, event)
+    if support:
+        # another place the events are recorded at, by month as `event_counts` reads it by year (a hypothesis of months
+        # at the place of care or of infection had fallen back to the year, 2026-10-13)
+        if support not in {r["column"] for r in roles(dataset) if r.get("kind") == "place"}:
+            raise ValueError(f"{dataset}: {support!r} is no place column of its roles")
+        strata = {**strata, "residence": support, "place": support}
     spec_class = classifier
     if spec_class is None:
         import pegasus_data as pg
@@ -884,7 +890,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     when = _when(dataset)
     key = {"what": "monthly_counts", "code": config.code_key(monthly_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "classifier": spec_class,
            "when": when, "data": config.data_version(), "dates": 3, **_df_key(dataset, year),
-           **({"code_list": True} if code_list else {})}
+           **({"code_list": True} if code_list else {}), **({"support": support} if support else {})}
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
