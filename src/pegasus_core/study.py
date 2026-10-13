@@ -2446,53 +2446,58 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
     return out
 
 
-def _relation_name(f: tuple) -> str:
-    """A related field as the relations table names it: dataset, node, and a code set's codes."""
-    return f"{f[0]}:{f[2]}" + (f"[{','.join(f[4]['codes'])}]" if f[4] else "")
-
-
 def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
-    """Relations among the study's primary fields (ARCHITECTURE §8.1, acceptance item 4; BACKLOG 3.5 the estimator):
-    every pair of read items with a field of the default reader (its nodes, or the event type's own) is compared on the
-    years both hold (at least four) by `tools.compare`, the joint model over graph bands and lags; every row kept,
-    ``reported`` marking those at q."""
+    """Relations among the topic's fields (ARCHITECTURE §8.1, acceptance item 4; BACKLOG 3.5 the estimator): each read
+    event type's own field and each code set of the topic's own codes (its admissions, its deaths), so whether the
+    systems move together is asked. They are estimated jointly (`tools.relate`: one map over graph bands and lags, one
+    BH) over each window of years at least two of them share: the years every field holds, and the longest span two or
+    more hold; pairwise, the national study's code sets made hundreds of separate estimates (2026-10-13). Related codes'
+    fields have their own table; ratios, linked shares and supports are other questions. Every row is kept,
+    ``reported`` marking those at q; a study with none says why."""
     from . import tools
 
-    # the topic's fields: each read event type's own, and each code set of the topic's codes (its admissions, its
-    # deaths), so a paper's question, whether the systems move together, is asked; the code sets had been left out, and
-    # a study of TOXC, SIH and SIM held no pair (2026-10-13). Ratios, linked shares and supports are other questions.
     fields_ = []
-    for it in (i for i in scope.items if i.status == "in"):
+    for it in (i for i in scope.items if i.status == "in" and not i.reason.startswith("related code")):
         src = it.source or {}
         if src and (set(src) - {"codes", "classifier", "structure"} or not src.get("codes")):
             continue
         for node in _study_nodes(it, None):
-            fields_.append((it.dataset, it.event, node, set(it.years), src or None))
+            f = (it.dataset, it.event, node, frozenset(it.years), src or None)
+            if all((g[0], g[2], json.dumps(g[4], sort_keys=True)) != (f[0], f[2], json.dumps(f[4], sort_keys=True))
+                   for g in fields_):
+                fields_.append(f)
+    # the windows: the years every field holds, and the longest span shared by two fields or more
+    windows = []
+    if fields_:
+        windows.append(frozenset.intersection(*(f[3] for f in fields_)))
+        shared = [f[3] for f in fields_ if sum(f[3] <= g[3] for g in fields_) >= 2]
+        if shared:
+            windows.append(max(shared, key=len))
     out = []
-    for (a, b) in ((fields_[i], fields_[j]) for i in range(len(fields_)) for j in range(i + 1, len(fields_))):
-        years = sorted(a[3] & b[3])
-        if len(years) < 4 or (a[0], a[2], json.dumps(a[4], sort_keys=True)) == (b[0], b[2], json.dumps(b[4], sort_keys=True)):
+    for w in dict.fromkeys(w for w in windows if len(w) >= 4):
+        years = sorted(w)
+        members = [f for f in fields_ if w <= f[3]]
+        if len(members) < 2 or len({f[0] for f in members}) < 2:
             continue
-        # an object of the state: a re-run reads it (BACKLOG 1.3), the key the pair, its years, the data and the code
-        key = {"what": "study_relation", "x": list(a[:3]), "y": list(b[:3]), "years": years, "q": decl.q,
-               **({"sources": [a[4], b[4]]} if a[4] or b[4] else {}),
-               "data": config.data_version(), "code": config.code_key(tools.compare)}
+        key = {"what": "study_relations", "fields": [list(f[:3]) + [f[4]] for f in members], "years": years,
+               "q": decl.q, "data": config.data_version(), "code": config.code_key(tools.relate)}
         hit = store.get_table("study_table", key)
         if hit is not None:
             rows = hit.to_pylist()
         else:
             try:
-                rows = config.on_cpu_if_cuda_fails(tools.compare, a[:3], b[:3], years, q=decl.q, sources=[a[4], b[4]])
-            except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
-                log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
+                rows = config.on_cpu_if_cuda_fails(tools.relate, [f[:3] for f in members], years, q=decl.q,
+                                                   sources=[f[4] for f in members], log=log)
+            except Exception as exc:  # noqa: BLE001 - a window that cannot be read is said, the other runs
+                log(f"study: relations {years[0]}-{years[-1]}: {type(exc).__name__}: {exc}")
+                out.append({"pair": None, "reported": False, "years": f"{years[0]}-{years[-1]}",
+                            "note": f"failed: {type(exc).__name__}: {exc}"})
                 continue
-            flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
-            store.put_table("study_table", key, _rows_table(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
-        out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))},
-                 "pair": f"{_relation_name(a)} ~ {_relation_name(b)}",
-                 "years": f"{years[0]}-{years[-1]}"} for r in rows]
+            rows = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
+            store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"p": pa.array([], pa.float64())}))
+        out += [{**r, "pair": f"{r.get('leader')} ~ {r.get('field')}", "years": f"{years[0]}-{years[-1]}"}
+                for r in rows if r.get("field") is not None]
     if not out:
-        # said, never an empty table: no two fields of different sources share four years (or none could be read)
         out.append({"pair": None, "reported": False, "note": f"no relation computed among {len(fields_)} fields: no two "
                     "of different sources share four years, or none could be read (said above)"})
     return out
