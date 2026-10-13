@@ -811,6 +811,14 @@ def resolve(decl: Declaration, log=print) -> Scope:
             ys = [y for y in ys if y - it.denominator[1] in dys]
             cost = {y: (None if cost[y] is None or dcost[y - it.denominator[1]] is None
                         else cost[y] + dcost[y - it.denominator[1]]) for y in ys}
+        # an event type rated per other events (live births, total births: pegasus_data's ``exposure``) reads them too:
+        # its years are those its exposure publishes, priced with it (SIM-DOFET and the SINAN agravos, rated per
+        # SINASC's 2024 births the lake did not hold, failed a download-free national run, 2026-10-13)
+        declared = (gateway.event_type(it.dataset, it.event) or {}).get("exposure") or {}
+        for ev in ([] if (it.source or {}).get("population") else declared.get("events") or []):
+            eys, ecost = _cost(ev.split(":")[0], ys)
+            ys = [y for y in ys if y in eys]
+            cost = {y: (None if cost[y] is None or ecost[y] is None else cost[y] + ecost[y]) for y in ys}
         if not ys:
             it.status, it.note = "deferred", "publishes none of the study's years"
             continue
