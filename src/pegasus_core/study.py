@@ -451,6 +451,15 @@ def _records(it: Item, years: list[int]) -> int:
     listed = src.get("source") == "code_list"
     if listed:              # a code list is counted by ICD category (`gateway.code_list_counts`)
         prefixes = list(dict.fromkeys(p[:3] for p in prefixes))
+    # kept by what it counts: each estimate re-read the national counts to count one state's (59 s of a one-state
+    # scope's 329, infarto_alagoas, 2026-10-13)
+    key = {"what": "topic_records", "dataset": it.dataset, "event": it.event, "years": sorted(int(y) for y in years),
+           "source": {k: v for k, v in src.items() if k in ("source", "column", "classifier", "codes")},
+           "prefixes": prefixes, "extract": bool(it.extract), "area": sorted(config.study_area() or []),
+           "data": config.data_version(), "code": config.code_key(_records)}
+    kept = store.get_table("study", key)
+    if kept is not None:
+        return int(kept.column("n")[0].as_py())
     for y in years:
         # every event, whatever its cell: a foetal death has no age, and counted by cells SIM-DOFET held no P37.1
         # (the Santa Maria hypothesis's own source left out, 2026-10-11); a code list by its own reader, its field's
@@ -466,6 +475,7 @@ def _records(it: Item, years: list[int]) -> int:
                 hit = pc.or_(hit, pc.starts_with(c.column("code"), n))
             c = c.filter(pc.fill_null(hit, False))
         total += int(pc.sum(c.column("y")).as_py() or 0)
+    store.put_table("study", key, pa.table({"n": [total]}))
     return total
 
 
@@ -679,6 +689,22 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
                 if d.reason:
                     excluded.append({"seed": f"{it.dataset}:{column}", "why": d.reason})
                     continue
+                spec_side = getattr(gateway.link_specs()[p["link"]], side)
+                if (it.source or {}).get("codes") and spec_side.where:
+                    # a code set on a side filtered to other events (the maternal deaths' link, an infarction's
+                    # deaths): every one unlinked by construction, a zero no one measured (2026-10-13)
+                    classifier = it.source.get("classifier") or fields.link_source(it.dataset, it.event,
+                                                                                    column).get("classifier")
+                    try:
+                        n, kept = gateway.side_holds(p["link"], side, classifier, list(it.source["codes"]),
+                                                     max(it.years))
+                    except KeyError as exc:
+                        excluded.append({"seed": f"{it.dataset}:{column}", "why": str(exc).strip("'\"")})
+                        continue
+                    if not kept:
+                        excluded.append({"seed": f"{it.dataset}:{column}", "why": f"its side keeps none of the code "
+                                         f"set's {n} records of {max(it.years)} ({spec_side.where})"})
+                        continue
 
                 def usable(z: int, link: str = p["link"], method: str = method) -> bool:
                     # a run touching the confirmation reserve is a claim's, never a field's (`run_touches_reserve`)

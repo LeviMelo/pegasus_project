@@ -2131,6 +2131,38 @@ def link_specs() -> dict:
     return load_links()
 
 
+def side_holds(link: str, side: str, classifier: str, codes: list[str], year: int) -> tuple[int, int]:
+    """How many of a code set's records of ``year`` (``codes`` on ``classifier``, nationally) one side of a declared
+    link keeps under its filter (`where`), of how many: a side filtered to other events (maternal deaths, an infant's)
+    holds none of an infarction's, and its linked share would read zero by construction (`linked_counts` keeps the
+    event type's denominator). Read on pegasus_data's role table, the filter's own terms."""
+    from pegasus_data.linkage.engine import dataset_roles
+    from pegasus_data.linkage.roles import role_table
+
+    spec = link_specs()[link]
+    sd = spec.left if side == "left" else spec.right
+    codes = sorted({c.replace(".", "").upper() for c in codes})
+    key = {"what": "side_holds", "link": link, "side": side, "where": sd.where or "", "classifier": classifier,
+           "codes": codes, "year": int(year), "data": config.data_version(), "code": config.code_key(side_holds)}
+    got = store.get_table("gateway", key)
+    if got is not None:
+        return int(got.column("n")[0].as_py()), int(got.column("kept")[0].as_py())
+    roles = dataset_roles(sd.dataset).roles
+    role = next((n for n, r in roles.items() if r.column == classifier), None)
+    if role is None:
+        # a classifier no role declares (SIM's CAUSABAS_O): the filter cannot be read on it, and nothing is claimed
+        raise KeyError(f"{sd.dataset}: no role reads {classifier}, the side's filter cannot be tested on it")
+    needed = sorted({role, *(n for n in roles if sd.where and f'"{n}"' in sd.where)})
+    t = role_table(sd.dataset, period=int(year), geography="BR", roles=needed, root=config.data_root())
+    con = duckdb.connect()
+    con.register("x", t)
+    mine = " OR ".join(f"upper(CAST(\"{role}\" AS VARCHAR)) LIKE '{c}%'" for c in codes)
+    n, kept = con.execute(f"""SELECT count(*), count(*) FILTER (WHERE {sd.where or 'TRUE'}) FROM x
+        WHERE {mine}""").fetchone()
+    store.put_table("gateway", key, pa.table({"n": [int(n)], "kept": [int(kept or 0)]}))
+    return int(n), int(kept or 0)
+
+
 #: whether a link absent from the store is computed (a national probabilistic linkage: hours per year) or refused;
 #: ``PEGASUS_COMPUTE_LINKS=1`` opts in. Reading stored runs only is the default: a reading never launches one silently
 COMPUTE_LINKS = os.environ.get("PEGASUS_COMPUTE_LINKS", "") == "1"

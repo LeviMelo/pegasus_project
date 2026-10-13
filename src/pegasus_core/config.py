@@ -116,6 +116,63 @@ def code_key(*entries: object) -> str:
 
 @cache
 def _code_key(entries: tuple[str, ...]) -> str:
+    known = _known_keys()
+    name = "|".join(entries)
+    if name in known["keys"]:
+        return known["keys"][name]
+    key = _computed_key(entries)
+    known["keys"][name] = key
+    _save_keys(known)
+    return key
+
+
+def _sources_state() -> str:
+    """The package's sources as they stand (each file's path, size and modification time): what a code key is a
+    function of, read in milliseconds where parsing and dumping every syntax tree took 42 s of a one-state scope's
+    329 (infarto_alagoas, 2026-10-13)."""
+    root = Path(__file__).resolve().parent
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        st = path.stat()
+        h.update(f"{path.relative_to(root).as_posix()}:{st.st_size}:{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()[:16]
+
+
+@cache
+def _known_keys() -> dict:
+    import json
+
+    state = _sources_state()
+    path = home() / "code_keys" / f"{state}.json"
+    try:
+        keys = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        keys = {}
+    return {"path": path, "keys": keys}
+
+
+def _save_keys(known: dict) -> None:
+    """The keys of this state of the sources, written whole and atomically (lanes compute them concurrently: a lost
+    write is a key computed again, never a wrong one); the other states' files are removed."""
+    import contextlib
+    import json
+
+    path = known["path"]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError, ValueError):
+            known["keys"] = {**json.loads(path.read_text(encoding="utf-8")), **known["keys"]}
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(known["keys"], sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+        for other in path.parent.glob("*.json"):
+            if other != path:
+                other.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _computed_key(entries: tuple[str, ...]) -> str:
     idx = _code_index()
     h = hashlib.sha256()
     for item in sorted(code_closure(entries)):

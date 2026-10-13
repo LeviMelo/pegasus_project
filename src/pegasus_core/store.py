@@ -87,15 +87,27 @@ def _replace(tmp: Path, target: Path) -> None:
             time.sleep(0.5 * (attempt + 1))
 
 
+_MANIFESTS: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+
+
 def manifests(kind: str) -> list[dict[str, Any]]:
-    """Every manifest of a kind (the key it was stored under, and its metadata), unordered."""
-    out = []
-    for path in (config.home() / kind).glob("*/manifest.json"):
+    """Every manifest of a kind (the key it was stored under, and its metadata), unordered. Each entry's is read once
+    per process and kept: four readings of 13,000 manifests took 70 s of a one-state study's scope (infarto_alagoas,
+    2026-10-13); an entry removed since is dropped, a new one read."""
+    folder = config.home() / kind
+    seen = _MANIFESTS.setdefault((str(folder), kind), {})
+    try:
+        names = {e.name for e in os.scandir(folder) if e.is_dir()}
+    except OSError:
+        return []
+    for gone in set(seen) - names:
+        del seen[gone]
+    for name in names - set(seen):
         try:
-            out.append(json.loads(path.read_text(encoding="utf-8")))
+            seen[name] = json.loads((folder / name / "manifest.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            continue    # a manifest being written by another process
-    return out
+            continue    # a manifest being written by another process, or an entry without one: read next time
+    return list(seen.values())
 
 
 def _manifest(path: Path, key: dict[str, Any], meta: dict[str, Any] | None, **extra: Any) -> None:

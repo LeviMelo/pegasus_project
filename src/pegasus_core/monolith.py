@@ -32,10 +32,23 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import scipy.sparse as sp
-import torch
 from scipy import optimize, special, stats
 
 from . import config, control, gateway, jobs, store, structures
+
+
+class _Torch:
+    """torch, imported on first use: its import took 41 s of a one-state study's scope, which fits nothing
+    (infarto_alagoas, 2026-10-13)."""
+
+    def __getattr__(self, name: str):
+        import torch as t
+
+        globals()["torch"] = t
+        return getattr(t, name)
+
+
+torch = _Torch()
 
 AGE_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]  # 18 bands; last is 80+
 N_BANDS = len(AGE_EDGES)
