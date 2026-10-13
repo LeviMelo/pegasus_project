@@ -3183,11 +3183,15 @@ def _codebook(decl: Declaration, scope: Scope, out: Path) -> list[str]:
         text = (f"- **{it.dataset} {it.event}**{_codes_text(it)}, {min(it.years)}-{max(it.years)}: one row is "
                 f"{et.get('grain') or 'one event'}")
         if st:
-            text += f"; counted where {st['column']} is {', '.join(st['values'])} ({st.get('evidence') or ''})"
+            why = st.get("evidence") or et.get("evidence")
+            text += f"; counted where {st['column']} is {', '.join(st['values'])}" + (f" ({why})" if why else "")
         if ex:
             text += f"; rates per {ex.get('per', 1):g} {' + '.join(ex['events'])} ({ex.get('evidence') or ''})"
         else:
             text += "; rates per 100,000 person-years of residents"
+            codes = [str(c) for c in (it.source or {}).get("codes") or []]
+            if codes and _code_structure(it) == "ICD10" and all(c[:1] in "OP" for c in codes):
+                text += ", and per 1,000 live births (SINASC-DN), pregnancy and perinatal codes (RIPSA C.1, C.3)"
         if sn.get("definition"):
             text += f"; the source's definition: {sn['definition']}"
         lines.append(text)
