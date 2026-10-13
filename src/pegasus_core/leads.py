@@ -108,11 +108,26 @@ class Register:
         changed at 09:25:57, 2026-10-08)."""
         if not leads:
             return
-        stored = self._latest_verdicts({x.id for x in leads})
+        latest = self._latest_states({x.id for x in leads})
         for x in leads:
-            v, mine = stored.get(x.id), x.robustness.get("verdict")
+            body = latest.get(x.id) or {}
+            rob = body.get("robustness") or {}
+            v, mine = rob.get("verdict"), x.robustness.get("verdict")
             if v and (not mine or v.get("at", "") > mine.get("at", "")):
                 x.robustness = {**x.robustness, "verdict": v}
+            # a question asked again writes its answer afresh: on the same evidence (effect, q, locus) the answer keeps
+            # what was read of it (triage, replication, corroboration). Rewritten bare, 37 of the exhaustive slice's
+            # findings lost their recording class, and triage, keyed by the same answers, never read them again
+            # (2026-10-12); evidence that changed is read again (`update`'s triage key carries the numbers)
+            same = (body and body.get("effect") == x.effect and body.get("q") == x.q
+                    and json.dumps(body.get("locus"), sort_keys=True, default=str)
+                    == json.dumps(x.locus, sort_keys=True, default=_json))
+            if same and "triage" in rob and "triage" not in x.robustness:
+                x.robustness = {**x.robustness, **{k: w for k, w in rob.items() if k not in x.robustness}}
+                if x.replication in (None, "R0") and body.get("replication"):
+                    x.replication = body["replication"]
+                if body.get("replications") and not x.replications:
+                    x.replications = body["replications"]
         # to the microsecond: two states of one lead written within a second had tied, and the latest was whichever part
         # was read last (a compaction reorders them); the old second-resolution stamps still sort before
         import datetime
@@ -127,17 +142,28 @@ class Register:
         if sum(1 for _ in self.path.glob("part-*.parquet")) > self.COMPACT_AT:
             self.compact()
 
-    def _latest_verdicts(self, ids: set[str]) -> dict[str, dict]:
-        """The newest verdict on record for each of ``ids`` (only their rows are parsed)."""
+    def _latest_states(self, ids: set[str]) -> dict[str, dict]:
+        """The newest stored state of each of ``ids``, its body with a person's newest verdict over all its states
+        (only their rows are parsed)."""
         import pyarrow.compute as pc
 
-        out: dict[str, dict] = {}
+        newest: dict[str, tuple[str, dict]] = {}
+        verdicts: dict[str, dict] = {}
         want = pa.array(sorted(ids))
-        for tab in self._parts(["id", "body"], [("id", "in", sorted(ids))]):
+        for tab in self._parts(["id", "at", "body"], [("id", "in", sorted(ids))]):
             for r in tab.filter(pc.is_in(tab.column("id"), value_set=want)).to_pylist():
-                v = (json.loads(r["body"]).get("robustness") or {}).get("verdict")
-                if v and v.get("at", "") > out.get(r["id"], {}).get("at", ""):
-                    out[r["id"]] = v
+                body = json.loads(r["body"])
+                v = (body.get("robustness") or {}).get("verdict")
+                if v and v.get("at", "") > verdicts.get(r["id"], {}).get("at", ""):
+                    verdicts[r["id"]] = v
+                if r["at"] > newest.get(r["id"], ("", {}))[0]:
+                    newest[r["id"]] = (r["at"], body)
+        out = {}
+        for k, (_, body) in newest.items():
+            rob = dict(body.get("robustness") or {})
+            if k in verdicts:
+                rob["verdict"] = verdicts[k]
+            out[k] = {**body, "robustness": rob}
         return out
 
     def current(self, family: str | list[str] | set[str] | None = None, kind: str | None = None) -> list[Lead]:

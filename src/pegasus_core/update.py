@@ -521,8 +521,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                        and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")
                        and list(x.provenance.get("years") or s.years) in (list(s.years), list(plan.years))]
             served = [(x.dataset, x.event) for x in plan.systems] +                 [tuple(c) for c in plan.extra.get("corroborators") or ()]
+            # the answers with their numbers: one asked again on changed evidence is read again
             key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
-                       leads=sorted(x.id for x in answers), served=sorted(served))
+                       leads=sorted(f"{x.id}:{x.effect!r}:{x.q!r}" for x in answers), served=sorted(served))
             if answers and (force or not _done(key)):
                 # each reader's answers by its own session (S4.3): a measure's are read on its admissions, not on counts
                 by_reader: dict[str, list] = {}

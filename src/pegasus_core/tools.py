@@ -1865,7 +1865,7 @@ def relation_survey(plan: list[tuple], years: list[int], graph: str = "contiguit
     rep = [r for r in out["rows"] if r["reported"]]
     qv = control.adjusted(np.array([r["p"] for r in out["rows"]]))
     qmap = {id(r): float(v) for r, v in zip(out["rows"], qv, strict=True)}
-    family = "relations|" + "+".join(f"{ds}:{','.join(b)}" for ds, _, b in plan)
+    family = "relations|" + "+".join(f"{ds}:{','.join(b)}" for ds, _, b, *_ in plan)   # the screen's carry years
     from . import questions
 
     record = questions.method_records().get("relation_map", {"calibrated": None, "evidence": "not characterised"})

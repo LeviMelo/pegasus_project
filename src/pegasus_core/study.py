@@ -1868,7 +1868,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 if not path.exists():
                     store.put_table("study_table", key, _expectation_table(sv, names))
                 views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
-                desc.extend(_descriptive(it, s, f, label))
+                rows_ = _descriptive(it, s, f, label)
+                desc.extend(rows_ + _apc(rows_))
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
                 rows.extend({**_finding(x, it, label, names), "_event": it.event,
@@ -2104,6 +2105,51 @@ def _expectation_table(sv, names: dict) -> pa.Table:
             .append_column("state", pa.array([(names.get(c) or {}).get("uf_sigla") for c in u]))
 
 
+def _apc(rows: list[dict]) -> list[dict]:
+    """Each series' annual percent change (the descriptive's rows of one field, level, unit and denominator over the
+    years): a Poisson regression of the events on the year with the denominator as offset, the slope's interval
+    widened by the Pearson dispersion (quasi-Poisson; never below Poisson's). APC = 100 (e^b - 1). A paper's trend is
+    a number with an interval; the folder had the yearly rates only (2026-10-12)."""
+    series: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if r.get("year") is not None and r.get("population") and r.get("per") not in ("share", "mean per event") \
+                and not str(r.get("per", "")).startswith(("days", "median")):
+            series.setdefault((r["field"], r["level"], r["unit"], r["per"]), []).append(r)
+    out = []
+    for (field_, level, unit, per), rs in series.items():
+        rs = sorted(rs, key=lambda r: r["year"])
+        t = np.array([float(r["year"]) for r in rs])
+        y = np.array([float(r["events"]) for r in rs])
+        n = np.array([float(r["population"]) for r in rs])
+        if len(rs) < 3 or y.sum() <= 0 or (n <= 0).any():
+            continue
+        x = t - t.mean()
+        b0, b1 = np.log(y.sum() / n.sum()), 0.0
+        for _ in range(50):                                   # Newton on the Poisson log-likelihood
+            mu = n * np.exp(b0 + b1 * x)
+            g = np.array([(y - mu).sum(), ((y - mu) * x).sum()])
+            h = np.array([[mu.sum(), (mu * x).sum()], [(mu * x).sum(), (mu * x * x).sum()]])
+            step = np.linalg.solve(h, g)
+            b0, b1 = b0 + step[0], b1 + step[1]
+            if np.abs(step).max() < 1e-10:
+                break
+        mu = n * np.exp(b0 + b1 * x)
+        disp = max(float(((y - mu) ** 2 / np.maximum(mu, 1e-300)).sum() / (len(rs) - 2)), 1.0)
+        with np.errstate(invalid="ignore"):
+            var = float(np.linalg.pinv(h)[1, 1] * disp)
+        if not np.isfinite(b1) or not var > 0:
+            continue                       # a series whose slope the years cannot identify (events in one year only)
+        se = var ** 0.5
+        r0 = rs[0]
+        out.append({"field": field_, "label": r0["label"], "dataset": r0["dataset"], "level": level, "unit": unit,
+                    "year": None, "events": float(y.sum()), "population": float(n.sum()),
+                    "per": f"annual percent change, {int(t[0])}-{int(t[-1])}, rate {per}",
+                    "rate": 100 * np.expm1(b1), "rate_low": 100 * np.expm1(b1 - 1.96 * se),
+                    "rate_high": 100 * np.expm1(b1 + 1.96 * se),
+                    "crude_per_100k": None, "standardised_per_100k": None})
+    return out
+
+
 def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     """Counts, crude and directly age–sex-standardised rates per 100,000 by year, nationally and by state, from the
     fitted block's own cells (the population of the model's exposure; the standard is the period's national
@@ -2201,6 +2247,53 @@ def _whole() -> tuple[str, str]:
     return ("national", "BR") if area is None else ("area", "+".join(str(a) for a in sorted(area)))
 
 
+def _sex_age(it: Item, s, f, label: str) -> list[dict]:
+    """The field's events by sex and by age band (the model's own cells: events with both recorded), by year, for the
+    whole and each state, each value's share with its exact interval: the case mix a paper's first table gives, which
+    the groups table held for the source's other columns only (2026-10-12). Bands are the population source's."""
+    from scipy.stats import beta
+
+    d = s.expectations.model(f.block).data
+    if d.n is not None:
+        return []
+    G = d.N.shape[2]
+    nB = G // 2
+    if nB < 2:
+        return []                                          # a collapsed field: no sex or age cells
+    edges = gateway.age_edges(d.population, it.dataset, it.event)
+    if len(edges) != nB:
+        return []
+    leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
+    sel = np.isin(d.e, leaves)
+    yg = np.zeros(d.N.shape)
+    np.add.at(yg, (d.u[sel], d.t[sel], d.g[sel]), d.y[sel])
+    by_sex = yg.reshape(*yg.shape[:2], 2, nB).sum(3)       # [U, T, 2]: sex 1, 2
+    by_age = yg.reshape(*yg.shape[:2], 2, nB).sum(2)       # [U, T, nB]
+    bands = [f"{lo}-{hi - 1}" if hi - 1 > lo else f"{lo}" for lo, hi in zip(edges[:-1], edges[1:], strict=True)]
+    bands.append(f"{edges[-1]}+")
+    state = np.asarray(d.places) // 10000
+    out = []
+    for by, by_name, arr, values in (("sex", "Sexo", by_sex, [("1", "Masculino"), ("2", "Feminino")]),
+                                     ("age band", "Faixa etária (anos)", by_age, [(b, b) for b in bands])):
+        for t, year in enumerate(np.asarray(d.years)):
+            for level, unit, rows_u in [(*_whole(), np.ones(len(state), bool))] + \
+                    [("state", str(int(st)), state == st) for st in np.unique(state)]:
+                obs = arr[rows_u, t].sum(0)
+                tot = float(obs.sum())
+                if tot <= 0:
+                    continue
+                for k, (v, vl) in enumerate(values):
+                    if obs[k] <= 0:
+                        continue
+                    o = float(obs[k])
+                    out.append({"field": f.id, "label": label, "dataset": it.dataset, "by": by, "by_name": by_name,
+                                "value": v, "value_label": vl, "level": level, "unit": unit, "year": int(year),
+                                "observed": o, "expected": None, "total": tot, "share": o / tot,
+                                "share_low": float(beta.ppf(0.025, o, tot - o + 1)),
+                                "share_high": float(beta.ppf(0.975, o + 1, tot - o)) if o < tot else 1.0})
+    return out
+
+
 def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     """A count field split by each composition column (`tools.Session.by_composition`), observed and expected by value,
     nationally and by state per year: the expectation is the place's observed events at its own usual mix of the value (race: at its population's)."""
@@ -2246,6 +2339,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
                             "share_low": (float(beta.ppf(0.025, obs[k], tot - obs[k] + 1)) if obs[k] > 0 else 0.0) if tot else None,
                             "share_high": (float(beta.ppf(0.975, obs[k] + 1, tot - obs[k])) if obs[k] < tot else 1.0) if tot else None}
                            for k, v in enumerate(values) if obs[k] > 0 or exp[k] > 0)
+    out.extend(_sex_age(it, s, f, label))
     return out
 
 
@@ -2402,7 +2496,8 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     topic_years = sorted(set.intersection(*(set(i.years) for i in topic)))
     if len(topic_years) < 4:
         log(f"study: screen: the topic's systems share {len(topic_years)} years; four are needed")
-        return []
+        return [{"pair": None, "screen": True, "reported": False,
+                 "note": f"not run: the topic's systems share {len(topic_years)} years; four are needed"}]
     # every system the store has fitted over at least four of the topic's years; the window is the run of the topic's
     # years from its first that maximises systems × years read (the fits on it are made on demand)
     # each block's stored fits: read over a fit's own years and cut to the window (`surprise.window`), a fit on the
@@ -2438,9 +2533,10 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
     log(f"study: screen over {len(spec)} systems, {sum(len(b) for *_, b in spec)} blocks, {years[0]}-{years[-1]}")
     try:
         found = tools.relation_survey(spec, years, q=decl.q, log=log)
-    except Exception as exc:  # noqa: BLE001 - the screen failing leaves the study's own relations, said
+    except Exception as exc:  # noqa: BLE001 - the screen failing leaves the study's own relations; a failure row
+        # the gate reads (`body`): a crash caught and logged had let two slices pass with no screen (2026-10-12)
         log(f"study: screen: {type(exc).__name__}: {exc}")
-        return []
+        return [{"pair": None, "screen": True, "reported": False, "note": f"failed: {type(exc).__name__}: {exc}"}]
     mine = {f"{i.dataset}:{i.event}:" for i in topic}
     out = []
     for x in found:
@@ -3142,7 +3238,8 @@ COLUMNS = {
     "by_name": "that column's name in the source's dictionary",
     "value": "the column's code as recorded",
     "value_label": "the code's label from the source's dictionary; undecoded when none",
-    "total": "the field's events in the row's geography and year (the share's denominator)",
+    "total": "the field's events in the row's geography and year (the share's denominator; by sex or age band, those "
+             "with both recorded)",
     "share": "the proportion: events with the value (or persons with the outcome) over the total",
     "share_low": "lower 95 % bound: Clopper-Pearson; for persons, Rubin's rules over link draws (normal)",
     "share_high": "upper 95 % bound, as share_low",
@@ -3162,6 +3259,7 @@ COLUMNS = {
     "pair": "the pair of fields",
     "years": "the years read",
     "partial": "the correlation partialled on the shared series",
+    "screen": "true for a relation the data-space screen found (the topic against every block the store holds)",
     "cohort": "the persons scanned: source and role",
     "outcome": "the outcome linked to the person",
     "attribute": "the person's attribute contrasted",
@@ -3325,10 +3423,17 @@ def body(folder: str | Path) -> list[dict]:
     g = table("groups")
     if g is not None and len(g):
         ok = "share" in g and g["share"].notna().mean() > 0.99 and "value_label" in g
-        undecoded = float(g["value_label"].astype(str).str.endswith("(undecoded)").mean()) if "value_label" in g else 1.0
-        part("groups", bool(ok) and undecoded < 0.05,
-             f"{len(g)} rows, shares with intervals {'present' if ok else 'missing'}, {undecoded:.0%} of values undecoded")
+        # an undecoded value is shown as such, never guessed (CLAUDE.md §6): named here, not a threshold to fail on
+        und = g[g["value_label"].astype(str).str.endswith("(undecoded)")] if "value_label" in g else g
+        cols = sorted(set(und["dataset"].astype(str) + ":" + und["by"].astype(str))) if len(und) else []
+        part("groups", bool(ok), f"{len(g)} rows, shares with intervals {'present' if ok else 'missing'}; "
+             f"{len(und) / max(len(g), 1):.0%} of values undecoded" + (f" ({', '.join(cols[:5])})" if cols else ""))
     rel = table("relations")
+    if "screen" in decl.choice("relations"):
+        sc = rel[rel["screen"].fillna(False).astype(bool)] if rel is not None and "screen" in rel else None
+        bad = [] if sc is None or "note" not in sc else [n for n in sc["note"].dropna() if str(n).startswith("failed")]
+        part("screen", sc is not None and len(sc) > 0 and not bad,
+             f"{0 if sc is None else int(sc['pair'].notna().sum())} screened relations" + (f"; {bad[0][:120]}" if bad else ""))
     if "fields" in decl.choice("relations"):
         part("relations", rel is not None and len(rel) > 0, f"{0 if rel is None else len(rel)} relation rows")
     if decl.choice("persons"):
