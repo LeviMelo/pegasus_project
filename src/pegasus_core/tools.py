@@ -1951,10 +1951,10 @@ def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "c
 
 
 def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
-            lags: int = 2, q: float = 0.05, grain: str = "year") -> list[dict]:
+            lags: int = 2, q: float = 0.05, grain: str = "year", sources: list[dict | None] | None = None) -> list[dict]:
     """Do two fields move together, at which spatial support and lag? `relate` of the two (the CLI's ``compare``, a
-    study's pairs)."""
-    return relate([x, y], years, graph, lags, q, grain)
+    study's pairs), each read by its own reader (``sources``: a code set's)."""
+    return relate([x, y], years, graph, lags, q, grain, sources=sources)
 
 
 def determinants(x: tuple[str, str, str], contexts: list, years: list[int], graph: str = "contiguity", lags: int = 2,

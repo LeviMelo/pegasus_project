@@ -2405,6 +2405,11 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
     return out
 
 
+def _relation_name(f: tuple) -> str:
+    """A related field as the relations table names it: dataset, node, and a code set's codes."""
+    return f"{f[0]}:{f[2]}" + (f"[{','.join(f[4]['codes'])}]" if f[4] else "")
+
+
 def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
     """Relations among the study's primary fields (ARCHITECTURE §8.1, acceptance item 4; BACKLOG 3.5 the estimator):
     every pair of read items with a field of the default reader (its nodes, or the event type's own) is compared on the
@@ -2412,31 +2417,43 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
     ``reported`` marking those at q."""
     from . import tools
 
+    # the topic's fields: each read event type's own, and each code set of the topic's codes (its admissions, its
+    # deaths), so a paper's question, whether the systems move together, is asked; the code sets had been left out, and
+    # a study of TOXC, SIH and SIM held no pair (2026-10-13). Ratios, linked shares and supports are other questions.
     fields_ = []
-    for it in (i for i in scope.items if i.status == "in" and not i.source):
+    for it in (i for i in scope.items if i.status == "in"):
+        src = it.source or {}
+        if src and (set(src) - {"codes", "classifier", "structure"} or not src.get("codes")):
+            continue
         for node in _study_nodes(it, None):
-            fields_.append((it.dataset, it.event, node, set(it.years)))
+            fields_.append((it.dataset, it.event, node, set(it.years), src or None))
     out = []
     for (a, b) in ((fields_[i], fields_[j]) for i in range(len(fields_)) for j in range(i + 1, len(fields_))):
         years = sorted(a[3] & b[3])
-        if len(years) < 4 or (a[0], a[2]) == (b[0], b[2]):
+        if len(years) < 4 or (a[0], a[2], json.dumps(a[4], sort_keys=True)) == (b[0], b[2], json.dumps(b[4], sort_keys=True)):
             continue
         # an object of the state: a re-run reads it (BACKLOG 1.3), the key the pair, its years, the data and the code
         key = {"what": "study_relation", "x": list(a[:3]), "y": list(b[:3]), "years": years, "q": decl.q,
+               **({"sources": [a[4], b[4]]} if a[4] or b[4] else {}),
                "data": config.data_version(), "code": config.code_key(tools.compare)}
         hit = store.get_table("study_table", key)
         if hit is not None:
             rows = hit.to_pylist()
         else:
             try:
-                rows = config.on_cpu_if_cuda_fails(tools.compare, a[:3], b[:3], years, q=decl.q)
+                rows = config.on_cpu_if_cuda_fails(tools.compare, a[:3], b[:3], years, q=decl.q, sources=[a[4], b[4]])
             except Exception as exc:  # noqa: BLE001 - a pair that cannot be compared is said, the others run
                 log(f"study: relation {a[:3]} ~ {b[:3]}: {type(exc).__name__}: {exc}")
                 continue
             flat = [{k: v for k, v in r.items() if not isinstance(v, (dict, list))} for r in rows]
             store.put_table("study_table", key, _rows_table(flat) if flat else pa.table({"p": pa.array([], pa.float64())}))
-        out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))}, "pair": f"{a[0]}:{a[2]} ~ {b[0]}:{b[2]}",
+        out += [{**{k: v for k, v in r.items() if not isinstance(v, (dict, list))},
+                 "pair": f"{_relation_name(a)} ~ {_relation_name(b)}",
                  "years": f"{years[0]}-{years[-1]}"} for r in rows]
+    if not out:
+        # said, never an empty table: no two fields of different sources share four years (or none could be read)
+        out.append({"pair": None, "reported": False, "note": f"no relation computed among {len(fields_)} fields: no two "
+                    "of different sources share four years, or none could be read (said above)"})
     return out
 
 
@@ -2558,6 +2575,12 @@ def _screen(scope: Scope, decl: Declaration, log) -> list[dict]:
         out.append({"pair": " ~ ".join(x.fields), "support": x.locus.get("band") or x.locus.get("scale"),
                     "lag": x.locus.get("lag"), "rho": float(x.effect), "p": float(x.p), "q": float(x.q),
                     "reported": True, "screen": True, "years": f"{years[0]}-{years[-1]}"})
+    if not out:
+        # the screen ran and found nothing with a topic field at q: said, a row the body reads (an empty result had read
+        # as a screen never run, 2026-10-13)
+        out.append({"pair": None, "screen": True, "reported": False,
+                    "note": f"screened {len(spec)} systems, {sum(len(b) for *_, b in spec)} blocks, {years[0]}-{years[-1]}: "
+                            f"no relation with a topic field at q {decl.q:g}"})
     return out
 
 
