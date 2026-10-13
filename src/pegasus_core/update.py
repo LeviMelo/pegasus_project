@@ -536,7 +536,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     # dataset's chapter answers too, which its session cannot read (CIH-CR P37.1 and chapter I, 2026-10-10)
                     mine = json.loads(json.dumps(s.source or {}, sort_keys=True, default=list))
                     rs = s if src == mine else tools.Session(sys_.dataset, sys_.event, plan.years, plan.graph, source=src)
-                    done += rs.triage(register=group, log=log)
+                    # the answers without a verdict of the current rules only: one re-asked on the same evidence keeps
+                    # its own (`leads.Register.add`); every answer re-read on a key change had cost a slice its cap
+                    done += rs.triage(register=group, log=log, stale=True)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
                 corr = s.corroborate(done, served=served, log=log)
                 s.register.add(corr)
