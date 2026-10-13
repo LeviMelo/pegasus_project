@@ -30,6 +30,10 @@ contexts: [sisagua_surveillance_ecoli_present, sisagua_surveillance_total_colifo
            households_water_network, households_sewer_network, households_waste_collected, households_without_bathroom,
            persons_low_income, persons_15_plus_literate, population_urban, gross_value_added_agriculture,
            cnes_teams_esf, cnes_community_health_agents_professionals]
+# the topic's relations and its contexts; the screen (the topic against every block the store holds) is left to its own
+# run: nationally it refitted 610 blocks the store held under older keys, hours past the hour (2026-10-13), and its
+# universe is what the store holds (OPEN_QUESTIONS 20)
+relations: [fields, contexts]
 hypotheses:
   - {component: transient, where: [4316907], when: 2018-01..2018-06, note: "Santa Maria (RS) waterborne outbreak"}
 ratios:
