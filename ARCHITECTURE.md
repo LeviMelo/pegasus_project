@@ -818,6 +818,10 @@ from the power surface (§11.4), so "nothing found" says what could have been mi
 
 A declared hypothesis (component, places, period, group, direction) is one test with its own error budget, answered
 whether or not discovery finds it, reported separately. A step at a declared date is how interventions are asked.
+A level or transient hypothesis is tested against what was expected before it happened: the prospective alarm tier
+(BPA), trained on the years before the window and extrapolated. A fit over the window's own years learns the event as
+normal; a statewide one sits in the year's effect (Porto Alegre's leptospirosis in the 2024 floods: 1.6× and not
+supported at B1, 6.8× and supported at BPA, 2026-10-12). Each answer names its tier and grain.
 
 ### 7.8 The grid and the depths
 

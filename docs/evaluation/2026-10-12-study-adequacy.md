@@ -50,3 +50,12 @@ Three other defects made the earlier gate runs overrun:
 **Gate.** `scripts/prelaunch.py`'s slice on `studies/slices/toxoplasmosis_deep.yml` (now reading TOXG too), f44fcdb, shared
 store: 25.9 min against an estimate of 36.9, every part of the body met, the adequacy checks included; log
 `data/probes/slice_toxo10.log`. The other presets' slices and the second condition are not yet run on this code.
+
+**A known answer that failed, and why.** The leptospirosis slice (RS 2016–2024, deep, a5bc790's parent) declared
+Porto Alegre's May 2024 floods. At B1 its notifications in 2024 were 2,119 against 1,309 expected, "not supported"
+(Holm p 0.70): B1 is fitted on 2024 itself, so a statewide rise is absorbed by the year's effect. Against the
+prospective alarm tier trained on 2016–2023 they are 2,119 against 311 (6.8×, 6.5–7.1), supported (Holm p 0.012); at the
+place of notification 5.5×, supported. Confirmed cases at residence, 283 against 66 (4.3×), do not reach q under
+Holm. Hypotheses now use BPA (ARCHITECTURE §7.7); at the annual grain a window of months is read as its whole year, and
+the answer says so. The same slice found persons and capture writing nothing where the topic has no person link or
+capture population; they now say why.
