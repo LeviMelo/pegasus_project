@@ -59,3 +59,15 @@ place of notification 5.5×, supported. Confirmed cases at residence, 283 agains
 Holm. Hypotheses now use BPA (ARCHITECTURE §7.7); at the annual grain a window of months is read as its whole year, and
 the answer says so. The same slice found persons and capture writing nothing where the topic has no person link or
 capture population; they now say why.
+
+**Read on the exhaustive slice (a5bc790).** It ran in 31.3 min against an estimate of 15.8 and missed three parts. Each
+was a defect, now fixed (621060a):
+- **Lost triage.** 37 SIA findings had no recording class. Their register history shows them triaged, then rewritten
+  bare when their question was asked again; triage's key, the same answers, never read them again.
+- **Screen crash.** The screen unpacked 4-tuples as 3 and crashed. The crash was caught and logged, so the deep slice
+  had also passed without a screen.
+- **A wrong SIM label.** `TPOBITOCOR`'s nine codes stood in pegasus_data as one label of code 1 (harvester, f9c64f1).
+  The other undecoded values, `SERIESCMAE`/`SERIESCFAL`, are grade numbers with no code table, and are named rather
+  than failed.
+
+The folder also gains each series' annual percent change and the case mix by sex and age band.
