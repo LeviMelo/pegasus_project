@@ -280,9 +280,18 @@ class Scope:
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
                 "person_paths": self.paths, "link_runs_to_compute": self.link_runs, "medicines": self.medicines,
                 "minutes_by_choice": self.minutes_by_choice(),
-                "estimated_minutes": round((sum(i.est_seconds or 0 for i in self.items if i.status == "in") / self.lane_overlap
-                                            + sum(r["est_seconds"] or 0 for r in self.link_runs)
+                "estimated_minutes": round((self._lanes_seconds() + sum(r["est_seconds"] or 0 for r in self.link_runs)
                                             + self.overhead_seconds) / 60, 1)}
+
+    def _lanes_seconds(self) -> float:
+        """The lanes' wall clock: the items' sum over the measured overlap, but never less than the longest lane, a
+        dataset's items run one after another (the leptospirosis slice: one lane held nearly every field, and its 11.5
+        minutes, the sum over an overlap of 2, ran past twice that, 2026-10-13)."""
+        read = [i for i in self.items if i.status == "in"]
+        lanes: dict[str, float] = {}
+        for i in read:
+            lanes[i.dataset] = lanes.get(i.dataset, 0.0) + (i.est_seconds or 0.0)
+        return max(sum(lanes.values()) / self.lane_overlap, max(lanes.values(), default=0.0))
 
     def minutes_by_choice(self) -> dict:
         """The estimated minutes behind each choice the declaration makes, so a person sees what to cut: per dataset
@@ -516,7 +525,11 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
             else:
                 fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
         it.fields = n
-        it.est_seconds = round(n * (fit + per_field(it.dataset, it.years) * share), 1)
+        # a replicating depth runs each field twice: on the whole years, and trained on the years before the later
+        # ones and confirmed on them (`update._later_years`), its fits and questions again (the leptospirosis slice's
+        # later years, priced at nothing, took two thirds of its run, 2026-10-13)
+        again = 2.0 if decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2 else 1.0
+        it.est_seconds = round(again * n * (fit + per_field(it.dataset, it.years) * share), 1)
 
 
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:

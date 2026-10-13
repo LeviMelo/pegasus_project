@@ -185,6 +185,7 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
                questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers))
     if not force and _done(key):
         return "done on these versions"
+    t0 = time.perf_counter()
     t = s.train(last)
     for block in blocks:
         try:
@@ -199,7 +200,7 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     selected = s.temporal_confirm(last, log=log)
     s.register.add(s.retier(answers, selected))
     stood = sum((x.replications.get("prospective") or {}).get("ok") is True for x in answers)
-    _mark(key, {"selected": len(selected), "stood": stood})
+    _mark(key, {"selected": len(selected), "stood": stood, "seconds": round(time.perf_counter() - t0, 2)})
     return {"selected": len(selected), "answers standing on the later years": stood}
 
 
