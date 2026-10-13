@@ -15,6 +15,7 @@ with effect on its own scale (rate ratio, ρ via Fisher's z, log RR).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import time
@@ -244,7 +245,10 @@ class Register:
             pq.write_table(merged, tmp)                  # in the parts' order: the history as written
             tmp.replace(target)
             for f in files:
-                f.unlink(missing_ok=True)
+                # a part another process holds open (Windows) stays for the next compaction; its rows are in the merged
+                # part too, and `current` reads each lead's latest state once (a lane's item had failed on it, 2026-10-13)
+                with contextlib.suppress(OSError):
+                    f.unlink(missing_ok=True)
             return len(files)
         finally:
             lock.release()

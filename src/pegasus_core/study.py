@@ -2520,7 +2520,7 @@ def _levels_below(state: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
     out = []
     if len(np.unique(region)) > 1:
         out += [("region", f"{int(rg)} {REGIONS.get(int(rg), '')}".strip(), region == rg) for rg in np.unique(region)]
-    out += _levels_below(state)
+    out += [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]
     return out
 
 

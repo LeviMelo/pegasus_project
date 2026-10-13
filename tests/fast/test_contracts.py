@@ -250,3 +250,18 @@ def test_the_audit_reads_a_findings_places_as_written(tmp_path):
         encoding="utf-8")
     item9 = next(r for r in study.audit(tmp_path) if r["item"] == 9)
     assert item9["status"] == "met" and "outbreak: 1 signals" in item9["evidence"]
+
+
+def test_levels_below_the_whole_are_regions_then_states(monkeypatch):
+    """The descriptive tables' geographies (`study._levels_below`): macro-regions when the study spans several, then
+    states; none below an area that is one state. Its patch had made it call itself (2026-10-13)."""
+    import numpy as np
+
+    from pegasus_core import study
+
+    monkeypatch.delenv("PEGASUS_AREA", raising=False)
+    levels = study._levels_below(np.array([43, 43, 42, 35, 11]))
+    assert [x[0] for x in levels] == ["region"] * 3 + ["state"] * 4
+    assert levels[0][1] == "1 Norte" and levels[-1][1] == "43"
+    monkeypatch.setenv("PEGASUS_AREA", "43")
+    assert study._levels_below(np.array([43, 43])) == []
