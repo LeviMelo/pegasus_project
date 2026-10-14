@@ -46,6 +46,11 @@ def get_table(kind: str, key: dict[str, Any]) -> pa.Table | None:
     return pq.read_table(path)
 
 
+def has_table(kind: str, key: dict[str, Any]) -> bool:
+    """Whether a table is stored under the key: a path test, nothing read (``get_table`` reads the Parquet file)."""
+    return (address(kind, key) / "table.parquet").exists()
+
+
 def put_arrays(kind: str, key: dict[str, Any], arrays: dict[str, np.ndarray],
                meta: dict[str, Any] | None = None) -> Path:
     path = address(kind, key)

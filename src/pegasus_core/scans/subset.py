@@ -13,9 +13,11 @@ changes, vectorised over every centre and every null replicate on the device.
 The null: replicates y* ~ NB(μ, φ) over the scanned support, searched identically and drawn on demand (`Null`): a score
 is tested by Besag and Clifford's (1991) sequential Monte Carlo, which stops at the tenth replicate above it; only a
 score the replicates do not settle takes the Gumbel tail fitted to their maxima (Abrams, Kleinman & Kulldorff 2010).
-The replicates draw each place's frailty independently of its neighbours' (N1's spatial structure is not drawn): a
-cluster over several places sums neighbours that may be correlated, so its p-value can be too small (stated in the
-leads' null text).
+The replicates are drawn with the field's noise structure (N1, `surprise.Noise`): gamma frailties joined by a Gaussian
+copula over periods and, where the field's spatial share ω is positive (`surprise.spatial_structure`), over places by
+the heat kernel of the place graph (``root``, `surprise.spatial_root`), the same latent field the multiscale replicates
+draw. A cluster over several places sums neighbours whose frailties are correlated, and a null of independent places
+gave it a p-value too small (the statistic spread 1.2 to 1.4 times wider on stroke at 256 places).
 """
 
 from __future__ import annotations
@@ -196,8 +198,8 @@ class Null:
     all the replicates drawn, not 1: an untestable tail is not "no cluster"."""
 
     def __init__(self, scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, cap: int, seed_parts: tuple,
-                 noise=None):
-        self.scanner, self.m, self.phi, self.noise = scanner, m, phi, noise
+                 noise=None, root: np.ndarray | None = None):
+        self.scanner, self.m, self.phi, self.noise, self.root = scanner, m, phi, noise, root
         self.cap, self.seed_parts = -(-max(int(cap), BLOCK) // BLOCK) * BLOCK, seed_parts
         self.draws = mc.Draws(self._block, BLOCK)
         self._fit: tuple | None = None          # (n drawn, loc, scale, π0, testable)
@@ -209,7 +211,7 @@ class Null:
 
     def _block(self, start: int, count: int) -> np.ndarray:
         seed = config.seed(*self.seed_parts, "block", start // BLOCK)
-        return _maxima_batched(self.scanner, self.m, self.phi, count, seed, chunk=BLOCK, noise=self.noise)
+        return _maxima_batched(self.scanner, self.m, self.phi, count, seed, chunk=BLOCK, noise=self.noise, root=self.root)
 
     def tail(self) -> tuple[float, float, float, bool]:
         """(loc, scale, π0, testable) of the tail model over the replicates drawn: to the cap, then on until
@@ -337,11 +339,15 @@ def _alternate(scanner: Scanner, Y, M):
 
 
 def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, replicates: int, seed: int,
-                    chunk: int = 32, noise=None) -> np.ndarray:
+                    chunk: int = 32, noise=None, root: np.ndarray | None = None) -> np.ndarray:
     """The null's maxima: replicates drawn on the device (gamma–Poisson for counts, Gaussian for
-    marks; with a ``noise`` structure the Poisson–lognormal frailty of `surprise.replicate_correlated`) and
-    searched in batches by `_alternate`, float32."""
+    marks; with a ``noise`` structure the Poisson–lognormal frailty of `surprise.replicate_correlated`, its spatial
+    share ω > 0 correlating the places by ``root`` [U, U], `surprise.spatial_root`) and searched in batches by
+    `_alternate`, float32."""
     import torch
+
+    if noise is not None and noise.omega > 0 and root is None:
+        raise ValueError("a noise structure with a spatial share (omega > 0) needs the root of its place kernel")
 
     dev = _device()
     gen = torch.Generator(device=dev).manual_seed(seed % (2 ** 63))
@@ -359,7 +365,7 @@ def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, re
             from .. import surprise
             nrng = np.random.default_rng([seed % (2 ** 63), start])
             phi_c = np.broadcast_to(np.asarray(phi, dtype=float), m.shape)
-            fr = surprise.gamma_frailty(surprise.copula_normals((R, U, T), noise, nrng), phi_c, noise)
+            fr = surprise.gamma_frailty(surprise.copula_normals((R, U, T), noise, nrng, root), phi_c, noise)
             Y = torch.poisson(M * torch.as_tensor(fr, dtype=torch.float32, device=dev), generator=gen)
         else:
             finite = torch.isfinite(phi_t) & (M > 0)
@@ -374,11 +380,13 @@ def _maxima_batched(scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, re
 
 def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner, alpha: float = 0.05,
          max_subsets: int = 20, replicates: int = 200, seed_parts: tuple = ("subset",),
-         nul: Null | None = None, noise=None) -> tuple[list[Subset], Null | None]:
+         nul: Null | None = None, noise=None, root: np.ndarray | None = None) -> tuple[list[Subset], Null | None]:
     """The recursive scan: report the best subset, condition it out (μ ← y on its cells; for the Gaussian score, its
     residuals ← 0), repeat until the next p exceeds α. Returns the subsets with their p-value (`Null.p`) and empirical
     p, and the null, which is drawn only as far as a score needs it: ``Null`` is None when no subset beat the
-    expectation. A ``nul`` given is the one of the unconditioned expectation ``m`` (extended in place)."""
+    expectation. A ``nul`` given is the one of the unconditioned expectation ``m`` (extended in place). The null's
+    ``noise`` (with its spatial ``root``) is given, or a function returning the pair, called when the first score
+    needs the null."""
     replicates = config.replicates(replicates)          # the study's `nulls`
     m0, m = m, m.copy()          # the null is of the unconditioned expectation
     y = y.copy()
@@ -387,7 +395,7 @@ def scan(y: np.ndarray, m: np.ndarray, phi: np.ndarray | float, scanner: Scanner
         s = scanner.best(y, m)
         if s.score <= 0:
             break
-        nul = nul or Null(scanner, m0, phi, replicates, seed_parts, noise=noise)
+        nul = nul or Null(scanner, m0, phi, replicates, seed_parts, *(noise() if callable(noise) else (noise, root)))
         s.p = nul.p(s.score)
         s.null, s.p_empirical = nul.kind, nul.p_empirical(s.score)
         if s.p > alpha:

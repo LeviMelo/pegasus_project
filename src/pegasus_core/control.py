@@ -8,6 +8,7 @@ to what the ledger holds, never to a hand-picked list.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import threading
 import time
@@ -44,6 +45,7 @@ class Ledger:
     def __init__(self, path: Path | None = None):
         self.path = path or config.home() / f"ledger{config.area_suffix()}"
         self.path.mkdir(parents=True, exist_ok=True)
+        self._table: tuple[tuple, pa.Table] | None = None     # (the part files it was made of, the table)
 
     def register(self, h: Hypothesis) -> str:
         return self.register_many([h])[0]
@@ -86,11 +88,15 @@ class Ledger:
                 time.sleep(0.2 * (attempt + 1))
         if not files:
             return pa.table({})
+        if self._table is not None and self._table[0] == tuple(files):
+            return self._table[1]            # the parts are immutable: the same listing is the same table
         t = pa.concat_tables([_PARTS[f] for f in files])
         # a row is unique by (id, kind): a part merged by `compact` and not yet removed is read once
         key = pc.binary_join_element_wise(t.column("id"), t.column("kind"), "|").to_numpy(zero_copy_only=False)
         _, first = np.unique(key, return_index=True)
-        return t if len(first) == t.num_rows else t.take(np.sort(first))
+        t = t if len(first) == t.num_rows else t.take(np.sort(first))
+        self._table = (tuple(files), t)
+        return t
 
     def compact(self) -> int:
         """Merge the part files into one (the rows unchanged): stage E writes a part per batch, and a field's triage
@@ -269,6 +275,12 @@ def tree_bh(p_leaf: dict[str, float], parent: dict[str, str | None], q: float = 
     return rejected
 
 
+@functools.cache
+def _lond_norm() -> float:
+    """The normaliser of LOND's gamma sequence, summed once per process (a hundred thousand logarithms each time)."""
+    return sum(1.0 / (i * np.log(i + 1) ** 2) for i in range(1, 100_000))
+
+
 class LOND:
     """Online FDR for a stream of claims (Javanmard & Montanari 2018): the i-th test
     is run at α_i = q · γ_i · (rejections so far + 1), γ_i ∝ 1/(i (log i)²)."""
@@ -277,7 +289,7 @@ class LOND:
         self.q = q
         self.tested = 0
         self.rejected = 0
-        norm = sum(1.0 / (i * np.log(i + 1) ** 2) for i in range(1, 100_000))
+        norm = _lond_norm()
         self._gamma = lambda i: 1.0 / (i * np.log(i + 1) ** 2) / norm
 
     def test(self, p: float) -> bool:
@@ -407,6 +419,33 @@ def reserve_open():
         _RESERVE.open = before
 
 
+_RESERVE_PARTS: dict[Path, tuple[list[tuple[str, float, str]], list[dict[str, Any]]]] = {}   # a part's reserve rows
+_RESERVE_GUARD = threading.Lock()
+_RESERVE_LOCKS: dict[str, tuple[Any, Any]] = {}
+
+
+def _reserve_part(f: Path, split: str) -> tuple[list[tuple[str, float, str]], list[dict[str, Any]]]:
+    """What one ledger part holds of the reserve, read once (a part is immutable): its LOND results (claim id, p,
+    result JSON: the rows whose result names "lond", found by a substring match on the column) and its claims (the
+    pending rows of ``split``: id, when, actor, spec). Only the columns a match needs are read; the spec's column only
+    for a part that holds a claim."""
+    got = _RESERVE_PARTS.get(f)
+    if got is None:
+        t = _PARTS[f] if f in _PARTS else pq.read_table(f, columns=["id", "kind", "split", "p", "result"])
+        is_lond = pc.fill_null(pc.and_(pc.equal(t.column("kind"), "result"),
+                                       pc.match_substring(t.column("result"), '"lond"')), False)
+        rows = t.filter(is_lond)
+        results = list(zip(rows.column("id").to_pylist(), rows.column("p").to_pylist(),
+                           rows.column("result").to_pylist(), strict=True))
+        is_claim = pc.fill_null(pc.and_(pc.equal(t.column("kind"), "pending"), pc.equal(t.column("split"), split)), False)
+        claims: list[dict[str, Any]] = []
+        if pc.any(is_claim).as_py():
+            full = _PARTS[f] if f in _PARTS else pq.read_table(f, columns=["id", "kind", "split", "at", "actor", "spec"])
+            claims = full.filter(is_claim).select(["id", "at", "actor", "spec"]).to_pylist()
+        got = _RESERVE_PARTS[f] = (results, claims)
+    return got
+
+
 class Reserve:
     """The confirmation reserve: the reserved periods of a dataset, spent only by claims, each under one LOND stream.
 
@@ -422,47 +461,118 @@ class Reserve:
     def __init__(self, ledger: Ledger, q: float = 0.05):
         self.ledger, self.q = ledger, q
 
+    def ledgers(self) -> list[Path]:
+        """The ledgers the reserve is counted over: the one given, the home's own (`ledger`) and every area's
+        (`ledger_area_*`). The reserve is one finite resource of the home, not of an area: each area's ledger had
+        started its own LOND stream on it, at full wealth, and a claim spent in one was unknown to the others."""
+        home = config.home()
+        found = {self.ledger.path.resolve()}
+        found |= {p.resolve() for p in [home / "ledger", *home.glob("ledger_area_*")] if p.is_dir()}
+        return sorted(found)
+
+    @contextlib.contextmanager
+    def locked(self):
+        """The reserve's state is read, a claim registered and its verdict written under one lock (a file lock on the
+        home, across processes, and a thread lock): two lanes spending at once had read the same state and tested at
+        the same gamma_i."""
+        from filelock import FileLock
+
+        key = str(config.home() / "reserve.lock")
+        with _RESERVE_GUARD:
+            thread_lock, file_lock = _RESERVE_LOCKS.setdefault(key, (threading.RLock(), FileLock(key)))
+        with thread_lock, file_lock:
+            yield
+
+    def _read(self) -> tuple[dict[str, tuple[float, str]], dict[str, dict[str, Any]]]:
+        """(the LOND results by claim id: p and result JSON, the claims' pending rows by id) over the reserve's ledgers.
+        Arrow-side and per part: a part is read once per process (`_reserve_part`), and only the rows of a claim reach
+        Python (the whole ledger's rows as Python objects took most of the 72.7 s of a state read, 83 MB, 2026-10-14)."""
+        for attempt in range(5):
+            results: dict[str, tuple[float, str]] = {}
+            claims: dict[str, dict[str, Any]] = {}
+            try:
+                for path in self.ledgers():
+                    for f in sorted(path.glob("part-*.parquet")):
+                        part_results, part_claims = _reserve_part(f, self.SPLIT)
+                        for i, p, r in part_results:
+                            results.setdefault(i, (p, r))
+                        for c in part_claims:
+                            claims.setdefault(c["id"], c)
+                return results, claims
+            except (FileNotFoundError, PermissionError):        # a part merged away by `compact` while listed
+                if attempt == 4:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
+        raise AssertionError("unreachable")
+
     def state(self) -> tuple[int, int]:
-        """(tests, rejections) spent so far."""
-        tested = rejected = 0
-        for r in self.ledger.table().to_pylist():
-            if r["kind"] == "result" and r.get("result") and '"lond"' in r["result"]:
-                tested += 1
-                rejected += json.loads(r["result"]).get("rejected") in (True, "True")   # older rows: numpy bool as text
-        return tested, rejected
+        """(tests, rejections) spent so far, over every ledger of the reserve."""
+        results, _ = self._read()
+        # older rows hold a numpy bool as text
+        return len(results), sum(json.loads(r).get("rejected") in (True, "True") for _, r in results.values())
 
     def level(self) -> float:
-        """The level at which the next claim would be tested: q · γ(tests + 1) · (rejections + 1)."""
-        lond = LOND(self.q)
+        """The level at which the next claim would be tested: q * gamma(tests + 1) * (rejections + 1)."""
+        return self.status()["next_level"]
+
+    def status(self) -> dict[str, Any]:
+        """{spent, rejections, next_level} from one read of the reserve."""
         tested, rejected = self.state()
-        return float(self.q * lond._gamma(tested + 1) * (rejected + 1))
+        return {"spent": tested, "rejections": rejected,
+                "next_level": float(self.q * LOND(self.q)._gamma(tested + 1) * (rejected + 1))}
+
+    @staticmethod
+    def _spec_key(spec: dict[str, Any]) -> str:
+        """A claim's identity: its spec without the caller (who asked does not make another claim)."""
+        return json.dumps({k: v for k, v in spec.items() if k != "caller"}, sort_keys=True, default=str)
+
+    def _spent(self) -> dict[str, dict[str, Any]]:
+        """The claims already spent, by identity (the first of a repeated claim): id, when, caller, actor, p, result."""
+        results, claims = self._read()
+        out: dict[str, dict[str, Any]] = {}
+        for i, c in claims.items():
+            if i in results:
+                have = json.loads(c["spec"])
+                out.setdefault(self._spec_key(have), {"id": i, "at": c["at"], "caller": have.get("caller"),
+                                                      "actor": c["actor"], "p": results[i][0],
+                                                      "result": json.loads(results[i][1])})
+        return out
 
     def previous(self, spec: dict[str, Any]) -> dict[str, Any] | None:
         """The earlier spend of the same claim (``spec`` without the caller), with its result, or None. The
         reserve is read once per claim: asking again must not buy a second draw."""
-        want = json.dumps({k: v for k, v in spec.items() if k != "caller"}, sort_keys=True, default=str)
-        rows = self.ledger.table().to_pylist()
-        done = {r["id"]: r for r in rows if r["kind"] == "result"}
-        for r in rows:
-            if r["kind"] == "pending" and r["split"] == self.SPLIT and r["id"] in done:
-                have = json.loads(r["spec"])
-                if json.dumps({k: v for k, v in have.items() if k != "caller"}, sort_keys=True, default=str) == want:
-                    return {"id": r["id"], "at": r["at"], "caller": have.get("caller"), "actor": r["actor"],
-                            "p": done[r["id"]]["p"], "result": json.loads(done[r["id"]]["result"])}
-        return None
+        return self._spent().get(self._spec_key(spec))
 
     def spend(self, claims: list[tuple[Hypothesis, float, float | None, dict[str, Any]]]) -> list[dict[str, Any]]:
-        """Test the claims in the order given: (hypothesis, p on the reserve, effect, detail) → level and verdict."""
-        lond = LOND(self.q)
-        lond.tested, lond.rejected = self.state()
-        ids = self.ledger.register_many([Hypothesis(h.family, h.actor, h.spec, self.SPLIT) for h, *_ in claims])
-        out, done = [], []
-        for i, (_, p, effect, detail) in zip(ids, claims, strict=True):
-            level = self.q * lond._gamma(lond.tested + 1) * (lond.rejected + 1)
-            hit = lond.test(p)
-            done.append((i, p, effect, {**detail, "lond": True, "rejected": hit, "level": level}))
-            out.append({"p": p, "level": level, "rejected": hit})
-        self.ledger.complete_many(done)
+        """Test the claims in the order given: (hypothesis, p on the reserve, effect, detail) -> level and verdict. All
+        under the reserve's lock, state read to verdict written: a claim already spent (by anyone, in any ledger of the
+        reserve) is not tested again, its earlier verdict is returned with ``repeated`` True."""
+        with self.locked():
+            lond = LOND(self.q)
+            lond.tested, lond.rejected = self.state()
+            earlier = self._spent()
+            keys = [self._spec_key(h.spec) for h, *_ in claims]
+            fresh = [(k, c) for j, (k, c) in enumerate(zip(keys, claims, strict=True))
+                     if k not in earlier and k not in keys[:j]]
+            ids = self.ledger.register_many([Hypothesis(h.family, h.actor, h.spec, self.SPLIT) for _, (h, *_) in fresh])
+            verdicts, done = {}, []
+            for i, (k, (_, p, effect, detail)) in zip(ids, fresh, strict=True):
+                level = self.q * lond._gamma(lond.tested + 1) * (lond.rejected + 1)
+                hit = lond.test(p)
+                done.append((i, p, effect, {**detail, "lond": True, "rejected": hit, "level": level}))
+                verdicts[k] = {"p": p, "level": level, "rejected": hit}
+            self.ledger.complete_many(done)
+        out, given = [], set()
+        for k in keys:
+            if k in verdicts and k not in given:
+                out.append(verdicts[k])
+            elif k in verdicts:
+                out.append({**verdicts[k], "repeated": True})
+            else:
+                prev = earlier[k]
+                out.append({"p": prev["p"], "level": prev["result"].get("level"),
+                            "rejected": prev["result"].get("rejected"), "repeated": True})
+            given.add(k)
         return out
 
 

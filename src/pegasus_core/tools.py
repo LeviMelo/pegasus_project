@@ -75,6 +75,101 @@ def lens_tier(lens: str, prospective: bool = False) -> str:
 
 
 
+COMPOSITION_BYTES = 512 * 1024 ** 2   # what one session keeps of the compositions it has read (a national column of SIH is hundreds of MB)
+
+
+class _Composition:
+    """One composition column's counts over a session's years and places, read once (`Session.by_composition`): every
+    (place, period, category-code, value) cell as arrays, the codes and values dictionary-encoded in Arrow, so a field's
+    composition is a mask over the codes and a ``bincount``, and the gateway's tables are read once per (year, column)
+    however many fields ask. ``y`` rows are summed over sex and age (place, year, code, value); ``g`` rows over places
+    (year, age–sex group, code, value), kept only for the race stratum, whose expectation reads the nation's mix by cell."""
+
+    def __init__(self, tables, d, edges: list, nB: int, race: bool):
+        sorted_places = np.asarray(d.places, dtype=np.int64)
+        order = np.argsort(sorted_places)
+        sorted_places = sorted_places[order]
+        codes: dict[str, int] = {}
+        values: dict[str, int] = {}
+        seen: set[int] = set()
+        cols: dict[str, list] = {k: [] for k in ("c", "u", "t", "k", "g", "n")}
+        for t, (counts, missing) in enumerate(tables):
+            for tab, value in ((counts, None), (missing, "not recorded")):
+                if tab is None or tab.num_rows == 0:
+                    continue
+                code = pc.cast(tab.column("code"), pa.string()).combine_chunks().dictionary_encode()
+                cmap = np.array([codes.setdefault(s, len(codes)) for s in code.dictionary.to_pylist()], dtype=np.int64)
+                ci = np.full(tab.num_rows, -1, dtype=np.int64)               # a null code: -1, in no field
+                valid = code.indices.is_valid().to_numpy(zero_copy_only=False)
+                if len(cmap):
+                    ci[valid] = cmap[code.indices.fill_null(0).to_numpy(zero_copy_only=False)[valid]]
+                seen.update(np.unique(ci[ci >= 0]).tolist())      # a code the table holds, whether or not a place of the field's
+                uu = tab.column("u").to_numpy().astype(np.int64)
+                pos = np.clip(np.searchsorted(sorted_places, uu), 0, len(sorted_places) - 1)
+                u = np.where(sorted_places[pos] == uu, order[pos], -1)
+                keep = u >= 0
+                if value is None:
+                    val = tab.column("value").combine_chunks().dictionary_encode()
+                    vmap = np.array([values.setdefault(str(s), len(values)) for s in val.dictionary.to_pylist()], dtype=np.int64)
+                    k = vmap[val.indices.to_numpy(zero_copy_only=False)]
+                else:
+                    k = np.full(tab.num_rows, values.setdefault(value, len(values)), dtype=np.int64)
+                g = ((tab.column("sex").to_numpy().astype(np.int64) - 1) * nB
+                     + monolith.age_band(tab.column("age").to_numpy(), edges)) if race else np.zeros(tab.num_rows, np.int64)
+                n = tab.column("n" if value is None else "m").to_numpy().astype(float)
+                for key, arr in (("c", ci), ("u", u), ("t", np.full(tab.num_rows, t)), ("k", k), ("g", g), ("n", n)):
+                    cols[key].append(arr[keep])
+        self.codes = list(codes)
+        self.values = list(values)
+        self.seen = np.zeros(len(self.codes) + 1, bool)       # the last slot answers the null code
+        self.seen[list(seen)] = True
+        flat = {k: (np.concatenate(v) if v else np.zeros(0, float if k == "n" else np.int64)) for k, v in cols.items()}
+        self.y = self._sum(flat, ["c", "u", "t", "k"])
+        self.g = self._sum(flat, ["c", "t", "g", "k"]) if race else None
+        self.nbytes = sum(a.nbytes for part in (self.y, self.g) if part for a in part.values())
+
+    @staticmethod
+    def _sum(flat: dict, keys: list[str]) -> dict[str, np.ndarray]:
+        """The rows summed over the columns not in ``keys`` (Arrow's grouped sum: counts are integers, so exact)."""
+        if not len(flat["n"]):
+            return {**{k: flat[k] for k in keys}, "n": flat["n"]}
+        agg = pa.table({**{k: flat[k] for k in keys}, "n": flat["n"]}).group_by(keys).aggregate([("n", "sum")])
+        return {**{k: agg.column(k).to_numpy() for k in keys}, "n": agg.column("n_sum").to_numpy()}
+
+    def hit(self, codes: tuple | None, leaves: set | None) -> np.ndarray:
+        """[codes + 1] whether each code (and, last, a null one: never) belongs to the field: a code set's prefixes, else
+        the node's leaves at the code or its first three characters, else every code (node "*")."""
+        if codes:
+            pre = tuple(str(c) for c in codes)
+            ok = [c.startswith(pre) for c in self.codes]
+        elif leaves is not None:
+            ok = [c[:3] in leaves or c in leaves for c in self.codes]
+        else:
+            ok = [True] * len(self.codes)
+        return np.append(np.array(ok, dtype=bool), False)
+
+    def counts(self, hit: np.ndarray, U: int, T: int, G: int) -> tuple[np.ndarray | None, np.ndarray | None, list[str]]:
+        """(y [U, T, K], the race cells [T, G, K] or None, the values sorted with "not recorded" last) of the field's
+        codes. None for y when the tables held none of its codes (the caller says why)."""
+        if not hit[np.flatnonzero(self.seen)].any():
+            return None, None, []
+        rows = hit[self.y["c"]]
+        used = np.unique(self.y["k"][rows])
+        values = sorted((self.values[k] for k in used), key=lambda v: (v == "not recorded", str(v)))
+        local = np.full(len(self.values), -1, dtype=np.int64)
+        for j, v in enumerate(values):
+            local[self.values.index(v)] = j
+        K = len(values)
+        y = np.bincount(((self.y["u"][rows] * T + self.y["t"][rows]) * K + local[self.y["k"][rows]]),
+                        weights=self.y["n"][rows], minlength=U * T * K).reshape(U, T, K) if K else np.zeros((U, T, 0))
+        true = None
+        if self.g is not None:
+            gr = hit[self.g["c"]]
+            true = np.bincount(((self.g["t"][gr] * G + self.g["g"][gr]) * K + local[self.g["k"][gr]]),
+                               weights=self.g["n"][gr], minlength=T * G * K).reshape(T, G, K) if K else np.zeros((T, G, 0))
+        return y, true, values
+
+
 @dataclass
 class Session:
     dataset: str
@@ -89,6 +184,8 @@ class Session:
     _local: threading.local = field(default_factory=threading.local, init=False, repr=False)   # .memo: one field's tiers
     _edges: np.ndarray | None = field(default=None, init=False, repr=False)
     _scales: dict | None = field(default=None, init=False, repr=False)
+    _compositions: dict = field(default_factory=dict, init=False, repr=False)      # column -> `_Composition`, least recent first
+    _composition_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self):
         # the years the dataset publishes: a reading never asks a source for years it does not have (SINAN-CHIK from
@@ -197,57 +294,41 @@ class Session:
         nB = d.N.shape[2] // 2
         # the field's events: a code set's codes (prefixes, as its counts read them: a code-set field's node is "*", and
         # keeping every code counted all of SIH's admissions against pneumonia's expectation, 2026-10-11), else the
-        # node's leaves; filtered in Arrow (a Python pass per row took most of an SIH item's hour)
+        # node's leaves: a mask over the column's codes, read once for the session (`_Composition`)
         codes = (self.source or {}).get("codes")
-        order = np.argsort(np.asarray(d.places, dtype=np.int64))
-        sorted_places = np.asarray(d.places, dtype=np.int64)[order]
-        frames = []
-        for t, year in enumerate(np.asarray(d.years)):
-            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary, codes=codes,
-                                           area=(tuple(sorted(config.study_area())) if config.study_area() else None))
-            for tab, value in ((c.counts, None), (c.missing, "not recorded")):
-                if tab is None or tab.num_rows == 0:
-                    continue
-                code = pc.cast(tab.column("code"), pa.string())
-                if codes:
-                    hit = pc.starts_with(code, str(codes[0]))
-                    for cc in codes[1:]:
-                        hit = pc.or_(hit, pc.starts_with(code, str(cc)))
-                    tab = tab.filter(pc.fill_null(hit, False))
-                elif f.node != "*":
-                    lv = pa.array(sorted(map(str, leaves)), pa.string())
-                    hit = pc.or_(pc.is_in(pc.utf8_slice_codeunits(code, 0, 3), value_set=lv), pc.is_in(code, value_set=lv))
-                    tab = tab.filter(pc.fill_null(hit, False))
-                if tab.num_rows == 0:
-                    continue
-                uu = tab.column("u").to_numpy().astype(np.int64)
-                pos = np.clip(np.searchsorted(sorted_places, uu), 0, len(sorted_places) - 1)
-                u = np.where(sorted_places[pos] == uu, order[pos], -1)
-                keep = u >= 0
-                g_true = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
-                vals = (np.asarray(tab.column("value").to_pylist(), dtype=object) if value is None
-                        else np.full(tab.num_rows, value, object))
-                n = tab.column("n" if value is None else "m").to_numpy().astype(float)
-                frames.append((u[keep], np.full(int(keep.sum()), t), vals[keep], n[keep], g_true[keep]))
-        if not frames and float(np.sum(y_g)) > 0:
+        cube = self._composition(column, missing, primary, codes, d, edges, nB)
+        U, T, G = len(d.places), len(d.years), d.N.shape[2]
+        y, true, values = cube.counts(cube.hit(codes, None if f.node == "*" else {str(c) for c in leaves}), U, T, G)
+        if y is None:
             # events, none in an age-sex cell: SIM-DOFET's foetal deaths carry no age, so a composition read against the
             # field's age-sex structure has nothing to read, and an empty answer would look like no departure
-            raise ValueError(f"{self.dataset}: its events carry no age or sex (every one unallocated by them): a group "
-                             f"question at the age-sex structure does not apply to {column}")
-        values = sorted({v for _, _, vals, _, _ in frames for v in vals}, key=lambda v: (v == "not recorded", str(v)))
-        vi = {v: k for k, v in enumerate(values)}
-        U, T, G, K = len(d.places), len(d.years), d.N.shape[2], len(values)
-        y = np.zeros((U, T, K))
-        race = self._is_race(column, values)
-        true = np.zeros((T, G, K)) if race else None
-        for u, t, vals, n, gt in frames:
-            k = np.fromiter((vi[v] for v in vals), dtype=np.int64, count=len(vals))
-            np.add.at(y, (u, t, k), n)
-            if race:
-                np.add.at(true, (t, gt, k), n)
-        if race:
+            if float(np.sum(y_g)) > 0:
+                raise ValueError(f"{self.dataset}: its events carry no age or sex (every one unallocated by them): a group "
+                                 f"question at the age-sex structure does not apply to {column}")
+            y, true = np.zeros((U, T, 0)), np.zeros((T, G, 0))
+        if self._is_race(column, values):
             return y, self._race_expected(d, mu_g, true, y, values, edges, nB, collapsed), values
         return y, own_mix(y, np.asarray(d.places, dtype=np.int64) // 10000), values
+
+    def _composition(self, column: str, missing, primary, codes, d, edges: list, nB: int) -> _Composition:
+        """The column's counts over the session's years and the block's places, read once and kept (least recently used
+        out beyond `COMPOSITION_BYTES`): the group question asks every field of every column, and each (year, column)
+        table was read, filtered and converted again for each (1,344 parquet reads a field for SIM.DO)."""
+        area = tuple(sorted(config.study_area())) if config.study_area() else None
+        key = (column, tuple(int(y) for y in np.asarray(d.years)), hash(np.asarray(d.places, dtype=np.int64).tobytes()),
+               nB, str(d.population), area, tuple(codes or ()))
+        with self._composition_lock:
+            cube = self._compositions.pop(key, None)
+            if cube is None:
+                tables = []
+                for year in np.asarray(d.years):
+                    tables.append(gateway.composition_parts(self.dataset, self.event, int(year), column, missing, primary,
+                                                            codes=codes, area=area))
+                cube = _Composition(tables, d, edges, nB, race=column == gateway._strata(self.dataset, self.event).get("race"))
+            self._compositions[key] = cube
+            while len(self._compositions) > 1 and sum(c.nbytes for c in self._compositions.values()) > COMPOSITION_BYTES:
+                self._compositions.pop(next(iter(self._compositions)))
+        return cube
 
     def _is_race(self, column: str, values: list[str]) -> bool:
         """Whether a composition column is the subject's race stratum, read against its own population by race."""
@@ -560,6 +641,8 @@ class Session:
         fn = getattr(lenses, lens)
         if "q" in kw and "q" not in inspect.signature(fn).parameters:      # the scans name their level alpha
             kw["alpha"] = kw.pop("q")
+        if lens in ("space_time", "spatial_cluster") and "spectrum" not in kw and s.extras.get("kind") != "mark":
+            kw["spectrum"] = self.spectrum()       # the scans' null draws the field's spatial share of noise on this graph
         return fn(s, self.edges(), self.ledger, **kw)
 
     def alarms(self, node: str, as_of: str, report: str, recurrence: float = 260.0, weeks: int = 8,
@@ -1063,25 +1146,28 @@ class Session:
         """A composition share's records whose value is not recorded, by place, period and category (the reader's own
         `composition_counts`, its ``missing`` part), on the block's places and periods."""
         src = self.source
-        index = {int(pl): j for j, pl in enumerate(d.places)}
-        tpos = {int(y): j for j, y in enumerate(d.years)}
-        out: dict[str, list] = {"u": [], "t": [], "code": [], "m": []}
-        for y in d.years:
-            ec = gateway.composition_counts(self.dataset, self.event, int(y), src["indicator"],
-                                            tuple(src.get("missing") or ()), src.get("classifier"), codes=src.get("codes"),
-                                            area=tuple(sorted(config.study_area())) if config.study_area() else None)
-            mt = ec.missing
+        places = np.asarray(d.places, dtype=np.int64)
+        order = np.argsort(places)
+        sorted_places = places[order]
+        u, tt, code, m = [], [], [], []
+        for j, y in enumerate(d.years):
+            _, mt = gateway.composition_parts(self.dataset, self.event, int(y), src["indicator"],
+                                              tuple(src.get("missing") or ()), src.get("classifier"), codes=src.get("codes"),
+                                              area=tuple(sorted(config.study_area())) if config.study_area() else None)
             if mt is None or mt.num_rows == 0:
                 continue
-            for u, c, m in zip(mt.column("u").to_pylist(), mt.column("code").to_pylist(), mt.column("m").to_pylist(),
-                               strict=True):
-                if int(u) in index:
-                    out["u"].append(index[int(u)])
-                    out["t"].append(tpos[int(y)])
-                    out["code"].append(str(c)[:3] if block != "*" else "*")
-                    out["m"].append(float(m))
-        return {"u": np.asarray(out["u"], dtype=np.int64), "t": np.asarray(out["t"], dtype=np.int64),
-                "code": out["code"], "m": np.asarray(out["m"], dtype=float)}
+            uu = mt.column("u").to_numpy().astype(np.int64)
+            pos = np.clip(np.searchsorted(sorted_places, uu), 0, len(sorted_places) - 1)
+            keep = sorted_places[pos] == uu                       # the block's places only
+            u.append(order[pos][keep])
+            tt.append(np.full(int(keep.sum()), j, dtype=np.int64))
+            code.extend(["*"] * int(keep.sum()) if block == "*" else
+                        pc.utf8_slice_codeunits(pc.cast(mt.column("code"), pa.string()), 0, 3)
+                        .filter(pa.array(keep)).to_pylist())
+            m.append(mt.column("m").to_numpy().astype(float)[keep])
+        return {"u": np.concatenate(u) if u else np.zeros(0, dtype=np.int64),
+                "t": np.concatenate(tt) if tt else np.zeros(0, dtype=np.int64),
+                "code": code, "m": np.concatenate(m) if m else np.zeros(0)}
 
     def _triage_marks(self, mine: list[leads.Lead], write: bool, log) -> list[leads.Lead]:
         """Stage E for a measure's answers (S4.3): the lead's admissions (its node's categories, its places, its window)
@@ -1867,7 +1953,7 @@ def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict
     ledger = ledger or control.Ledger()
     pending = [r for r in ledger.table().to_pylist() if r["kind"] == "pending"]
     reserve = control.Reserve(ledger, q)
-    tested, rejected = reserve.state()
+    status = reserve.status()
     by_family: dict[str, int] = {}
     actors: dict[str, int] = {}
     for r in pending:
@@ -1876,8 +1962,8 @@ def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict
     claims = [r for r in pending if r["split"] == control.Reserve.SPLIT]
     return {"tests": len(pending), "n_families": len(by_family), "actors": actors,
             "families": dict(sorted(by_family.items(), key=lambda kv: -kv[1])[:25]),
-            "reserve": {"split": control.Reserve.SPLIT, "q": q, "spent": tested, "rejections": rejected,
-                        "next_level": reserve.level(),
+            "reserve": {"split": control.Reserve.SPLIT, "q": q, "spent": status["spent"], "rejections": status["rejections"],
+                        "next_level": status["next_level"],
                         "last_claims": [{"id": r["id"], "at": r["at"], "actor": r["actor"], "spec": json.loads(r["spec"])}
                                         for r in claims[-10:]]}}
 

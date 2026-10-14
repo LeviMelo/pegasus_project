@@ -840,8 +840,9 @@ Prospective use is not a component: it is every component tested against BP/BPA 
   level shifts and ramps under N1's covariance; the finding carries the shape it takes.
 - **Subset scans** (search): expectation-based Poisson score `F(S) = Y log(Y/M) + M − Y`, linear-time subset scanning
   over places in graph neighbourhoods (the prefix's connected component, observed and replicates alike: a cluster is one
-  piece), contiguous windows; null by replicate fields (places' frailty independent: N1's spatial structure is not
-  drawn), drawn on demand: a score is tested by Besag–Clifford sequential Monte Carlo (stop at the tenth replicate at
+  piece), contiguous windows; null by replicate fields drawn with N1 (the copula's frailties correlated over places by the field's
+  estimated spatial share ω at heat-kernel scale s*, `surprise.spatial_structure`, the multiscale replicates' own field;
+  independent where ω = 0, and said so in the finding's `null`), drawn on demand: a score is tested by Besag–Clifford sequential Monte Carlo (stop at the tenth replicate at
   or above it; one helper, `mc`, serves the scans, a lead's corroboration, whose source tests stop at ten null place sets
   above their statistic unless their p is within 3 q, and the propagation test, which stops at floor(q (N + 1))
   surrogates, where the decision is certain), only a score the replicates do not settle takes the Gumbel tail, and where that cannot be fitted the
@@ -880,7 +881,9 @@ from the power surface (§11.4), so "nothing found" says what could have been mi
 - **The ledger.** Every test is written before it runs (family, hypothesis, data and model versions) and its result
   appended; the ledger is the denominator of every error rate.
 - **Discovery and confirmation.** Discovery controls FDR. A held-back **confirmation reserve** (a reserved period,
-  SIM.DO 2024) tests only claims declared in order before it is read, under one LOND stream.
+  SIM.DO 2024) tests only claims declared in order before it is read, under one LOND stream: one for the home, counted over
+  the ledger and every area's ledger, each spend (state read, claim registered, verdict written) under one file lock,
+  and a claim already spent is not tested again.
 - **Below threshold** results are exported with their effect and q, marked (P22).
 
 ### 7.7 Discovery and hypothesis mode

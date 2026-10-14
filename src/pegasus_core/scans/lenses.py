@@ -8,6 +8,7 @@ separate function: it is any of these applied to a recording-practice field
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any
 
@@ -92,19 +93,42 @@ class Finding:
 
 
 def spatial_cluster(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
-                    replicates: int = 200, alpha: float = 0.05, rate_ratio: float | None = None) -> list[Finding]:
+                    replicates: int = 200, alpha: float = 0.05, rate_ratio: float | None = None,
+                    spectrum=None) -> list[Finding]:
     """Graph-connected place sets over the whole period (time summed), expectation-based Poisson scan.
-    ``rate_ratio`` overrides the minimum effect θ0 (the grid's calibration, §10.5)."""
+    ``rate_ratio`` overrides the minimum effect θ0 (the grid's calibration, §10.5); ``spectrum`` is the place graph's
+    (`multiscale.GraphSpectrum`), which gives the null the field's spatial share of noise (`_cells`)."""
     return _cells("spatial_cluster", s, edges, ledger, k, replicates, alpha, full_period=True,
-                  rate_ratio=minimum_effect("spatial_cluster", s.field.id) if rate_ratio is None else rate_ratio)
+                  rate_ratio=minimum_effect("spatial_cluster", s.field.id) if rate_ratio is None else rate_ratio,
+                  spectrum=spectrum)
 
 
 def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int = 30,
                max_window: int | None = 4, replicates: int = 200, alpha: float = 0.05,
-               rate_ratio: float | None = None) -> list[Finding]:
+               rate_ratio: float | None = None, spectrum=None) -> list[Finding]:
     """Place sets × contiguous windows of at most ``max_window`` years."""
     return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window,
-                  rate_ratio=minimum_effect("space_time", s.field.id) if rate_ratio is None else rate_ratio)
+                  rate_ratio=minimum_effect("space_time", s.field.id) if rate_ratio is None else rate_ratio,
+                  spectrum=spectrum)
+
+
+def _null_noise(s: surprise.Surprise, spectrum, mark: bool) -> tuple[surprise.Noise | None, np.ndarray | None, str]:
+    """The noise the scan's null draws (N1) with its spatial root, and the lead's ``null`` text saying what was drawn.
+    A count field's frailties are correlated over places where `surprise.spatial_structure` finds a spatial share
+    (ω > 0 at the heat-kernel scale s*): the same estimate, on the same graph, the multiscale replicates draw, so a
+    cluster summing correlated neighbours is judged against sums of correlated neighbours. Where there is no graph
+    (``spectrum`` None, or not the surprise's places) the places are drawn independent, and the text says so; a mark's
+    Gaussian null has no frailty."""
+    if mark:
+        return None, None, "minimum effect; places independent (a mark's Gaussian null has no frailty)"
+    if spectrum is None or spectrum.n != len(s.places):
+        return s.noise, None, "minimum effect; places independent (the graph's spatial structure was not available)"
+    noise = surprise.spatial_structure(s, spectrum)
+    if noise.omega <= 0:
+        return noise, None, "minimum effect; places independent (N1's spatial share estimated at 0)"
+    return noise, surprise.spatial_root(spectrum, noise.scale), (
+        f"minimum effect; N1's frailty correlated over places (spatial share {noise.omega:.2f}, heat-kernel scale "
+        f"{noise.scale:.3g})")
 
 
 def _cluster_mu(mu: np.ndarray, usable: np.ndarray, f) -> float:
@@ -115,7 +139,7 @@ def _cluster_mu(mu: np.ndarray, usable: np.ndarray, f) -> float:
 
 def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int, replicates: int,
            alpha: float, full_period: bool = False, max_window: int | None = None,
-           rate_ratio: float | None = None) -> list[Finding]:
+           rate_ratio: float | None = None, spectrum=None) -> list[Finding]:
     rr = RATE_RATIO if rate_ratio is None else rate_ratio
     family = f"{lens}|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "scan", {"lens": lens, "field": s.field.id, "tier": s.tier,
@@ -155,19 +179,22 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
         low = subset.Scanner(nbr, adj, max_window=max_window, full_period=full_period, kind="poisson_low")
         directions = (("up", 1.0, y, m, scanner), ("down", -1.0, y, m_low, low))
     out, nulls = [], []
+    # the noise the null draws (its spatial share is estimated on first need: a field whose scans find no subset above
+    # its expectation never builds a null)
+    drawn = functools.cache(lambda: _null_noise(s, spectrum, mark))
     for name, sign, data, mm, sc in directions:
-        # the null depends on (m = the minimum-effect expectation, φ, noise, neighbourhoods, windows, direction, the
-        # study's replicate scale): one per field, θ0 and direction, shared by every scan of them, surrogates
-        # included. The entry holds the arrays it was keyed by, so their identities cannot be reused while it
-        # lives (an address key survived a garbage collection and served another array's null)
+        # the null depends on (m = the minimum-effect expectation, φ, noise with its spatial share, neighbourhoods,
+        # windows, direction, the study's replicate scale): one per field, θ0 and direction, shared by every scan of
+        # them, surrogates included. The entry holds the arrays it was keyed by, so their identities cannot be reused
+        # while it lives (an address key survived a garbage collection and served another array's null)
         null_key = (lens, name, s.field.id, s.tier, k, max_window, full_period, config.replicates(replicates), mark,
-                    float(rr), id(s.mu), id(s.phi), s.mu.shape, float(np.sum(mm)), s.noise)
+                    float(rr), id(s.mu), id(s.phi), s.mu.shape, float(np.sum(mm)), s.noise, id(spectrum))
         cached = _NULLS.get(null_key)
         found, nul = subset.scan(data, mm, s.phi, sc, alpha=alpha, replicates=replicates,
                                  seed_parts=(lens, name, s.field.id, s.tier, float(rr)),
-                                 nul=cached[2] if cached else None, noise=None if mark else s.noise)
+                                 nul=cached[2] if cached else None, noise=lambda: drawn()[:2])
         if nul is not None and cached is None:
-            _NULLS[null_key] = (s.mu, s.phi, nul)
+            _NULLS[null_key] = (s.mu, s.phi, nul, spectrum)
             while len(_NULLS) > 16:
                 _NULLS.pop(next(iter(_NULLS)))
         nulls.append(nul)
@@ -183,7 +210,7 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
                         {"score": f.score, "observed": f.observed,
                          "expected": f.expected if mark else mu_in, "expected_floor": f.expected,
                          "p_empirical": f.p_empirical, "p_method": f.null,
-                         "null": "minimum effect; places independent (no spatial frailty)",
+                         "null": drawn()[2],
                          "calibrated": bool(s.calibration.get("calibrated", True))}) for f in found]
     out = [f for f in out if f.p <= alpha]   # α after the two directions' doubling
     ledger.complete(test, min([f.p for f in out], default=1.0), out[0].effect if out else None,

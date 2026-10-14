@@ -1306,10 +1306,32 @@ def _composition_key(dataset: str, event: str, year: int, column: str, missing, 
             "data": config.data_version(), **_data_key(dataset, year)}
 
 
+def _composition_stored(key: dict) -> bool:
+    """Whether a composition is stored whole (its counts, unallocated and missing tables): a path test, nothing read."""
+    return all(store.has_table("gateway", k) for k in (key, {**key, "part": "unallocated"}, {**key, "part": "missing"}))
+
+
 def _composition_cached(key: dict) -> EventCounts | None:
+    if not _composition_stored(key):
+        return None
     parts = [store.get_table("gateway", key), store.get_table("gateway", {**key, "part": "unallocated"}),
              store.get_table("gateway", {**key, "part": "missing"})]
     return None if any(x is None for x in parts) else EventCounts(parts[0], parts[1], key, parts[2])
+
+
+def composition_parts(dataset: str, event: str, year: int, column: str, missing: tuple[str, ...] | list = (),
+                      classifier: str | None = None, places: pa.Array | None = None,
+                      codes: list[str] | tuple[str, ...] | None = None, area=None) -> tuple[pa.Table, pa.Table]:
+    """(counts, missing cells) of `composition_counts`: the two tables a reader of the composition itself uses (the
+    group question), the unallocated one left unread when the entry is stored. Computed and stored as there when not."""
+    codes = tuple(codes) if codes and classifier else None
+    key = _composition_key(dataset, event, year, column, missing, classifier, places, codes, area)
+    if _composition_stored(key):
+        counts, miss = store.get_table("gateway", key), store.get_table("gateway", {**key, "part": "missing"})
+        if counts is not None and miss is not None:
+            return counts, miss
+    ec = composition_counts(dataset, event, year, column, missing, classifier, places, codes=codes, area=area)
+    return ec.counts, ec.missing
 
 
 def composition_counts(dataset: str, event: str, year: int, column: str, missing: tuple[str, ...] | list = (),
@@ -1342,8 +1364,8 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     for col, miss in siblings.items():
         if len(batch) >= limit:
             break
-        if col not in batch and _composition_cached(_composition_key(dataset, event, year, col, miss, classifier, places,
-                                                                     codes, area)) is None:
+        if col not in batch and not _composition_stored(_composition_key(dataset, event, year, col, miss, classifier,
+                                                                          places, codes, area)):
             batch[col] = tuple(miss)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + ([classifier] if classifier else [])
     con = duckdb.connect()

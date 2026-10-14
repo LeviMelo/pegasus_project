@@ -279,7 +279,7 @@ def confirm_claim(node: str, lens: str, places: list[int], years: list[int], dir
     locus = {"places": sorted(int(p) for p in places), "years": [int(y) for y in years], "direction": direction}
     spec = {"field": node, "lens": lens, "locus": locus}
     reserve = control.Reserve(s.ledger)
-    before = {"spent": reserve.state()[0], "rejections": reserve.state()[1], "next_level": reserve.level()}
+    before = reserve.status()
     prev = reserve.previous(spec)
     if prev:
         return _clean({"status": "already_spent", "claim": spec, "earlier": prev, "reserve": before,
@@ -293,8 +293,7 @@ def confirm_claim(node: str, lens: str, places: list[int], years: list[int], dir
     after = control.Reserve(s.ledger)
     return _clean({"status": "spent", "wrote": True, "claim": spec, "caller": caller.strip(), "actor": actor,
                    "result": result, "ledger": after.previous(spec),
-                   "reserve": {"spent": after.state()[0], "rejections": after.state()[1],
-                               "next_level": after.level()},
+                   "reserve": after.status(),
                    "provenance": _provenance(s, s.expectations.field(node).block, tools.LENS_TIERS[lens])})
 
 
