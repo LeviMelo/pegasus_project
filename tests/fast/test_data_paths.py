@@ -140,7 +140,7 @@ def test_a_related_code_is_one_field_a_source():
     # read on every classifier and certificate line apart, 20 codes made 725 fields (31 h, exhaustive scope)
     decl = study.Declaration("s", {"icd10": ["B58"]}, list(range(2015, 2024)), study.Path("s.yml"), depth="deep")
     related = [{"code": "H32", "label": "Coriorretinite", "dataset": "SIHSUS-RD", "event": "hospitalisation",
-                "observed": 40.0, "lift": 300.0, "low": 190.0}]
+                "with_code": 40.0, "lift": 300.0, "lift_low": 190.0}]
     out = study._related_fields(decl, related, {"SIHSUS-RD", "SIM-DOREXT", "SINASC-DN"}, {"SIHSUS-RD"})
     per = collections.Counter((i.dataset, i.event) for i in out)
     assert per and max(per.values()) == 1

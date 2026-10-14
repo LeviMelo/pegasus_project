@@ -621,7 +621,7 @@ def _associated(decl: Declaration, scope: Scope, log) -> list[dict]:
         done.add(it.dataset)
         for role, cols in gateway.code_groups(it.dataset).items():
             try:
-                rows = cooccur.associated(it.dataset, it.event, list(it.years), list(cols), seeds)
+                rows = cooccur.associated(it.dataset, it.event, list(it.years), list(cols), seeds, q=decl.q)
             except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said
                 log(f"study: associated {it.dataset} {role}: {type(exc).__name__}: {exc}")
                 continue
@@ -630,12 +630,13 @@ def _associated(decl: Declaration, scope: Scope, log) -> list[dict]:
 
 
 def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) -> list[dict]:
-    """The codes related to the seeds on the same records (BACKLOG 4.2, `cooccur.related_codes`), wherever a read item's
-    records carry several codes (`fields.declared_mentions`: certificate lines, all diagnoses, anomaly lists), over the
-    item's years in the lake; each with its strength (lift and interval) and FDR."""
+    """The codes related to the seeds on the same records (BACKLOG 4.2, `cooccur.associated` at the study's q), wherever
+    a read item's records carry several codes (`fields.declared_mentions`: certificate lines, all diagnoses, anomaly
+    lists), over the item's years in the lake; each with its strength (lift and interval) and FDR. Only where related
+    fields are read (`related`): the report's table of them is associated.parquet's, made in the products."""
     from . import cooccur
 
-    if not seeds:
+    if not seeds or not decl.choice("related"):
         return []
     out, seen = [], set()
     # every read dataset whose records carry several codes, however its items are fitted: keyed on the item's mention
@@ -648,7 +649,7 @@ def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) 
             src = fields.mentions_source(it.dataset, d.column)
             cols = src["column"] if isinstance(src["column"], list) else [src["column"]]
             try:
-                rows = cooccur.related_codes(it.dataset, it.event, list(it.years), cols, seeds, q=decl.q)
+                rows = cooccur.associated(it.dataset, it.event, list(it.years), cols, seeds, q=decl.q)
             except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said, not hidden
                 log(f"study: related codes in {it.dataset} {d.column}: {type(exc).__name__}: {exc}")
                 continue
@@ -1054,7 +1055,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # each related code read as one field in each source that records it (a lead, never a cause)
         strength: dict[str, float] = {}
         for r in (r for r in related if r["related"]):
-            strength[r["code"]] = max(strength.get(r["code"], 0.0), float(r.get("low") or 0.0))
+            strength[r["code"]] = max(strength.get(r["code"], 0.0), float(r.get("lift_low") or 0.0))
         extra += [(strength.get(_related_code(it), 0.0), it)
                   for it in _related_fields(decl, [r for r in related if r["related"]], served,
                                             {i.dataset for i in items if i.status == "in"})]
@@ -1479,7 +1480,7 @@ def _related_fields(decl: Declaration, related: list[dict], served: set[str], to
     for r in related:
         found.setdefault((r["code"], gateway.dataset_key(r["dataset"])), r)
     out, seen = [], set()
-    for r in sorted(related, key=lambda r: -float(r.get("low") or 0.0)):
+    for r in sorted(related, key=lambda r: -float(r.get("lift_low") or 0.0)):
         code = r["code"]
         if code not in tree:
             continue
@@ -1493,7 +1494,7 @@ def _related_fields(decl: Declaration, related: list[dict], served: set[str], to
             if not ys:
                 continue
             here = found.get((code, gateway.dataset_key(ds)))
-            why = (f"related code {code} ({r['label']}): on {here['observed']:.0f} of its records with the topic's codes, "
+            why = (f"related code {code} ({r['label']}): on {here['with_code']:.0f} of its records with the topic's codes, "
                    f"{here['lift']:.1f} times expected" if here else
                    f"related code {code} ({r['label']}), found on {r['dataset']} records with the topic's codes")
             mine = any(gateway.same_dataset(ds, t) for t in topic)
@@ -2261,7 +2262,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "hypotheses.parquet")
     lap("hypotheses")
     lap.guard("report", lambda: _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons,
-                                        captured, quality, trends, linkage), None, log)
+                                        captured, quality, trends, linkage, assoc), None, log)
     lap("report")
     lap.guard("methods", lambda: (out / "METHODS.md").write_text(_methods_markdown(decl, scope, desc, linkage),
                                                                 encoding="utf-8"), None, log)
@@ -3485,8 +3486,12 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
                 # standardised ratio, the expected held fixed (Breslow & Day 1987; no finding had an interval,
                 # 2026-10-12)
                 if e_ > 0:
-                    r["ratio"], r["ratio_low"] = o / e_, (chi2.ppf(0.025, 2 * o) / 2 if o > 0 else 0.0) / e_
-                    r["ratio_high"] = chi2.ppf(0.975, 2 * o + 2) / 2 / e_
+                    # a group finding's own estimate is its group's effect; the locus's O/E is all the field's events
+                    # there, named apart (it had been the row's `ratio` beside the group's effect: "below expectation,
+                    # O/E 2.35", the review of the study, 2026-10-14)
+                    tag = "locus_ratio" if r.get("groups") else "ratio"
+                    r[tag], r[f"{tag}_low"] = o / e_, (chi2.ppf(0.025, 2 * o) / 2 if o > 0 else 0.0) / e_
+                    r[f"{tag}_high"] = chi2.ppf(0.975, 2 * o + 2) / 2 / e_
                 continue
             if e_ <= 0:
                 continue
@@ -4093,7 +4098,8 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
 def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: list[dict], figs: list[str],
             hyp: list[dict] | None = None, relations: list[dict] | None = None, persons: list[dict] | None = None,
             captured: list[dict] | None = None, completeness: list[dict] | None = None,
-            trends: list[dict] | None = None, linkage: list[dict] | None = None) -> None:
+            trends: list[dict] | None = None, linkage: list[dict] | None = None,
+            associated: list[dict] | None = None) -> None:
     """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
     from pegasus_data.linkage.engine import CAUTION, VIABLE
 
@@ -4107,7 +4113,12 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     other = [r for r in rows if r.get("class") not in ("signal", "facility", "noise") and not r.get("institution_facts")]
     noise = [r for r in rows if r.get("class") == "noise"]
     rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["ratio"])) if r.get("ratio") and r["ratio"] > 0 else 0))
-    stories = _stories(signal)
+    # the stories the products numbered on every place of each locus (`story`), not recomputed on the written list
+    numbered: dict[int, list[dict]] = {}
+    for r in signal:
+        if r.get("story") is not None:
+            numbered.setdefault(int(r["story"]), []).append(r)
+    stories = [sorted(numbered[k], key=lambda r: (bool(r.get("uncalibrated")), r["q"])) for k in sorted(numbered)]
 
     def table(rs: list[dict], cols: list[tuple[str, str]], cap: int = 40, where: str = "findings.parquet") -> str:
         head = "".join(f"<th>{e(c)}</th>" for _, c in cols)
@@ -4203,10 +4214,12 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              "<h3>Deferred</h3><ul>" + "".join(f"<li>{e(i.dataset)}: {e(i.note)}</li>"
                                                for i in scope.items if i.status != "in") + "</ul>",
              "<h3>Codes found with the topic's on the same records</h3>"
-             + (table(scope.related, [("code", "code"), ("label", "condition"), ("dataset", "source"), ("where", "on"),
-                                      ("observed", "records with both"), ("expected", "expected"), ("lift", "lift"),
-                                      ("low", "95% from"), ("high", "to"), ("q", "q")], cap=25)
-                if scope.related else "<p>None at q.</p>"),
+             + (table(sorted([r for r in associated or [] if r.get("related")], key=lambda r: -r["lift"]),
+                      [("code", "code"), ("label", "condition"), ("dataset", "source"), ("where", "on"),
+                       ("with_code", "records with both"), ("expected", "expected"), ("share", "share of the topic's"),
+                       ("lift", "lift"), ("lift_low", "95% from"), ("lift_high", "to"), ("q", "q")], cap=25,
+                      where="associated.parquet")
+                if any(r.get("related") for r in associated or []) else "<p>None at q.</p>"),
              "<h3>Person paths</h3><p>Declared record links between the sources read (no name is published: pairs "
              "are found on birth date, sex, residence and dates). A link is read only where its negative control, the "
              f"same key shifted, finds few pairs by chance (viable at most {VIABLE[0]:g}% with {VIABLE[1]:g}% "
@@ -4267,9 +4280,12 @@ def _stories(rows: list[dict]) -> list[list[dict]]:
 
     by_place: dict[str, list[int]] = {}
     for i, r in enumerate(rows):
-        for p_ in str(r.get("places") or "").replace(" (+", ",").split(","):
-            if p_.strip().isdigit():
-                by_place.setdefault(p_.strip(), []).append(i)
+        # every place of the locus (`_places`): the written `places` holds the first 20, and findings sharing only a
+        # later one were never one story (the review of the study, 2026-10-14)
+        places = r.get("_places") or [p_.strip() for p_ in str(r.get("places") or "").replace(" (+", ",").split(",")
+                                       if p_.strip().isdigit()]
+        for p_ in places:
+            by_place.setdefault(str(int(p_)), []).append(i)
     for idx in by_place.values():
         for i in idx:
             for j in idx:
@@ -4355,12 +4371,20 @@ def _story_html(k: int, rows: list[dict], e) -> str:
     sources = sorted({r["dataset"] for r in rows})
     years = [y for r in rows for y in (r.get("first_year"), r.get("last_year")) if y]
     span = f"{min(years)}–{max(years)}" if years else ""
+    def estimate(r: dict) -> str:
+        if r.get("groups"):
+            ci = (f" [{_fmt(r.get('interval_low'))}, {_fmt(r.get('interval_high'))}]"
+                  if r.get("interval_low") is not None else "")
+            return (f", {e(str(r['effect_unit']))} {_fmt(r['effect'])}{ci}; all the field's events there: "
+                    f"{_fmt(r.get('locus_observed'))} against {_fmt(r.get('locus_expected'))} expected")
+        if r.get("ratio") is not None:
+            return (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected, "
+                    f"O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]")
+        return f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} (the method's statistic)"
+
     items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
                     + (f" in {e(r['groups'])}" if r.get("groups") else "")
-                    + _direction(r) + (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected, "
-                                       f"O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]"
-                                       if r.get("ratio") is not None else
-                                       f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} (the method's statistic)")
+                    + _direction(r) + estimate(r)
                     + f", q {_fmt(r['q'])}"
                     + (", corroborated" if r.get("corroborated") else "")
                     + (f" (method not calibrated: {e(r['reliability'])})" if r.get("uncalibrated") else "") + "</li>"
@@ -4497,9 +4521,20 @@ COLUMNS = {
     "locus_observed": "a group finding's locus: all the field's events there",
     "locus_expected": "a group finding's locus: their expected count",
     "observed": "the field's events at the finding's locus (places and years)",
-    "expected": "the expected count there under the model, tier B1: fitted on the same years with each year's own effect, "
-                "so it reads a departure of the place from its own level and from the shared course, never a rise every "
-                "place shares (a national or statewide one is absorbed: those are read prospectively, hypotheses and series)",
+    "expected": "the expected count there under the model of the finding's tier (findings.parquet: `tier`): B1, fitted on "
+                "the same years with each year's own effect, so it reads a departure of the place from its own level and "
+                "from the shared course, never a rise every place shares (a national or statewide one is absorbed: those "
+                "are read prospectively, hypotheses and series); B0, the whole's rates without place effects",
+    "locus_ratio": "a group finding's locus: all the field's events there over their expected count (its own estimate "
+                   "is `effect`)",
+    "locus_ratio_low": "lower 95 % bound of locus_ratio, as ratio_low",
+    "locus_ratio_high": "upper 95 % bound of locus_ratio, as ratio_low",
+    "groups.parquet:observed": "the value's events in the row's geography and year (or period)",
+    "groups.parquet:expected": "the value's events expected there from the place's own usual mix of the column (race: "
+                               "from its population's)",
+    "associated.parquet:label": "the associated ICD-10 category's name",
+    "context_profile.parquet:context": "the context (water, sanitation, ...)",
+    "context_profile.parquet:places": "how many places of the finding's locus the context was read at",
     "excess": "observed minus expected",
     "ratio": "observed over expected at the locus (a standardised ratio)",
     "ratio_low": "lower 95 % bound of ratio: exact Poisson, expected fixed (Breslow and Day 1987)",
@@ -4557,6 +4592,11 @@ COLUMNS = {
                      "the group's columns (a certificate's lines: the deaths the infarction took part in, beside those it "
                      "is the underlying cause of)",
     "lift_low": "lower 95 % bound of the lift (exact Poisson, the expected fixed)",
+    "associated.parquet:expected": "the topic's records expected to name the category at the same sex and ten-year age "
+                                   "band (independence within each band)",
+    "associated.parquet:p": "one-sided exact Poisson p of with_code against expected",
+    "associated.parquet:q": "Benjamini-Hochberg q over every category with an expectation, in the source and column",
+    "associated.parquet:related": "q at most the study's q and at least 3 records naming both: a lead, never a cause",
     "lift_high": "upper 95 % bound of the lift",
     "associated.parquet:code": "the ICD-10 category named beside the topic on its records",
     "associated.parquet:where": "the group of columns read together (a certificate's lines, an admission's diagnoses)",
@@ -4598,8 +4638,12 @@ def _codebook(decl: Declaration, scope: Scope, out: Path) -> list[str]:
         seen.add(key)
         et = gateway.event_type(it.dataset, it.event) or {}
         st, ex, sn = et.get("status") or {}, et.get("exposure") or {}, et.get("source_notes") or {}
-        text = (f"- **{it.dataset} {it.event}**{_codes_text(it)}, {min(it.years)}-{max(it.years)}: one row is "
-                f"{et.get('grain') or 'one event'}")
+        src = it.source or {}
+        # the item's reading: two items of one source had printed identical lines (the review of the study)
+        how = (f" linked across {src['link']} ({src.get('side')} side)" if src.get("source") == "linked"
+               else " (second coding: counted and described only)" if it.count_only else "")
+        text = (f"- **{it.dataset} {it.event}**{_codes_text(it)} on {src.get('classifier') or 'the primary classifier'}"
+                f"{how}, {min(it.years)}-{max(it.years)}: one row is {et.get('grain') or 'one event'}")
         if st:
             why = st.get("evidence") or et.get("evidence")
             text += f"; counted where {st['column']} is {', '.join(st['values'])}" + (f" ({why})" if why else "")
