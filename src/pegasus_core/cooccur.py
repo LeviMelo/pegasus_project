@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from . import config, control, gateway
 
+#: the records naming both a category must hold to be a lead beside its q (the report reads the same rule)
+MIN_BOTH = 3
+
 
 def associated(dataset: str, event: str, years: list[int], columns: list[str], seeds: list[str], q: float = 0.05,
-               min_both: int = 3) -> list[dict]:
+               min_both: int = MIN_BOTH) -> list[dict]:
     """The conditions the topic's records name beside it (multiple-cause analysis): for every ICD-10 category on the
     records carrying a seed (a certificate's lines, an admission's diagnoses) in the study's area and ``years``, the
     records carrying both (``with_code``), their share of the topic's records with its exact (Clopper–Pearson)
@@ -26,7 +29,7 @@ def associated(dataset: str, event: str, years: list[int], columns: list[str], s
     fixed before the data are looked at), and ``related``: q at most ``q`` and at least ``min_both`` records. Most
     frequent first: a profile of mortality reports the associated causes by how often they are named (hypertension,
     diabetes), where the lift ranks the codes most specific to the topic. One computation for the scope's related codes
-    and the folder's associated.parquet, which had been two passes over the same tables, the second without p or q
+    and the folder's associated causes (estimates.parquet), which had been two passes over the same tables, the second without p or q
     (the review of the study, 2026-10-14)."""
     import pyarrow as pa
     from scipy.stats import beta, chi2, poisson

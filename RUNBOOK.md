@@ -13,6 +13,7 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | lint | `$PY -m ruff check src scripts` | |
 | the gate | `$PY scripts/prelaunch.py --slices [NAME ...]` | the fast tests, then every slice of `studies/slices/` within twice its estimate, each checked against the analytic body (`study.body`); before any national run |
 | a study's body and acceptance | `pegasus-core audit FOLDER`; `study.body(FOLDER)` | the win condition's items 1-10; the analytic body |
+| a study's products again | `pegasus-core study DECL --products-only` | from the fits and answers the store holds, the lanes not run: a change to the products measured in minutes (Alagoas: 5 min against 25) |
 | documents consistent | `$PY scripts/check_docs.py` | ADRs, evaluation index, open questions, modules named in ARCHITECTURE, CLAUDE.md = AGENTS.md |
 | pegasus_data reachable | `$PY -c "import pegasus_data, pegasus_core; print(pegasus_data.__file__)"` | |
 | warm the gateway cache | `PYTHONUTF8=1 $PY scripts/warm_gateway.py SIM.DO death 2010 2023` | one year at a time; downloads through pegasus_data into `PEGASUS_DATA_ROOT` |

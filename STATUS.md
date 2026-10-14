@@ -316,10 +316,11 @@ old keys had never covered the lens that made a stored answer; plumbing keyless,
 keys alone adopted on request); the gateway's readers on one template with one cached store and single flight
 (shown equal on 33 tables of real reads; facility_cube, the composition batch's frame and splitting gateway.py left);
 the study folder's ten estimate tables as one `estimates.parquet` (a measure vocabulary, every interval naming its
-method, every rate its denominator and scale, every period explicit; views `rates` and `municipalities`; written at the
-folder's edge from the producers' rows, which are next to emit estimates themselves); one declaration of what a reader's
+method, every rate its denominator and scale, every period explicit; views `rates` and `municipalities`; every producer
+emits through `_estimate_row`, and the trends, ratios, figures, report and methods read the estimates; `pegasus-core study
+--products-only` rewrites the products from the store); one declaration of what a reader's
 cells are (`questions.basis`/`not_read`: a method's kinds and bases, a question's quality flag), which the survey, the
-harness and the share lens apply alike. Not done, in order: the producers emitting estimates; studies of other sources
+harness and the share lens apply alike. Not done, in order: studies of other sources
 (SINASC microcephaly in Pernambuco, SIA dialysis in Alagoas) audited as the AMI one was; then per area: query (one
 catalog snapshot, the planner's read plan, render by vintage window), linkage (one role-table service, one placebo and
 verdict, run fingerprints, entities as components), semantics (a curation epoch, typing in declarations, event reading

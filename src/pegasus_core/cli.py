@@ -575,13 +575,15 @@ def scope_command(declaration: str) -> None:
 
 
 @app.command("study")
-def study_command(declaration: str) -> None:
+def study_command(declaration: str,
+                  products_only: bool = typer.Option(False, help="the products alone, from the fits and answers the "
+                                                                 "store holds (the lanes not run)")) -> None:
     """Run a study from its declaration (ARCHITECTURE §3) and write its folder beside the declaration."""
     from . import jobs, study
 
     decl = study.load(declaration)
     with jobs.slot(f"study {decl.study}"):
-        out = study.run(decl, log=console.print)
+        out = study.run(decl, log=console.print, products_only=products_only)
     console.print(f"study folder: {out}")
 
 
