@@ -354,21 +354,29 @@ cache eviction never removes them while the study exists. Two studies sharing a 
 toxoplasmosis/
   study.yml                 the declaration as written
   scope.yml                 what it resolved to, with reasons and costs
-  study.duckdb              views onto the lake and store objects the study uses (no data copied):
-                              records_<dataset>, fields_<field>, populations, contexts_<context>,
-                              expectations_<field>, parameters_<field>, ledger
-  findings.parquet          one row per finding (schema below)
-  stories.parquet           findings grouped into stories
+  study.duckdb              every table below as a view, and expectations_<field> (observed against expected per
+                              municipality and period, in the store)
+  findings.parquet          one row per finding (schema below), its story in a column
   hypotheses.parquet        the declared tests and their answers
-  descriptive.parquet       counts, crude and age-standardised rates with intervals, by place, period, group
-  relations.parquet         field–field and field–context cross-structure (§8.1–8.2)
-  screen.parquet            (exhaustive) the data-space screen (§8.3)
-  persons.parquet           linked-share sequences, cohort scan, capture–recapture (§8.4)
-  quality.parquet           completeness, "ignored" shares, recording regimes, capture completeness (§9.7)
-  models/<field>.md         model cards: data, tier, fit, calibration, method records (§11.6)
-  figures/                  maps, series against expectation, pyramids, lag and distance curves, cohort plots
+  descriptive.parquet       events, denominators, crude and directly standardised rates with intervals, each year
+                              and over the period, for the whole, its regions, states and health regions, by sex, age
+                              band and sex within age band; an area's reference rows (Brazil, its macro-regions);
+                              each series' APC, crude and age-sex adjusted
+  places.parquet            per municipality, each year and the period: rates, indirectly standardised ratios, the
+                              model's expected events, all with intervals (what a map or a spatial model reads)
+  groups.parquet            the case mix: every recorded variable's values, counts and shares with intervals, each
+                              year and over the period
+  quality.parquet           completeness: events placed and every reason the rest were not, ill-defined causes,
+                              each variable's share not recorded, with intervals
+  associated.parquet        causes named beside the topic on its own records, with lift against sex-age peers
+  related.parquet, relations.parquet, context_profile.parquet   cross-field and context structure (§8.1–8.2)
+  persons.parquet, capture.parquet   linked cohorts and capture–recapture (§8.4)
+  figures/                  maps, series against expectation
   report.html               the report (§3.5), opens offline
-  provenance.json           data and code versions, store keys referenced
+  METHODS.md                the methods as a paper states them, written from what the run read and computed (one
+                              text with the report's section 6)
+  README.md                 every table's columns, every field's definition, case status and denominator
+  provenance.json           data and code versions, timings, every failed product
 ```
 
 **A finding's row** carries:
@@ -386,7 +394,11 @@ epidemiological analysis and a paper, produced reliably across every preset and 
 says why it does not: the scope with each source's reason; incidence with its denominator and 95 % interval by place and
 year for every source read; a series and a map for every field; findings each with its recording class and named
 places; relations; the persons' cohorts and the completeness across systems where persons are asked for; the data's
-quality; an answer to every declared hypothesis; the report; and no failed step. The gate (`scripts/prelaunch.py
+quality; an answer to every declared hypothesis; the report; and no failed step. Since 2026-10-14 (the author: the folder
+goes to researchers, or a model, who write the paper from it alone, at every depth) it also holds the whole period's rates
+and case mix beside each year's, every municipality's rates and standardised ratios, the completeness of the records, an
+area's reference rates (Brazil, its macro-regions), and METHODS.md naming every source read; depth changes how much is
+searched, never this descriptive and methodological core. The gate (`scripts/prelaunch.py
 --slices`) checks it on a slice of every preset and of a second condition before any national run.
 
 Presence is not adequacy (2026-10-12: a folder that passed held notification counts rated as incidence, perinatal deaths

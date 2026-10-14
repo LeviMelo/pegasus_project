@@ -1161,26 +1161,17 @@ def _area_key(area) -> dict:
     return {"area": sorted(int(a) for a in area)} if area else {}
 
 
-def event_totals(dataset: str, event: str, year: int, classifier: str | None) -> pa.Table:
-    """Brazil's events of ``year`` by code alone (code, y): the denominator of the national share of a field's events
-    placed at a residence, beside `unplaced` (an area's own counts cannot say it). One column counted, cached."""
-    import pegasus_data as pg
-
-    key = {"what": "event_totals", "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
-           "classifier": classifier, "data": config.data_version(), "code": config.code_key(event_totals)}
-    cached = store.get_table("gateway", key)
-    if cached is not None:
-        return cached
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        raw = pg.count_events(dataset, event, period=year, geography="BR", by=[classifier] if classifier else None,
-                              root=config.data_root(), allow_partial=False, max_download=max_download())
-    con = duckdb.connect()
-    con.register("r", raw)
-    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
-    out = con.execute(f"SELECT {code} AS code, CAST(sum(events) AS BIGINT) AS y FROM r GROUP BY ALL").fetch_arrow_table()
-    store.put_table("gateway", key, out, {"source": f"pegasus_data.count_events({dataset}, {event}) by code"})
-    return out
+def event_totals(dataset: str, event: str, year: int, classifier: str | None, codes=()) -> pa.Table:
+    """Brazil's events of ``year`` by code alone (code, y), placed or not: the denominator of the national share of a
+    field's events placed at a residence, beside `unplaced` (an area's own counts cannot say it). Summed from Brazil's
+    `event_counts`, the one national read an area study makes (it gives the area's reference rates too), where this had
+    been a scan of its own (2026-10-14). A weight grid's uncounted groups are rows, not events."""
+    ec = event_counts(dataset, event, int(year), classifier, codes=tuple(codes))
+    un = ec.unallocated.filter(pc.invert(pc.equal(ec.unallocated.column("reason"), "groups not counted (rows, not events)")))
+    schema = pa.schema([("code", pa.string()), ("y", pa.int64())])
+    both = pa.concat_tables([ec.counts.select(["code", "y"]).cast(schema), un.select(["code", "y"]).cast(schema)])
+    sums = both.group_by("code").aggregate([("y", "sum")])
+    return pa.table({"code": sums.column("code"), "y": sums.column("y_sum")})
 
 
 def unplaced(dataset: str, event: str, year: int, classifier: str | None) -> pa.Table:
@@ -2311,17 +2302,15 @@ def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
 
 
 def link_report(link: str, year: int) -> dict | None:
-    """The report of ``link``'s stored national run for ``year`` without reading its pairs (None when not stored): what
-    a scope checks and prices a run by (`study._link_runs_needed`)."""
-    import json
-
+    """The report of ``link``'s stored national run for ``year`` without reading its pairs (None when not stored, or
+    not current: pegasus_data's `linkage.store.report`): what a scope checks and prices a run by
+    (`study._link_runs_needed`). The file had been read directly, so runs made before the linkage fixes counted as
+    stored, were not made again, and their verdicts were read (2026-10-14)."""
     import pegasus_data as pg
     from pegasus_data.linkage import store as link_store
     from pegasus_data.linkage.engine import link_method, stored_key
 
-    key = stored_key(link, link_method(link), year, "BR")
-    path = link_store.links_dir(pg.load_settings(root=config.data_root())) / key.spec / f"{key.stem}.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() and path.with_suffix(".parquet").exists() else None
+    return link_store.report(pg.load_settings(root=config.data_root()), stored_key(link, link_method(link), year, "BR"))
 
 
 def covering_runs(link: str, side: str, year: int) -> list[int]:
