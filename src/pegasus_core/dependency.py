@@ -147,8 +147,9 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
             s = tools.Session(dataset, event, config.FIT_YEARS, source=reader)
             tag = "" if not reader else "|" + ":".join(str(reader.get(f)) for f in ("source", "mark", "indicator",
                                                                                    "link", "classifier") if reader.get(f))
-            for block in (blocks if not reader else s._blocks()):
-                if block not in s._blocks():
+            found = s._blocks()        # once a reader: it had been listed again for every block (the review, 2026-10-14)
+            for block in (blocks if not reader else found):
+                if block not in found:
                     continue
                 node = block
                 su = s.surprise(node, "B0")
@@ -198,6 +199,7 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
         add(f"ctx:{name}", "context", label, z, np.where(np.isfinite(z), CONTEXT_SD, np.nan), set())
     F = len(names)
     overlap = np.zeros((F, F))
+    position = {n: i for i, n in enumerate(names)}      # list.index for every pair was O(F^3): 47 s at 1,500 fields
     for a in range(F):
         for b in range(a + 1, F):
             ga, gb = groups[a], groups[b]
@@ -207,7 +209,7 @@ def build(systems: list[tuple[str, str, list[str]]], years: list[int] | None = N
                 base_a, base_b = names[a].split("|not linked")[0], names[b].split("|not linked")[0]
                 ov = 1.0 if (base_a == base_b or (cats[a] & cats[b]) - {""}) else 0.0
             else:
-                base = {n: names.index(n.split("|not linked")[0]) for n in (names[a], names[b])}
+                base = {n: position[n.split("|not linked")[0]] for n in (names[a], names[b])}
                 ia, ib = base[names[a]], base[names[b]]
                 unl_a = f"unlinked:{gb}" in cats[a]
                 unl_b = f"unlinked:{ga}" in cats[b]
