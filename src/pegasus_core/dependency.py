@@ -17,7 +17,7 @@ import json
 
 import numpy as np
 
-from . import config, gateway, surprise
+from . import config, gateway, monolith, surprise
 from .fields import MAX_OVERLAP
 from .scans.maps import MapInputs
 
@@ -52,8 +52,7 @@ def _window(su, years: list[int], places: np.ndarray) -> tuple[np.ndarray, ...]:
     """A surprise summed over the map's years on the map's places: y, μ [U], and the place weights Σw, Σw·(y − μ) [U]
     (a Gaussian location's precision and residual)."""
     cols = np.isin(np.asarray(su.years), years)
-    index = {int(p): i for i, p in enumerate(su.places)}
-    rows = np.array([index.get(int(u), -1) for u in places])
+    rows = monolith.positions(su.places, places)
     have = rows >= 0
     out = [np.zeros(len(places)) for _ in range(4)]
     y, mu, w = (np.nan_to_num(np.asarray(a, dtype=float)[rows[have]][:, cols]) for a in (su.y, su.mu, su.w))

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import config, gateway, store, structures
+from . import config, gateway, monolith, store, structures
 
 DEFAULT = "contiguity"
 
@@ -43,9 +43,8 @@ def graph(places: np.ndarray, kind: str = DEFAULT) -> tuple[np.ndarray, np.ndarr
         w = np.ones(len(out))
     elif kind in ("contiguity", "contiguity01") or kind.startswith("distance"):
         table = gateway.proximity_graph("contiguity" if kind.startswith("contiguity") else "population_distance")
-        index = {int(c): i for i, c in enumerate(places)}
-        a = np.array([index.get(int(x), -1) for x in table.column("a").to_numpy()])
-        b = np.array([index.get(int(x), -1) for x in table.column("b").to_numpy()])
+        a = monolith.positions(places, table.column("a").to_numpy())
+        b = monolith.positions(places, table.column("b").to_numpy())
         raw = table.column("weight").to_numpy()
         keep = (a >= 0) & (b >= 0) & (a < b)
         out = np.column_stack([a[keep], b[keep]])
@@ -86,9 +85,8 @@ def _careflow(places: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     u = np.concatenate([p.column("u").to_numpy() for p in parts])
     v = np.concatenate([p.column("v").to_numpy() for p in parts])
     y = np.concatenate([p.column("y").to_numpy() for p in parts]).astype(float)
-    index = {int(c): i for i, c in enumerate(places)}
-    a = np.array([index.get(int(x), -1) for x in u])
-    b = np.array([index.get(int(x), -1) for x in v])
+    a = monolith.positions(places, u)
+    b = monolith.positions(places, v)
     keep = (a >= 0) & (b >= 0)
     a, b, y = a[keep], b[keep], y[keep]
     n = len(places)

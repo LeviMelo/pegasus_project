@@ -562,7 +562,16 @@ population).
   → national; the **facility** (the notifying or recording establishment's CNES code: SINAN's `ID_UNIDADE`, SIH's
   `CNES`, SIM's `CODESTAB`); the **place of infection** where a record declares one (SINAN's `COMUNINF`); special
   supports declared with their membership (the indigenous health districts). Built: a count field at every municipality column of the event
-  (`support:<column>`), its records without one unallocated by municipality, the exposure the place's residents.
+  that pegasus_data's roles model as `where` (where the event or its care happened, or the infection was acquired:
+  SIM's place of death, SIH's hospital, SINASC's place of birth, SINAN's place of infection, notification and
+  hospital), never at a place the record merely names (`mark`: the registry office, the death-verification service, a
+  managing authority) (`support:<column>`), its records without one unallocated by municipality, the exposure the
+  place's residents. The topic's own field is always by **residence**: an area study reads every state's files and
+  keeps, in the lake's scan, the records whose residence is in the area (pegasus_data ADR-0043).
+- **A second coding of the same events** (an alternative classifier of the primary's own structure: SIM's cause before
+  investigation, `CAUSABAS_O`) is counted and described beside the primary, asked no questions and given no supports
+  or linked shares (`study.Item.count_only`); an alternative of another structure (SIA's diagnosis beside its
+  procedure) reaches other records and is read whole.
 - **Grains:** year, month, epidemiological week (SINAN's own week, never recomputed).
 - **Groups:** every stratum (sex, age band, race) and every composition column (schooling, occupation, …) is a group
   dimension a field can be split by (§7.2, component 8). Built for compositions: a value's expectation is the place-year's events at the place's mix

@@ -253,6 +253,9 @@ class Item:
     confirm_last: int | None = None      # stage E's later years: its leads selected on the years up to it, tested after
     questions: list[str] | None = None   # the declaration's questions (None: every question)
     note: str = ""
+    #: a second coding of the topic's own events (an alternative classifier of the primary's structure: SIM's cause
+    #: before investigation): counted and described, asked nothing, given no supports or linked shares
+    count_only: bool = False
 
 
 @dataclass
@@ -675,7 +678,7 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
         method = link_method(p["link"])
         # a source's own events, or a code set of them (SIM's infarction deaths: the share that died after an admission,
         # the rest without one; code sets had no linked share, and a study of a cause of death no linkage, 2026-10-13)
-        for it in (i for i in items if i.status == "in" and (i.source is None or (
+        for it in (i for i in items if i.status == "in" and not i.count_only and (i.source is None or (
                 (i.source or {}).get("codes") and set(i.source) <= {"codes", "classifier", "structure"}))):
             for side in (s for s in p["sides_read"] if gateway.same_dataset(p[s], it.dataset)):
                 column = f"link:{p['link']}:{side}"
@@ -768,13 +771,23 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
     procedures = sorted({r["code"] for r in ix["labels"] if r["structure"] == "SIGTAP" and r["level"] == "procedure"})
     for ds in sorted(served):
         for et in gateway.event_types(ds):
+            primary_structure = next((c.get("structure") for c in et.get("classifiers") or []
+                                      if c.get("role") == "primary"), None)
             for c in et.get("classifiers") or []:
                 if c.get("role") == "primary" and c.get("structure") == "ICD10":
                     continue                    # read by the primary loop, with its tree
                 if c.get("structure") == "ICD10" and prefixes:       # its records decide (`_records`)
+                    # an alternative of the primary's own structure codes the same events again (SIM's CAUSABAS_O, the
+                    # cause before investigation): its rates are described beside the primary's, its questions,
+                    # supports and links would restate the primary's (Alagoas's infarction deaths were asked twice
+                    # over, 2026-10-14); of another structure (SIA's diagnosis beside its procedure) it reaches records
+                    # the primary's codes do not, and is read whole
+                    again = c.get("role") != "primary" and c.get("structure") == primary_structure
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
-                                      f"(ICD-10) carries {', '.join(prefixes)}, read as one code set",
-                                      source={"classifier": c["column"], "codes": prefixes}))
+                                      f"(ICD-10) carries {', '.join(prefixes)}, read as one code set"
+                                      + (": a second coding of the same events, counted and described only" if again
+                                         else ""),
+                                      source={"classifier": c["column"], "codes": prefixes}, count_only=again))
                 elif c.get("structure") == "SIGTAP" and procedures:
                     # the instruments SIGTAP registers each procedure on, against the column's (pegasus_data
                     # `can_record`): SIGTAP is every SIA dataset's tree, and the serology procedures, recorded by BPA
@@ -976,7 +989,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         it.readers = {} if it.source else {k: "all" for k in chosen if k != "linked"}
         it.questions = decl.questions
         coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
-        if coded and "supports" in chosen:
+        if coded and "supports" in chosen and not it.count_only:
             it.readers = {"supports": "all"}     # the code set at its other places
     # a dataset read as nested events (SINAN's notification, every row; its case, the rows its classification
     # confirms): its fields are asked of the narrower, the topic's own object, and the wider is counted only; asked of
@@ -1018,14 +1031,15 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # replication in later years (ARCHITECTURE §8.3, acceptance item 6): selected on the years up to the last
         # LATER_YEARS held out, tested once on them; the survey's findings stood at R0 with nothing to replicate them
         for it in items:
-            if it.status == "in" and len(it.years) >= 2 * LATER_YEARS + 2:
+            if it.status == "in" and not it.count_only and len(it.years) >= 2 * LATER_YEARS + 2:
                 it.confirm_last = sorted(it.years)[-LATER_YEARS - 1]
     items = _shared_blocks(_one_per_field(items))
     for it in items:
         # the topic's fields and their linked shares are asked the declaration's questions; a related code's field is
         # read to relate it to the topic (`related_questions`, preset none): asked all eleven, 160 related fields made
         # the exhaustive scope's hours (2026-10-12)
-        it.questions = decl.choice("related_questions") if it.reason.startswith("related code") else decl.questions
+        it.questions = ([] if it.count_only else decl.choice("related_questions") if it.reason.startswith("related code")
+                        else decl.questions)
     overlap, fixed, per_field = _phase_record(decl)
     overhead = fixed + per_field * sum(i.fields for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
@@ -2394,7 +2408,6 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     N = d.N.astype(float)
     rate = np.divide(yg.sum(0), N.sum(0), out=np.zeros((T, G)), where=N.sum(0) > 0)          # [T, G]
     years = [int(x) for x in np.asarray(d.years)]
-    index = {int(p_): i for i, p_ in enumerate(np.asarray(d.places))}
     races = {k: ACCOUNT_RACE.get(plain(labels.get(v, ""))) for k, v in enumerate(values)}
     races = {k: r for k, r in races.items() if r}
     # what the source says of its race column (pegasus_data's role note: SIH's code 04), on every row it makes
@@ -2402,7 +2415,7 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     expected = {}
     for k, race in races.items():
         tab = gateway._tensor_population(years, tools.RACE_POPULATION, race)
-        u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
+        u = monolith.positions(np.asarray(d.places), tab.column("u").to_numpy())
         t = np.searchsorted(np.asarray(years), tab.column("year").to_numpy())
         g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
         ok = (u >= 0) & (t < len(years)) & (g >= 0) & (g < G)
@@ -2621,8 +2634,6 @@ def _levels_below(places: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
     the area is one state), then, for a declared area, its health macro-regions and health regions (`HEALTH_LEVELS`):
     a state's profile tabulates its regions, where Alagoas's infarction study had the state's rows alone (2026-10-13).
     Brazil's own study stops at the states; its municipalities are the findings' and maps'."""
-    import pegasus_data as pg
-
     places = np.asarray(places).astype(np.int64)
     state = places // 10000
     region = state // 10
@@ -2640,9 +2651,17 @@ def _levels_below(places: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
             continue                    # a municipality without the membership: the level is not written, never guessed
         for code in np.unique(unit):
             sel = unit == code
-            m = pg.memberships(str(int(places[sel][0]))).get(classification)
-            out.append((level, f"{code} {m.member_label}" if m is not None else str(code), sel))
+            out.append((level, _region_label(classification, str(code), int(places[sel][0])), sel))
     return out
+
+
+@functools.cache
+def _region_label(classification: str, code: str, member: int) -> str:
+    """A health region's or macro-region's name, from one of its municipalities' memberships (pegasus_data)."""
+    import pegasus_data as pg
+
+    m = pg.memberships(str(member)).get(classification)
+    return f"{code} {m.member_label}" if m is not None else code
 
 
 def _whole() -> tuple[str, str]:
@@ -2717,36 +2736,37 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
     from . import tools
 
     names = {d.column: d.name for d in fields.declared(it.dataset)}
+    geo = [(*_whole(), np.ones(len(places), bool))] + _levels_below(places)     # once: every column and year reads it
     for column in tools.group_columns(it.dataset, it.event):
         try:
             y, mu, values = config.on_cpu_if_cuda_fails(s.by_composition, f.node, column)
         except Exception as exc:  # noqa: BLE001 - a column that cannot be split is a note, the others are written
             log(f"study: {it.dataset} {f.node} by {column}: {type(exc).__name__}: {exc}")
             continue
-        # labelled on the values this split holds, as pegasus_data labels a query (`pg.levels`): weighed on the
-        # whole dataset's values (`gateway.value_labels`), SIM's and SIH's every column was read for every year
-        # in the products, 20 minutes of a slice (2026-10-12)
-        held = sorted({str(v) for v in values} - {"not recorded", "value missing"})
+        # labelled as a finding's text labels them (`gateway.value_labels`, one table chosen on the column's values in
+        # the study's area and years, kept for the process): two paths had labelled the same values, one on this
+        # split's values only, where a subset can choose another table (2026-10-14)
         try:
-            import pegasus_data as pg
-
-            vl = pg.levels(it.dataset, column, held, root=config.data_root()) if held else {}
+            vl = gateway.value_labels(it.dataset, it.event, column, tuple(int(x) for x in it.years))
         except Exception:  # noqa: BLE001 - a column no table decodes: its values as recorded, said undecoded
             vl = {}
         shown = {v: (vl[str(v)] if str(v) in vl else (str(v) if str(v) in ("not recorded", "value missing")
                                                        else f"{v} (undecoded)")) for v in values}
         for t, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     _levels_below(places):
+            for level, unit, sel in geo:
                 obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
                 # each value's share of the field's events, with its exact (Clopper–Pearson) interval: a case mix is
-                # described by proportions, and the table gave counts against a model's expectation only (2026-10-12)
+                # described by proportions, and the table gave counts against a model's expectation only (2026-10-12).
+                # One vectorised call per level and year: per value, 138,612 calls took 113 s of a study (2026-10-14)
                 tot = float(obs.sum())
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    lo = np.where(obs > 0, beta.ppf(0.025, obs, tot - obs + 1), 0.0) if tot else None
+                    hi = np.where(obs < tot, beta.ppf(0.975, obs + 1, tot - obs), 1.0) if tot else None
                 out.extend({"field": f.id, "label": label, "dataset": it.dataset, "by": column, "by_name": names.get(column, "race"),
                             "value": v, "value_label": shown[v], "level": level, "unit": unit, "year": int(year),
                             "observed": float(obs[k]), "expected": float(exp[k]), "total": tot,
                             "share": float(obs[k]) / tot if tot else None,
-                            "share_low": (float(beta.ppf(0.025, obs[k], tot - obs[k] + 1)) if obs[k] > 0 else 0.0) if tot else None,
-                            "share_high": (float(beta.ppf(0.975, obs[k] + 1, tot - obs[k])) if obs[k] < tot else 1.0) if tot else None}
+                            "share_low": float(lo[k]) if tot else None, "share_high": float(hi[k]) if tot else None}
                            for k, v in enumerate(values) if obs[k] > 0 or exp[k] > 0)
     out.extend(_sex_age(it, s, f, label))
     return out
@@ -3325,13 +3345,32 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
     munis = pg.mesh("municipality", root=config.data_root())
     munis["u"] = munis["code"].str[:6].astype(int)
     st = places // 10000
-    by_state = {}
-    for k in np.unique(st):
-        sel = st == k
-        e = float(obs[sel].sum())
-        n = float(n_of[sel].sum())
-        by_state[str(int(k))] = (e / n * (1e3 if ratio else 1e5)) if n else np.nan
-    states["rate"] = states["code"].map(by_state)
+    scale = 1e3 if ratio else 1e5
+    area = config.study_area()
+    if area is not None:
+        # an area study draws its own places: Brazil's 5,570 municipalities, all but the area's grey, took 9 s a map
+        # (Alagoas's infarction study, 2026-10-14)
+        munis = munis[config.in_area(munis["u"].to_numpy())]
+        states = states[states["code"].astype(int).isin(np.unique(st).tolist())]
+    one_state = area is not None and len(np.unique(st)) == 1
+    if one_state:
+        # one state: its rate by health region (the descriptive tables' level), each municipality drawn in its region's
+        region = gateway.regions(places, "health_region")
+        rate_of = {}
+        for code in np.unique(region):
+            sel = region == code
+            n = float(n_of[sel].sum())
+            rate_of[code] = float(obs[sel].sum()) / n * scale if n else np.nan
+        munis["rate"] = munis["u"].map(dict(zip(places.tolist(), [rate_of[r] for r in region], strict=True)))
+        rated, level = munis, "health region"
+    else:
+        by_state = {}
+        for k in np.unique(st):
+            sel = st == k
+            n = float(n_of[sel].sum())
+            by_state[str(int(k))] = float(obs[sel].sum()) / n * scale if n else np.nan
+        states["rate"] = states["code"].map(by_state)
+        rated, level = states, "state"
     # the standardised departure over the years, (O − E)/sd with the NB variance: a small place's ratio is mostly noise
     var = (sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)).sum(1)
     zd = np.where(var > 0, (obs - mu) / np.sqrt(np.maximum(var, 1e-12)), np.nan)
@@ -3342,9 +3381,11 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
     figs.mkdir(exist_ok=True)
     name = _figure_name(it, f, "map")
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.6), dpi=110)
-    states.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
-                legend_kwds={"shrink": 0.6, "label": "per 1,000 denominator events" if ratio else "per 100,000"})
-    a1.set_title(f"{label}: rate by state, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
+    rated.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
+               legend_kwds={"shrink": 0.6, "label": "per 1,000 denominator events" if ratio else "per 100,000"})
+    if one_state:
+        states.boundary.plot(ax=a1, color="#555", linewidth=0.3)
+    a1.set_title(f"{label}: rate by {level}, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
     munis.plot(column="z", ax=a2, cmap="RdBu_r", norm=mcolors.TwoSlopeNorm(0.0, -4.0, 4.0), legend=True,
                missing_kwds={"color": "#eee"}, legend_kwds={"shrink": 0.6, "label": "(observed − expected) / sd",
                                                             "extend": "both"})

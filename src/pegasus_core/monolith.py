@@ -691,6 +691,20 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     return data
 
 
+def positions(keys, values) -> np.ndarray:
+    """The position of each of ``values`` in ``keys`` (distinct, any order), -1 where absent: one vectorised search. A
+    Python dict lookup per row over the population tensor's millions of rows took 40 s of one study's products
+    (2026-10-14)."""
+    keys = np.asarray(keys).astype(np.int64, copy=False)
+    values = np.asarray(values).astype(np.int64, copy=False)
+    if not len(keys) or not len(values):
+        return np.full(len(values), -1, dtype=np.int64)
+    order = np.argsort(keys, kind="stable")
+    sk = keys[order]
+    pos = np.searchsorted(sk, values).clip(0, len(sk) - 1)
+    return np.where(sk[pos] == values, order[pos], -1).astype(np.int64)
+
+
 def _index_of(sorted_values: np.ndarray, values: np.ndarray) -> np.ndarray:
     """Position of each value in a sorted array of distinct values; a value the array lacks raises."""
     values = np.asarray(values).astype(sorted_values.dtype, copy=False)

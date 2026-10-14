@@ -399,7 +399,11 @@ def declared_flows(dataset: str) -> list[Declared]:
     codelist) against the residence municipality (`gateway.away_counts`). A place of the event (a hospital, a place of
     death: its entity is not the residence's) is a care flow ``away:<column>``, the share of events that happened away
     from the residence; a place of the person (a birthplace: the residence's entity) is an origin ``origin:<column>``,
-    the share of events of persons from elsewhere. One reader, two meanings."""
+    the share of events of persons from elsewhere. One reader, two meanings. Only a place pegasus_data's roles model
+    as ``where`` (where the event or its care happened, or the infection was acquired); a place the record merely
+    names (``mark``: the registry office, the death-verification service, a managing authority) is no field: SIM's
+    death-verification municipality had been read as a field of Alagoas's infarction deaths and given 354 answers
+    (2026-10-14)."""
     from . import gateway
 
     rows = gateway.roles(dataset)
@@ -410,7 +414,7 @@ def declared_flows(dataset: str) -> list[Declared]:
     out = []
     for r in rows:
         w = gateway.PLACE_PREFIX.get((r.get("codelists") or [None])[0])
-        if not (r["kind"] == "place" and r["column"] != res["column"] and r.get("reviewed", True)
+        if not (r["kind"] == "place" and r.get("model") == "where" and r["column"] != res["column"] and r.get("reviewed", True)
                 and w is not None and width is not None and w <= width):
             continue
         if r["entity"] == res["entity"] and r["role"].split(".", 1)[-1].startswith(res["role"].split(".", 1)[-1]):

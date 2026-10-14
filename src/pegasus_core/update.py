@@ -484,7 +484,8 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 out[f"disparity {sys_.dataset} {node}"] = len(found)
             else:
                 out[f"disparity {sys_.dataset} {node}"] = "done on these versions"
-    t0 = plan.extra.get("prospective")
+    # a plan that asks no questions asks none of its later years either (`study.Item.count_only`)
+    t0 = plan.extra.get("prospective") if plan.questions != [] else None
     for sys_ in plan.systems if t0 else ():
         s = sessions[sys_.dataset]
         blocks = resolved.get(sys_.dataset, sys_.blocks)

@@ -287,15 +287,14 @@ class Session:
         "departure" of 0.25 (2026-10-10)."""
         U, T, G = d.N.shape
         K = len(values)
-        index = {int(p_): i for i, p_ in enumerate(d.places)}
         tidx = {int(yr): i for i, yr in enumerate(np.asarray(d.years))}
         pop = np.zeros((U, T, G, K))
         for k, v in enumerate(values):
             if v not in gateway.RACE:
                 continue
             tab = gateway._tensor_population(sorted(tidx), RACE_POPULATION, gateway.RACE[v])
-            u = np.array([index.get(int(x), -1) for x in tab.column("u").to_numpy()])
-            t = np.array([tidx.get(int(x), -1) for x in tab.column("year").to_numpy()])
+            u = monolith.positions(d.places, tab.column("u").to_numpy())
+            t = monolith.positions(np.asarray(d.years), tab.column("year").to_numpy())
             g = (tab.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(tab.column("age").to_numpy(), edges)
             ok = (u >= 0) & (t >= 0)
             np.add.at(pop, (u[ok], t[ok], g[ok], k), tab.column("n").to_numpy()[ok])
@@ -326,7 +325,6 @@ class Session:
         counts as none."""
         block = next(iter(self.expectations._models), None) or self._blocks()[0]
         d = self.expectations.model(block).data
-        index = {int(p): i for i, p in enumerate(d.places)}
         monthly = d.grain == "month"
         x = np.zeros(d.N.shape[:2])
         y0 = int(d.years[0])
@@ -337,7 +335,7 @@ class Session:
                     t = reader(dataset, event, int(year), places=pa.array(d.places, pa.int32())).counts
                 except LookupError:                      # nothing published for that year (NothingPublished)
                     continue
-                rows = np.array([index.get(int(a), -1) for a in t.column("u").to_numpy()])
+                rows = monolith.positions(d.places, t.column("u").to_numpy())
                 yr = t.column("year").to_numpy()
                 k = (yr - y0) * 12 + t.column("month").to_numpy() - 1 if monthly else yr - y0
                 ok = (rows >= 0) & (k >= 0) & (k < x.shape[1])
@@ -501,8 +499,7 @@ class Session:
             base._prepare_grid()
             if base._total is None:
                 raise ValueError(f"{self.dataset}: no all-event count to take a share of (one block, no tree)")
-            index = {int(p_): i for i, p_ in enumerate(base._grid_places)}
-            rows = np.array([index.get(int(p_), -1) for p_ in s.places])
+            rows = monolith.positions(base._grid_places, s.places)
             have = rows >= 0
             total = np.zeros(s.y.shape)
             total[have] = base._total[rows[have]]
@@ -1171,8 +1168,7 @@ class Session:
                                   f"`pegasus-core update` fits it with the plan, or `pegasus-core fit "
                                   f"{self.dataset} {self.event} '*'`") from exc
             mu = m.expected(np.arange(len(m.data.leaves)))[0]
-            index = {int(p): i for i, p in enumerate(m.data.places)}
-            rows = np.array([index.get(int(p), -1) for p in self._grid_places])
+            rows = monolith.positions(m.data.places, self._grid_places)
             self._mu_total = np.where(rows[:, None] >= 0, mu[np.maximum(rows, 0)], 0.0)
             return self._mu_total
         if getattr(self, "_mu_total", None) is None:

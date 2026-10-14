@@ -873,7 +873,7 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     concatenated (SINASC's CODANOMAL, "Q02Q690"); an event counts once under each distinct
     category it carries (as `code_list_counts`), and events carrying none are not counted."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     if support:
         # another place the events are recorded at, by month as `event_counts` reads it by year (a hypothesis of months
         # at the place of care or of infection had fallen back to the year, 2026-10-13)
@@ -998,7 +998,7 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     mark is an interval: the days from the anchor to the ``mark`` date times ``sign``, plus one (the calendar days
     spanned, so a same-day date is 1 and the log is defined). Returns the unallocated (year, reason, code, y)."""
 
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     _per_record(dataset, event, "a mark's moments")
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), mark] + ([anchor] if anchor else []) + \
@@ -1113,12 +1113,22 @@ def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[f
 COMPOSITION_BATCH = 4
 
 
+def _area_rows(residence: str) -> dict[str, list[str]]:
+    """The study's area as a filter of the lake's scan on the subject's residence column (`_records`'s ``rows``): every
+    state's files are still read (ADR-0043: a resident treated in another state is kept), only the area's residents'
+    rows are. Empty for Brazil."""
+    area = config.study_area()
+    return {residence: sorted(str(a) for a in area)} if area else {}
+
+
 def _composition_key(dataset: str, event: str, year: int, column: str, missing, classifier: str | None,
                      places: pa.Array | None, codes=None) -> dict:
+    area = config.study_area()
     return {"what": "composition_counts", "code": config.code_key(composition_counts, _composition_tables),
             **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event),
             "year": year, "column": column, "missing": sorted(missing), "classifier": classifier,
-            **({"codes": sorted(codes)} if codes else {}), "data": config.data_version(), **_df_key(dataset, year)}
+            **({"codes": sorted(codes)} if codes else {}), **({"area": sorted(area)} if area else {}),
+            "data": config.data_version(), **_df_key(dataset, year)}
 
 
 def _composition_cached(key: dict) -> EventCounts | None:
@@ -1144,21 +1154,25 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
         return hit
     from .tools import group_columns
 
+    strata = _strata(dataset, event, year)
+    rows = {**({classifier: list(codes)} if codes else {}), **_area_rows(strata["residence"])}
     batch = {column: tuple(missing)}
     try:
         siblings = group_columns(dataset, event)
     except Exception:  # noqa: BLE001 - without the list of siblings the column is counted alone
         siblings = {}
+    # a filtered read (a code set's records, an area's residents) is small: every group column from the one read. Four
+    # at a time had made Alagoas's infarction study 268 lake queries of 0.65 s each, 384 s of its products (2026-10-14)
+    limit = len(siblings) + 1 if rows else COMPOSITION_BATCH
     for col, miss in siblings.items():
-        if len(batch) >= COMPOSITION_BATCH:
+        if len(batch) >= limit:
             break
         if col not in batch and _composition_cached(_composition_key(dataset, event, year, col, miss, classifier, places,
                                                                      codes)) is None:
             batch[col] = tuple(miss)
-    strata = _strata(dataset, event)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + ([classifier] if classifier else [])
     con = duckdb.connect()
-    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), rows={classifier: list(codes)} if codes else None)
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), rows=rows or None)
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
@@ -1202,7 +1216,7 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
     """A share's records of ``year`` by recording facility, residence and category: (facility, u, code, n, k), n the
     records with ``indicator`` recorded and k those with a value among ``success``; a record naming no facility is
     ''. One read of the year serves every lead's facility reading in stage E (S4.3)."""
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     fac = facility_column(dataset)[0]
     key = {"what": "composition_facility", "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year, "indicator": indicator,
            "success": sorted(success), "missing": sorted(missing), "classifier": classifier, "data": config.data_version(),
@@ -1266,7 +1280,7 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
     municipality where the event happened: the hospital, the place of death or birth, the place of infection; or a
     place of the person) and k of them away from the residence, compared at the place's level (``width``: the digits
     of the residence's code it holds, `PLACE_PREFIX`). A place not recorded is unallocated ('place not recorded')."""
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     key = {"what": "away_counts", "code": config.code_key(away_counts), **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "place": place, "classifier": classifier, "data": config.data_version(), **_df_key(dataset, year),
            **({"width": width} if width != 6 else {})}
@@ -1576,7 +1590,14 @@ def column_name(dataset: str, column: str) -> str:
 def value_labels(dataset: str, event: str, column: str, years: tuple[int, ...]) -> dict[str, str]:
     """``code -> label`` for a group column (a composition or the race stratum), labelled as pegasus_data labels a
     query (`pg.levels`), weighed on every value the column holds in ``years``: a subset can choose another table
-    (SINAN-TOXC's CRITERIO with one stray code read as meningitis's criteria). A code no table decodes is absent."""
+    (SINAN-TOXC's CRITERIO with one stray code read as meningitis's criteria). A code no table decodes is absent. Kept
+    for the process (the lake does not change under a study): each finding's text had read them again, 18 s a call,
+    144 s of Alagoas's infarction products (2026-10-14)."""
+    return dict(_value_labels(dataset, event, column, tuple(int(y) for y in years), config.study_area()))
+
+
+@functools.cache
+def _value_labels(dataset: str, event: str, column: str, years: tuple[int, ...], area) -> dict[str, str]:
     import pegasus_data as pg
 
     from .tools import group_columns
@@ -2002,7 +2023,7 @@ def delay_counts(dataset: str, event: str, year: int, report: str, onset: str | 
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     raw = _records(dataset, event, year, [strata["residence"], when, report] + ([classifier] if codes else []))
     con = duckdb.connect()
     con.register("r", raw)
@@ -2358,7 +2379,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     if not same_dataset(sd.dataset, dataset):
         raise ValueError(f"{link}: its {side} side is {sd.dataset}, not {dataset}")
     group = _group_columns(dataset, sd)
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     _per_record(dataset, event, "a link's pairs")
     key = {"what": "linked_counts", **_places_key(places, year), "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
@@ -2368,7 +2389,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     codes = sorted({str(c).replace(".", "").upper() for c in codes})
     rows = {}
     if area is not None and not group:
-        rows[strata["residence"]] = sorted(str(a) for a in area)
+        rows.update(_area_rows(strata["residence"]))
         key["area"] = sorted(area)
     if codes and classifier and not group:
         rows[classifier] = codes
@@ -2428,7 +2449,7 @@ def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> t
     """One event type's records of ``year`` as persons (`tools.cohort`): on the lattice (u, sex, age class) with
     ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name)."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
-    strata = _strata(dataset, event)
+    strata = _strata(dataset, event, year)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + columns
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
     con = duckdb.connect()
