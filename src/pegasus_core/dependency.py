@@ -298,12 +298,17 @@ def dependency_map(systems: list[tuple[str, str, list[str]]], contexts: list | t
     the same events): the inputs from the store (built on first use), the marginal and conditional layers controlled
     over the whole map, the admitted pairs as relation leads. Returns the summary, the edges, the inputs and the Moran
     bases a false-edge measurement reads (`harness.dependency_negatives`)."""
-    from . import control, leads, store, tools
+    from . import control, leads, tools
     from .scans import maps, pairs
 
     years = years or YEARS
     contexts = list(contexts or ())
+    # the inputs are the production fits' surprises over the area's places: keyed by the area and by the fits they read
+    # (their stored addresses), where a refit or another PEGASUS_AREA had been served the inputs built before (the
+    # review of the gateway, 2026-10-14)
+    fits = sorted(r["model"] for dataset, event, _ in systems for r in tools.fitted(dataset, event, years=config.FIT_YEARS))
     key = {"what": "map_inputs", "years": years, "systems": [list(s[:2]) for s in systems], "contexts": contexts,
+           "area": sorted(config.study_area() or []), "fits": fits, "data": config.data_version(),
            "code": config.code_key(build)}
     inp = maps.MapInputs.load(key)
     if inp is None:
@@ -323,7 +328,6 @@ def dependency_map(systems: list[tuple[str, str, list[str]]], contexts: list | t
     out: dict = {"fields": len(inp.names), "tested": dm.tested, "excluded_by_overlap": dm.excluded,
                  "admitted": dm.controlled, "seconds": dm.seconds, "linked_share": inp.meta.get("linked_share", {}),
                  "excluded_calibration": inp.meta.get("excluded_calibration", {})}
-    store.put_table("maps", {"what": "map_edges", "years": years}, dm.edges, {"summary": out})
     # the admitted pairs are relation leads (§9.1), read and triaged with every other lead
     e = dm.edges.to_pylist()
     adm = [r for r in e if r.get("admitted")]

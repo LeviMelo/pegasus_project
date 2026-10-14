@@ -2811,10 +2811,13 @@ def persons(year: int, draw: int | None = None, datasets=None, seeds=None):
 
 
 def _scope_runs(year: int) -> list[str]:
-    """The stored runs of a scope (their report files): a reading over its persons is current while they are."""
+    """The stored runs of a scope (each report's name, size and time of writing): a reading over its persons is current
+    while they are. By name alone, a rerun with the same parameters overwrote the same names with new pairs and kept
+    the readings made on the old ones (the review of the gateway, 2026-10-14; `link_runs_key`'s 2026-10-10 failure)."""
     from pathlib import Path
 
-    return sorted(p.name for p in (Path(config.data_root()) / "lake" / "links").rglob(f"*_BR_{year}*.json"))
+    return sorted(f"{p.name}:{(st := p.stat()).st_size}:{st.st_mtime_ns}"
+                  for p in (Path(config.data_root()) / "lake" / "links").rglob(f"*_BR_{year}*.json"))
 
 
 def person_quality(year: int, datasets=None, seeds=None) -> dict:
