@@ -2429,7 +2429,25 @@ def link_side_roles(link: str, dataset: str) -> frozenset[str]:
         spec = body.get(side) or {}
         if same_dataset(str(spec.get("dataset") or ""), dataset):
             out |= set(re.findall(r'"([a-z_]+\.[a-z_]+)"', str(spec.get("where") or "")))
+            # a link of one event recorded twice (`same_event`) validates on what that event must be on both records:
+            # sih_deaths_to_sim's "died in hospital" (death.place), so only in-hospital deaths pair, and the place of
+            # death "predicted" a linked admission at a rate ratio of 0.02 by construction (Alagoas 2021, 2026-10-14)
+            if body.get("same_event"):
+                mine = _side_entities(body, side)
+                for v in body.get("validate") or []:
+                    roles = set(re.findall(r'"([a-z_]+\.[a-z_]+)"', str(v.get("sql") or "")))
+                    roles |= {str(v[side])} if v.get(side) else set()
+                    out |= {r for r in roles if r.split(".")[0] in mine}
     return frozenset(out)
+
+
+def _side_entities(body: dict, side: str) -> set[str]:
+    """The entities a link side's roles name (patient and admission on SIH's side, deceased and death on SIM's), read
+    from the pairs it compares: a validation's role is matched to the side it is about."""
+    i = 0 if side == "left" else 1
+    pairs = [k for ps in body.get("passes") or [] for k in ps.get("keys") or []]
+    pairs += list((body.get("probabilistic") or {}).get("compare") or [])
+    return {str(k[i]).split(".")[0] for k in pairs if isinstance(k, (list, tuple)) and len(k) >= 2}
 
 
 def link_report(link: str, year: int) -> dict | None:

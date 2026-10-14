@@ -59,3 +59,9 @@ among the 996 discharged alive. So "12-20 % of admissions paired with a SIM-DO d
 mortality as the link finds it, not death after admission, and the link's sensitivity for in-hospital deaths there is
 159/168 = 94.6 % (nationally its `linked_share`, 0.89-0.92 a year). The cohort scan had read MORTE as an attribute of
 that outcome (its fit diverged: log RR 27.7, sd 6,969, p 0.5); a column a link's side filters on is no longer one.
+
+**What a whole study costs** (`studies/infarto_alagoas.yml`, deep, PegaSUS 889b775-1f9d199, pegasus_data 09abb3b). Cold,
+after 7f93a06 and 9eb9296 re-keyed every read and fit: 79.4 min of wall clock, of which the laptop slept 54 min (Windows'
+Power-Troubleshooter log: 09:40:45-10:02:03 and 10:15:02-10:47:45, exactly the silences of the first question step and of
+the groups product): about 25 min computed. Warm, the next run: 2.7 min (scope 25 s, lanes 28 s, products 100 s), every
+`body` part met. A run measures wall time: a sleep reads as a slow step, and had been read as one twice the same day.
