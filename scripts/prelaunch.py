@@ -24,9 +24,12 @@ def run_slice(path: Path) -> tuple[bool, str]:
 
     decl = study.load(path)
     folder = study.folder_of(decl)
-    if subprocess.run([sys.executable, "-m", "pegasus_core.cli", "scope", str(path)], cwd=ROOT,
-                      capture_output=True).returncode:
-        return False, "its scope failed"
+    scope = subprocess.run([sys.executable, "-m", "pegasus_core.cli", "scope", str(path)], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if scope.returncode:
+        # the scope's own error, where "its scope failed" had sent the reader to rerun it (the review of the study,
+        # 2026-10-14)
+        return False, "its scope failed: " + (scope.stderr or scope.stdout).strip()[-1500:]
     estimate = float(yaml.safe_load((folder / "scope.yml").read_text(encoding="utf-8"))["estimated_minutes"])
     # twice the estimate, at least 20 min: an estimate measured on a cached run prices no refit (slice5, 2026-10-12)
     cap = max(2 * estimate, 20.0) * 60
@@ -40,10 +43,16 @@ def run_slice(path: Path) -> tuple[bool, str]:
     minutes = (time.time() - t0) / 60
     if run.returncode:
         return False, f"the study exited {run.returncode} after {minutes:.1f} min"
-    missing = [r for r in study.body(folder) if r["status"] != "met"]
-    for r in study.body(folder):
+    body = study.body(folder)           # once: it reads every table of the folder
+    missing = [r for r in body if r["status"] != "met"]
+    for r in body:
         print(f"  {r['part']}: {r['status']} | {r['evidence'][:160]}")
-    return not missing, (f"{minutes:.1f} min against an estimate of {estimate:.1f}; "
+    # an estimate is the scope's promise to the person who declared it: one far above the run is as wrong as one below,
+    # and only the cap saw the latter (the review of the study, 2026-10-14); said, not failed, as a cached run is rightly
+    # faster than a cold estimate
+    ratio = minutes / estimate if estimate > 0 else float("inf")
+    off = "" if 0.5 <= ratio <= 1.5 else f" (the estimate off: the run took {ratio:.2f}x it)"
+    return not missing, (f"{minutes:.1f} min against an estimate of {estimate:.1f}{off}; "
                          + (f"body missing {[r['part'] for r in missing]}" if missing else "the body whole"))
 
 

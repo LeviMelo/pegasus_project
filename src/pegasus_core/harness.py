@@ -1013,7 +1013,7 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
     question takes, `questions._shape` where the method states none), the matching finding, and how many findings
     the field had. A positive whose question is not built yet, whose locus a script derives, or whose dataset is not
     served is recorded with that status, never dropped. Kept in the store (kind ``event_record``)."""
-    from . import questions, tools
+    from . import control, questions, tools
 
     years = list(range(2010, 2024)) if years is None else years
     positives = POSITIVES + verdict_positives() if positives is None else positives
@@ -1042,8 +1042,11 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
         key = (ds, ev, p.grain, p.source)
         try:
             if key not in sessions:
+                # the record's validation scans in a ledger of their own, as `grid`'s: in the default one they were
+                # pending tests of the production error rate (the review of the study, 2026-10-14)
                 sessions[key] = tools.Session(ds, ev, years, source={**({"grain": p.grain} if p.grain != "year" else {}),
-                                                                     **dict(p.source)})
+                                                                     **dict(p.source)},
+                                              ledger=control.Ledger(config.home() / "harness" / "event_ledger"))
             s = sessions[key]
         except Exception as exc:  # noqa: BLE001 - an unserved dataset is recorded, the record goes on
             rec["status"] = f"not served: {type(exc).__name__}: {exc}"

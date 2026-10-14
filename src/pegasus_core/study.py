@@ -2176,7 +2176,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
                                                      | ({str(f_)} if (f_ := _one_institution(x)) else set()))}
                             for x in by_field.get(f.id, ())
-                            if list(x.provenance.get("years") or []) == list(it.years))
+                            if list(x.provenance.get("years") or []) == list(it.years)
+                            and int(x.provenance.get("nulls") or 1000) == config.replicates(1000))
                 # a count field's series and map: a linked share's or a share's events are trials, not a rate per
                 # person-year (its "per 100,000" map and its series had been drawn empty, and counted as figures)
                 if not name and s.expectations.model(f.block).data.n is None:
@@ -4132,13 +4133,21 @@ def _institution_facts(rows: list[dict], log) -> None:
         r["institution_volume"] = _institution_volume(r, codes, log)
 
 
-def _institution_volume(r: dict, codes: list[str], log) -> str | None:
-    """Each institution's events of every code, the year before the finding and in its last (`facility.facility_cube`):
-    a ward whose whole activity grew reads as a departure of any one code there (BACKLOG 7.1's other-chapter volume)."""
-    import pyarrow.compute as pc
-
+@functools.lru_cache(maxsize=64)
+def _facility_volume(dataset: str, event: str, year: int) -> dict[str, int]:
+    """Each facility's events of every code in a year (`facility.facility_cube` summed over residence and code), once a
+    process: every finding row had read the national cube and filtered it per code (31.8 s of the leptospirosis slice,
+    the review of the study, 2026-10-14)."""
     from . import facility
 
+    t = facility.facility_cube(dataset, event, year).group_by("facility").aggregate([("y", "sum")])
+    return dict(zip([str(f) for f in t.column("facility").to_pylist()], [int(v or 0) for v in t.column("y_sum").to_pylist()],
+                    strict=True))
+
+
+def _institution_volume(r: dict, codes: list[str], log) -> str | None:
+    """Each institution's events of every code, the year before the finding and in its last (`_facility_volume`): a
+    ward whose whole activity grew reads as a departure of any one code there (BACKLOG 7.1's other-chapter volume)."""
     dataset, event = r.get("dataset"), r.get("_event")
     first, last = r.get("first_year"), r.get("last_year")
     if not (dataset and event and first and last):
@@ -4146,13 +4155,13 @@ def _institution_volume(r: dict, codes: list[str], log) -> str | None:
     published = gateway.published_years(dataset)
     base = int(first) - 1 if int(first) - 1 in published else int(first)
     try:
-        cubes = {y: facility.facility_cube(dataset, event, y) for y in sorted({base, int(last)})}
+        volume = {y: _facility_volume(dataset, event, y) for y in sorted({base, int(last)})}
     except Exception as exc:  # noqa: BLE001 - a volume that cannot be read leaves the finding without it, said
         log(f"study: institution volume {dataset} {codes}: {type(exc).__name__}: {exc}")
         return None
     parts = []
     for c in codes:
-        n = {y: int(pc.sum(t.filter(pc.equal(t.column("facility"), c)).column("y")).as_py() or 0) for y, t in cubes.items()}
+        n = {y: v.get(str(c), 0) for y, v in volume.items()}
         ratio = f" (×{n[int(last)] / n[base]:.2f})" if n.get(base) else ""
         parts.append(f"{c}: {n[base]:,} {event} events of every code in {base}, {n[int(last)]:,} in {last}{ratio}")
     return " | ".join(parts) or None

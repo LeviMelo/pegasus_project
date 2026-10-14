@@ -772,6 +772,10 @@ class Session:
         failed_pairs: set[tuple[str, str]] = set()  # (field id, family) a question failed on
         collected: list[tuple[str, str, list, int]] = []       # (field id, family, answers, k)
         nulls = config.replicates(1000)
+        # the replicate scale is part of an answer's family: a quick study's answers neither retire a precise one's nor
+        # stand in for them in the shared register (the review of the study, 2026-10-14: the stored answers were keyed by
+        # it, the register was not); the standard scale keeps its families and ids
+        scale = f"|nulls{nulls}" if nulls != 1000 else ""
         for block in blocks or self._blocks():
             within = None
             if nodes:
@@ -792,7 +796,7 @@ class Session:
                         "q": q, "years": list(self.years), "graph": self.graph, "fit": m.key(),
                         "fitted": fit.get("written"), "code": code, "nulls": nulls, **ask_kw}
                 for qn in names:
-                    fam = f"{qn}|{block}{measure}{suffix}"
+                    fam = f"{qn}|{block}{measure}{suffix}{scale}"
                     hit = store.get_arrays("answers", {**base, "question": qn})
                     if hit is not None:
                         answers, k = pickle.loads(hit["rows"].tobytes())
@@ -858,7 +862,7 @@ class Session:
                 null=null, calibrated=calibrated,
                 method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"}) for m in a.methods},
                 provenance={"graph": self.graph, "methods": a.methods, "source": dict(self.source),
-                            "years": list(self.years), **extra,
+                            "years": list(self.years), "nulls": nulls, **extra,
                             "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
                                           for m, x in a.findings.items()}})
 
