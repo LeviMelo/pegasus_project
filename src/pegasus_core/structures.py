@@ -76,6 +76,9 @@ def knn_graph(points: np.ndarray, k: int = 6) -> np.ndarray:
     """Symmetric k-nearest-neighbour edges between points (lon, lat → local km)."""
     lat0 = np.deg2rad(np.mean(points[:, 1]))
     xy = np.column_stack([points[:, 0] * 111.32 * np.cos(lat0), points[:, 1] * 110.57])
+    k = min(k, len(points) - 1)          # an area of k or fewer places: every other place is a neighbour
+    if k < 1:
+        return np.zeros((0, 2), dtype=np.int64)
     _, idx = cKDTree(xy).query(xy, k=k + 1)
     rows = np.repeat(np.arange(len(points)), k)
     cols = idx[:, 1:].ravel()

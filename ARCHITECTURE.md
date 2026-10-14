@@ -689,7 +689,10 @@ are fitted by the same solver (§6.6).
   |E|·|U||T|·R)`; the ~10¹² implicit cells are never formed.
 - **Dispersion** by maximum likelihood with μ fixed: non-empty cells exactly, empty cells through log p(0), the sum over
   all cells by μ-binning (8,192 log bins with a second-order correction). The field's own dispersion is NB-P (ADR-0032)
-  where the block's fails calibration.
+  where the block's fails calibration. An estimate on its Poisson bound (the likelihood flat, P unidentified) is
+  replaced by the lower 95 % profile limit of φ at NB2, the largest overdispersion the data do not exclude, so a
+  predictive is never Poisson by default; a model derived from a fit (a refit, an extrapolation) carries the fit's φ0,
+  power and reference. The robust refit's φ is estimated on the unflagged cells' counts, never on the imputed ones.
 - **The robust expectation** (`Monolith.robust`): outlying leaf × place × period cells imputed to their expectation so a
   departure does not pull the expectation toward itself; an excess its siblings' deficit accounts for is moved back to
   them, not removed (ADR-0033).
@@ -726,7 +729,8 @@ The low-rank interaction is never part of a tier.
 ### 6.8 Calibration and surprise
 
 - **Randomised PIT** of each observed cell under its predictive: `u = F(y − 1) + V · p(y)`, V seeded by (field, cell).
-  A field is calibrated when its KS distance is ≤ 0.03 overall and ≤ 0.05 in every macro-region. Calibration is
+  A field is calibrated when its KS distance is ≤ max(0.03, 1.63/√n) overall and ≤ max(0.05, 1.63/√n_r) in every
+  macro-region (n cells; 1.63/√n is the sampling KS's 99 % quantile, so a calibrated small field passes). Calibration is
   **measured and reported per field** in its model card; it never gates a field (P9).
 - **The field's place-year variance component** where the block's dispersion fails: `1/φ_cell = 1/φ_cells +
   κ (μ/μ_ref)^(P−2)`, P learned per field (NB-P), the component varying by group of places (field → macro-region →

@@ -467,9 +467,10 @@ def _records(it: Item, years: list[int]) -> int:
         # every event, whatever its cell: a foetal death has no age, and counted by cells SIM-DOFET held no P37.1
         # (the Santa Maria hypothesis's own source left out, 2026-10-11); a code list by its own reader, its field's
         # name ("codes:LINHAA_O") is no column (deep7's probes of SIM-DOFET and SIM-DOREXT failed on it, 2026-10-12)
-        c = (gateway.code_list_counts(it.dataset, it.event, y, src["column"]).counts if listed else
+        area = (tuple(sorted(config.study_area())) if config.study_area() else None)
+        c = (gateway.code_list_counts(it.dataset, it.event, y, src["column"], area=area).counts if listed else
              gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False,
-                                  codes=tuple(src.get("codes") or ()) if it.extract else ()).counts)
+                                  codes=tuple(src.get("codes") or ()) if it.extract else (), area=area).counts)
         if config.study_area() is not None:                 # the study's area's records only
             c = c.filter(pa.array(config.in_area(c.column("u").to_numpy())))
         if prefixes:
@@ -2459,7 +2460,7 @@ def _allocation(it: Item, years: list[int], support: str | None = None) -> dict[
     for y in years:
         try:
             ec = gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"), cell=False,
-                                      codes=tuple(codes) if it.extract else (), support=support)
+                                      codes=tuple(codes) if it.extract else (), support=support, area=(tuple(sorted(config.study_area())) if config.study_area() else None))
         except Exception:  # noqa: BLE001 - a year that cannot be counted has no share
             continue
         tabs = [ec.counts, ec.unallocated]

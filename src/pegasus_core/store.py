@@ -33,8 +33,8 @@ def put_table(kind: str, key: dict[str, Any], table: pa.Table, meta: dict[str, A
     path.mkdir(parents=True, exist_ok=True)
     tmp = path / f"table.{os.getpid()}.parquet.tmp"
     pq.write_table(table, tmp, compression="zstd")
+    _manifest(path, key, meta, rows=table.num_rows)     # first: data in place implies its manifest is
     _replace(tmp, path / "table.parquet")
-    _manifest(path, key, meta, rows=table.num_rows)
     return path
 
 
@@ -52,8 +52,8 @@ def put_arrays(kind: str, key: dict[str, Any], arrays: dict[str, np.ndarray],
     path.mkdir(parents=True, exist_ok=True)
     tmp = path / f"arrays.{os.getpid()}.tmp.npz"      # one temporary per writer: concurrent writers of one address must not collide
     np.savez_compressed(tmp, **arrays)
+    _manifest(path, key, meta)                           # first: data in place implies its manifest is
     _replace(tmp, path / "arrays.npz")
-    _manifest(path, key, meta)
     return path
 
 
@@ -67,8 +67,12 @@ def get_arrays(kind: str, key: dict[str, Any]) -> dict[str, np.ndarray] | None:
 
 
 def manifest(kind: str, key: dict[str, Any]) -> dict[str, Any] | None:
+    """An entry's manifest, None when there is none or it cannot be read (written by another process just now)."""
     path = address(kind, key) / "manifest.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def _replace(tmp: Path, target: Path) -> None:
@@ -114,7 +118,10 @@ def _manifest(path: Path, key: dict[str, Any], meta: dict[str, Any] | None, **ex
     body = {"key": key, "code_version": config.code_version(), "data_code_version": config.data_code_version(),
             "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             **extra, **(meta or {})}
-    (path / "manifest.json").write_text(json.dumps(body, indent=1, default=str), encoding="utf-8")
+    # whole or not at all: a lane reading a manifest another writes had read half of it (the reviews, 2026-10-14)
+    tmp = path / f"manifest.{os.getpid()}.json.tmp"
+    tmp.write_text(json.dumps(body, indent=1, default=str), encoding="utf-8")
+    _replace(tmp, path / "manifest.json")
 
 
 #: The kinds `gc` may evict: caches of pegasus_data reads, rebuilt from the lake when asked again. Fits, results and

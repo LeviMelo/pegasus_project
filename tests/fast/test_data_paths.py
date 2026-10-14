@@ -73,13 +73,14 @@ def test_a_cohorts_seeded_persons_are_the_whole_merges(draw):
 
 
 def test_a_study_area_holds_its_places_only(monkeypatch):
-    # `where: RS`: a block is the area's 497 places, its events those of residents of the area
+    # `where: RS`: a block is the area's 497 places, its events those of residents of the area, read at the lake's scan
+    # (none outside the area reaches the block) beside Brazil's records without a residence, said as Brazil's
     from pegasus_core import monolith
 
     monkeypatch.setenv("PEGASUS_AREA", "43")
     d = monolith.assemble("SINAN-TOXC", "notification", "*", list(range(2019, 2024)))
     assert len(d.places) == 497 and {int(p) // 10000 for p in d.places} == {43}
-    assert d.unallocated.get("outside the study area", 0) > 0
+    assert d.unallocated.get("outside the study area", 0) == 0 and "residence not recorded (Brazil)" in d.unallocated
     assert study._area(["RS", "431690"]) == [43, 431690]
 
 

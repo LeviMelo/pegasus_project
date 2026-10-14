@@ -204,7 +204,8 @@ class Session:
         sorted_places = np.asarray(d.places, dtype=np.int64)[order]
         frames = []
         for t, year in enumerate(np.asarray(d.years)):
-            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary, codes=codes)
+            c = gateway.composition_counts(self.dataset, self.event, int(year), column, missing, primary, codes=codes,
+                                           area=(tuple(sorted(config.study_area())) if config.study_area() else None))
             for tab, value in ((c.counts, None), (c.missing, "not recorded")):
                 if tab is None or tab.num_rows == 0:
                     continue
@@ -332,7 +333,7 @@ class Session:
             for year in d.years:
                 reader = gateway.monthly_counts if monthly else gateway.event_counts
                 try:
-                    t = reader(dataset, event, int(year), places=pa.array(d.places, pa.int32())).counts
+                    t = reader(dataset, event, int(year), places=pa.array(d.places, pa.int32()), area=(tuple(sorted(config.study_area())) if config.study_area() else None)).counts
                 except LookupError:                      # nothing published for that year (NothingPublished)
                     continue
                 rows = monolith.positions(d.places, t.column("u").to_numpy())
@@ -1004,7 +1005,8 @@ class Session:
         out: dict[str, list] = {"u": [], "t": [], "code": [], "m": []}
         for y in d.years:
             ec = gateway.composition_counts(self.dataset, self.event, int(y), src["indicator"],
-                                            tuple(src.get("missing") or ()), src.get("classifier"), codes=src.get("codes"))
+                                            tuple(src.get("missing") or ()), src.get("classifier"), codes=src.get("codes"),
+                                            area=tuple(sorted(config.study_area())) if config.study_area() else None)
             mt = ec.missing
             if mt is None or mt.num_rows == 0:
                 continue
@@ -1115,7 +1117,7 @@ class Session:
             known = True
             for j, year in enumerate(years):          # vectorised: a Python loop over SIH's rows took 320 s a field
                 try:
-                    c = gateway.event_counts(self.dataset, self.event, int(year)).counts
+                    c = gateway.event_counts(self.dataset, self.event, int(year), area=(tuple(sorted(config.study_area())) if config.study_area() else None)).counts
                 except (ValueError, LookupError):
                     # the type's every event is not held (SIA-PA, read as an extract of its codes; a study downloads
                     # nothing past its store): its totals are unknown, and the evidence that reads them is not drawn

@@ -175,6 +175,7 @@ class Expectations:
         classifier = self.source.get("classifier") or self.source.get("column")
         self.registry = fields.Registry(dataset, event, self.source.get("structure", structure), classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
+        self._prospective: dict[tuple, tuple] = {}
         self._macro: np.ndarray | None = None
 
     def model(self, block: str) -> monolith.Monolith:
@@ -242,14 +243,25 @@ class Expectations:
         cls = monolith.model_class(self.source)
         if issubclass(cls, monolith.MarkModel):
             raise NotImplementedError("the prospective tier is for counts")
-        model = monolith.load_or_fit(cls, self.dataset, self.event, f.block, train, self.graph, device=self.device,
-                                     rank=self.rank, **self._reader())
         if purpose not in PURPOSE_TIER:
             raise ValueError(f"purpose {purpose!r}: one of {sorted(PURPOSE_TIER)}")
-        regime = monolith.regime_history(model, history, purpose)
-        point = "level36" if regime == "climatology" else regime
-        tm, x_point = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test,
-                                                                    **self._reader()), point)
+        # the block's training fit, its test cells and the extrapolated model are the node's block's, not the node's:
+        # built once per (block, training years, purpose, history), where every field of the block rebuilt them
+        # (14 s, then 1.4 s a field; the review of the models, 2026-10-14)
+        memo_key = (f.block, int(train_last), purpose, history)
+        if memo_key not in self._prospective:
+            model = monolith.load_or_fit(cls, self.dataset, self.event, f.block, train, self.graph, device=self.device,
+                                         rank=self.rank, **self._reader())
+            if self.robust and cls is monolith.Monolith and not self.rank:
+                # the robust training fit, as the full window's reading uses (`model`): an outbreak inside the training
+                # years had set the prospective baseline's level, and its robust refit was made and never read
+                model = model.robust_stored()
+            regime = monolith.regime_history(model, history, purpose)
+            point = "level36" if regime == "climatology" else regime
+            tm, x_point = monolith.extrapolate(model, monolith.assemble(self.dataset, self.event, f.block, test,
+                                                                        **self._reader()), point)
+            self._prospective[memo_key] = (model, regime, point, tm, x_point)
+        model, regime, point, tm, x_point = self._prospective[memo_key]
         names = [c for c in self.registry.leaves(f.node) if c in tm.data.leaves]
         trained = np.bincount(model.data.e, weights=model.data.y, minlength=len(model.data.leaves))
         new = [c for c in names if trained[model.data.leaves.index(c)] == 0]       # unseen by the fit (ADR-0011)
@@ -1197,15 +1209,20 @@ def calibration(u: np.ndarray, mu: np.ndarray, macro: np.ndarray) -> dict:
     flat = u[informative]
     ks = stats.kstest(flat, "uniform")
     hist = np.histogram(flat, bins=10, range=(0, 1))[0]
-    by_region = {}
+    # a tolerance is a relevant departure OR the sampling KS of a calibrated field of this many cells, whichever is
+    # larger (1.63/sqrt(n), Kolmogorov's 99 % quantile): at a fixed 0.03 a perfectly calibrated one-state field of 1,020
+    # cells failed 32 % of the time and left every pair scan (the review of the models, 2026-10-14)
+    n = int(informative.sum())
+    tol = max(KS_TOLERANCE, 1.63 / np.sqrt(max(n, 1)))
+    by_region, ok_regions = {}, True
     for r in np.unique(macro):
         sel = (macro[:, None] == r) & informative
         if sel.sum() >= 50:
             by_region[str(r)] = float(stats.kstest(u[sel], "uniform").statistic)
-    worst = max(by_region.values(), default=0.0)
+            ok_regions &= by_region[str(r)] <= max(KS_REGION_TOLERANCE, 1.63 / np.sqrt(int(sel.sum())))
     return {"ks": float(ks.statistic), "ks_p": float(ks.pvalue), "histogram": (hist / hist.sum()).round(4).tolist(),
-            "ks_by_macroregion": by_region, "cells": int(informative.sum()),
-            "calibrated": bool(ks.statistic <= KS_TOLERANCE and worst <= KS_REGION_TOLERANCE)}
+            "ks_by_macroregion": by_region, "cells": n, "tolerance": float(tol),
+            "calibrated": bool(ks.statistic <= tol and ok_regions)}
 
 
 def refit_place_trend(y: np.ndarray, mu: np.ndarray, mu2: np.ndarray, phi: float, years: np.ndarray

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import time
 from functools import cache, lru_cache
 from pathlib import Path
 
@@ -120,10 +121,19 @@ def _code_key(entries: tuple[str, ...]) -> str:
     name = "|".join(entries)
     if name in known["keys"]:
         return known["keys"][name]
+    if _sources_state() != _STATE_AT_IMPORT:
+        # the sources changed after this process imported them: a key computed now would be the new code's, stored for
+        # artefacts this process makes with the old (a lane started before an edit), and served later as current
+        raise StaleCode(f"the package's sources changed after this process started ({_STATE_AT_IMPORT} -> "
+                        f"{_sources_state()}): it runs code that no longer exists; restart it on the current code")
     key = _computed_key(entries)
     known["keys"][name] = key
     _save_keys(known)
     return key
+
+
+class StaleCode(RuntimeError):
+    """A process asked for the key of code it no longer runs (the sources were edited after it started)."""
 
 
 def _sources_state() -> str:
@@ -138,12 +148,15 @@ def _sources_state() -> str:
     return h.hexdigest()[:16]
 
 
+#: the sources' state when this process imported the package: its keys are of this code, whatever is edited later
+_STATE_AT_IMPORT = _sources_state()
+
+
 @cache
 def _known_keys() -> dict:
     import json
 
-    state = _sources_state()
-    path = home() / "code_keys" / f"{state}.json"
+    path = home() / "code_keys" / f"{_STATE_AT_IMPORT}.json"
     try:
         keys = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -153,7 +166,8 @@ def _known_keys() -> dict:
 
 def _save_keys(known: dict) -> None:
     """The keys of this state of the sources, written whole and atomically (lanes compute them concurrently: a lost
-    write is a key computed again, never a wrong one); the other states' files are removed."""
+    write is a key computed again, never a wrong one). Another state's file is removed only when a week old: a lane of
+    an older state had deleted the live state's file, and every process after it recomputed its keys (2026-10-14)."""
     import contextlib
     import json
 
@@ -165,8 +179,9 @@ def _save_keys(known: dict) -> None:
         tmp = path.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(known["keys"], sort_keys=True), encoding="utf-8")
         os.replace(tmp, path)
+        week = time.time() - 7 * 86400
         for other in path.parent.glob("*.json"):
-            if other != path:
+            if other != path and other.stat().st_mtime < week:
                 other.unlink(missing_ok=True)
     except OSError:
         pass

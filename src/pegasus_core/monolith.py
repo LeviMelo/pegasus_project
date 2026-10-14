@@ -23,6 +23,7 @@ import concurrent.futures
 import dataclasses
 import functools
 import hashlib
+import inspect
 import os
 import time
 from dataclasses import dataclass, field
@@ -245,6 +246,9 @@ def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str
         # the robust refit every count reading uses (`surprise.Expectations.model`): part of fitting the block,
         # never left to the first reading (15 min a chapter on SIH, inside a question pass, 2026-10-07)
         model.robust_stored(log=lambda line: log(f"{dataset} {block} {line}"))
+    # the solver and the model refer to each other, the solver holding dense factors (2.2 GB on SIM chapter I): freed
+    # with the model, not at the next full collection (the review of the models, 2026-10-14)
+    model._solver_v1 = None
     return model
 
 
@@ -259,8 +263,9 @@ def load_or_fit(cls, dataset: str, event: str, block: str, years: list[int], gra
         if rank:
             raise
     log(f"{dataset} {block} {years[0]}-{years[-1]}: no stored fit, fitting it")
-    fit_block(dataset, event, block, list(years), graph, device=device, source=reader or None, log=log)
-    return cls.load(dataset, event, block, years, graph, device=device, **reader)
+    model = fit_block(dataset, event, block, list(years), graph, device=device, source=reader or None, log=log)
+    # the model just fitted, where it had been loaded again (the block assembled and the parameters read once more)
+    return model if type(model) is cls else cls.load(dataset, event, block, years, graph, device=device, **reader)
 
 
 def default_population(dataset: str, event: str, block: str, years: list[int], source: str = "events", race: str | None = None,
@@ -298,23 +303,24 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
     control.check_reserved(dataset, years)
     if block == "*":
         profile, geography = "group", None          # no classifier tree: one leaf, nothing to carry
+    if source_args.get("codes"):
+        # one spelling of a code set for every use of it (the exposure's choice read "P37.1" raw, and matched nothing)
+        source_args = {**source_args, "codes": sorted({str(c).replace(".", "").upper() for c in source_args["codes"]})}
     if not cache:
         return _assemble(dataset, event, block, years, profile, source, grain, population, geography, geo_pool,
                          **source_args)
     ys = np.array(sorted(set(years)))
     population = population or config.population_pinned() or default_population(
         dataset, event, block, ys.tolist(), source, **source_args)
-    pop = gateway.population(ys.tolist(), source=population, dataset=dataset, race=source_args.get("race"))
-    h = hashlib.sha256()
-    for name in pop.column_names:
-        h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
     area = config.study_area()
+    digest = _population_digest(tuple(ys.tolist()), population, dataset, source_args.get("race"),
+                                tuple(sorted(area)) if area else None)
     key = {"what": "blockdata", "dataset": dataset, "event": event, "block": block, "years": ys.tolist(),
            **({"area": sorted(area)} if area else {}),
            "profile": profile, "geography": geography, **({"geo_pool": geo_pool} if geo_pool else {}),
            "source": source, "grain": grain, "args": source_args,
-           "data": config.data_version(),
-           **gateway.population_key(population), "population_hash": h.hexdigest()[:16], "assembly": _assembly_code(),
+           "data": config.data_version(), **gateway._declared_key(dataset, event),
+           **gateway.population_key(population), "population_hash": digest, "assembly": _assembly_code(),
            **({} if block == "*" else {"tree": config.resource_version("code_trees.parquet"),
                                        "attributes": config.resource_version("code_attributes.parquet")})}
     # most events without a sex or age cell (SIA's consolidated production names no patient: 98 % of SIA-PA's
@@ -343,8 +349,24 @@ def assemble(dataset: str, event: str, block: str, years: range | list[int], pro
             return collapsed()
         store.put_arrays("blockdata", key, *_blockdata_to(data))
     lost = sum(v for k, v in data.unallocated.items() if k in ("sex", "age"))
-    held = float(np.sum(data.y)) + data.unallocated.get("outside the study area", 0)
+    # events against events: a mark's, a share's or a count's y is a cell's mean, its events are n (a share field read
+    # collapsed as soon as 2 % of its events lacked a sex or an age: the review of the models, 2026-10-14)
+    held = float(np.sum(data.n if data.n is not None else data.y)) + data.unallocated.get("outside the study area", 0)
     return collapsed() if lost > held else data
+
+
+@functools.lru_cache(maxsize=256)
+def _population_digest(years: tuple[int, ...], population: str, dataset: str, race, area) -> str:
+    """The content hash of a block's exposure as the block reads it (the area's places only): hashing Brazil's 9 million
+    rows took 2-3 s of every `assemble`, cache hits included, to key one state's 102 places (the review of the models,
+    2026-10-14). Kept per process: a population table does not change under a running study."""
+    pop = gateway.population(list(years), source=population, dataset=dataset, race=race)
+    if area:
+        pop = pop.filter(pa.array(config.in_area(pop.column("u").to_numpy(), frozenset(area))))
+    h = hashlib.sha256()
+    for name in pop.column_names:
+        h.update(np.ascontiguousarray(pop.column(name).to_numpy()).tobytes())
+    return h.hexdigest()[:16]
 
 
 @functools.cache
@@ -529,8 +551,8 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             raise NotImplementedError("the monthly grain reads event counts and code-list counts")
         readers["events"] = gateway.monthly_counts
         # a code-list column (SINASC's CODANOMAL) by month: each event once under each category it carries
-        readers["code_list"] = lambda ds, ev, year, places=None, column=None: gateway.monthly_counts(
-            ds, ev, year, classifier=column, places=places, code_list=True)
+        readers["code_list"] = lambda ds, ev, year, places=None, column=None, area=None: gateway.monthly_counts(
+            ds, ev, year, classifier=column, places=places, code_list=True, area=area)
         # person-months: each month carries a twelfth of the year's person-years
         N = np.repeat(N, 12, axis=1) / 12.0
         S = None if S is None else np.repeat(S, 12, axis=1)
@@ -543,10 +565,13 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
                  in (gateway.event_counts, gateway.share_moments, gateway.linked_counts)
                  else {})          # a share of a code set: only its records' compositions are read (`composition_counts`)
         area = config.study_area()
-        # an area reads the national counts (cached, shared with Brazil's studies) and keeps its own places' rows: read
-        # against the area's places, the rest would be "unallocated by municipality", which they are not
-        ec = readers[source](dataset, event, int(year), places=None if area else pa.array(places, pa.int32()),
-                             **source_args, **extra)
+        # an area reads its own residents, filtered in the lake's scan by every reader that can (`gateway._area_rows`):
+        # the national table had been built and cut to the state, 799 s of one state's linked share (2026-10-14). Its
+        # places are the population's valid ones (not the area's), so a resident of an invalid code stays 'municipality'
+        reader = readers[source]
+        takes_area = "area" in inspect.signature(reader).parameters
+        ec = reader(dataset, event, int(year), places=None if area else pa.array(places, pa.int32()),
+                    **source_args, **extra, **({"area": tuple(sorted(area))} if area and takes_area else {}))
         tab = ec.counts
 
         def of_subset(t):
@@ -583,9 +608,11 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
         unallocated[absent] = unallocated.get(absent, 0) + int(tab.column(weight).to_numpy()[other].sum())
         in_tree.append(float(tab.column(weight).to_numpy()[~other].sum()))
         lost_rows = of_subset(ec.unallocated) if subset and "code" in ec.unallocated.column_names else ec.unallocated
+        # a reader that cannot filter to the area returns Brazil's lost events: said as Brazil's, never as the area's
+        national = " (Brazil)" if area and not takes_area else ""
         for r in lost_rows.to_pylist():
             if block == "*" or _chapter(str(r["code"] or "")[:width], parent_of) == block:
-                unallocated[r["reason"]] = unallocated.get(r["reason"], 0) + int(r["y"])
+                unallocated[r["reason"] + national] = unallocated.get(r["reason"] + national, 0) + int(r["y"])
         if grain == "month":
             # the event's own (year, month), which may fall outside the publication year
             ym = (tab.column("year").to_numpy().astype(np.int64) - int(years[0])) * 12 \
@@ -1783,12 +1810,14 @@ class Monolith:
                                      "loglik_gain_over_poisson": float(nll(np.log(1e6)) - res.fun)}
         return float("inf") if phi > 0.99e6 else phi
 
-    def _nb_loglik_binned(self, places: np.ndarray | None = None, bins: int = 8192):
+    def _nb_loglik_binned(self, places: np.ndarray | None = None, bins: int = 8192, exclude: np.ndarray | None = None):
         """−`nb_loglik` as a function of log φ at fixed μ, for the 1-D search of `_dispersion`: the non-empty cells
         exactly, and the sum over every cell of φ·log(1 + μ/φ) from one streamed pass that bins the cells by log μ
         (count, Σμ, Σμ² per bin; the bin's term at its mean plus the second-order correction ½f''·Σ(μ − μ̄)²,
         exact to about 10⁻⁹ relative at 8,192 bins). Each evaluation then costs O(bins) instead of a pass over every
-        cell (IX: 185 M cells, about 1 s per evaluation and 14 evaluations)."""
+        cell (IX: 185 M cells, about 1 s per evaluation and 14 evaluations). ``exclude`` ([E, U, T] leaf-place-periods,
+        a robust round's flagged cells) leaves those cells out of both terms: their counts were imputed by fractional
+        expectations, and an NB likelihood at non-integer counts is no likelihood (the review of the models, 2026-10-14)."""
         with torch.no_grad():
             x = self.effects()
             mu = torch.exp(self.eta_nnz(x)).cpu().numpy()
@@ -1801,6 +1830,10 @@ class Monolith:
             # 7,342 cells fewer than its index on SIH A00-A09 2014-2023, and the arrays did not pair, 2026-10-11)
             fd = getattr(self, "fit_data", None) or self.data
             y, u = fd.y, fd.u
+            if exclude is not None:
+                kept = ~np.asarray(exclude, dtype=bool)[fd.e, fd.u, fd.t]
+                mu, y, u = mu[kept], y[kept], u[kept]
+                out = torch.as_tensor(np.asarray(exclude, dtype=bool), device=self.device)
             sel = slice(None)
             if places is not None:
                 keep = np.asarray(places, dtype=bool)
@@ -1832,6 +1865,8 @@ class Monolith:
                     m = m * torch.exp(torch.einsum("r,ru,rt->ut", x["ix_psi"][:, int(self.ixpos[e])], om, x["ix_t"]))[sel][:, :, None]
                 if self.hc is not None:
                     m = m * torch.exp(self.hc[e])[None, :, None]
+                if exclude is not None:          # an excluded leaf-place-period: unexposed in the total, every group
+                    m = torch.where(out[e][sel][:, :, None], torch.zeros_like(m), m)
                 m = m.reshape(-1)
                 # an unexposed cell (μ = 0) goes to an extra bin that is dropped: no compaction of the slab
                 idx = torch.where(m > 0, ((torch.log(m) - lo) / (hi - lo) * bins).clamp_(0, bins - 1),
@@ -1870,7 +1905,7 @@ class Monolith:
         nll.parts = {"y": y, "mu": mu, "n": n, "mbar": mbar, "spread": spread, "const": const}
         return nll
 
-    def _dispersion_power(self) -> float:
+    def _dispersion_power(self, exclude: np.ndarray | None = None) -> float:
         """φ0 and P of the block's NB-P dispersion at fixed μ (ADR-0032, unit B3): Var = μ + μ²/φ_i with
         φ_i = φ0·(μ_i/μ_ref)^(2−P), μ_ref the median non-empty cell, P in [1, 2] by the profile of the binned likelihood
         (P = 2 is NB2's size-free relative noise). Births' place-year noise falls from 0.016 in villages to 0.0027 in
@@ -1879,7 +1914,7 @@ class Monolith:
         if self.likelihood != "poisson":
             self.phi_power, self.phi_ref = 2.0, 1.0
             return self._dispersion()
-        nll = self._nb_loglik_binned()
+        nll = self._nb_loglik_binned(exclude=exclude)
         ref = nll.mu_ref
         lp, power, fun, lp2, fun2 = _nbp_profile(nll.parts, ref, self.device)
         phi = float(np.exp(lp))
@@ -1887,12 +1922,38 @@ class Monolith:
         self.dispersion_check = {"phi": phi, "power": power, "mu_ref": ref,
                                  "loglik_gain_over_nb2": float(fun2 - fun),
                                  "loglik_gain_over_poisson": float(nll(np.log(1e6)) - fun)}
-        return float("inf") if phi > 0.99e6 else phi
+        if phi <= 0.99e6:
+            return phi
+        # the estimate on its Poisson bound: the likelihood is flat there, P unidentified, and Poisson's intervals were
+        # read as exact (one state's infarction deaths 2014-2020: φ = ∞, the prospective tier's PIT KS 0.15). The lower
+        # 95 % profile limit of φ at NB2 is the largest overdispersion the data do not exclude: the predictive then
+        # errs conservative, never at Poisson by default (the review of the models, 2026-10-14)
+        from scipy.optimize import brentq
+
+        top = float(np.log(1e6))
+        base = nll(top, 2.0, 1.0)
+        g = lambda v: nll(v, 2.0, 1.0) - base - 1.92            # noqa: E731 - χ²₁(0.95)/2 above the bound's
+        low = float(np.log(1e-3))
+        if g(low) <= 0:                                        # no information on φ at all: Poisson is all one can say
+            self.dispersion_check.update({"bound": "poisson", "phi_low95": None})
+            return float("inf")
+        lp_low = brentq(g, low, top, xtol=1e-6)
+        self.phi_power, self.phi_ref = 2.0, 1.0
+        self.dispersion_check.update({"bound": "poisson", "phi_low95": float(np.exp(lp_low)), "power": None})
+        return float(np.exp(lp_low))
 
     def ensure_power(self) -> None:
         """A fit stored before B3 carries NB2's φ only: its NB-P dispersion is estimated once, on first use."""
         if getattr(self, "phi_power", None) is None:
             self.phi = self._dispersion_power()
+
+    def carry_dispersion(self, other: Monolith) -> None:
+        """This model's NB-P dispersion (φ0, its power and reference) as ``other``'s, the fitted model it derives from
+        (a refit, an extrapolation): carrying φ alone, a derived model re-estimated the power and reference on its own
+        unfitted parameters at first use, and the prospective tier's variance came out 3.1 times the fit's (the review
+        of the models, 2026-10-14)."""
+        other.ensure_power()
+        self.phi, self.phi_power, self.phi_ref = other.phi, other.phi_power, getattr(other, "phi_ref", 1.0)
 
     def dispersion_by(self, labels: np.ndarray) -> np.ndarray:
         """φ per place when each group of places (``labels``, one per place) has its own, by `_dispersion`."""
@@ -2019,7 +2080,7 @@ class Monolith:
         m2.hc = self.hc if hc is ... else hc
         solver.fit_mean(m2, iterations=30, loglik_tol=1.0)
         m2._solver_v1 = None        # the solver and the model refer to each other: a world's factor freed with it, not
-        m2.phi = self.phi           # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)
+        m2.carry_dispersion(self)   # at the next full collection (a grid of worlds held 17 GB, 2026-10-06)
         return m2
 
     def robust(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print,
@@ -2053,6 +2114,7 @@ class Monolith:
         # courses fix the siblings of a category that dominates its group (B25–B33 under COVID-19). Which reference a
         # question takes, the background or the category's own course, is the question registry's to declare
         # (evaluation 2026-10-07, robust expectation)
+        flag = None
         for r in range(0 if courses else 1, rounds + 1):
             if not courses:
                 mu = _leaf_expected(m, E, U, T)                                        # [E, U, T]
@@ -2131,7 +2193,8 @@ class Monolith:
                 log(f"  squarem {sweep}: course moved {moved:.3g}, α {alpha:.2f}, τ {m.category_courses['tau']:.3g}")
                 if moved < sweep_tol:
                     break
-        m.phi = m._dispersion_power()
+        # on the observed counts of the cells no round flagged: the imputed ones are expectations, not counts
+        m.phi = m._dispersion_power(exclude=flag if flag is not None else None)
         m.fit_data = m.data            # the imputed cells its index tensors (e, u, t, g) are of
         m.data = d                     # readers see the block's real counts
         m.robust_info = info
@@ -2275,7 +2338,8 @@ class Monolith:
     def robust_stored(self, rounds: int = 2, trim: float = 0.005, min_expected: float = 0.05, log=print) -> Monolith:
         """`robust`, read from the store when it was made before (its own key: the fit's plus the robust settings),
         else made and stored."""
-        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "v": 12, "courses": False}   # v12: a recoding's share in its most expected group
+        tag = {"rounds": rounds, "trim": trim, "min_expected": min_expected, "courses": False,
+               "code": config.code_key(Monolith.robust)}       # its code, where a hand-bumped version was
         key = {**self.key(), "robust": tag}
         arrays, meta = store.get_arrays("monolith", key), store.manifest("monolith", key)
         if arrays is not None and meta is not None:
@@ -2333,7 +2397,10 @@ class Monolith:
     # ---- persistence -------------------------------------------------------------
 
     def key(self) -> dict:
-        return {**self.data.key, "graph": self.graph_kind, **({"rank": self.rank} if self.rank else {}),
+        # the fit's own code beside its data's: an edit of the solver or the dispersion was served from the store
+        # (the review of the models, 2026-10-14)
+        return {**self.data.key, "graph": self.graph_kind, "fit_code": config.code_key(Monolith.fit),
+                **({"rank": self.rank} if self.rank else {}),
                 **({"prior": self.prior} if self.prior != "gaussian" else {}),
                 **({"likelihood": self.likelihood} if self.likelihood != "poisson" else {}),
                 **({"robust": self.robust_tag} if getattr(self, "robust_tag", None) else {})}
@@ -2938,7 +3005,7 @@ def extrapolate(model: Monolith, test: BlockData, history: str = "auto") -> tupl
     tm = Monolith(test, model.graph, model.graph_kind, device=str(model.device), rank=model.rank)
     if model.ix_on:
         tm._enable_interaction(model.ixl.cpu().numpy())
-    tm.phi = model.phi
+    tm.carry_dispersion(model)
     return tm, extrapolate_effects(model, tm, model.effects(), history)
 
 
@@ -3117,8 +3184,10 @@ def _torch_sparse(Q: sp.csr_matrix, dtype: torch.dtype, device: torch.device) ->
 
 
 def _cached_icar(edges: np.ndarray, weights: np.ndarray, n: int) -> structures.Shape:
-    key = {"what": "icar", "n": n, "edges": int(len(edges)), "hash": int(np.sum(edges[:, 0] * 7919 + edges[:, 1])),
-           "w": round(float(np.sum(weights * (1 + edges[:, 0] % 97))), 6)}
+    # the graph's content, where a linear checksum gave edges (0,3),(1,2) and (0,2),(1,3) one key (the review, 2026-10-14)
+    digest = hashlib.sha256(np.ascontiguousarray(edges, dtype=np.int64).tobytes()
+                            + np.ascontiguousarray(weights, dtype=np.float64).tobytes()).hexdigest()[:20]
+    key = {"what": "icar", "n": n, "edges": int(len(edges)), "graph": digest, "code": config.code_key(structures.icar)}
     cached = store.get_arrays("structures", key)
     if cached is not None:
         Q = sp.csr_matrix((cached["data"], cached["indices"], cached["indptr"]), shape=(n, n))

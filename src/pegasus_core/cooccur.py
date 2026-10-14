@@ -13,7 +13,7 @@ death), and its strength is the lift.
 
 from __future__ import annotations
 
-from . import control, gateway
+from . import config, control, gateway
 
 
 def associated(dataset: str, event: str, years: list[int], columns: list[str], seeds: list[str]) -> list[dict]:
@@ -30,7 +30,7 @@ def associated(dataset: str, event: str, years: list[int], columns: list[str], s
     parts = []
     for y in years:
         try:
-            c = gateway.cooccurrence(dataset, event, int(y), columns, seeds)
+            c = gateway.cooccurrence(dataset, event, int(y), columns, seeds, area=(tuple(sorted(config.study_area())) if config.study_area() else None))
         except gateway.nothing_published():
             continue
         parts.append(c.append_column("year", pa.array([int(y)] * c.num_rows, pa.int32())))
@@ -72,7 +72,7 @@ def related_codes(dataset: str, event: str, years: list[int], columns: list[str]
     parts = []
     for y in years:
         try:
-            parts.append(gateway.cooccurrence(dataset, event, int(y), columns, seeds))
+            parts.append(gateway.cooccurrence(dataset, event, int(y), columns, seeds, area=(tuple(sorted(config.study_area())) if config.study_area() else None)))
         except gateway.nothing_published():
             continue
     if not parts:
@@ -82,11 +82,18 @@ def related_codes(dataset: str, event: str, years: list[int], columns: list[str]
         t[c] = t[c].astype(float)
     t["e"] = t["n_code"] * t["n_seed"] / t["n"].clip(lower=1)
     g = t.groupby("code").agg(o=("n_both", "sum"), e=("e", "sum"), n_code=("n_code", "sum")).reset_index()
-    g = g[(g["o"] >= min_both) & (g["e"] > 0)]
+    # the family is every category with an expected co-occurrence (independent of the observed count under the null);
+    # dropping those observed fewer than `min_both` times before Benjamini-Hochberg shrank it after looking at the data.
+    # `min_both` decides which are reported, after the adjustment (the review of the gateway, 2026-10-14)
+    g = g[g["e"] > 0]
     if g.empty:
         return []
     p = poisson.sf(g["o"].to_numpy() - 1, g["e"].to_numpy())
     qv = control.adjusted(p)
+    shown = (g["o"] >= min_both).to_numpy()
+    g, p, qv = g[shown], p[shown], qv[shown]
+    if g.empty:
+        return []
     labels = {r["code"]: r["label"] for r in gateway.code_tree("ICD10").to_pylist()}
     out = []
     for (_, r), pi, qi in zip(g.iterrows(), p, qv, strict=True):

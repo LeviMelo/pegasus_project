@@ -568,7 +568,8 @@ def share_sources(dataset: str, event: str, column: str, probe_year: int) -> lis
         raise ValueError(f"{dataset}.{column} is not a modelled composition: {d.reason or d.kind}")
     et = gateway.event_type(dataset, event)
     primary = next((c["column"] for c in et.get("classifiers") or [] if c["role"] == "primary"), None)
-    comp = gateway.composition_counts(dataset, event, probe_year, column, d.missing, primary).counts.to_pandas()
+    comp = gateway.composition_counts(dataset, event, probe_year, column, d.missing, primary,
+                                      area=(tuple(sorted(config.study_area())) if config.study_area() else None)).counts.to_pandas()
     order = comp.groupby("value")["n"].sum().sort_values(ascending=False).index.tolist()
     return [(v, {"source": "share", "indicator": column, "success": (v,), "missing": list(d.missing),
                  **({"classifier": primary} if primary else {})}) for v in order[1:]]
