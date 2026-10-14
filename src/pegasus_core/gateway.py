@@ -1615,20 +1615,28 @@ def _cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds
 
 
 def code_list_counts(dataset: str, event: str, year: int, column: str | list[str],
-                     places: pa.Array | None = None, classifier: str | None = None, area=None) -> EventCounts:
+                     places: pa.Array | None = None, classifier: str | None = None, area=None,
+                     support: str | None = None) -> EventCounts:
     """Events per (u, year, sex, age, ICD category) for a column that holds several codes
     concatenated (SINASC's CODANOMAL: "Q02Q690"), or several columns read together (the lines of a
     death certificate: every cause it mentions): an event counts once under each distinct
     category it carries. Events carrying none are the complement, not counted here. ``classifier`` names the field's
-    family (a declared group's role) and reads nothing."""
+    family (a declared group's role) and reads nothing. ``support``: the events at another place they are recorded at
+    (a birth's place of occurrence), as `event_counts` reads it; the support reader of a code list had raised (the SINASC
+    study's hypothesis at the place of birth, 2026-10-14)."""
     columns = [column] if isinstance(column, str) else list(column)
+    strata = _strata(dataset, event)
+    if support:
+        if support not in {r["column"] for r in roles(dataset) if r.get("kind") == "place"}:
+            raise ValueError(f"{dataset}: {support!r} is no place column of its roles")
+        strata = {**strata, "residence": support, "place": support}
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     categories = _categories_sql(columns)
     key = _reader_key("code_list_counts", code_list_counts, dataset, event, year, places=places, area=area,
-                      column=column)
+                      column=column, **({"support": support} if support else {}))
 
     def compute() -> dict[str, pa.Table]:
-        con = _cells(dataset, event, year, columns, _strata(dataset, event), area=area, places=places,
+        con = _cells(dataset, event, year, columns, strata, area=area, places=places,
                      select=f"{categories} AS codes", where=f"trim({text}) <> ''")
         reason = _reason(("len(codes) = 0", "code"))
         counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,

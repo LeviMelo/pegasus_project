@@ -272,7 +272,9 @@ def system_readers(sys_: System, plan: Plan, blocks: list[str], out: dict | None
                 for d in fields.declared_flows(sys_.dataset) if sys_.flows == "all" or d.column in (sys_.flows or [])]
     # a code set's places of care, infection or notification read its own codes there (SIA serology is billed by
     # the establishment and names no patient's residence: Santa Maria's 2018 outbreak shows only there)
-    own = {k: v for k, v in (sys_.source or {}).items() if k in ("classifier", "structure", "codes")}
+    # the item's own codes: a code set's, or a code list's (its source and columns: its classifier is no column)
+    own = {k: v for k, v in (sys_.source or {}).items() if k in ("classifier", "structure", "codes")
+           or (sys_.source or {}).get("source") == "code_list" and k in ("source", "column")}
     readers += [(name, {**source, **own}) for name, source in fields.support_sources(sys_.dataset, sys_.event, list(plan.years))
                 if sys_.supports == "all" or name.split(":", 1)[1] in (sys_.supports or [])]
     readers += [(name, source) for name, source in fields.quality_sources(sys_.dataset, sys_.event, plan.years)

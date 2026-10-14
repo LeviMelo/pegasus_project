@@ -1055,7 +1055,8 @@ def resolve(decl: Declaration, log=print) -> Scope:
         chosen = decl.choice("readers")
         it.readers = {} if it.source else {k: "all" for k in chosen if k != "linked"}
         it.questions = decl.choice("questions")
-        coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
+        # a code list's field is a code set too (its categories on the list): read at its other places as one is
+        coded = bool(it.source) and ("codes" in it.source or it.source.get("source") == "code_list")             and not ({"population", "support"} & set(it.source))
         if coded and "supports" in chosen and not it.count_only:
             it.readers = {"supports": "all"}     # the code set at its other places
     # a dataset read as nested events (SINAN's notification, every row; its case, the rows its classification
@@ -2155,6 +2156,10 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     for x in leads.Register().current():
         if x.fields and x.kind == "answer" and x.status != "retired":
             by_field.setdefault(x.fields[0], []).append(x)
+    # a year whose monthly files the lake holds fewer than twelve of is a part of a year (SIA's ATD began in August
+    # 2014): its estimates say so, and no trend or season reads it (it had read as a halving, the SIA audit, 2026-10-14)
+    files = lap.guard("sources", lambda: _publications(scope, log), None, log)
+    partial = _partial_years(files)
     for it in (i for i in scope.items if i.status == "in"):
         for name, src in _fields_of(it):
             if name == "!":
@@ -2195,6 +2200,10 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     for r in rows_:
                         if r["period_kind"] == "year":
                             r["provisional"] = int(r["first"]) > int(time.strftime("%Y")) - int(final)
+                for r in rows_:
+                    why = partial.get((it.dataset, r["first"])) if r["period_kind"] == "year" else None
+                    if why:
+                        r["partial"] = why
                 # the share placed, for the counts and for each other place they are read at: a place of infection
                 # or of care left blank for 35-44 % of gestational cases makes its rates lower bounds (the review);
                 # each year's share placed is a completeness row ("events placed"), once
@@ -2224,8 +2233,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 if not name and s.expectations.model(f.block).data.n is None:
                     places += lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv, refs=refs: _places(
                         it, s, f, label, sv, names, refs), [], log)
-                    seasons += lap.guard(f"seasons {f.id}", lambda it=it, s=s, f=f, label=label: _seasons(it, s, f, label),
-                                         [], log)
+                    seasons += lap.guard(f"seasons {f.id}", lambda it=it, s=s, f=f, label=label: _seasons(
+                        it, s, f, label, skip={y for (ds, y) in partial if ds == it.dataset}), [], log)
                     measures += lap.guard(f"measures {f.id}", lambda it=it, f=f, label=label: _measures(it, f, label, log),
                                           [], log)
                     code_rows += lap.guard(f"codes {f.id}", lambda it=it, f=f, label=label: _codes(it, f, label), [], log)
@@ -2324,7 +2333,6 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
             figure_rows.append(drawn)
     if figure_rows:
         pq.write_table(_rows_table(figure_rows), out / "figures.parquet")
-    files = lap.guard("sources", lambda: _publications(scope, log), None, log)
     if files is not None and files.num_rows:
         pq.write_table(files, out / "sources.parquet")
     lap.guard("geometry", lambda: _geometry(out, places), None, log)
@@ -2631,7 +2639,7 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     from . import monolith, tools
 
     d = s.expectations.model(f.block).data
-    if d.n is not None or str(d.population).startswith("events:") or (it.source or {}).get("population")             or d.key.get("collapse"):
+    if _births_field(it) or d.n is not None or str(d.population).startswith("events:") or (it.source or {}).get("population")             or d.key.get("collapse"):
         return []
     column = gateway._strata(it.dataset, it.event).get("race")
     if not column:
@@ -2834,7 +2842,7 @@ def _apc(rows: list[dict]) -> list[dict]:
     series: dict[tuple, list[dict]] = {}
     for r in rows:
         if r["measure"] in ("crude_rate", "smr") and r["period_kind"] == "year" and not r.get("provisional") \
-                and r.get("denominator"):
+                and not r.get("partial") and r.get("denominator"):
             series.setdefault((r["field"], r["geography"], r["place"], r.get("unit") or "standardised ratio (observed "
                                "over expected)", r.get("stratum"), r.get("value")), []).append(r)
     out = []
@@ -3100,9 +3108,12 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
         return out_
 
     below = _levels_below(np.asarray(d.places))
+    # a field whose events are live births is a birth prevalence: its person-year rows would be the mother's sex and age
+    # over women's person-years (every event "female", the SINASC audit, 2026-10-14); only its rates per live births
+    births_field = _births_field(it)
     # each year, then the whole period (a paper's table gives the period's rates beside the yearly series; they had to
     # be summed by hand from the yearly rows, 2026-10-14)
-    for t in [*range(T), None]:
+    for t in [] if births_field else [*range(T), None]:
         ys, ns = (y[:, t], N[:, t]) if t is not None else (y.sum(1), N.sum(1))
         out += row(*_whole(), t, ys.sum(0), ns.sum(0))
         for level, unit, sel_u in below:
@@ -3110,11 +3121,11 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
     # an area's reference: Brazil's and its macro-regions' rates of the same field, standardised to the same standard,
     # each year and over the period (an area's rate compared with nothing had been the folder's only rate, 2026-10-14)
     references = [] if ratio else list(refs or [])
-    for unit, yr_, nr_ in references:
+    for unit, yr_, nr_ in [] if births_field else references:
         for t in [*range(T), None]:
             yy, nn = (yr_[t], nr_[t]) if t is not None else (yr_.sum(0), nr_.sum(0))
             out += row("reference", unit, t, yy, nn)
-    if not ratio and G >= 4 and G % 2 == 0:
+    if not ratio and not births_field and G >= 4 and G % 2 == 0:
         # rates by sex and by age band, for the whole: the risk a paper's first tables give (the case-mix shares say
         # nothing about it), each with its exact interval and its own trend (`_apc`)
         nB = G // 2
@@ -3152,8 +3163,9 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
             base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": level, "place": unit,
                     "stratum": None, **_period(int(np.asarray(d.years)[t]) if t is not None else None,
                                                None if t is not None else period)}
+            # the count is the person-year rows' already, but for a births field, which has none
             return _rated(base, float(yy.sum()), float(bb.sum()), "1,000 SINASC-DN:birth events", 1e3, "live births",
-                          cells=(yy.sum(keepdims=True), bb.sum(keepdims=True)))
+                          cells=(yy.sum(keepdims=True), bb.sum(keepdims=True)), count=births_field)
         for t in [*range(T), None]:
             out += per_births(*_whole(), t, np.ones(U, bool))
             for level, unit, sel_u in below:
@@ -3168,17 +3180,19 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
                 base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": "reference", "place": unit,
                         "stratum": None, **_period(int(np.asarray(d.years)[t]) if t is not None else None,
                                                    None if t is not None else period)}
-                out += _rated(base, ev_, bb, "1,000 SINASC-DN:birth events", 1e3, "live births")
+                out += _rated(base, ev_, bb, "1,000 SINASC-DN:birth events", 1e3, "live births", count=births_field)
     _ratio_to_brazil(out)
     return out
 
 
-def _rated(base: dict, events: float, pop: float, per: str, scale: float, kind: str, cells=None) -> list[dict]:
-    """A count and, over its denominator, the crude rate with its exact Poisson 95 % interval (Garwood), the denominator
-    fixed; ``cells`` (the sex-age events and denominators) kept for the age-sex adjusted trend, never written."""
+def _rated(base: dict, events: float, pop: float, per: str, scale: float, kind: str, cells=None,
+           count: bool = True) -> list[dict]:
+    """A count (unless another row of the same events has it: ``count``) and, over its denominator, the crude rate with
+    its exact Poisson 95 % interval (Garwood), the denominator fixed; ``cells`` (the sex-age events and denominators)
+    kept for the age-sex adjusted trend, never written."""
     from scipy.stats import chi2
 
-    out = [_estimate_row("rates", "count", base, estimate=events)]
+    out = [_estimate_row("rates", "count", base, estimate=events)] if count else []
     if pop:
         lo = chi2.ppf(0.025, 2 * events) / 2 if events > 0 else 0.0
         hi = chi2.ppf(0.975, 2 * events + 2) / 2
@@ -3223,7 +3237,7 @@ def _ratio_to_brazil(rows: list[dict]) -> None:
         lr = float(np.log(r["estimate"] / b["estimate"]))
         se = float(np.sqrt(r["variance"] / r["estimate"] ** 2 + b["variance"] / b["estimate"] ** 2))
         base = {k: v for k, v in r.items() if k not in ("measure", "section", "variance", "denominator", "per", "unit",
-                                                          "denominator_kind", "low", "high", "interval", "estimate")}
+                                                          "low", "high", "interval", "estimate")}
         return _estimate_row("rates", "rate_ratio", base, estimate=float(np.exp(lr)),
                              low=float(np.exp(lr - 1.96 * se)), high=float(np.exp(lr + 1.96 * se)),
                              interval="log-normal, two gamma variances", comparator=comparator)
@@ -3417,7 +3431,7 @@ def _period(year, period) -> dict:
 #: estimates.parquet's columns by type: a column holds one type whatever the producer (a municipality's code beside "BR"
 #: in ``place`` had failed the table, 2026-10-14); the private ones (``_``) are the producers' and never written
 ESTIMATE_TEXT = ("section", "measure", "field", "label", "dataset", "model", "segment", "variable", "variable_label",
-                 "value", "value_label",
+                 "value", "value_label", "partial",
                  "interval", "denominator_kind", "unit", "geography", "place", "place_name", "state", "health_region",
                  "health_macroregion", "period_kind", "stratum", "comparator", "standard", "note")
 ESTIMATE_NUMBER = ("estimate", "low", "high", "p", "q", "numerator", "denominator", "per", "variance")
@@ -3426,8 +3440,8 @@ ESTIMATE_INT = ("first", "last", "month")
 
 #: study.duckdb's view of the rates as a paper's table reads them (and the report's): one row per field, place, stratum and
 #: period, the count, the crude and the standardised rate with their intervals, the ratio to Brazil
-RATES_VIEW = """SELECT field, label, dataset, geography, place, stratum, period_kind, first, last,
-        max(estimate) FILTER (WHERE measure = 'count') AS events,
+RATES_VIEW = """SELECT field, label, dataset, geography, place, stratum, period_kind, first, last, denominator_kind,
+        max(numerator) FILTER (WHERE measure = 'crude_rate') AS events,
         max(estimate) FILTER (WHERE measure = 'crude_rate') AS crude_rate,
         max(low) FILTER (WHERE measure = 'crude_rate') AS crude_low,
         max(high) FILTER (WHERE measure = 'crude_rate') AS crude_high,
@@ -3439,7 +3453,7 @@ RATES_VIEW = """SELECT field, label, dataset, geography, place, stratum, period_
         max(high) FILTER (WHERE measure = 'rate_ratio' AND comparator = 'Brazil') AS ratio_to_brazil_high,
         max(denominator) FILTER (WHERE measure = 'crude_rate') AS denominator,
         max(unit) FILTER (WHERE measure = 'crude_rate') AS unit
-    FROM estimates WHERE section = 'rates' AND measure IN ('count', 'crude_rate', 'standardised_rate', 'rate_ratio')
+    FROM estimates WHERE section = 'rates' AND measure IN ('crude_rate', 'standardised_rate', 'rate_ratio')
     GROUP BY ALL"""
 #: and of the municipalities: rates, the standardised ratios against Brazil and the area, the model's rate
 MUNICIPALITIES_VIEW = """SELECT field, label, dataset, place AS u, place_name AS municipality, state, health_region,
@@ -3463,7 +3477,9 @@ def _estimates_table(rows: list[dict]) -> pa.Table:
     cols = [*ESTIMATE_TEXT, *ESTIMATE_NUMBER, *ESTIMATE_INT, "provisional"]
     types = {**{c: pa.string() for c in ESTIMATE_TEXT}, **{c: pa.float64() for c in ESTIMATE_NUMBER},
              **{c: pa.int64() for c in ESTIMATE_INT}, "provisional": pa.bool_()}
-    return pa.table({c: pa.array([r.get(c) for r in rows], types[c]) for c in cols})
+    # each row its id, so a paper's number cites its row (the audits numbered them themselves)
+    return pa.table({"id": pa.array(range(1, len(rows) + 1), pa.int64()),
+                     **{c: pa.array([r.get(c) for r in rows], types[c]) for c in cols}})
 
 
 def _estimate_row(section: str, measure: str, base: dict, **row) -> dict:
@@ -3488,6 +3504,24 @@ def _estimate_row(section: str, measure: str, base: dict, **row) -> dict:
             out[k] = int(v)
         else:
             raise ValueError(f"estimate {section}/{measure}: no column {k!r}")
+    return out
+
+
+def _partial_years(files: pa.Table | None) -> dict[tuple[str, int], str]:
+    """(dataset, year) -> why the year is a part of one: a source published by month (its files have a competence)
+    whose year the lake holds fewer than twelve months of. A year's rate would compare a part with wholes."""
+    out: dict[tuple[str, int], str] = {}
+    if files is None or not files.num_rows:
+        return out
+    t = files.select(["dataset", "year", "competence", "in_lake"]).to_pylist()
+    monthly = {r["dataset"] for r in t if r["competence"]}
+    held: dict[tuple[str, int], set] = {}
+    for r in t:
+        if r["dataset"] in monthly and r["in_lake"] and r["competence"]:
+            held.setdefault((r["dataset"], int(r["year"])), set()).add(str(r["competence"]))
+    for (ds, y), months in held.items():
+        if len(months) < 12:
+            out[(ds, y)] = f"{len(months)} of 12 months published and held ({min(months)}-{max(months)})"
     return out
 
 
@@ -3797,7 +3831,7 @@ def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
     return out
 
 
-def _seasons(it: Item, s, f, label: str) -> list[dict]:
+def _seasons(it: Item, s, f, label: str, skip: set | frozenset = frozenset()) -> list[dict]:
     """A count field by the month of its events' own dates (`gateway.monthly_counts`, the study's area), over the period
     and each year: events, the days of those months, events per day, and the seasonal index (a month's events per day
     over the period's) with its exact interval, the period's daily rate fixed; over the period, Pearson's test of the
@@ -3817,7 +3851,9 @@ def _seasons(it: Item, s, f, label: str) -> list[dict]:
     leaves = [str(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
     width = max(len(str(c)) for c in d.leaves) if d.leaves else 0
     area = tuple(sorted(config.study_area())) if config.study_area() else None
-    years = [int(y) for y in it.years]
+    years = [int(y) for y in it.years if int(y) not in skip]       # a partial year has no season of its own
+    if not years:
+        return []
     ev = np.zeros((len(years), 12))
     for y in years:
         c = gateway.monthly_counts(it.dataset, it.event, y, classifier=fields.classifier_of(it.dataset, it.event, src,
@@ -4050,6 +4086,14 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
     ratio = str(d.population).startswith("events:")
     per, scale = ((f"1,000 {d.population[len('events:'):].replace(';', ' + ')} events", 1e3) if ratio
                   else ("100,000 person-years", 1e5))
+    if _births_field(it):
+        # a birth prevalence by municipality: its live births as the one cell (a birth has no sex or age of its own),
+        # the area's and Brazil's rates per live birth as the expectations (the audit could map no prevalence)
+        y, N = y.sum(2, keepdims=True), _births(d)[:, :, None]
+        G = 1
+        per, scale, ratio = "1,000 SINASC-DN:birth events", 1e3, True
+        refs = [(k, yb.sum(1, keepdims=True), _reference_births([int(x) for x in np.asarray(d.years)], [k])[k][:, None])
+                for k, yb, _ in refs or [] if k == "BR"]
     with np.errstate(divide="ignore", invalid="ignore"):
         own = np.where(N.sum(0) > 0, y.sum(0) / N.sum(0), 0.0)           # [T, G]: the area's own rates of each year
     ex, ev, py = (N * own[None]).sum(2), y.sum(2), N.sum(2)              # [U, T]
@@ -4097,7 +4141,8 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
         return out_
     q_int, q_br = bh(p_int), bh(p_br)
     period = f"{int(years[0])}-{int(years[-1])}"
-    kind = d.population[len("events:"):].replace(";", " + ") + " events" if ratio else "person-years"
+    kind = ("live births" if _births_field(it) else d.population[len("events:"):].replace(";", " + ") + " events"
+            if ratio else "person-years")
     exact = "exact Poisson, expectation fixed"
     out = []
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -4119,9 +4164,11 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
                                              denominator=pop, denominator_kind=kind, per=scale, unit=f"per {per}"))
                 # against the area's own age-sex rates of each year, and against Brazil's; over the period with the
                 # exact two-sided p and the Benjamini-Hochberg q across the municipalities
-                for e_, p_, q_, comparator in ((e, p_int[ui], q_int[ui], "the area's own age-sex rates"),
+                own_, brazil_ = (("the area's own rate per live birth", "Brazil's rate per live birth")
+                                 if G == 1 else ("the area's own age-sex rates", "Brazil's age-sex rates"))
+                for e_, p_, q_, comparator in ((e, p_int[ui], q_int[ui], own_),
                                                *(() if exb is None else ((float(exb[ui, k]), p_br[ui], q_br[ui],
-                                                                          "Brazil's age-sex rates"),))):
+                                                                          brazil_),))):
                     if e_ > 0:
                         out.append(_estimate_row("municipalities", "smr", base, estimate=o / e_, low=lo_ / e_,
                                                  high=hi_ / e_, interval=exact, p=p_ if k == T else None,
@@ -4163,6 +4210,7 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
     events with the value not recorded, each year and over the period. Each share with its exact interval."""
     out = []
     area = tuple(sorted(config.study_area())) if config.study_area() else None
+    cats = {str(r["code"])[:3] for r in gateway.code_tree("ICD10").to_pylist() if r.get("level") == "category"}
     done = set()
     for it in (i for i in scope.items if i.status == "in" and i.years):
         if (it.dataset, it.event) in done:
@@ -4180,6 +4228,13 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
                 continue
             ill = np.array([str(x or "")[:1] == "R" for x in code], dtype=bool)
             k, tot = float(n[ill].sum()), float(n.sum())
+            # and those with no code of the tree at all (blank, '000'): a topic read on a column most records leave
+            # empty is a recording-defined part of them (SIA's ATD: 88 % of its authorisations, 2026-10-14)
+            none_ = np.array([str(x or "").strip()[:3].upper() not in cats for x in code], dtype=bool)
+            out.append(_indicator({"dataset": it.dataset, "label": f"every {it.event} of the source",
+                                   **_period(int(y), None)},
+                                  f"no ICD-10 code on {primary['column']} (blank or none of the tree)",
+                                  float(n[none_].sum()), tot))
             out.append(_indicator({"dataset": it.dataset, "label": f"every {it.event} of the source",
                                    **_period(int(y), None)},
                                   f"ill-defined causes (ICD-10 R00-R99) on {primary['column']}", k, tot))
@@ -4520,12 +4575,18 @@ def _methods_markdown(decl: Declaration, scope: Scope, desc: list[dict], linkage
     return "\n".join(lines)
 
 
+def _births_field(it: Item) -> bool:
+    """Whether the field's events are live births themselves (SINASC's: a newborn's anomaly), not deaths or admissions
+    around birth: its rates are per live births only, its strata the mother's."""
+    return f"events:{it.dataset}:{it.event}" == BIRTHS
+
+
 def _birth_related(it: Item, d) -> bool:
     """Whether a count field is rated per live births: its events are births themselves (SINASC's: an anomaly is a birth
     prevalence, and microcephaly had been rated per person-years of every resident, 2026-10-14), or they belong to
     pregnancy or the perinatal period: its codes all in ICD-10 chapter XV (O00–O99) or XVI (P00–P96), or its events
     mostly at age 0 (the model's newborn exposure, `monolith.default_population`)."""
-    if f"events:{it.dataset}:{it.event}" == BIRTHS:
+    if _births_field(it):
         return True
     codes = [str(c) for c in ((it.source or {}).get("codes") or it.nodes or [])]
     icd = (it.source or {}).get("structure", "ICD10") == "ICD10" and all(c[:1].isalpha() for c in codes)
@@ -4632,6 +4693,7 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
     # as 100 % male at age 0 (the review of the RS slice, 2026-10-13)
     if d.n is not None or d.key.get("collapse") or str(d.population).startswith("events:"):
         return []
+    births_field = _births_field(it)         # a birth's cells are its mother's: her age band, no sex
     G = d.N.shape[2]
     nB = G // 2
     if nB < 2:
@@ -4652,8 +4714,11 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
     geo = [(*_whole(), np.ones(len(state), bool))] + _levels_below(np.asarray(d.places))
     yrs = np.asarray(d.years)
     out = []
-    for by, by_name, arr, values in (("sex", "Sexo", by_sex, [("1", "Masculino"), ("2", "Feminino")]),
-                                     ("age band", "Faixa etária (anos)", by_age, [(b, b) for b in bands])):
+    for by, by_name, arr, values in ((() if births_field else (("sex", "Sexo", by_sex, [("1", "Masculino"),
+                                                                                       ("2", "Feminino")]),))
+                                     + (("mother's age band" if births_field else "age band",
+                                         "Faixa etária da mãe (anos)" if births_field else "Faixa etária (anos)",
+                                         by_age, [(b, b) for b in bands]),)):
         for t, year in [*enumerate(yrs), (None, None)]:        # each year, then the whole period
             for level, unit, rows_u in geo:
                 obs = arr[rows_u, t].sum(0) if t is not None else arr[rows_u].sum((0, 1))
@@ -6220,6 +6285,9 @@ COLUMNS = {
                                "measure's 'valid', 'not recorded' or 'outside the domain'",
     "estimates.parquet:estimate": "the estimate, in `unit` (a count: events or records)",
     "estimates.parquet:interval": "the 95 % interval's method (empty: the estimate has none)",
+    "estimates.parquet:id": "the estimate's number in the folder, which a paper's number cites",
+    "estimates.parquet:partial": "why the estimate's year is a part of one (a monthly source's year the lake holds "
+                                 "fewer than twelve months of): never compare it with whole years; no trend reads it",
     "estimates.parquet:variance": "the estimate's variance on its own scale, where the method gives one (a standardised "
                                   "rate's, from its Poisson cells: what a pooled or compared rate needs)",
     "estimates.parquet:p": "the estimate's p (a test's or a ratio's; the measure says which)",
@@ -6432,8 +6500,14 @@ def body(folder: str | Path) -> list[dict]:
     if "quality" in decl.choice("readers") and f is not None:
         q = f[f["label"].astype(str).str.contains("quality:", regex=False)] if len(f) else f
         qd = desc[desc["label"].astype(str).str.contains("—", regex=False)] if desc is not None else None
-        part("data quality", (q is not None and len(q) > 0) or (qd is not None and len(qd) > 0),
-             f"{0 if q is None else len(q)} quality findings, {0 if qd is None else len(qd)} recorded shares by year")
+        # a code set's items read no quality field (they would read every event of the type, not the topic's): its
+        # data quality is its own records' completeness by year, which the case mix gives (the SINASC study, 2026-10-14)
+        comp = section("completeness")
+        nr = 0 if comp is None else int((comp["variable"].astype(str).str.startswith("not recorded:")
+                                         & (comp["period_kind"] == "year")).sum())
+        part("data quality", (q is not None and len(q) > 0) or (qd is not None and len(qd) > 0) or nr > 0,
+             f"{0 if q is None else len(q)} quality findings, {0 if qd is None else len(qd)} recorded shares by year, "
+             f"{nr} of the topic's own variables not recorded by year")
     lk = table("linkage")
     if any((x.get("source") or {}).get("source") == "linked" for x in read):
         part("linkage", lk is not None and len(lk) > 0 and "pairs" in lk,

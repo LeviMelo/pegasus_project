@@ -539,8 +539,12 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
             raise NotImplementedError("the monthly grain reads event counts and code-list counts")
         readers["events"] = gateway.monthly_counts
         # a code-list column (SINASC's CODANOMAL) by month: each event once under each category it carries
-        readers["code_list"] = lambda ds, ev, year, places=None, column=None, area=None: gateway.monthly_counts(
-            ds, ev, year, classifier=column, places=places, code_list=True, area=area)
+        # (``classifier`` names the field's family and reads nothing, as for `code_list_counts`: a lambda without it had
+        # failed every monthly code-list fit, the SINASC study's hypothesis, 2026-10-14)
+        def monthly_code_list(ds, ev, year, places=None, column=None, area=None, classifier=None, support=None):
+            return gateway.monthly_counts(ds, ev, year, classifier=tuple([column] if isinstance(column, str) else column),
+                                          places=places, area=area, support=support)
+        readers["code_list"] = monthly_code_list
         # person-months: each month carries a twelfth of the year's person-years
         N = np.repeat(N, 12, axis=1) / 12.0
         S = None if S is None else np.repeat(S, 12, axis=1)
