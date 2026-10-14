@@ -314,14 +314,18 @@ question), the unreachable scan code deleted, depth presets as axes, guarded pro
 measured by running a cold study under `config.key_audit_start`; a counting function's key 574 definitions -> 88; the
 old keys had never covered the lens that made a stored answer; plumbing keyless, seeds free of code keys, a change of
 keys alone adopted on request); the gateway's readers on one template with one cached store and single flight
-(shown equal on 33 tables of real reads; facility_cube, the composition batch's frame and splitting gateway.py left). Not
-done, in order: the study folder as one schema (measure x stratum x geography x period x comparator, one interval
-and unit convention, the codebook generated from it) instead of a table per audit; studies of other sources (SINAN,
-SINASC, SIA) audited as the AMI one was; then per area: query (one catalog snapshot, the planner's read plan, render by
-vintage window), linkage (one role-table service, one placebo and verdict, run fingerprints, entities as components),
-semantics (a curation epoch, typing in declarations, event reading in one function), statistics (one error-control
-layer, a reader-aware evidence grid), study (one field list, one step-key constructor, per-item replication once),
-intake (one transport).
+(shown equal on 33 tables of real reads; facility_cube, the composition batch's frame and splitting gateway.py left);
+the study folder's ten estimate tables as one `estimates.parquet` (a measure vocabulary, every interval naming its
+method, every rate its denominator and scale, every period explicit; views `rates` and `municipalities`; written at the
+folder's edge from the producers' rows, which are next to emit estimates themselves); one declaration of what a reader's
+cells are (`questions.basis`/`not_read`: a method's kinds and bases, a question's quality flag), which the survey, the
+harness and the share lens apply alike. Not done, in order: the producers emitting estimates; studies of other sources
+(SINASC microcephaly in Pernambuco, SIA dialysis in Alagoas) audited as the AMI one was; then per area: query (one
+catalog snapshot, the planner's read plan, render by vintage window), linkage (one role-table service, one placebo and
+verdict, run fingerprints, entities as components), semantics (a curation epoch, typing in declarations, event reading
+in one function), statistics (one error-control layer), study (one field list, one step-key constructor, per-item
+replication once), intake (one transport), models (block assembly and dispersion out of monolith.py, one
+keying function for its stored objects).
 
 
 Measured 2026-10-10 in the capability assessment (machine shared with the overnight SIM job) and by reading the code. "Works" means ran and produced plausible output when exercised.

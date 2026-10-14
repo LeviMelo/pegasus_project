@@ -574,14 +574,16 @@ class Session:
                     for r in res["steps"]]
         if lens == "share_excess":                   # the field's share of all events (§7.1, the observation lens)
             from . import departures
-            if str(self.source.get("population", "")).startswith("events:"):
-                raise ValueError(f"{self.dataset}: a ratio field's share of all events is its numerator's code set's question")
-            if (other := [k for k in ("support", "place", "link", "indicator", "quality", "mark") if self.source.get(k)])                     or self.source.get("source") in ("share", "linked", "away"):
-                # the total is the event type's events by residence: a reader at another place or basis (a support's
-                # deaths by the verification service's municipality, an away place's) counts others than that total
-                # holds, and the cells whose numerator exceeded it were certain findings (2026-10-14)
-                raise ValueError(f"{self.dataset}: a share of all events is not defined for a reader at another place or "
-                                 f"basis ({', '.join(other) or self.source.get('source')})")
+
+            # the total is the event type's events by residence: a reader at another place or basis (a support's deaths
+            # by the verification service's municipality, an away place's) counts others than that total holds, and the
+            # cells whose numerator exceeded it were certain findings (2026-10-14); a ratio field's share is its
+            # numerator's code set's question. The rule is the method's declaration (`questions.not_read`)
+            from . import questions as qs
+
+            qn = qs.QUESTIONS["share"]
+            if why := qs.not_read(qn, next(m for m in qn.methods if m.id == "share_excess"), "count", self.source):
+                raise ValueError(f"{self.dataset}: a share of all events is not defined here: {why}")
             s = self.surprise(node, "B1")
             # a code set's share is of all the type's events: the total and its fit are the unrestricted reader's (the
             # code set's own fit as the total read every place's share as ~0 against ~1, CIH-CR P37.1: 4185 "departures"

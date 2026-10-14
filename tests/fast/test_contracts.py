@@ -154,7 +154,8 @@ def test_a_quality_field_is_asked_of_recording_only():
         source = {"quality": True, "indicator": "ID_PAIS"}
 
     out = questions._ask(S(), "propagation", "*")
-    assert out == [] and "quality field" in out.failed["*"] and set(questions.QUALITY_QUESTIONS) <= set(questions.QUESTIONS)
+    assert out == [] and "quality field" in out.failed["*"]
+    assert {q.id for q in questions.QUESTIONS.values() if q.quality} == {"excess", "step", "trend", "cluster", "institution"}
 
 
 def test_a_small_corroboration_p_is_read_from_the_tail():

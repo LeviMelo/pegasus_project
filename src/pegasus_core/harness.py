@@ -1064,8 +1064,8 @@ def event_record(positives: tuple[Positive, ...] | None = None, years: list[int]
         in_area = area(list(place_events))
         area_events = float(sum(e for (u, e), a in zip(place_events.items(), in_area, strict=True) if a))
         for m in qn.methods:
-            if kind not in m.kinds:            # a method that does not read this field's kind is not scored on it
-                rec["methods"][m.id] = {"not_read": kind}
+            if why := questions.not_read(qn, m, kind, getattr(s, "source", None)):   # not scored where it reads nothing
+                rec["methods"][m.id] = {"not_read": why}
                 continue
             if m.id in p.selected_by:
                 rec["methods"][m.id] = {"selected": True}      # it found the answer that made the positive: not scored

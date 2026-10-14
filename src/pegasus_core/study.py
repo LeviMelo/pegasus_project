@@ -17,6 +17,7 @@ import functools
 import html
 import json
 import os
+import re
 import shutil
 import time
 import traceback
@@ -634,7 +635,7 @@ def _related_codes(decl: Declaration, items: list[Item], seeds: list[str], log) 
     """The codes related to the seeds on the same records (BACKLOG 4.2, `cooccur.associated` at the study's q), wherever
     a read item's records carry several codes (`fields.declared_mentions`: certificate lines, all diagnoses, anomaly
     lists), over the item's years in the lake; each with its strength (lift and interval) and FDR. Only where related
-    fields are read (`related`): the report's table of them is associated.parquet's, made in the products."""
+    fields are read (`related`): the report's table of them is estimates.parquet's (associated causes), made in the products."""
     from . import cooccur
 
     if not seeds or not decl.choice("related"):
@@ -2222,7 +2223,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                                                 "shows": "left: each state's crude rate over the period; right: each "
                                                          "municipality's standardised departure from tier B1 (observed "
                                                          "minus expected over its sd), the findings' places outlined; "
-                                                         "a rate map is drawn from places.parquet and "
+                                                         "a rate map is drawn from estimates.parquet (municipalities) and "
                                                          "municipalities.geojson"})
                     except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
@@ -2234,8 +2235,6 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "related.parquet")
     lap("related")
     assoc = lap.guard("associated", lambda: _associated(decl, scope, log), [], log)
-    pq.write_table(_rows_table(assoc) if assoc else pa.table({"code": pa.array([], pa.string())}),
-                   out / "associated.parquet")
     lap("associated")
     chosen = decl.choice("relations")
     rel = lap.guard("relations", lambda: _relations(scope, decl, log), [], log) if "fields" in chosen else []
@@ -2264,8 +2263,6 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "capture.parquet")
     profile = lap.guard("context profiles", lambda: _context_profiles(decl, scope, rows, log), [], log)
     covariates = lap.guard("contexts", lambda: _context_table(decl, scope, places, names, log), [], log)
-    if covariates:
-        pq.write_table(_rows_table(covariates), out / "contexts.parquet")
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
@@ -2280,18 +2277,6 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
         r.pop("_event", None)
     findings = _rows_table(rows) if rows else pa.table({"id": pa.array([], pa.string())})
     pq.write_table(findings, out / "findings.parquet")
-    pq.write_table(_rows_table(desc) if desc else pa.table({"field": pa.array([], pa.string())}),
-                   out / "descriptive.parquet")
-    pq.write_table(_rows_table(groups) if groups else pa.table({"field": pa.array([], pa.string())}),
-                   out / "groups.parquet")
-    pq.write_table(_rows_table(places) if places else pa.table({"field": pa.array([], pa.string())}),
-                   out / "places.parquet")
-    pq.write_table(_rows_table(trends) if trends else pa.table({"field": pa.array([], pa.string())}),
-                   out / "trends.parquet")
-    pq.write_table(_rows_table(seasons) if seasons else pa.table({"field": pa.array([], pa.string())}),
-                   out / "seasons.parquet")
-    pq.write_table(_rows_table(measures) if measures else pa.table({"field": pa.array([], pa.string())}),
-                   out / "measures.parquet")
     linkage = lap.guard("linkage", lambda: _linkage(scope), [], log)
     pq.write_table(_rows_table(linkage) if linkage else pa.table({"link": pa.array([], pa.string())}),
                    out / "linkage.parquet")
@@ -2311,14 +2296,16 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
             figure_rows.append(drawn)
     if figure_rows:
         pq.write_table(_rows_table(figure_rows), out / "figures.parquet")
-    if code_rows:
-        pq.write_table(_rows_table(code_rows), out / "codes.parquet")
     files = lap.guard("sources", lambda: _publications(scope, log), None, log)
     if files is not None and files.num_rows:
         pq.write_table(files, out / "sources.parquet")
     lap.guard("geometry", lambda: _geometry(out, places), None, log)
-    pq.write_table(_rows_table(quality) if quality else pa.table({"indicator": pa.array([], pa.string())}),
-                   out / "quality.parquet")
+    # every descriptive number as one schema (MEASURES): ten tables, each with its own columns, had grown one audit at a
+    # time (docs/plans/study-estimates.md)
+    est = _estimates(_whole()[0], desc, places, seasons, code_rows, groups, quality, measures, trends, assoc,
+                     covariates)
+    pq.write_table(_rows_table(est) if est else pa.table({"section": pa.array([], pa.string())}),
+                   out / "estimates.parquet")
     lap("places and quality")
     hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
     pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
@@ -2337,6 +2324,37 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     tables = sorted(out.glob("*.parquet"))
     for path in tables:
         con.execute(f"CREATE TABLE {path.stem} AS SELECT * FROM read_parquet('{path.as_posix()}')")
+    if (out / "estimates.parquet").exists():
+        # the wide shapes a paper's tables read, as views over estimates: one row per field, place, stratum and period
+        key = "field, label, dataset, geography, place, stratum, period_kind, first, last"
+        con.execute(f"""CREATE VIEW rates AS SELECT {key},
+                max(estimate) FILTER (WHERE measure = 'count') AS events,
+                max(estimate) FILTER (WHERE measure = 'crude_rate') AS crude_rate,
+                max(low) FILTER (WHERE measure = 'crude_rate') AS crude_low,
+                max(high) FILTER (WHERE measure = 'crude_rate') AS crude_high,
+                max(estimate) FILTER (WHERE measure = 'standardised_rate') AS standardised_rate,
+                max(low) FILTER (WHERE measure = 'standardised_rate') AS standardised_low,
+                max(high) FILTER (WHERE measure = 'standardised_rate') AS standardised_high,
+                max(estimate) FILTER (WHERE measure = 'rate_ratio' AND comparator = 'Brazil') AS ratio_to_brazil,
+                max(low) FILTER (WHERE measure = 'rate_ratio' AND comparator = 'Brazil') AS ratio_to_brazil_low,
+                max(high) FILTER (WHERE measure = 'rate_ratio' AND comparator = 'Brazil') AS ratio_to_brazil_high,
+                max(denominator) FILTER (WHERE measure = 'crude_rate') AS denominator,
+                max(unit) FILTER (WHERE measure = 'crude_rate') AS unit
+            FROM estimates WHERE section = 'rates' AND measure IN ('count', 'crude_rate', 'standardised_rate',
+                                                                     'rate_ratio') GROUP BY ALL""")
+        con.execute("""CREATE VIEW municipalities AS SELECT field, label, dataset, place AS u, place_name AS municipality,
+                state, health_region, health_macroregion, period_kind, first, last,
+                max(estimate) FILTER (WHERE measure = 'count') AS events,
+                max(estimate) FILTER (WHERE measure = 'crude_rate') AS crude_rate,
+                max(low) FILTER (WHERE measure = 'crude_rate') AS crude_low,
+                max(high) FILTER (WHERE measure = 'crude_rate') AS crude_high,
+                max(estimate) FILTER (WHERE measure = 'smr' AND comparator LIKE 'Brazil%') AS smr_brazil,
+                max(low) FILTER (WHERE measure = 'smr' AND comparator LIKE 'Brazil%') AS smr_brazil_low,
+                max(high) FILTER (WHERE measure = 'smr' AND comparator LIKE 'Brazil%') AS smr_brazil_high,
+                max(q) FILTER (WHERE measure = 'smr' AND comparator LIKE 'Brazil%') AS smr_brazil_q,
+                max(estimate) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area,
+                max(estimate) FILTER (WHERE measure = 'model_rate') AS model_rate
+            FROM estimates WHERE section = 'municipalities' GROUP BY ALL""")
     con.close()
     try:
         os.replace(tmp_db, db)
@@ -2689,7 +2707,7 @@ def _allocation(it: Item, years: list[int], support: str | None = None,
     serology by residence rose 65-fold in Rio Grande do Sul over 2014-2023 while the tests billed stayed near five million
     a year, its consolidated production (no patient, no residence) giving way to individual records: 0.15 % of the
     tests placed in 2014, 9.7 % in 2023 (2026-10-13). The field's own codes for a code set. ``lost``, when given,
-    receives the completeness rows the shares are made of (quality.parquet): each reason the events were not placed,
+    receives the completeness rows the shares are made of (estimates.parquet, completeness): each reason the events were not placed,
     Brazil's events with no residence for an area, and the share placed."""
     import pyarrow.compute as pc
 
@@ -2838,7 +2856,7 @@ def _apc(rows: list[dict]) -> list[dict]:
         se = var ** 0.5
         q975 = float(student.ppf(0.975, len(rs) - 2))
         r0 = rs[0]
-        # a trend is its own row of trends.parquet: its percentage had been written in the rate columns of the
+        # a trend is its own row of estimates.parquet (trends): its percentage had been written in the rate columns of the
         # descriptive table, said only by the text of `per` (2026-10-14)
         base = {"field": field_, "label": r0["label"], "dataset": r0["dataset"], "level": level, "unit": unit,
                 "stratum": group, "per": per, "first_year": int(t[0]), "last_year": int(t[-1]), "years_read": len(rs),
@@ -3266,6 +3284,300 @@ def _icd_ancestors() -> dict[str, list[tuple[str, str]]]:
             p = rows[p].get("parent")
         out[code] = chain
     return out
+
+
+#: the measures an estimate can be, each defined once (estimates.parquet's ``measure``; the codebook prints them)
+MEASURES = {
+    "count": "events (or records) counted; no interval",
+    "crude_rate": "events per `per` units of the denominator (`denominator_kind`), exact Poisson interval (Garwood) "
+                  "with the denominator fixed",
+    "standardised_rate": "directly age-sex-standardised rate per `per` person-years to `standard`, gamma interval (Fay & "
+                         "Feuer 1997)",
+    "rate_ratio": "a standardised rate over `comparator`'s of the same period and stratum, log-normal interval from "
+                  "the two gamma variances",
+    "smr": "observed over expected events at `comparator`'s rates (indirect standardisation), exact Poisson interval "
+           "with the expectation fixed; p two-sided exact, q Benjamini-Hochberg over the municipalities",
+    "proportion": "numerator over denominator, exact (Clopper-Pearson) interval",
+    "expected": "events expected (`model`), no interval",
+    "model_rate": "the hierarchical model's expected events per `per` person-years (tier B1)",
+    "mean": "mean of the valid values", "sd": "standard deviation of the valid values",
+    "quantile": "a quantile of the valid values (`value`: its probability)",
+    "median": "the median of the records' values (a mark: a stay, an interval)",
+    "seasonal_index": "a month's rate over the year's (a year's rows) or over the geometric mean of the twelve, each year "
+                      "its own level (the period's rows: quasi-Poisson regression on year and month, days as offset)",
+    "seasonality_f": "the twelve month effects' joint F statistic (p its p)",
+    "uniformity_chi2": "Pearson's chi-square of a year's months against their days, 11 degrees of freedom (p its p)",
+    "peak_day": "one harmonic's peak, day of the year (`note`: as a date), delta-method interval",
+    "peak_to_trough": "one harmonic's peak-to-trough rate ratio, delta-method interval",
+    "apc": "annual percent change: 100 (exp(b) - 1) of a log-linear slope (`model`; a joinpoint `segment`), t interval",
+    "aapc": "average annual percent change over the series (joinpoint: the segments' slopes weighted by their lengths)",
+    "fitted_rate": "a joinpoint model's fitted rate per 100,000 at a segment's end (`first` = `last` its year)",
+    "dispersion": "the trend model's scale (Pearson dispersion, or the joinpoint's residual variance)",
+    "joinpoints": "the number of joinpoints chosen (`p`: the permutation p of the last test; `note`: their years)",
+    "lift": "the records with a code among those with the topic over those of the same sex and ten-year band without "
+            "it (associated causes), with p and Benjamini-Hochberg q",
+    "context": "a context's value in a municipality (`unit` over `denominator_kind`), the year it was read from in `note`",
+}
+
+
+def _period(year, period) -> dict:
+    """An estimate's time, explicit: a year is first = last; a whole period its first and last year; never a null
+    standing for "the whole" (the audit summed both, 2026-10-14)."""
+    if year is not None and str(year) not in ("", "nan", "None"):
+        y = int(year)
+        return {"period_kind": "month" if y > 9999 else "year", "first": y, "last": y}
+    if period:
+        a, _, b = str(period).partition("-")
+        return {"period_kind": "period", "first": int(a), "last": int(b or a)}
+    return {"period_kind": None, "first": None, "last": None}
+
+
+#: estimates.parquet's columns by type: a column holds one type whatever the producer (a municipality's code beside "BR"
+#: in ``place`` had failed the table, 2026-10-14); the private ones (``_``) are the producers' and never written
+ESTIMATE_TEXT = ("section", "measure", "field", "label", "dataset", "model", "segment", "variable", "value", "value_label",
+                 "interval", "denominator_kind", "unit", "geography", "place", "place_name", "state", "health_region",
+                 "health_macroregion", "period_kind", "stratum", "comparator", "standard", "note")
+ESTIMATE_NUMBER = ("estimate", "low", "high", "p", "q", "numerator", "denominator", "per", "variance")
+ESTIMATE_INT = ("first", "last", "month")
+
+
+def _estimate_row(section: str, measure: str, base: dict, **row) -> dict:
+    """One estimate row, typed and refused when incomplete: a measure of the vocabulary; an interval names its method; a
+    rate names its denominator and scale; every column of its one type (`ESTIMATE_TEXT`, `ESTIMATE_NUMBER`,
+    `ESTIMATE_INT`), an unknown one refused."""
+    if measure not in MEASURES:
+        raise ValueError(f"estimate: no measure {measure!r}")
+    out = {"section": section, "measure": measure, **base, **row}
+    if (out.get("low") is not None or out.get("high") is not None) and not out.get("interval"):
+        raise ValueError(f"estimate {section}/{measure}: an interval without its method")
+    if measure in ("crude_rate", "standardised_rate", "model_rate") and not (out.get("denominator_kind") and out.get("per")):
+        raise ValueError(f"estimate {section}/{measure}: a rate without its denominator or scale")
+    for k, v in out.items():
+        if v is None or k.startswith("_") or k == "provisional":
+            continue
+        if k in ESTIMATE_TEXT:
+            out[k] = str(v)
+        elif k in ESTIMATE_NUMBER:
+            out[k] = float(v)
+        elif k in ESTIMATE_INT:
+            out[k] = int(v)
+        else:
+            raise ValueError(f"estimate {section}/{measure}: no column {k!r}")
+    return out
+
+
+def _f(v):
+    """A number or None (NaN is no number)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if x != x else x
+
+
+def _estimates(whole: str, desc: list, places: list, seasons: list, codes: list, groups: list, quality: list,
+               measures: list, trends: list, assoc: list, contexts: list) -> list[dict]:
+    """Every descriptive number the products made, as estimates (MEASURES): one schema where ten tables each had their
+    own (docs/plans/study-estimates.md)."""
+    out: list[dict] = []
+    gauss = "exact Poisson (Garwood), denominator fixed"
+    placed: set = set()
+    for r in desc:
+        per = str(r.get("per") or "")
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": r.get("level"),
+                "place": r.get("unit"), "stratum": r.get("stratum"), "provisional": r.get("provisional"),
+                "note": r.get("note"), **_period(r.get("year"), r.get("period"))}
+        est, low, high = _f(r.get("rate")), _f(r.get("rate_low")), _f(r.get("rate_high"))
+        if _f(r.get("allocated_share")) is not None and (r.get("field"), r.get("year"), r.get("period")) not in placed:
+            # a field-year's national share of events a rate can place: once, not on each of its geographies
+            placed.add((r.get("field"), r.get("year"), r.get("period")))
+            out.append(_estimate_row("completeness", "proportion", {**base, "geography": "national", "place": "BR",
+                                                                "stratum": None, "note": None},
+                                 variable="events with the place, sex and age a rate needs, nationally",
+                                 estimate=_f(r.get("allocated_share")), denominator_kind="the field's events"))
+        if per.startswith("share"):
+            # a code set's share of its ICD-10 group, chapter or source; a mark's share; a link's on what it can pair
+            out.append(_estimate_row("rates", "proportion", base, estimate=est, low=low, high=high,
+                                 interval="Clopper-Pearson" if low is not None else None,
+                                 numerator=_f(r.get("numerator")), denominator=_f(r.get("events")),
+                                 denominator_kind=per[len("share of "):] if per.startswith("share of ")
+                                 else "the field's events"))
+        elif per.startswith("standardised ratio"):
+            race = re.search(r"race ([^\s(]+)", per)
+            out.append(_estimate_row("rates", "smr", base, variable="race", value=race.group(1) if race else per,
+                                 estimate=est, low=low, high=high, interval="exact Poisson, expectation fixed",
+                                 numerator=_f(r.get("events")), denominator=_f(r.get("population")),
+                                 denominator_kind="expected events", comparator="every race at the field's age-sex rates"))
+        elif "median" in per:
+            valued = {"denominator": _f(r.get("events")), "denominator_kind": "records with a valid value",
+                      "unit": "days" if per.startswith("days") else None}
+            out.append(_estimate_row("rates", "median", base, estimate=est, **valued))
+            if _f(r.get("p90")) is not None:
+                out.append(_estimate_row("rates", "quantile", base, value="0.9", estimate=_f(r.get("p90")), **valued))
+        elif per == "mean per event":
+            out.append(_estimate_row("rates", "mean", base, estimate=est, denominator=_f(r.get("events")),
+                                 denominator_kind="the field's events"))
+        elif est is not None or _f(r.get("events")) is not None:
+            scale = 1e3 if per.startswith("1,000") else 1e5
+            kind = ("live births" if "birth" in per else "person-years of the place's residents (not a risk)"
+                    if "place's residents" in per else per.split(" ", 1)[1] if per.startswith("1,000") else "person-years")
+            out.append(_estimate_row("rates", "count", base, estimate=_f(r.get("events"))))
+            if est is not None:
+                out.append(_estimate_row("rates", "crude_rate", base, estimate=est, low=low, high=high,
+                                     interval=gauss if low is not None else None, numerator=_f(r.get("events")),
+                                     denominator=_f(r.get("population")), denominator_kind=kind, per=scale,
+                                     unit=f"per {per}"))
+            if _f(r.get("standardised_per_100k")) is not None:
+                out.append(_estimate_row("rates", "standardised_rate", base, estimate=_f(r.get("standardised_per_100k")),
+                                     low=_f(r.get("standardised_low")), high=_f(r.get("standardised_high")),
+                                     interval="gamma (Fay & Feuer 1997)", denominator_kind="person-years", per=1e5,
+                                     unit="per 100,000 person-years", standard=r.get("standard")))
+            for col, comp in (("ratio_to_brazil", "Brazil"), ("ratio_to_region_rest", "the region without the area")):
+                if _f(r.get(col)) is not None:
+                    out.append(_estimate_row("rates", "rate_ratio", base, estimate=_f(r.get(col)), low=_f(r.get(f"{col}_low")),
+                                         high=_f(r.get(f"{col}_high")), interval="log-normal, two gamma variances",
+                                         comparator=comp, standard=r.get("standard")))
+    for r in places:
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": "municipality",
+                "place": r.get("u"), "place_name": r.get("municipality"), "state": r.get("state"),
+                "health_region": r.get("health_region"), "health_macroregion": r.get("health_macroregion"),
+                **_period(r.get("year"), r.get("period"))}
+        scale = 1e3 if str(r.get("per") or "").startswith("1,000") else 1e5
+        out.append(_estimate_row("municipalities", "count", base, estimate=_f(r.get("events"))))
+        if _f(r.get("rate")) is not None:
+            out.append(_estimate_row("municipalities", "crude_rate", base, estimate=_f(r.get("rate")), low=_f(r.get("rate_low")),
+                                 high=_f(r.get("rate_high")), interval=gauss, numerator=_f(r.get("events")),
+                                 denominator=_f(r.get("population")), denominator_kind="person-years", per=scale,
+                                 unit=f"per {r.get('per')}"))
+        for pre, comp in (("smr", "the area's own age-sex rates"), ("smr_brazil", "Brazil's age-sex rates")):
+            if _f(r.get(pre)) is not None:
+                out.append(_estimate_row("municipalities", "smr", base, estimate=_f(r.get(pre)), low=_f(r.get(f"{pre}_low")),
+                                     high=_f(r.get(f"{pre}_high")), interval="exact Poisson, expectation fixed",
+                                     p=_f(r.get(f"{pre}_p")), q=_f(r.get(f"{pre}_q")), numerator=_f(r.get("events")),
+                                     denominator=_f(r.get("expected_indirect" if pre == "smr" else "expected_brazil")),
+                                     denominator_kind="expected events", comparator=comp))
+        if _f(r.get("expected_model")) is not None:
+            out.append(_estimate_row("municipalities", "expected", base, estimate=_f(r.get("expected_model")),
+                                 model="hierarchical, tier B1"))
+            if _f(r.get("model_rate")) is not None:
+                out.append(_estimate_row("municipalities", "model_rate", base, estimate=_f(r.get("model_rate")),
+                                     denominator=_f(r.get("population")), denominator_kind="person-years", per=scale,
+                                     unit=f"per {r.get('per')}", model="hierarchical, tier B1"))
+    for r in seasons:
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": whole,
+                "variable": r.get("date_column"), "model": r.get("method"), **_period(r.get("year"), r.get("period"))}
+        m = r.get("month")
+        out.append(_estimate_row("seasonality", "count", {**base, "month": m}, estimate=_f(r.get("events")),
+                             denominator=_f(r.get("days")), denominator_kind="days"))
+        out.append(_estimate_row("seasonality", "seasonal_index", {**base, "month": m}, estimate=_f(r.get("seasonal_index")),
+                             low=_f(r.get("seasonal_index_low")), high=_f(r.get("seasonal_index_high")),
+                             interval=("quasi-Poisson regression" if r.get("year") is None else
+                                       "exact Poisson, the year's daily rate fixed")))
+        if m == 1:          # the year's or period's tests and harmonic: once, not on every month
+            if _f(r.get("uniformity_chi2")) is not None:
+                out.append(_estimate_row("seasonality", "uniformity_chi2", base, estimate=_f(r.get("uniformity_chi2")),
+                                     p=_f(r.get("uniformity_p"))))
+            if _f(r.get("seasonality_f")) is not None:
+                out.append(_estimate_row("seasonality", "seasonality_f", base, estimate=_f(r.get("seasonality_f")),
+                                     p=_f(r.get("seasonality_p"))))
+            if _f(r.get("peak_day")) is not None:
+                out.append(_estimate_row("seasonality", "peak_day", base, estimate=_f(r.get("peak_day")),
+                                     low=_f(r.get("peak_day_low")), high=_f(r.get("peak_day_high")), interval="delta method",
+                                     note=r.get("peak_date"), unit="day of the year"))
+                out.append(_estimate_row("seasonality", "peak_to_trough", base, estimate=_f(r.get("peak_to_trough")),
+                                     low=_f(r.get("peak_to_trough_low")), high=_f(r.get("peak_to_trough_high")),
+                                     interval="delta method"))
+    for r in codes:
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": r.get("level"),
+                "place": r.get("unit"), "variable": r.get("classifier"), "value": r.get("code"),
+                "value_label": r.get("code_label"), "note": r.get("code_level"), **_period(r.get("year"), r.get("period"))}
+        out.append(_estimate_row("codes", "count", base, estimate=_f(r.get("events"))))
+        out.append(_estimate_row("codes", "proportion", base, estimate=_f(r.get("proportion")), low=_f(r.get("proportion_low")),
+                             high=_f(r.get("proportion_high")), interval="Clopper-Pearson", numerator=_f(r.get("events")),
+                             denominator=_f(r.get("topic_events")), denominator_kind="the topic's events"))
+    for r in groups:
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": r.get("level"),
+                "place": r.get("unit"), "variable": r.get("variable_name") or r.get("variable"), "value": r.get("value"),
+                "value_label": r.get("value_label"), **_period(r.get("year"), r.get("period"))}
+        if _f(r.get("share")) is not None:
+            out.append(_estimate_row("case mix", "proportion", base, estimate=_f(r.get("share")), low=_f(r.get("share_low")),
+                                 high=_f(r.get("share_high")), interval="Clopper-Pearson", numerator=_f(r.get("observed")),
+                                 denominator=_f(r.get("total")), denominator_kind="the field's events"))
+        if _f(r.get("expected")) is not None:
+            out.append(_estimate_row("case mix", "expected", base, estimate=_f(r.get("expected")),
+                                 model="the place's composition (B1)"))
+    for r in quality:
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": whole,
+                "variable": r.get("indicator"), **_period(r.get("year"), r.get("period"))}
+        out.append(_estimate_row("completeness", "proportion", base, estimate=_f(r.get("proportion")),
+                             low=_f(r.get("proportion_low")), high=_f(r.get("proportion_high")),
+                             interval="Clopper-Pearson" if _f(r.get("proportion_low")) is not None else None,
+                             numerator=_f(r.get("numerator")), denominator=_f(r.get("denominator")),
+                             denominator_kind="events" if _f(r.get("denominator")) is not None else None))
+    for r in measures:
+        unit = {"interval": "days", "age": "years"}.get(str(r.get("kind")))
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": whole,
+                "variable": r.get("measure"), "value_label": r.get("measure_name"), "unit": unit,
+                **_period(r.get("year"), r.get("period"))}
+        for what, col in (("valid", "n"), ("not recorded", "not_recorded"), ("outside the domain", "out_of_domain")):
+            if _f(r.get(col)) is not None:
+                out.append(_estimate_row("measures", "count", {**base, "value": what}, estimate=_f(r.get(col))))
+        for meas, col, val in (("mean", "mean", None), ("sd", "sd", None), ("quantile", "q25", "0.25"),
+                               ("quantile", "median", "0.5"), ("quantile", "q75", "0.75"), ("quantile", "q90", "0.9")):
+            if _f(r.get(col)) is not None:
+                out.append(_estimate_row("measures", meas, {**base, **({"value": val} if val else {})}, estimate=_f(r.get(col))))
+    for r in trends:
+        seg = r.get("segment")
+        first, last = (r.get("segment_first"), r.get("segment_last")) if seg else (r.get("first_year"), r.get("last_year"))
+        base = {"field": r.get("field"), "label": r.get("label"), "dataset": r.get("dataset"), "geography": r.get("level"),
+                "place": r.get("unit"), "stratum": r.get("stratum"), "model": r.get("model"), "segment": seg,
+                "unit": f"per {r.get('per')}", "period_kind": "segment" if seg and seg != "AAPC" else "period",
+                "first": first, "last": last}
+        out.append(_estimate_row("trends", "aapc" if seg == "AAPC" else "apc", base, estimate=_f(r.get("apc")),
+                             low=_f(r.get("apc_low")), high=_f(r.get("apc_high")), interval="t", p=_f(r.get("p")),
+                             numerator=_f(r.get("events"))))
+        if seg in (None, "AAPC") and _f(r.get("dispersion")) is not None:
+            out.append(_estimate_row("trends", "dispersion", base, estimate=_f(r.get("dispersion"))))
+        if seg == "AAPC" and r.get("joinpoints") is not None:
+            out.append(_estimate_row("trends", "joinpoints", base, estimate=_f(r.get("joinpoints")),
+                                 p=_f(r.get("joinpoint_p")), note=r.get("joinpoint_years")))
+        if seg not in (None, "AAPC"):
+            for col, yr in (("fitted_first", r.get("segment_first")), ("fitted_last", r.get("segment_last"))):
+                if _f(r.get(col)) is not None:
+                    out.append(_estimate_row("trends", "fitted_rate", {**base, "period_kind": "year", "first": yr, "last": yr},
+                                         estimate=_f(r.get(col))))
+    for r in assoc:
+        base = {"dataset": r.get("dataset"), "geography": whole, "variable": "code", "value": r.get("code"),
+                "value_label": r.get("label"), "note": f"recorded on {r.get('recorded_on')}", "period_kind": "period",
+                "first": None, "last": None}
+        if r.get("years"):
+            yrs = [int(y) for y in re.findall(r"\d{4}", str(r.get("years")))]
+            base.update({"first": min(yrs), "last": max(yrs)} if yrs else {})
+        if _f(r.get("share")) is not None:
+            out.append(_estimate_row("associated causes", "proportion", base, estimate=_f(r.get("share")),
+                                 low=_f(r.get("share_low")), high=_f(r.get("share_high")), interval="Clopper-Pearson",
+                                 numerator=_f(r.get("with_code")), denominator=_f(r.get("topic_records")),
+                                 denominator_kind="the topic's records"))
+        if _f(r.get("records_with_code")) is not None:
+            # every record of the area and years naming the category, the topic's or not: how common it is beside how
+            # specific (the second audit's figure, 2026-10-14)
+            out.append(_estimate_row("associated causes", "count", {**base, "note": f"{base['note']}; every record of "
+                                                                                   "the area and years naming it, the "
+                                                                                   "topic's or not"},
+                                     estimate=_f(r.get("records_with_code"))))
+        if _f(r.get("lift")) is not None:
+            out.append(_estimate_row("associated causes", "lift", base, estimate=_f(r.get("lift")), low=_f(r.get("lift_low")),
+                                 high=_f(r.get("lift_high")), interval="exact, Poisson on the expected", p=_f(r.get("p")),
+                                 q=_f(r.get("q")), numerator=_f(r.get("with_code")), denominator=_f(r.get("expected")),
+                                 denominator_kind="expected records"))
+    for r in contexts:
+        out.append(_estimate_row("contexts", "context", {
+            "geography": "municipality", "place": r.get("u"), "place_name": r.get("municipality"), "state": r.get("state"),
+            "variable": r.get("context"), "value_label": r.get("what"), "unit": r.get("unit"),
+            "denominator_kind": r.get("over"), "note": f"read from {r.get('read_from')}; {r.get('source')}",
+            **_period(r.get("year"), r.get("period"))}, estimate=_f(r.get("value"))))
+    return out
+
 
 
 def _publications(scope: Scope, log) -> pa.Table | None:
@@ -3763,7 +4075,7 @@ def _linkage(scope: Scope) -> list[dict]:
 
 
 def _proportion(k: float, n: float) -> dict:
-    """A proportion with its exact (Clopper-Pearson) 95 % interval, as quality.parquet carries it."""
+    """A proportion with its exact (Clopper-Pearson) 95 % interval, as estimates.parquet carries it."""
     from scipy.stats import beta
 
     if not n or n <= 0:
@@ -3881,7 +4193,7 @@ def _smr_brazil(o: float, e: float, lo: float, hi: float, p: float | None, q: fl
 
 def _geometry(out: Path, places: list[dict]) -> None:
     """The municipalities of the folder's places as GeoJSON (pegasus_data's IBGE mesh, simplified to about 100 m),
-    keyed by ``u`` as places.parquet: a map drawn from the tables needs no other file (the audit could not draw one)."""
+    keyed by ``u`` as estimates.parquet's municipalities (``place``): a map drawn from the tables needs no other file (the audit could not draw one)."""
     import pegasus_data as pg
 
     us = sorted({int(r["u"]) for r in places if r.get("u") is not None})
@@ -4081,7 +4393,7 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         row_is = facts.get("what_one_row_is") or et.get("grain") or "one event"
         line = (f"{it.dataset} ({it.event}; one row is {row_is}), {min(it.years)}-"
                 f"{max(it.years)}: {what} on {on} ({kind}); a year's events are those of the files published for "
-                "that year" + (f", a month's those whose {when} falls in it (seasons.parquet), so a year's months "
+                "that year" + (f", a month's those whose {when} falls in it (estimates.parquet, seasonality), so a year's months "
                                "need not sum to its published count" if when else ""))
         if st:
             line += f"; counted where {st['column']} is {', '.join(st['values'])}"
@@ -4095,17 +4407,17 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "Annual percent change of each series, crude and age-sex adjusted: a Poisson log-linear model of the counts on "
         "the year, each sex-age cell its own level in the adjusted model, person-years as offset; the variance widened "
         "by the year-level Pearson dispersion (quasi-Poisson, in `dispersion`) and the interval read on Student's t "
-        "with T - 2 degrees of freedom; APC = 100 (exp(b) - 1), with the slope's two-sided p (trends.parquet). "
+        "with T - 2 degrees of freedom; APC = 100 (exp(b) - 1), with the slope's two-sided p (estimates.parquet, trends). "
         "Joinpoint regression (Kim et al. 2000, the NCI Joinpoint program's defaults) of the crude and of the directly "
         "standardised rate: log rate segmented-linear in the year by weighted least squares (weights the inverse "
         "variance of each year's log rate), joinpoints at observed years at least two years from an end or another "
         "joinpoint, their number by Kim's permutation tests (4,499 permutations, alpha 0.05 over the tests), each "
         "segment's APC and the whole series' average APC (AAPC) with t intervals. Provisional years (a source not yet "
         "final) are left out of every trend.",
-        "Measures (measures.parquet): every quantity and interval the source declares on the topic's own events (a "
+        "Measures (estimates.parquet, measures): every quantity and interval the source declares on the topic's own events (a "
         "length of stay, a value paid), per year and over the period: mean, standard deviation, quartiles and 90th "
         "percentile of the valid values, with the counts not recorded and outside the declared domain.",
-        "Seasonality (seasons.parquet): the events by the month of their own dates (the column named in date_column). "
+        "Seasonality (estimates.parquet, seasonality): the events by the month of their own dates (the column named in date_column). "
         "Over the period, a quasi-Poisson regression of the monthly counts on year and month with the month's days as "
         "offset, so neither a trend nor a jump between years reads as season: each month's rate ratio to the geometric "
         "mean of the twelve with its 95 % interval, the months' joint F test, and one harmonic's peak month and "
@@ -4113,14 +4425,14 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "(exact intervals) and Pearson's chi-square (11 degrees of freedom).",
         "Case mix: every recorded variable of the events, as counts and shares with Clopper-Pearson intervals, per year "
         "and over the period; 'not recorded' and 'value missing' are values, kept.",
-        "Race: each declared race's standardised ratio (descriptive.parquet, per 'standardised ratio, race ...'): its "
+        "Race: each declared race's standardised ratio (estimates.parquet, rates, measure smr, variable race): its "
         "events against those expected of its population at the field's own age-sex rates of each year (indirect "
         f"standardisation), the populations by race of pegasus_data's population account ({tools_race_population()}: "
         "municipal population by single age, sex and race, with intervals); events of no recorded race are in no ratio, "
         "so a race recorded on few events (SIH before 2020) gives ratios that measure its recording.",
         f"Persons (persons.parquet): the cohort scan reads the study's last {PERSON_YEARS} years whose link runs are "
         "stored; a year that cannot be scanned is listed in provenance.json's products_gaps.",
-        "Municipalities (places.parquet; boundaries in municipalities.geojson, IBGE's mesh): crude rates; the "
+        "Municipalities (estimates.parquet, municipalities; boundaries in municipalities.geojson, IBGE's mesh): crude rates; the "
         "standardised ratio against the area's own age-sex rates of each year (indirect standardisation, 1 for the "
         "area by construction) and against Brazil's, each with its exact interval, the expectation fixed, and over the "
         "period its exact two-sided p and Benjamini-Hochberg q across the municipalities; the hierarchical model's "
@@ -4128,14 +4440,14 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "Comparison with Brazil: every directly standardised rate's ratio to Brazil's of the same year and stratum, "
         "with a 95 % interval from the two gamma variances on the log scale (Brazil includes the area, so the interval "
         "is conservative); Brazil's and each macro-region's rates by sex, by age band and by sex within each age band "
-        "(descriptive.parquet, level reference); the standard's weights in standard.parquet.",
+        "(estimates.parquet, rates, geography reference); the standard's weights in standard.parquet.",
         "Associated causes (multiple-cause analysis, where a source carries every certificate line or diagnosis): each "
         "ICD-10 category named beside the topic on its own records, its share with a Clopper-Pearson interval and its "
         "ratio to the records of the same sex and ten-year age band without the topic.",
-        "Proportional measures (descriptive.parquet, per 'share of ...'): a code set's events over every event of each "
+        "Proportional measures (estimates.parquet, rates, measure proportion): a code set's events over every event of each "
         "ICD-10 ancestor of its codes (its group, its chapter) and of the whole source, in the area, placed or not, with "
         "Clopper-Pearson intervals.",
-        "Completeness (quality.parquet): the share of the events placed by residence, sex and age, every reason the "
+        "Completeness (estimates.parquet, completeness): the share of the events placed by residence, sex and age, every reason the "
         "rest were not, the share of ill-defined causes (R00-R99) and of garbage codes (the GBD 2019 list, Johnson et al. "
         "2021, every level and by level, of the source and of the topic's ICD-10 chapter), each variable's share not "
         "recorded (the codes "
@@ -4740,7 +5052,7 @@ def _institution_explains(rows: list[dict]) -> None:
 def _recording_groups(rows: list[dict]) -> None:
     """A group finding whose groups are a column's missing levels ("not recorded", "value missing") departs in the
     records' completeness, not in the events: its class becomes "system", the reason said, the column's completeness in
-    quality.parquet (Inhapi's "Necrópsia: not recorded" and "Recebeu assistência médica: not recorded" had led the
+    estimates.parquet's completeness (Inhapi's "Necrópsia: not recorded" and "Recebeu assistência médica: not recorded" had led the
     Alagoas study's first story as signals, 2026-10-14)."""
     for r in rows:
         groups = r.get("_groups") or []
@@ -4749,7 +5061,7 @@ def _recording_groups(rows: list[dict]) -> None:
         levels = {str(g).partition("=")[2] for g in groups}
         if levels <= {"not recorded", "value missing"}:
             r["class_reason"] = (f"the group is its column's {' and '.join(sorted(levels))} level: the records' "
-                                 f"completeness, not the events (quality.parquet); was signal ({r.get('class_reason')})")
+                                 f"completeness, not the events (estimates.parquet); was signal ({r.get('class_reason')})")
             r["class"] = "system"
 
 
@@ -4824,7 +5136,7 @@ def _institution_volume(r: dict, codes: list[str], log) -> str | None:
 def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: dict, log) -> list[dict]:
     """Every context of the scope (pegasus_data's declared fields over their declared denominators,
     `gateway.context_value`) per municipality of the study's places, each year and over the period: the covariates an
-    ecological model of the rates reads beside places.parquet. A context without a value for a place-year is an empty
+    ecological model of the rates reads beside estimates.parquet's municipalities. A context without a value for a place-year is an empty
     value, never zero."""
     us = sorted({int(r["u"]) for r in places if r.get("u") is not None})
     if not us or not scope.contexts:
@@ -5182,7 +5494,7 @@ def _rate_figure(out: Path, field_id: str, desc: list[dict], trends: list[dict])
     """A count field's rates as a paper draws them: (a) the directly standardised rate per year with its 95 % interval,
     for the study's whole and its references (Brazil, the region without the area), the whole's average annual percent
     change from the joinpoint model in the legend; (b) the rates by age band of each sex over the period, on a log
-    scale. Drawn from descriptive.parquet and trends.parquet, so every point is a row there."""
+    scale. Drawn from the rows estimates.parquet carries (rates, trends), so every point is one of them."""
     import hashlib
 
     import matplotlib
@@ -5245,7 +5557,7 @@ def _rate_figure(out: Path, field_id: str, desc: list[dict], trends: list[dict])
     return {"file": f"figures/{name}", "kind": "rates", "field": field_id, "label": label, "dataset": dataset,
             "shows": "(a) the standardised rate per year with its 95 % interval for the whole and its references, the "
                      "whole's AAPC (joinpoint) in the legend; (b) the rates by age band of each sex over the period, log "
-                     "scale; every point a row of descriptive.parquet"}
+                     "scale; every point a row of estimates.parquet (rates)"}
 
 
 def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict, population: str = "") -> str | None:
@@ -5388,13 +5700,13 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                          ("events", "events"), ("rate", "rate"), ("rate_low", "95% from"), ("rate_high", "to"),
                          ("per", "per"), ("standardised_per_100k", "standardised /100k"),
                          ("standardised_low", "95% from"), ("standardised_high", "to")], cap=80,
-                   where="descriptive.parquet (with sex, age, region rows and the standard population named)"),
+                   where="estimates.parquet, section rates (with sex, age, region rows and the standard population named; view rates)"),
              "<h3>Trends</h3>"
              + (table([r for r in trends or [] if not r.get("stratum")],
                       [("label", "field"), ("dataset", "source"), ("unit", "where"), ("model", "model"),
                        ("first_year", "from"), ("last_year", "to"), ("apc", "APC %"), ("apc_low", "95% from"),
                        ("apc_high", "to"), ("p", "p")], cap=40,
-                      where="trends.parquet (by sex and age band too)") if trends else "<p>No series long enough.</p>"),
+                      where="estimates.parquet, section trends (by sex and age band too)") if trends else "<p>No series long enough.</p>"),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
              "<h2>3. Institutional findings</h2><p>Departures concentrated in one establishment: often real (a referral "
              "centre, a new service, a screening programme), read with the establishment's registration.</p>",
@@ -5411,7 +5723,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              + (table(completeness, [("dataset", "source"), ("label", "field"), ("year", "year"),
                                      ("indicator", "indicator"), ("numerator", "events"), ("denominator", "of"),
                                      ("proportion", "share"), ("proportion_low", "95% from"),
-                                     ("proportion_high", "to")], cap=60, where="quality.parquet")
+                                     ("proportion_high", "to")], cap=60, where="estimates.parquet, section completeness")
                 if completeness else "<p>No completeness measure was written.</p>"),
              "<h3>Completeness across systems</h3>"
              + (table(captured, [("population", "population"), ("lists", "lists"), ("years", "years"),
@@ -5450,7 +5762,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                       [("code", "code"), ("label", "condition"), ("dataset", "source"), ("recorded_on", "on"),
                        ("with_code", "records with both"), ("expected", "expected"), ("share", "share of the topic's"),
                        ("lift", "lift"), ("lift_low", "95% from"), ("lift_high", "to"), ("q", "q")], cap=25,
-                      where="associated.parquet")
+                      where="estimates.parquet, section associated causes")
                 if any(r.get("related") for r in associated or []) else "<p>None at q.</p>"),
              "<h3>Person paths</h3><p>Declared record links between the sources read (no name is published: pairs "
              "are found on birth date, sex, residence and dates). A link is read only where its negative control, the "
@@ -5995,6 +6307,42 @@ COLUMNS = {
     "institution_facts": "each establishment of an institutional finding: its CNES registration (name, type, care "
                          "level, SUS link, beds, obstetric centre, neonatal unit) at the finding's first and last year",
     "institution_volume": "each establishment's events of every code the year before the finding and in its last",
+    # estimates.parquet: one schema for every descriptive number (MEASURES; docs/plans/study-estimates.md)
+    "estimates.parquet:section": "the part of the analysis: rates, municipalities, seasonality, codes, case mix, "
+                                 "completeness, measures, trends, associated causes, contexts",
+    "estimates.parquet:measure": "what the estimate is: one of the measures defined below the tables",
+    "estimates.parquet:model": "the model behind the estimate: a trend's (crude or age-sex adjusted log-linear, "
+                               "joinpoint of the crude or standardised rate), a season's method, the hierarchical tier",
+    "estimates.parquet:variable": "what the estimate is of within the field: a case-mix or code column, a completeness "
+                                  "indicator, a measure's column, a context, a season's date column, a race ratio",
+    "estimates.parquet:value": "the variable's value the estimate is of: a code or category, a quantile's probability, a "
+                               "measure's 'valid', 'not recorded' or 'outside the domain'",
+    "estimates.parquet:estimate": "the estimate, in `unit` (a count: events or records)",
+    "estimates.parquet:interval": "the 95 % interval's method (empty: the estimate has none)",
+    "estimates.parquet:p": "the estimate's p (a test's or a ratio's; the measure says which)",
+    "estimates.parquet:q": "Benjamini-Hochberg q over the estimate's family (the municipalities' ratios, the associated "
+                           "categories)",
+    "estimates.parquet:numerator": "the events (or records) the estimate counts",
+    "estimates.parquet:denominator": "what it is over, of the kind `denominator_kind`",
+    "estimates.parquet:denominator_kind": "the denominator's kind: person-years, live births, the field's events, "
+                                          "expected events, days",
+    "estimates.parquet:per": "a rate's scale: per this many units of the denominator",
+    "estimates.parquet:unit": "the estimate's unit (a rate's 'per 100,000 person-years', days, years, a context's)",
+    "estimates.parquet:geography": "the estimate's geography: national (Brazil), area (the declared study area), region, "
+                                   "state, health macro-region or health region, municipality, or reference (an area "
+                                   "study's comparison: Brazil and each macro-region the area lies in)",
+    "estimates.parquet:place": "the geography's code: BR, the area's IBGE codes joined by +, a region's digit and name, "
+                               "a state's two-digit code, a health (macro-)region's code and name, a municipality's "
+                               "six-digit IBGE code",
+    "estimates.parquet:place_name": "a municipality's name (IBGE)",
+    "estimates.parquet:period_kind": "year (first = last), month, period (first to last, summed: never add it to its "
+                                     "years) or segment (a joinpoint segment's years)",
+    "estimates.parquet:first": "the estimate's first year",
+    "estimates.parquet:last": "the estimate's last year",
+    "estimates.parquet:comparator": "what a ratio is against: Brazil, the region without the area, the area's own or "
+                                    "Brazil's age-sex rates",
+    "estimates.parquet:note": "what the estimate needs read beside it: a peak's date, the joinpoints' years, a code's "
+                              "level (category or code: never sum the two), a context's year and source",
     # a name that means another thing in one table
     "context_profile.parquet:value": "the context's value at the finding's locus",
     "capture.parquet:population": "what is counted: cases or deaths",
@@ -6056,6 +6404,11 @@ def _codebook(decl: Declaration, scope: Scope, out: Path) -> list[str]:
                 missing.append(f"{path.name}:{c}")
             lines.append(f"| {c} | {meaning or 'UNDOCUMENTED'} |")
         lines.append("")
+    if (out / "estimates.parquet").exists():
+        lines += ["## The measures of estimates.parquet", "",
+                  "Each row of estimates.parquet is one estimate: filter on `section` and `measure`. study.duckdb's "
+                  "views `rates` and `municipalities` hold the wide shapes a paper's tables read.", "",
+                  "| measure | what it is |", "|---|---|", *(f"| {k} | {v} |" for k, v in MEASURES.items()), ""]
     (out / "README.md").write_text("\n".join(lines), encoding="utf-8")
     return missing
 
@@ -6096,21 +6449,27 @@ def body(folder: str | Path) -> list[dict]:
     unread = (scope.get("deferred") or []) + (scope.get("not_read") or [])
     part("scope", bool(read) and all((x.get("note") or x.get("why") or x.get("reason")) for x in unread),
          f"{len(read)} sources read with their reasons, {len(unread)} left out each with why")
-    desc = table("descriptive")
+    est = table("estimates")
+
+    def section(name: str):
+        return est[est["section"] == name] if est is not None and "section" in est else None
+    desc = section("rates")
     counted = {x["dataset"] for x in read if (x.get("source") or {}).get("source") != "linked"}
     if desc is None or desc.empty:
-        part("descriptive epidemiology", False, "no descriptive table")
+        part("descriptive epidemiology", False, "no rates among the estimates")
     else:
-        rated = desc[desc["rate"].notna() & desc["rate_low"].notna() & desc["rate_high"].notna()]
+        rated = desc[desc["estimate"].notna() & desc["low"].notna() & desc["high"].notna()]
         missing = sorted(d for d in counted if d not in set(rated["dataset"]))
         part("descriptive epidemiology", not missing,
-             f"{len(rated)} rates with 95 % intervals and their denominators ({', '.join(sorted(set(rated['per'])))[:120]})"
+             f"{len(rated)} estimates with 95 % intervals and their denominators "
+             f"({', '.join(sorted(set(rated['measure'].astype(str))))[:120]})"
              + (f"; none for {missing}" if missing else ""))
         # the meaning of the numbers, not their presence (2026-10-12): an area's total is not Brazil's; a notified
         # condition with a confirmed-case event is rated on its cases; a pregnancy or perinatal field per live births
         whole = "national" if decl.where in (None, "BR") else "area"
-        wrong = sorted(set(desc["level"]) - {whole, "region", "state", *(level for _, level in HEALTH_LEVELS),
-                                             *(["reference"] if whole == "area" else [])})
+        wrong = sorted(set(desc["geography"].dropna()) - {whole, "region", "state",
+                                                          *(level for _, level in HEALTH_LEVELS),
+                                                          *(["reference"] if whole == "area" else [])})
         part("descriptive: geography", not wrong, f"the whole at level {whole}" + (f"; also {wrong}" if wrong else ""))
         cased = sorted({x["dataset"] for x in read if x.get("event") == "case"})
         uncased = sorted({x["dataset"] for x in read if not x.get("source") and any(
@@ -6120,8 +6479,9 @@ def body(folder: str | Path) -> list[dict]:
              f"confirmed-case rates for {sorted(rated_cases) or 'no source'}"
              + (f"; read as notifications only: {uncased}" if uncased else "")
              + (f"; no case rate for {sorted(set(cased) - rated_cases)}" if set(cased) - rated_cases else ""))
-        perinatal = desc[desc["label"].astype(str).str.contains(r": [OP]\d", regex=True)]
-        births = perinatal[perinatal["per"].astype(str).str.contains("birth")]
+        rates_ = desc[desc["measure"] == "crude_rate"]
+        perinatal = rates_[rates_["label"].astype(str).str.contains(r": [OP]\d", regex=True)]
+        births = perinatal[perinatal["denominator_kind"].astype(str).str.contains("birth")]
         part("descriptive: perinatal denominators", perinatal.empty or set(births["field"]) == set(perinatal["field"]),
              f"{births['field'].nunique()} of {perinatal['field'].nunique()} pregnancy or perinatal fields rated per live births")
     figs = sorted((folder / "figures").glob("*_series.png")) if (folder / "figures").exists() else []
@@ -6141,9 +6501,10 @@ def body(folder: str | Path) -> list[dict]:
         part("findings", len(f) == 0 or (named > 0.95 and classed > 0.9 and intervals > 0.99),
              f"{len(f)} findings, {classed:.0%} with a recording class, {named:.0%} with named places, {intervals:.0%} "
              "of those with an expectation with an O/E and its interval" + ("" if len(f) else " (none at q: said in the report)"))
-    g = table("groups")
+    g = section("case mix")
     if g is not None and len(g):
-        ok = "share" in g and g["share"].notna().mean() > 0.99 and "value_label" in g
+        g = g[g["measure"] == "proportion"]
+        ok = len(g) > 0 and g["estimate"].notna().mean() > 0.99 and g["low"].notna().mean() > 0.99
         # an undecoded value is shown as such, never guessed (CLAUDE.md §6): named here, not a threshold to fail on
         und = g[g["value_label"].astype(str).str.endswith("(undecoded)")] if "value_label" in g else g
         cols = sorted(set(und["dataset"].astype(str) + ":" + und["variable"].astype(str))) if len(und) else []
@@ -6174,29 +6535,30 @@ def body(folder: str | Path) -> list[dict]:
     if any((x.get("source") or {}).get("source") == "linked" for x in read):
         part("linkage", lk is not None and len(lk) > 0 and "pairs" in lk,
              f"{0 if lk is None else len(lk)} link runs described (pairs, false-match rate, validations)")
-    tr = table("trends")
-    part("trends", tr is not None and ((len(tr) > 0 and "apc_low" in tr and tr["apc_low"].notna().all())
-                                       or len(decl.years) < 3),
+    tr = section("trends")
+    tr = tr[tr["measure"].isin(["apc", "aapc"])] if tr is not None else None
+    part("trends", tr is not None and ((len(tr) > 0 and tr["low"].notna().all()) or len(decl.years) < 3),
          f"{0 if tr is None else len(tr)} annual percent changes with intervals (crude and age-sex adjusted)")
-    me = table("measures")
+    me = section("measures")
     if any(x.get("dataset") for x in read):
         part("measures", me is not None, f"{0 if me is None else len(me)} measure rows (the topic's own quantities)")
-    se = table("seasons")
-    part("seasons", se is not None and len(se) > 0 and "seasonal_index_low" in se,
+    se = section("seasonality")
+    part("seasons", se is not None and len(se) > 0 and se[se["measure"] == "seasonal_index"]["low"].notna().any(),
          f"{0 if se is None else len(se)} month rows (seasonal index with intervals, the test of uniformity)")
-    pl = table("places")
-    part("places", pl is not None and "smr" in pl and pl["rate_low"].notna().any() and pl["smr"].notna().any(),
-         f"{0 if pl is None else len(pl)} municipality rows (rates, standardised ratios, model expectations with "
+    pl = section("municipalities")
+    part("places", pl is not None and (pl["measure"] == "crude_rate").any() and (pl["measure"] == "smr").any()
+         and pl[pl["measure"] == "crude_rate"]["low"].notna().any(),
+         f"{0 if pl is None else len(pl)} municipality estimates (rates, standardised ratios, model expectations with "
          f"intervals) for {0 if pl is None or 'field' not in pl else pl['field'].nunique()} count fields")
-    qa = table("quality")
-    placed = set() if qa is None or "indicator" not in qa else set(
-        qa[qa["indicator"].astype(str).str.startswith("events placed")]["dataset"])
+    qa = section("completeness")
+    placed = set() if qa is None or "variable" not in qa else set(
+        qa[qa["variable"].astype(str).str.startswith("events placed")]["dataset"])
     part("completeness", qa is not None and len(qa) > 0 and not (counted - placed),
          f"{0 if qa is None else len(qa)} completeness rows; placed share for {sorted(placed)}"
          + (f"; none for {sorted(counted - placed)}" if counted - placed else ""))
     if desc is not None and not desc.empty:
-        part("descriptive: period", "period" in desc and desc["period"].notna().any(),
-             f"{0 if 'period' not in desc else int(desc['period'].notna().sum())} whole-period rows")
+        part("descriptive: period", (desc["period_kind"] == "period").any(),
+             f"{int((desc['period_kind'] == 'period').sum())} whole-period estimates")
     methods = folder / "METHODS.md"
     text = methods.read_text(encoding="utf-8") if methods.exists() else ""
     absent = sorted(d for d in counted if d not in text)

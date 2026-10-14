@@ -359,31 +359,19 @@ toxoplasmosis/
                               surprise (one table keyed by field)
   findings.parquet          one row per finding (schema below), its story in a column
   hypotheses.parquet        the declared tests and their answers
-  descriptive.parquet       events, denominators, crude and directly standardised rates with intervals, each year
-                              and over the period, for the whole, its regions, states and health regions, by sex, age
-                              band and sex within age band; an area's reference rows (Brazil, its macro-regions); a
-                              code set's share of its ICD-10 group, chapter and source; linked shares and a same-event
-                              link's share of the records it can pair; each standardised rate's ratio to Brazil's
-                              and to its region without the area
+  estimates.parquet         every descriptive number as one schema: a row is one estimate (its `section` and
+                              `measure` from one vocabulary, value, interval and the interval's method, numerator,
+                              denominator and its kind, scale, unit, geography and place, period_kind, first and last,
+                              stratum, comparator); sections rates (crude and standardised, by sex, age band and sex
+                              within age band, every geography and the area's references, ratios to Brazil and to the
+                              region without the area, shares of a code's group, chapter and source), municipalities
+                              (rates, standardised ratios with p and BH q, the model's expectation), seasonality, codes,
+                              case mix, completeness, measures, trends (APC, joinpoint segments, AAPC), associated causes,
+                              contexts; study.duckdb's views `rates` and `municipalities` give the wide shapes
   standard.parquet          the direct standardisation's standard: weights by sex and age band
   sources.parquet           every published file read: path, state, competence, server date, digest, rows, status
-  codes.parquet             the topic's events by category and code, labelled, with shares
-  trends.parquet            each series' APC, crude and age-sex adjusted, and its joinpoint segments and AAPC (crude
-                              and standardised rate), with intervals and p
-  measures.parquet          the topic's own measures and intervals (length of stay, value paid) and the age at the
-                              event: mean, sd, quartiles, p90, each year and over the period
-  seasons.parquet           the events by calendar month (the date column named): over the period a quasi-Poisson
-                              regression on year and month (index, F test, harmonic peak and amplitude); each year's
   linkage.parquet           every link run a linked field read: pairs, false-match rate, validations
-  places.parquet            per municipality, each year and the period: rates, standardised ratios against the
-                              area and against Brazil (p, BH q), the model's expected events, all with intervals
-  municipalities.geojson    the places' boundaries (IBGE's mesh), keyed as places.parquet
-  contexts.parquet          every context's value per municipality, each year and over the period
-  groups.parquet            the case mix: every recorded variable's values, counts and shares with intervals, each
-                              year and over the period
-  quality.parquet           completeness: events placed and every reason the rest were not, ill-defined causes,
-                              each variable's share not recorded, columns with one value, SIM/SINASC coverage
-  associated.parquet        causes named beside the topic on its own records, with lift against sex-age peers
+  municipalities.geojson    the places' boundaries (IBGE's mesh), keyed as estimates.parquet's places
   related.parquet, relations.parquet, context_profile.parquet   cross-field and context structure (§8.1–8.2)
   persons.parquet, capture.parquet   linked cohorts and capture–recapture (§8.4)
   figures/, figures.parquet maps, series against expectation, and what each figure shows

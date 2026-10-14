@@ -33,6 +33,8 @@ class Method:
     assumptions: str            # ``lens`` names another
     regimes: str = "any"
     kinds: tuple[str, ...] = ("count",)     # the field kinds it reads (count; mark: a measurement's location)
+    reads: tuple[str, ...] = ()             # the reader bases it needs beyond its kind (`basis`): a share of all events
+                                            # needs events placed at residence, over residents
     lens: str | None = None
     settings: tuple = ()        # (name, value) pairs passed to the lens: one lens read two ways is two methods
     maturity: str = "v0"        # ARCHITECTURE's levels: v0 runs, v1 the established method, v2 v1 measured (§13.1)
@@ -54,6 +56,9 @@ class Question:
     grain: str = ""                             # the grain it is asked at ("": any; "month": the monthly fits only)
     component: str = ""                         # the ARCHITECTURE §7.2 component it answers (BACKLOG 3.1); the
                                                 # question's name stays its id, so no former question is lost
+    quality: bool = False                       # asked of a quality field too (a column's blank share, §9.7): a
+                                                # departure in completeness, a recording practice's step, trend, region
+                                                # or institution; an epidemic's spread, share, groups and seasons are not
 
 
 QUESTIONS: dict[str, Question] = {q.id: q for q in (
@@ -66,17 +71,17 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                  Method("outbreak", "each cell's NB tail, BH; the v0 lens"),
                  Method("space_time", "expectation-based Poisson scan over graph-connected place sets and windows of "
                                       "up to four years, Monte Carlo null; the v0 lens (restored 2026-10-07, S0.4)"),
-             ), ("spike", "transient"), component="transient"),
+             ), ("spike", "transient"), quality=True, component="transient"),
     Question("step", "C", "a lasting rise in level from some period to the series' end", "B1",
              "area × window", "rate ratio", (
                  Method("excess_step", "multiscale graph peaks of suffix sums; N1's correlation over periods",
                         kinds=("count", "mark")),
                  Method("step", "Bayesian single change point per place, tempered by N1's correlation"),
                  Method("change_point", "trailing-window NB tails against the place's past course; the v0 lens"),
-             ), ("step",), component="step"),
+             ), ("step",), quality=True, component="step"),
     Question("trend", "C", "a course bending upward from some period", "B1", "area × window", "rate ratio", (
         Method("excess_trend", "multiscale graph peaks of hinge contrasts", kinds=("count", "mark")),
-    ), ("trend",), component="trend"),
+    ), ("trend",), quality=True, component="trend"),
     # the questions the declared positives also ask (harness.POSITIVES), answered for now by their v0 lenses alone:
     # a question is kept while its departure model (ARCHITECTURE §12, O6: BYM2 exceedance, the group interaction) is
     # built, never dropped with its lens (CLAUDE.md)
@@ -86,7 +91,7 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
                                         "effects), STEM; a cluster at its own scale, no zoning", kinds=("count", "mark")),
                  Method("spatial_cluster", "expectation-based Poisson scan over graph-connected sets; the v0 lens",
                         component="spatial coherence"),
-             ), component="level"),
+             ), quality=True, component="level"),
     Question("propagation", "C", "the periods at which places first depart from the expectation ordered in space: a source, "
              "the speed and direction of spread (a wave), and the field's emergence where it was absent", "B1",
              "area × period", "km per month", (
@@ -98,13 +103,13 @@ QUESTIONS: dict[str, Question] = {q.id: q for q in (
     Question("share", "C", "a field's share of all events departing from its expectation in a place and period: "
              "recording practice (the ill-defined share) or composition", "B1", "area × period", "share ratio", (
                  Method("share_excess", "beta-binomial on the observed total, the share expected from stage B, "
-                                        "θ by central matching; two-sided"),
+                                        "θ by central matching; two-sided", reads=("residence", "residents")),
              ), component="transient (ratio field)"),
     Question("institution", "C", "one institution's events departing, over a window, from its catchment's expectation "
              "(a step specific to it, or the volume of all its chapters)", "B1", "institution × window", "rate ratio", (
                  Method("institution_step", "best window's likelihood ratio against the facility's constant ratio to "
                                             "its catchment; Bonferroni over the T(T+1)/2 windows; the v0 lattice's gates"),
-             ), component="step (facility support)"),
+             ), quality=True, component="step (facility support)"),
     Question("group", "C", "a place whose excess differs across groups from the national pattern: sex × age, and "
              "each composition column (schooling, outcome, …) at the place's age–sex structure", "B0",
              "area × group", "rate ratio", (
@@ -207,26 +212,45 @@ def ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer
             session._local.memo = None
 
 
-#: the questions a quality field (a column's blank or "ignored" share, ARCHITECTURE §9.7) is asked: a departure in
-#: completeness, a change of recording practice (a step, a trend), a region's practice (a cluster), an institution's.
-#: The others ask of an epidemic (its spread, its share of events, its groups, seasons and alarms): asked of each of
-#: SINAN-TOXC's forty columns they held the deep study's TOXC item half an hour (2026-10-12)
-QUALITY_QUESTIONS = ("excess", "step", "trend", "cluster", "institution")
+def basis(source: dict | None) -> set[str]:
+    """What a reader's cells stand on: ``residence`` (events placed at their residents' municipality) or ``elsewhere``
+    (a support's, a place's, a link's, an indicator's or a mark's, or a share, linked or away reading); ``residents``
+    (over person-years) or ``ratio`` (over another field's events); ``quality`` for a column's completeness."""
+    src = source or {}
+    away = [k for k in ("support", "place", "link", "indicator", "mark") if src.get(k)]
+    away += [src["source"]] if src.get("source") in ("share", "linked", "away") else []
+    return {"elsewhere" if away else "residence",
+            "ratio" if str(src.get("population", "")).startswith("events:") else "residents",
+            *(["quality"] if src.get("quality") else [])}
+
+
+def not_read(qn: Question, m: Method, kind: str | None, source: dict | None) -> str | None:
+    """Why ``m`` does not read this reader (None: it does). One rule for the survey, the harness and the lens: a method
+    reads its declared kinds and bases, a quality field is asked only the questions declared for it. Asked anyway, a
+    share of all events had failed on every support reader, every run (2026-10-14)."""
+    have = basis(source)
+    if "quality" in have and not qn.quality:
+        return f"{qn.id!r} is not asked of a quality field"
+    if kind not in m.kinds:
+        return f"{m.id} reads no {kind} field"
+    if missing := [b for b in m.reads if b not in have]:
+        return f"{m.id} needs {' and '.join(missing)}; the reader is {', '.join(sorted(have))}"
+    return None
 
 
 def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answer]:
     qn = QUESTIONS[question]
-    if (getattr(session, "source", None) or {}).get("quality") and question not in QUALITY_QUESTIONS:
-        out = AnswerList()
-        out.other_shape, out.k = [], 1
-        out.failed = {"*": f"{question!r} is not asked of a quality field (`QUALITY_QUESTIONS`)"}
-        return out
-    kind = session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count")
-    methods = [m for m in qn.methods if kind in m.kinds]
+    source = getattr(session, "source", None) or {}
+    # a quality field is not read for a question not asked of it (`not_read` says so before the kind is asked)
+    kind = (None if "quality" in basis(source) and not qn.quality else
+            session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count"))
+    why = {m.id: r for m in qn.methods if (r := not_read(qn, m, kind, source))}
+    methods = [m for m in qn.methods if m.id not in why]
     k = max(len(methods), 1)
     answers: list[Answer] = []
     by_place: dict[int, set[int]] = {}         # place -> the answers (by index) holding it: a finding's candidates
-    failed = {} if methods else {"*": f"no method of {question!r} reads a {kind} field yet"}
+    # "*": no method reads this reader, which is no failure (the answer list stands, empty, and is stored)
+    failed = {} if methods else {"*": "; ".join(dict.fromkeys(why.values()))}
     for m in methods:
         try:
             found = session.scan(node, m.lens or m.id, q=q / k, **dict(m.settings), **kw)
@@ -259,7 +283,8 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     out = AnswerList([a for a, ok in zip(answers, fits, strict=True) if ok])
     out.other_shape = [a for a, ok in zip(answers, fits, strict=True) if not ok]
     out.failed = failed
-    out.k = k                   # the methods that read this field's kind: the answer's Bonferroni factor
+    out.not_read = why          # the methods that do not read this reader, and why
+    out.k = k                   # the methods that read this reader: the answer's Bonferroni factor
     return out
 
 
@@ -279,6 +304,7 @@ def components(question: str, methods: list[str] | None = None) -> str:
 
 class AnswerList(list):
     failed: dict
+    not_read: dict
     other_shape: list
     k: int
 
