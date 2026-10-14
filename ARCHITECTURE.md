@@ -364,7 +364,9 @@ toxoplasmosis/
                               band and sex within age band; an area's reference rows (Brazil, its macro-regions); a
                               code set's share of its ICD-10 group, chapter and source; linked shares and a same-event
                               link's share of the records it can pair; each standardised rate's ratio to Brazil's
+                              and to its region without the area
   standard.parquet          the direct standardisation's standard: weights by sex and age band
+  sources.parquet           every published file read: path, state, competence, server date, digest, rows, status
   codes.parquet             the topic's events by category and code, labelled, with shares
   trends.parquet            each series' APC, crude and age-sex adjusted, and its joinpoint segments and AAPC (crude
                               and standardised rate), with intervals and p

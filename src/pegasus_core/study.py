@@ -2301,6 +2301,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
         pq.write_table(_rows_table(figure_rows), out / "figures.parquet")
     if code_rows:
         pq.write_table(_rows_table(code_rows), out / "codes.parquet")
+    files = lap.guard("sources", lambda: _publications(scope, log), None, log)
+    if files is not None and files.num_rows:
+        pq.write_table(files, out / "sources.parquet")
     lap.guard("geometry", lambda: _geometry(out, places), None, log)
     pq.write_table(_rows_table(quality) if quality else pa.table({"indicator": pa.array([], pa.string())}),
                    out / "quality.parquet")
@@ -3098,16 +3101,29 @@ def _ratio_to_brazil(rows: list[dict]) -> None:
     """Each standardised rate's ratio to Brazil's of the same year (or period) and stratum, with its 95 % interval on
     the log scale from the two gamma variances (Brazil holds the area, so the interval is conservative): what a paper
     states as "x times the national rate" (the audit derived it by hand, 2026-10-14)."""
-    ref = {(r["year"], r["period"], r["stratum"]): r for r in rows
-           if r["level"] == "reference" and r["unit"] == "BR" and r.get("_dsr")}
-    for r in rows:
-        b = ref.get((r["year"], r["period"], r["stratum"]))
-        if b is None or b is r or not r.get("_dsr") or not r.get("_dsr_var") or not b.get("_dsr_var"):
-            continue
+    def ratio(r: dict, b: dict) -> tuple[float, float, float]:
         lr = float(np.log(r["_dsr"] / b["_dsr"]))
         se = float(np.sqrt(r["_dsr_var"] / r["_dsr"] ** 2 + b["_dsr_var"] / b["_dsr"] ** 2))
-        r.update({"ratio_to_brazil": float(np.exp(lr)), "ratio_to_brazil_low": float(np.exp(lr - 1.96 * se)),
-                  "ratio_to_brazil_high": float(np.exp(lr + 1.96 * se))})
+        return float(np.exp(lr)), float(np.exp(lr - 1.96 * se)), float(np.exp(lr + 1.96 * se))
+
+    ref = {(r["year"], r["period"], r["stratum"]): r for r in rows
+           if r["level"] == "reference" and r["unit"] == "BR" and r.get("_dsr")}
+    # and an area's rows against the rest of its region (the region without the area: no shared events, so the interval
+    # is the two independent variances' own), when the area lies in one region
+    rests = {r["unit"] for r in rows if r["level"] == "reference" and str(r["unit"]).endswith("without the area")}
+    rest = {(r["year"], r["period"], r["stratum"]): r for r in rows
+            if r["level"] == "reference" and r["unit"] in rests and r.get("_dsr")} if len(rests) == 1 else {}
+    for r in rows:
+        if not r.get("_dsr") or not r.get("_dsr_var"):
+            continue
+        b = ref.get((r["year"], r["period"], r["stratum"]))
+        if b is not None and b is not r and b.get("_dsr_var"):
+            r.update(dict(zip(("ratio_to_brazil", "ratio_to_brazil_low", "ratio_to_brazil_high"), ratio(r, b),
+                              strict=True)))
+        c = rest.get((r["year"], r["period"], r["stratum"]))
+        if c is not None and r["level"] != "reference" and c.get("_dsr_var"):
+            r.update(dict(zip(("ratio_to_region_rest", "ratio_to_region_rest_low", "ratio_to_region_rest_high"),
+                              ratio(r, c), strict=True)))
 
 
 @functools.lru_cache(maxsize=32)
@@ -3161,9 +3177,12 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     subset = [str(x) for x in src.get("codes") or []]
     codes = tuple(subset) if it.extract else ()
     regions = sorted({int(str(int(a))[0]) for a in area})
-    units = [("BR", None)] + [(f"{r} {REGIONS.get(r, '')}".strip(), r) for r in regions]
-    ev = {k: np.zeros((T, G)) for k, _ in units}
-    py = {k: np.zeros((T, G)) for k, _ in units}
+    # Brazil, each macro-region the area lies in, and that region without the area: the comparison a paper makes (the
+    # area against the rest of its region), which a total holding the area blurs (the paper audit, 2026-10-14)
+    units = [("BR", None, False)] + [(f"{r} {REGIONS.get(r, '')}".strip(), r, False) for r in regions] + \
+        [(f"{r} {REGIONS.get(r, '')} without the area".strip(), r, True) for r in regions]
+    ev = {k: np.zeros((T, G)) for k, *_ in units}
+    py = {k: np.zeros((T, G)) for k, *_ in units}
     for t, yr in enumerate(years):
         c = gateway.event_counts(it.dataset, it.event, int(yr), classifier=src.get("classifier"), codes=codes).counts
         if subset:
@@ -3179,8 +3198,10 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
         u = c.column("u").to_numpy().astype(np.int64)
         cell = (c.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(c.column("age").to_numpy(), edges)
         y = c.column("y").to_numpy().astype(float)
-        for k, r in units:
+        for k, r, rest in units:
             m = np.ones(len(u), bool) if r is None else (u // 100000 == r)
+            if rest:
+                m &= ~config.in_area(u)
             ev[k][t] = np.bincount(cell[m], weights=y[m], minlength=G)[:G]
     pop = gateway.population([int(x) for x in years], source=str(d.population), dataset=it.dataset)
     u = pop.column("u").to_numpy().astype(np.int64)
@@ -3188,10 +3209,12 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     cell = (pop.column("sex").to_numpy().astype(np.int64) - 1) * nB + monolith.age_band(pop.column("age").to_numpy(), edges)
     n = pop.column("n").to_numpy().astype(float)
     ok = t_of >= 0
-    for k, r in units:
+    for k, r, rest in units:
         m = ok & (np.ones(len(u), bool) if r is None else (u // 100000 == r))
+        if rest:
+            m &= ~config.in_area(u)
         py[k] = np.bincount(t_of[m] * G + cell[m], weights=n[m], minlength=T * G)[:T * G].reshape(T, G)
-    return [(k, ev[k], py[k]) for k, _ in units]
+    return [(k, ev[k], py[k]) for k, *_ in units]
 
 
 @functools.lru_cache(maxsize=256)
@@ -3224,6 +3247,45 @@ def _icd_ancestors() -> dict[str, list[tuple[str, str]]]:
             p = rows[p].get("parent")
         out[code] = chain
     return out
+
+
+def _publications(scope: Scope, log) -> pa.Table | None:
+    """Every published file the study's sources were read from (pegasus_data `publications`: the server path, state,
+    year and competence, the size and date the server listed, the digest and rows of the bytes decoded, when and from
+    where they were fetched, and the source's own status, preliminary or final), and every file listed for those years
+    the lake does not hold, with why: what a methods section cites and a reader re-checks against the server (the
+    audit could check nothing, 2026-10-14). Every state's files of an area study: a record is filed by its place of
+    care, so a resident cared for elsewhere is in another state's file."""
+    import pegasus_data as pg
+
+    years: dict[str, set[int]] = {}
+    for it in (i for i in scope.items if i.status == "in" and i.years):
+        years.setdefault(it.dataset, set()).update(int(y) for y in it.years)
+    parts = []
+    for ds, ys in years.items():
+        try:
+            t = pg.publications(ds, sorted(ys), root=config.data_root())
+        except Exception as exc:  # noqa: BLE001 - a source whose files cannot be listed: said, the others written
+            log(f"study: sources {ds}: {type(exc).__name__}: {exc}")
+            continue
+        parts.append(t)
+    return pa.concat_tables(parts, promote_options="permissive") if parts else None
+
+
+def _population_text(population: str) -> str | None:
+    """What the population series is, as the documents that produce it say (pegasus_data `curation/populations.yml`):
+    producer, vintage, reference date, years, method, limitations and the documents."""
+    from pegasus_data.sources.ibge import series_documentation
+
+    doc = series_documentation(str(population).split("+")[0].split(":")[0])
+    if not doc:
+        return None
+
+    def flat(v) -> str:
+        return "; ".join(" ".join(str(x).split()) for x in v) if isinstance(v, (list, tuple)) else " ".join(str(v).split())
+    parts = [f"{k.replace('_', ' ')}: {flat(doc[k])}" for k in ("producer", "vintage", "reference_date", "years", "method",
+                                                                "limitations", "documents") if doc.get(k)]
+    return f"The population ({doc.get('title') or population}). " + ". ".join(parts) + "."
 
 
 def _codes(it: Item, f, label: str) -> list[dict]:
@@ -3884,7 +3946,8 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
     # a column with one value on every record of the period carries no information here, whatever its label says (SIH's
     # GESTRISCO "Sim" on every admission, men's included; the audit, 2026-10-14)
     for (ds, fid, label, name, tot), values in one.items():
-        if len(values) == 1 and tot > 0:
+        # (a column not recorded on every record is its not-recorded row's 100 %, said once)
+        if len(values) == 1 and tot > 0 and not values & {"not recorded", "value missing"}:
             out.append({"dataset": ds, "field": fid, "label": label, "year": None,
                         "indicator": f"one value on every record: {name} = {next(iter(values))} (no information)",
                         "numerator": tot, "denominator": tot, **_proportion(tot, tot)})
@@ -3911,6 +3974,15 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
               f"Denominators: {'; '.join(pers) or 'none'}. Rates per person-years use the resident population of the "
               "field's population source by municipality, sex, age and year; a source that declares other events as its "
               "denominator (live births) is rated per 1,000 of them."]
+    for population in sorted({str(config.population_source())}):
+        try:
+            text = _population_text(population)
+        except Exception:  # noqa: BLE001 - an undocumented series is said so
+            text = None
+        design.append(text or f"The population {population}: no document describing it has been read (pegasus_data).")
+    design.append("Files read: sources.parquet, one row per published file of each source and year (server path, state, "
+                  "competence, the size and date the server listed, the digest and rows of the bytes decoded, the "
+                  "source's status), with the files listed and not held and why.")
     sources = []
     for it in read:
         src = it.source or {}
@@ -3925,7 +3997,14 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
             when = gateway._when(it.dataset)
         except LookupError:
             when = None
-        line = (f"{it.dataset} ({it.event}; one row is {et.get('grain') or 'one event'}), {min(it.years)}-"
+        try:
+            import pegasus_data as pg
+
+            facts = pg.dataset_facts(it.dataset)
+        except Exception:  # noqa: BLE001 - a dataset pegasus_data does not document: the event type's grain
+            facts = {}
+        row_is = facts.get("what_one_row_is") or et.get("grain") or "one event"
+        line = (f"{it.dataset} ({it.event}; one row is {row_is}), {min(it.years)}-"
                 f"{max(it.years)}: {what} on {on} ({kind}); a year's events are those of the files published for "
                 "that year" + (f", a month's those whose {when} falls in it (seasons.parquet), so a year's months "
                                "need not sum to its published count" if when else ""))
@@ -4003,6 +4082,15 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         et = gateway.event_type(it.dataset, it.event) or {}
         sn, ex = et.get("source_notes") or {}, et.get("exposure") or {}
         cite = f" ({sn['source']})" if sn.get("source") else ""
+        try:
+            import pegasus_data as pg
+
+            facts = pg.dataset_facts(it.dataset)
+        except Exception:  # noqa: BLE001 - nothing documented: nothing quoted
+            facts = {}
+        if facts.get("known_biases"):
+            notes.append(f"{it.dataset}: known biases: {' '.join(str(facts['known_biases']).split())} (pegasus_data)")
+        notes += [f"{it.dataset}: {' '.join(str(g).split())} (pegasus_data)" for g in facts.get("gotchas") or ()]
         if sn.get("definition"):
             notes.append(f"{it.dataset}: definition: {sn['definition']}{cite}")
         if sn.get("valid_from") and min(it.years) < sn["valid_from"]:
@@ -5500,6 +5588,10 @@ COLUMNS = {
     "ratio_to_brazil_low": "its lower 95 % bound (log scale, the two gamma variances; conservative: Brazil includes the "
                            "area)",
     "ratio_to_brazil_high": "its upper 95 % bound",
+    "ratio_to_region_rest": "an area's standardised rate over its macro-region's without the area (the Northeast without "
+                            "Alagoas), the same year or period and stratum",
+    "ratio_to_region_rest_low": "its lower 95 % bound (log scale, the two independent gamma variances)",
+    "ratio_to_region_rest_high": "its upper 95 % bound",
     "health_macroregion": "the municipality's health macro-region (SUS regionalisation), in an area study",
     "smr_p": "over the period, the exact two-sided Poisson p of the standardised ratio",
     "smr_q": "its Benjamini-Hochberg q over the municipalities",
@@ -5527,6 +5619,27 @@ COLUMNS = {
     "contexts.parquet:context": "the context (pegasus_data's declared field over its declared denominator)",
     "contexts.parquet:value": "its value in the municipality and year (or over the period); empty when the source holds "
                               "none",
+    "sources.parquet:dataset": "the source (pegasus_data's name for it)",
+    "sources.parquet:listed": "whether the catalog's last listing of the server holds the file",
+    "sources.parquet:path": "the file's path on the DATASUS server",
+    "sources.parquet:uf": "the state the file is published under (BR: national)",
+    "sources.parquet:year": "the year the file is published under",
+    "sources.parquet:competence": "a monthly file's month (YYYYMM); empty for an annual file",
+    "sources.parquet:listed_size": "the file's size as the server listed it",
+    "sources.parquet:listed_modified": "its modification date on the server as listed",
+    "sources.parquet:listed_at": "when the catalog last listed it",
+    "sources.parquet:in_lake": "whether the lake holds the file's records (False: listed, not read, see lake_note)",
+    "sources.parquet:lake_note": "why a listed file is not held",
+    "sources.parquet:blob_sha256": "the SHA-256 of the bytes decoded (the digest every record read from it carries)",
+    "sources.parquet:rows_decoded": "the file's rows in the lake (every state's, for a national file)",
+    "sources.parquet:decoded_at": "when the file was decoded",
+    "sources.parquet:fetched_at": "when the bytes were fetched",
+    "sources.parquet:served_by": "where from: the DATASUS server or a mirror",
+    "sources.parquet:fetched_size": "the size of the bytes fetched",
+    "sources.parquet:server_changed_since_fetch": "the server's listing differs from the one at the fetch: the file has "
+                                                  "been rewritten since",
+    "sources.parquet:status": "preliminary, final or undeclared (the source declares no finality rule)",
+    "sources.parquet:status_basis": "the declaration behind the status",
     "codes.parquet:classifier": "the column the codes are read from",
     "codes.parquet:code": "a category (three characters) or a code as the source records it",
     "codes.parquet:code_label": "its label in the column's codelist (pegasus_data); empty when the codelist has none",

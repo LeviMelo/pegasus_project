@@ -1808,11 +1808,10 @@ def _value_labels(dataset: str, event: str, column: str, years: tuple[int, ...],
                 continue                # a year that does not hold the column (or publishes nothing) labels nothing
             if c.counts is not None and "value" in c.counts.column_names:
                 codes |= {str(v) for v in pc.unique(c.counts.column("value")).to_pylist() if v is not None}
-    elif column == _strata(dataset, event).get("race"):
-        codes = {str(k) for k in range(10)}       # the race stratum's codes: one digit
     else:
-        # any other column, by the codes its records hold: weighed on 0-9, SINAN-TOXC's CLASSI_FIN (1, 2, 8) took
-        # polio's table, "Confirmado Poliovírus Selvagem" for 1 (2026-10-12)
+        # any other column, and the race stratum, by the codes its records hold: weighed on 0-9, SINAN-TOXC's CLASSI_FIN
+        # (1, 2, 8) took polio's table, "Confirmado Poliovírus Selvagem" for 1 (2026-10-12), and SIH's two-digit race
+        # codes (01-05, 99) matched none and read "(undecoded)" in every study (pegasus_data's fixer data5, 2026-10-14)
         strata = _strata(dataset, event)
         for y in years:
             try:

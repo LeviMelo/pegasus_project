@@ -46,8 +46,17 @@ length of stay (mean 7.0 to 12.2 days, median 4 to 8) are in the records by publ
 alike, and every year holds its twelve monthly files: features of the source, said, not gaps. Macro-region 2703 holding
 regions 7-10 is Alagoas's second (Arapiraca's): correct.
 
-**Left.** For pegasus_data (fixers data5 and data6): SIH RACA_COR's codelist and the missing codes of the columns a
-Table 1 reads; GESTRISCO's meaning; each file read with its hash, server date and status; the population's vintage
-(Alagoas grows 0.017 % in 2022 and 0.007 % in 2023); what one row is. Open: case fatality at 30 days (needs a person
-link of every admission to later deaths), ill-defined and garbage-code redistribution (needs a declared code list with
-its source), persons for 2014-2020 and 2023 (link runs not stored), procedures (SIGTAP) not read.
+**With pegasus_data's rounds 5 and 6** (merged 71873d6, ADR-0180, ADR-0181). GESTRISCO was coded the wrong way round:
+SISAIH01's layout asks it of sterilisation AIHs only, 0 Sim, 1 Não, while TabWin's table binds 1 Sim; the records side
+with the layout, so its 1 on every AIH is the default fill, declared not recorded. RACA_COR's 99, INSTRU's 0 and four
+more columns' "ignored" codes are declared missing: race is recorded on 43.0 % of the AIHs (was "100 %"); SIH's race
+codes read "(undecoded)" because PegaSUS asked for them as one digit, SIM's width (fixed here). sources.parquet lists
+every file read (SIH-RD 2014-2023: 3,240 files, every state's twelve monthly files, each with its digest, rows, server
+date and status); METHODS quotes what one row is and the known biases of each source, and the population's producer,
+vintage (IBGE's Revisão 2024, after the 2022 Census), reference date and method: Alagoas's near-flat 2022-23 is its
+natural increase offset by an implied net out-migration of about 0.7 % a year. The area is also compared with its
+region without it (the Northeast without Alagoas), its ratio's interval from two independent variances.
+
+**Left.** Open: case fatality at 30 days (needs a person link of every admission to later deaths); ill-defined and
+garbage-code shares (pegasus_data round 7, in progress: a declared, cited list) and costs in constant reais (the same
+round: IPCA); persons for 2014-2020 and 2023 (link runs not stored); procedures (SIGTAP) not read.
