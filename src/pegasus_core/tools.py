@@ -815,6 +815,9 @@ class Session:
                             f"{len(getattr(answers, 'other_shape', []))} of another shape")
                         if any(m_ != "*" for m_ in getattr(answers, "failed", {})):     # "*": no method reads it
                             failed_pairs.add((f.id, fam))       # retried by the next run, never stored
+                            # which method and why: the pair had been counted and never named (the runs of 2026-10-14)
+                            log(f"FAIL {f.id} {qn}: " + "; ".join(f"{m_}: {why}" for m_, why in answers.failed.items()
+                                                                  if m_ != "*"))
                         else:
                             store.put_arrays("answers", {**base, "question": qn},
                                              {"rows": np.frombuffer(pickle.dumps((list(answers), k)), dtype=np.uint8)})

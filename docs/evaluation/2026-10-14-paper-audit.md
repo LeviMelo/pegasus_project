@@ -30,7 +30,10 @@ by sex, age band and sex within band; every standardised rate's ratio to Brazil'
 dispersion; joinpoint regression (Kim et al. 2000, NCI defaults, 4,499 permutations) of the crude and the standardised
 rate with segment APCs and the AAPC: no joinpoint in Alagoas (p 0.11-0.13), one in Brazil's standardised admissions at
 2020 (2.6 % a year to 2020, 6.6 % after, p 0.048). Seasonality by quasi-Poisson regression on year and month: deaths
-peak mid-July, peak-to-trough 1.15 (1.09-1.21), F p 0.001; admissions early August, 1.34 (1.18-1.52); the date column
+peak about 12 August (20 July to 4 September; the monthly index highest in June and July), peak-to-trough 1.15
+(1.09-1.21), F p 0.001; admissions about 4 September (10 August to 28 September), 1.34 (1.18-1.52) (first written
+here as mid-July and early August: the peak in months from 1 January was read a month early, which the second audit
+caught; it is now a day of the year and a date); the date column
 named (DTOBITO, DT_INTER) and the year said to be the publications'. Places: each municipality against Brazil's age-sex
 rates (SMR, exact interval, two-sided p and BH q), the internal ratio's p and q, the macro-region; the boundaries as
 municipalities.geojson. Completeness: SIM's coverage of the state's deaths by year (pegasus_data system_completeness:

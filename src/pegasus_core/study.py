@@ -1594,7 +1594,8 @@ def run(decl: Declaration, log=print) -> Path:
             "seconds": round(time.time() - t0, 1), "phases": phases, "products_seconds": dict(products),
             "estimated_minutes": estimate,
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
-            "steps": steps, "store_tables": tables, "products_failed": dict(products.failed)}
+            "steps": steps, "store_tables": tables, "products_failed": dict(products.failed),
+            "products_gaps": dict(products.gaps)}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     os.environ.pop("PEGASUS_MAX_DOWNLOAD", None)
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
@@ -2081,6 +2082,7 @@ class _Lap(dict):
         super().__init__()
         self._t = time.time()
         self.failed: dict[str, str] = {}
+        self.gaps: dict[str, str] = {}          # what could not be read, by design or by data (not a failure)
 
     def __call__(self, name: str) -> None:
         now = time.time()
@@ -2168,7 +2170,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                         if r.get("year") in shares and r["level"] == _whole()[0]:
                             r["allocated_share"] = shares[r["year"]]
                     quality.extend({"dataset": it.dataset, "field": f.id, "label": label, **x} for x in lost)
-                trends.extend(_apc(rows_))
+                # guarded as every product: an unguarded trend error had ended a slice's whole study (2026-10-14)
+                trends.extend(lap.guard(f"trends {f.id}", lambda rows_=rows_: _apc(rows_), [], log))
                 for r in rows_:                     # the cells the trends read, never a column of the table
                     for k in ("_y", "_n", "_dsr", "_dsr_var"):
                         r.pop(k, None)
@@ -2247,6 +2250,11 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                                        _recording_groups(rows)), None, log)
     lap("institutions")
     persons = lap.guard("persons", lambda: _persons(decl, scope, log), [], log) if decl.choice("persons") else []
+    # a cohort-year that could not be scanned (its link runs not stored) is a gap of the study, in provenance beside the
+    # failures: a note inside persons.parquet alone read as "no failure" (the second audit, 2026-10-14)
+    for r in persons:
+        if str(r.get("note") or "").startswith(("not scanned", "no year")):
+            lap.gaps[f"persons {r.get('cohort')} {r.get('year') or ''}".strip()] = str(r["note"])
     lap("persons")
     pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
@@ -2297,6 +2305,10 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                                              for i, (sex, band) in enumerate((sx, b) for sx in ("male", "female")
                                                                              for b in bands)
                                              for w in [wts[i]]]), out / "standard.parquet")
+    for fid in dict.fromkeys(r["field"] for r in desc if r.get("standardised_per_100k") is not None):
+        drawn = lap.guard(f"rate figure {fid}", lambda fid=fid: _rate_figure(out, fid, desc, trends), None, log)
+        if drawn:
+            figure_rows.append(drawn)
     if figure_rows:
         pq.write_table(_rows_table(figure_rows), out / "figures.parquet")
     if code_rows:
@@ -2834,7 +2846,10 @@ def _apc(rows: list[dict]) -> list[dict]:
         out.append({**base, "model": "crude", "apc": 100 * np.expm1(b1), "apc_low": 100 * np.expm1(b1 - q975 * se),
                     "apc_high": 100 * np.expm1(b1 + q975 * se),
                     "p": float(2 * student.sf(abs(b1 / se), len(rs) - 2)), "dispersion": disp})
-        if all(r.get("_y") is not None for r in rs):
+        # the adjusted model reads a series' sex-age cells: a row of one cell (a rate per live birth: births carry no
+        # sex or age) has none to adjust for, and its (1, 1) cells had crashed the products of every perinatal field
+        # (the slice gate, 2026-10-14)
+        if all(r.get("_y") is not None and np.ndim(r["_y"]) == 1 and np.size(r["_y"]) > 1 for r in rs):
             adj = _apc_adjusted(np.array([r["_y"] for r in rs], dtype=float), np.array([r["_n"] for r in rs], dtype=float))
             if adj is not None and np.isfinite(adj[0]) and adj[1] > 0:
                 b, v = adj[0], adj[1] ** 0.5
@@ -2845,6 +2860,7 @@ def _apc(rows: list[dict]) -> list[dict]:
         # figure draws): a log-linear slope over a series that jumps and plateaus had been the only trend, and the
         # adjusted model's slope is not the standardised series' (the paper audit, 2026-10-14)
         inputs = [("joinpoint: crude rate", np.log(y / n) if (y > 0).all() else None, y)]
+        per100k = {"joinpoint: crude rate": 1e5, "joinpoint: standardised rate": 1.0}
         dsr = np.array([r.get("_dsr") or np.nan for r in rs], dtype=float)
         dvar = np.array([r.get("_dsr_var") or np.nan for r in rs], dtype=float)
         if np.isfinite(dsr).all() and (dsr > 0).all() and np.isfinite(dvar).all() and (dvar > 0).all():
@@ -2859,7 +2875,8 @@ def _apc(rows: list[dict]) -> list[dict]:
                       "joinpoint_p": jp["p"]}
             for i, sg in enumerate(jp["segments"]):
                 out.append({**common, "segment": str(i + 1), "segment_first": int(sg["first"]),
-                            "segment_last": int(sg["last"]), **_apc_interval(sg["b"], sg["se"], jp["df"])})
+                            "segment_last": int(sg["last"]), **_apc_interval(sg["b"], sg["se"], jp["df"]),
+                            "fitted_first": per100k[model] * sg["fit_first"], "fitted_last": per100k[model] * sg["fit_last"]})
             out.append({**common, "segment": "AAPC", "segment_first": int(t[0]), "segment_last": int(t[-1]),
                         **_apc_interval(jp["aapc"][0], jp["aapc"][1], jp["df"])})
     return out
@@ -2945,13 +2962,15 @@ def _joinpoint(x: np.ndarray, logr: np.ndarray, w: np.ndarray, permutations: int
     scale = float(sse[0]) / df
     cov = scale * np.linalg.pinv(X.T @ X)
     edges = [0, *c, n - 1]
+    fitted = np.column_stack([np.ones(n), xc, *[np.maximum(x - x[j], 0.0) for j in c]]) @ beta      # the log rate
     segments, la = [], np.zeros(len(beta))
     for i in range(k + 1):
         lv = np.zeros(len(beta))
         lv[1], lv[2:2 + i] = 1.0, 1.0
         first, last = x[edges[i]], x[edges[i + 1]]
         segments.append({"first": first, "last": last, "b": float(lv @ beta),
-                         "se": float(np.sqrt(max(lv @ cov @ lv, 0.0)))})
+                         "se": float(np.sqrt(max(lv @ cov @ lv, 0.0))),
+                         "fit_first": float(np.exp(fitted[edges[i]])), "fit_last": float(np.exp(fitted[edges[i + 1]]))})
         la = la + (last - first) / (x[-1] - x[0]) * lv
     return {"joinpoints": k, "years": [x[j] for j in c], "p": p_last, "df": df, "scale": scale,
             "segments": segments, "aapc": (float(la @ beta), float(np.sqrt(max(la @ cov @ la, 0.0))))}
@@ -3644,10 +3663,15 @@ def _seasonal_model(ev: np.ndarray, days: np.ndarray, base: dict) -> list[dict]:
         g_phi = np.array([-s_, c]) / amp ** 2
         se_amp = float(np.sqrt(max(g_amp @ hc @ g_amp, 0.0)))
         se_phi = float(np.sqrt(max(g_phi @ hc @ g_phi, 0.0)))
+        import datetime
+
         phi = float(np.arctan2(s_, c))
-        month = (phi / (2 * np.pi) * 12) % 12                       # 0.5 = the middle of January
-        peak = {"peak_month": month, "peak_month_low": month - 1.96 * se_phi * 12 / (2 * np.pi),
-                "peak_month_high": month + 1.96 * se_phi * 12 / (2 * np.pi),
+        # the peak as days from 1 January (a peak in "months" read a month off: 7.35 is 12 August, written up as July,
+        # the second audit, 2026-10-14)
+        day = (phi / (2 * np.pi)) % 1.0 * 365.25
+        half = 1.96 * se_phi / (2 * np.pi) * 365.25
+        peak = {"peak_day": day + 1, "peak_day_low": day + 1 - half, "peak_day_high": day + 1 + half,
+                "peak_date": (datetime.date(2001, 1, 1) + datetime.timedelta(days=int(day))).strftime("%d %B"),
                 "peak_to_trough": float(np.exp(2 * amp)), "peak_to_trough_low": float(np.exp(2 * max(amp - 1.96 * se_amp, 0))),
                 "peak_to_trough_high": float(np.exp(2 * (amp + 1.96 * se_amp)))}
     tot = float(ev.sum())
@@ -3901,6 +3925,7 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
             out.append({"dataset": it.dataset, "field": None, "label": f"every {it.event} of the source",
                         "year": int(y), "indicator": f"ill-defined causes (ICD-10 R00-R99) on {primary['column']}",
                         "numerator": k, "denominator": tot, **_proportion(k, tot)})
+            out += _garbage_rows(it, int(y), code, n, primary["column"], log)
     # the system's coverage of its events in the area's states (pegasus_data's system_completeness: SIM and SINASC by
     # state and year, the published ratio to 2011 and a calibrated extension): what separates a recording change from a
     # real one (the audit had only a 2004 national figure, 2026-10-14)
@@ -3951,6 +3976,56 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
             out.append({"dataset": ds, "field": fid, "label": label, "year": None,
                         "indicator": f"one value on every record: {name} = {next(iter(values))} (no information)",
                         "numerator": tot, "denominator": tot, **_proportion(tot, tot)})
+    return out
+
+
+@functools.cache
+def _garbage_levels(edition: str = "GBD2019") -> dict[str, int]:
+    """Each garbage code of a published list (pegasus_data `garbage_codes`) and its GBD level (the lowest where a code is
+    in two packages; 0 where the edition prints none), as the list spells them: a category of three characters, or a code
+    as SIM writes it. Read exactly: a subcode the list omits is not its category's (I42.2, hypertrophic cardiomyopathy, is
+    no garbage code though I42.9 is; reading by category had put Alagoas's 2014 share at 44.9 % for 44.3 %)."""
+    import pegasus_data as pg
+
+    out: dict[str, int] = {}
+    for r in pg.garbage_codes(edition).to_pylist():
+        lv = int(r["level"]) if r.get("level") is not None else 0
+        c = str(r["code"]).upper()
+        prev = out.get(c)
+        out[c] = lv if not prev else (min(prev, lv) if lv else prev)
+    return out
+
+
+def _garbage_rows(it: Item, year: int, code: np.ndarray, n: np.ndarray, column: str, log) -> list[dict]:
+    """One year's share of the area's events (placed or not) whose code is a garbage code of the GBD 2019 list
+    (`_garbage_levels`), at every level and at each, of the whole source and of the ICD-10 chapter of the topic's codes:
+    what tells a coding shift from a change in the condition (the paper audits, 2026-10-14). A code the list does not
+    hold is not asserted useful: the list is a claim about its own codes."""
+    try:
+        levels = _garbage_levels()
+    except Exception as exc:  # noqa: BLE001 - no list: no rows, said
+        log(f"study: garbage codes: {type(exc).__name__}: {exc}")
+        return []
+    lv = np.array([levels.get(str(x or "").upper(), -1) for x in code])
+    anc = _icd_ancestors()
+    topic = [str(c).upper() for c in (it.source or {}).get("codes") or []]
+    chapters = {anc[c[:3]][-1] for c in topic if anc.get(c[:3])}          # (code, label) of the outermost ancestor
+    scopes = [("every event of the source", np.ones(len(code), bool))]
+    for a, a_label in sorted(chapters):
+        inside = np.array([any(x == a for x, _ in anc.get(str(c or "")[:3], [])) for c in code], dtype=bool)
+        scopes.append((f"{a_label} ({a})", inside))
+    out = []
+    cite = "GBD 2019 list, Johnson et al. 2021, pegasus_data garbage_codes"
+    for name, m in scopes:
+        tot = float(n[m].sum())
+        if tot <= 0:
+            continue
+        for which, sel in [("every level", lv >= 0), *((f"level {k}", lv == k) for k in (1, 2, 3, 4)),
+                           ("level not given by the list", lv == 0)]:
+            k = float(n[m & sel].sum())
+            out.append({"dataset": it.dataset, "field": None, "label": name, "year": year,
+                        "indicator": f"garbage codes on {column}, {which} ({cite})", "numerator": k,
+                        "denominator": tot, **_proportion(k, tot)})
     return out
 
 
@@ -4038,6 +4113,13 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "(exact intervals) and Pearson's chi-square (11 degrees of freedom).",
         "Case mix: every recorded variable of the events, as counts and shares with Clopper-Pearson intervals, per year "
         "and over the period; 'not recorded' and 'value missing' are values, kept.",
+        "Race: each declared race's standardised ratio (descriptive.parquet, per 'standardised ratio, race ...'): its "
+        "events against those expected of its population at the field's own age-sex rates of each year (indirect "
+        f"standardisation), the populations by race of pegasus_data's population account ({tools_race_population()}: "
+        "municipal population by single age, sex and race, with intervals); events of no recorded race are in no ratio, "
+        "so a race recorded on few events (SIH before 2020) gives ratios that measure its recording.",
+        f"Persons (persons.parquet): the cohort scan reads the study's last {PERSON_YEARS} years whose link runs are "
+        "stored; a year that cannot be scanned is listed in provenance.json's products_gaps.",
         "Municipalities (places.parquet; boundaries in municipalities.geojson, IBGE's mesh): crude rates; the "
         "standardised ratio against the area's own age-sex rates of each year (indirect standardisation, 1 for the "
         "area by construction) and against Brazil's, each with its exact interval, the expectation fixed, and over the "
@@ -4054,7 +4136,9 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "ICD-10 ancestor of its codes (its group, its chapter) and of the whole source, in the area, placed or not, with "
         "Clopper-Pearson intervals.",
         "Completeness (quality.parquet): the share of the events placed by residence, sex and age, every reason the "
-        "rest were not, the share of ill-defined causes (R00-R99), each variable's share not recorded (the codes "
+        "rest were not, the share of ill-defined causes (R00-R99) and of garbage codes (the GBD 2019 list, Johnson et al. "
+        "2021, every level and by level, of the source and of the topic's ICD-10 chapter), each variable's share not "
+        "recorded (the codes "
         "pegasus_data declares missing for that column), a column with one value on every record, and, for SIM and "
         "SINASC, the system's coverage of the state's events by year (pegasus_data system_completeness), with exact "
         "intervals."]
@@ -4147,6 +4231,13 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
               f"{time.strftime('%Y-%m-%d')}. scope.yml says what was read and why and what was left out; provenance.json "
               "every step and its time; README.md every table's columns; study.duckdb every table as a table of its "
               "own; figures.parquet what each figure shows; municipalities.geojson the places' boundaries."])]
+
+
+def tools_race_population() -> str:
+    """The population account the race ratios read (`tools.RACE_POPULATION`)."""
+    from . import tools
+
+    return gateway.TENSOR.get(tools.RACE_POPULATION, (tools.RACE_POPULATION,))[0]
 
 
 def _methods_markdown(decl: Declaration, scope: Scope, desc: list[dict], linkage: list[dict] | None = None) -> str:
@@ -4742,11 +4833,20 @@ def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: d
     period = f"{decl.years[0]}-{decl.years[-1]}"
     out: list[dict] = []
     left: list = []
+    spec_of = gateway.declared_fields()
     for entry in gateway.rated(scope.contexts, left):
         name = gateway.context_name(entry)
+        numerators, _, over, declared = gateway._context_entry(entry)
+        spec = spec_of.get(numerators[0]) or {}
+        about = {"unit": spec.get("unit"), "over": "residents" if over == "population" else over,
+                 "source": spec.get("source"), "what": " ".join(str(spec.get("what") or "").split()) or None,
+                 "declared_years": ", ".join(str(x) for x in declared)}
         for y in [*decl.years, None]:
+            window = list(decl.years) if y is None else [int(y)]
+            inside = [x for x in declared if window[0] <= x <= window[-1]]
+            read = inside or [min(declared, key=lambda x: (abs(x - window[-1]), -x))] if declared else []
             try:
-                v, _ = gateway.context_value(entry, list(decl.years) if y is None else [int(y)], arr)
+                v, _ = gateway.context_value(entry, window, arr)
             except Exception as exc:  # noqa: BLE001 - a context without data for a year: no row, said
                 log(f"study: context {name} {y or period}: {type(exc).__name__}: {exc}")
                 continue
@@ -4754,7 +4854,8 @@ def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: d
                 nm = names.get(str(u)) or {}
                 out.append({"context": name, "u": u, "municipality": nm.get("name"), "state": nm.get("uf_sigla"),
                             "year": None if y is None else int(y), "period": period if y is None else None,
-                            "value": float(val) if np.isfinite(val) else None})
+                            "value": float(val) if np.isfinite(val) else None,
+                            "read_from": ", ".join(str(x) for x in read) or None, **about})
     for name_, why in left:
         log(f"study: context {name_} left out: {why}")
     return out
@@ -5075,6 +5176,76 @@ def _series_figure(out: Path, sv, f, label: str, it: Item, session=None) -> str 
     fig.savefig(figs / name)
     plt.close(fig)
     return f"figures/{name}"
+
+
+def _rate_figure(out: Path, field_id: str, desc: list[dict], trends: list[dict]) -> dict | None:
+    """A count field's rates as a paper draws them: (a) the directly standardised rate per year with its 95 % interval,
+    for the study's whole and its references (Brazil, the region without the area), the whole's average annual percent
+    change from the joinpoint model in the legend; (b) the rates by age band of each sex over the period, on a log
+    scale. Drawn from descriptive.parquet and trends.parquet, so every point is a row there."""
+    import hashlib
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    whole = _whole()[0]
+    rows = [r for r in desc if r["field"] == field_id and r.get("per") == "100,000 person-years"]
+    series: dict[str, list[dict]] = {}
+    for r in rows:
+        if r.get("year") is not None and r.get("stratum") is None and r.get("standardised_per_100k") is not None \
+                and (r["level"] == whole or (r["level"] == "reference" and (r["unit"] == "BR" or
+                                                                           str(r["unit"]).endswith("without the area")))):
+            name = "the area" if r["level"] == whole and whole == "area" else                 "Brazil" if r["unit"] == "BR" else str(r["unit"]).split(" ", 1)[-1]
+            series.setdefault(name, []).append(r)
+    if not series:
+        return None
+    label, dataset = rows[0]["label"], rows[0]["dataset"]
+    aapc = next((t for t in trends if t["field"] == field_id and t["level"] == whole and t.get("stratum") is None
+                 and t.get("model") == "joinpoint: standardised rate" and t.get("segment") == "AAPC"), None)
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(11, 3.8), dpi=110)
+    for name, rs in series.items():
+        rs = sorted(rs, key=lambda r: r["year"])
+        x = [r["year"] for r in rs]
+        y = [r["standardised_per_100k"] for r in rs]
+        lo = [r.get("standardised_low") or v for r, v in zip(rs, y, strict=True)]
+        hi = [r.get("standardised_high") or v for r, v in zip(rs, y, strict=True)]
+        text = name
+        if aapc is not None and name == ("the area" if whole == "area" else "Brazil"):
+            text += f" (AAPC {aapc['apc']:.1f} %, {aapc['apc_low']:.1f} to {aapc['apc_high']:.1f})"
+        ax.plot(x, y, "o-", lw=1.5, ms=3, label=text)
+        ax.fill_between(x, lo, hi, alpha=0.2)
+    ax.set_ylabel("standardised rate per 100,000")
+    ax.set_title("(a) directly standardised rate, 95 % interval", fontsize=9)
+    ax.legend(fontsize=7, frameon=False)
+    for sx in ("male", "female"):
+        rs = [r for r in rows if r["level"] == whole and r.get("year") is None
+              and str(r.get("stratum") or "").startswith(f"sex: {sx}, age ")]
+        if not rs:
+            continue
+        bands = [str(r["stratum"]).split(", age ")[1] for r in rs]
+        y = [r.get("rate") or np.nan for r in rs]
+        lo = [r.get("rate_low") or np.nan for r in rs]
+        hi = [r.get("rate_high") or np.nan for r in rs]
+        pos = np.arange(len(bands))
+        bx.plot(pos, y, "o-", lw=1.5, ms=3, label=sx)
+        bx.fill_between(pos, lo, hi, alpha=0.2)
+        bx.set_xticks(pos, bands, rotation=60, fontsize=7)
+    bx.set_yscale("log")
+    bx.set_ylabel("rate per 100,000 person-years")
+    bx.set_title("(b) by age band and sex over the period, exact 95 %", fontsize=9)
+    bx.legend(fontsize=7, frameon=False)
+    fig.suptitle(f"{label} — {dataset}", fontsize=9)
+    fig.tight_layout()
+    (out / "figures").mkdir(exist_ok=True)
+    name = f"{_slug(dataset)}_{hashlib.sha1(field_id.encode()).hexdigest()[:8]}_rates.png"
+    fig.savefig(out / "figures" / name)
+    plt.close(fig)
+    return {"file": f"figures/{name}", "kind": "rates", "field": field_id, "label": label, "dataset": dataset,
+            "shows": "(a) the standardised rate per year with its 95 % interval for the whole and its references, the "
+                     "whole's AAPC (joinpoint) in the legend; (b) the rates by age band of each sex over the period, log "
+                     "scale; every point a row of descriptive.parquet"}
 
 
 def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict, population: str = "") -> str | None:
@@ -5584,6 +5755,9 @@ COLUMNS = {
     "joinpoints": "the number of joinpoints chosen (Kim's permutation tests)",
     "joinpoint_years": "the years the joinpoints fall on",
     "joinpoint_p": "the permutation p of the last test of the sequence (empty when no test could be made)",
+    "fitted_first": "a joinpoint segment's fitted rate per 100,000 at its first year (the fitted line is straight on the "
+                    "log scale between fitted_first and fitted_last)",
+    "fitted_last": "its fitted rate per 100,000 at its last year",
     "ratio_to_brazil": "the standardised rate over Brazil's of the same year (or period) and stratum",
     "ratio_to_brazil_low": "its lower 95 % bound (log scale, the two gamma variances; conservative: Brazil includes the "
                            "area)",
@@ -5606,9 +5780,10 @@ COLUMNS = {
                               "months against their days",
     "seasonality_f": "the period's joint F statistic of the twelve month effects (11 and the residual degrees of freedom)",
     "seasonality_p": "its p",
-    "peak_month": "one harmonic's peak, in months from the start of January (0.5 its middle, 11.5 December's)",
-    "peak_month_low": "its lower 95 % bound (delta method)",
-    "peak_month_high": "its upper 95 % bound",
+    "peak_day": "one harmonic's peak as a day of the year (1 = 1 January, 182 = 1 July)",
+    "peak_day_low": "its lower 95 % bound (delta method; may fall before day 1 or after 365: it wraps around the year)",
+    "peak_day_high": "its upper 95 % bound",
+    "peak_date": "the peak day as a date",
     "peak_to_trough": "one harmonic's peak-to-trough rate ratio",
     "peak_to_trough_low": "its lower 95 % bound (delta method)",
     "peak_to_trough_high": "its upper 95 % bound",
@@ -5617,8 +5792,15 @@ COLUMNS = {
     "standard.parquet:age_band": "the age band",
     "standard.parquet:weight": "the cell's weight (the weights of a standard sum to 1)",
     "contexts.parquet:context": "the context (pegasus_data's declared field over its declared denominator)",
-    "contexts.parquet:value": "its value in the municipality and year (or over the period); empty when the source holds "
-                              "none",
+    "contexts.parquet:value": "its value in the municipality and year (or over the period): the numerator in `unit` "
+                              "over `over` (one per person where `over` is residents); empty when the source holds none",
+    "contexts.parquet:read_from": "the year(s) of the source the value was read from: a field held in some years only (a "
+                                  "census) gives its nearest year, so its value repeats",
+    "contexts.parquet:unit": "the numerator's unit (pegasus_data's declaration)",
+    "contexts.parquet:over": "the denominator: residents, or another declared field",
+    "contexts.parquet:source": "the source pegasus_data reads it from",
+    "contexts.parquet:what": "what the field is, as pegasus_data declares it",
+    "contexts.parquet:declared_years": "the years the source holds",
     "sources.parquet:dataset": "the source (pegasus_data's name for it)",
     "sources.parquet:listed": "whether the catalog's last listing of the server holds the file",
     "sources.parquet:path": "the file's path on the DATASUS server",
@@ -5650,7 +5832,7 @@ COLUMNS = {
     "codes.parquet:proportion_low": "its lower 95 % bound (Clopper-Pearson)",
     "codes.parquet:proportion_high": "its upper 95 % bound",
     "figures.parquet:file": "the figure's file in the folder",
-    "figures.parquet:kind": "series or map",
+    "figures.parquet:kind": "series, map or rates",
     "figures.parquet:shows": "what the figure draws",
     "quality.parquet:period": "the period of a whole-period row (empty for a year's row): never sum the two",
     "rate_high": "upper 95 % bound, as rate_low",
