@@ -860,6 +860,12 @@ def season_departure(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
     return out
 
 
+#: the lenses a question names, by name: the one way `tools.Session.scan` reaches a lens, so every code key that runs
+#: one covers them all (a lens found by its name at run time was in no key)
+LENSES = {"spatial_cluster": spatial_cluster, "space_time": space_time, "outbreak": outbreak,
+          "change_point": change_point, "trend_divergence": trend_divergence, "season_departure": season_departure}
+
+
 def mean_ref(b: np.ndarray, diff: np.ndarray) -> np.ndarray:
     """The reference trend the contrast was taken against (β less the contrast)."""
     return b - diff

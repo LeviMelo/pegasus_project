@@ -18,16 +18,25 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 
+def keyless(fn):
+    """A definition no stored result depends on (storage, paths, versions, devices, the keys' own machinery): `code_key`
+    neither hashes nor follows it, so mending the plumbing re-keys nothing. Declared, never inferred; a module whose
+    every definition is so says ``__keyless__ = True`` (store)."""
+    return fn
+
+
 #: the years of the production fits and readings (the dependency map reads their calibration; a declared column whose
 #: years end before them is read by none)
 FIT_YEARS = list(range(2010, 2024))
 
+@keyless
 def home() -> Path:
     path = Path(os.environ.get("PEGASUS_HOME", REPO / "pegasus_home"))
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
+@keyless
 def data_root() -> str:
     return os.environ.get("PEGASUS_DATA_ROOT", "C:/Users/Galaxy/pegasus_core_data")
 
@@ -37,6 +46,7 @@ def data_root() -> str:
 os.environ.setdefault("PEGASUS_DATA_HOME", data_root())
 
 
+@keyless
 def population_root() -> str:
     return os.environ.get("PEGASUS_POPULATION_ROOT",
                           "C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home")
@@ -96,6 +106,7 @@ def population_pinned() -> str | None:
     return os.environ.get("PEGASUS_POPULATION") or None
 
 
+@keyless
 @lru_cache(maxsize=1)
 def code_version() -> str:
     """This repository's commit, plus ``+dirty`` when the tree has changes: recorded in manifests and the ledger,
@@ -103,18 +114,23 @@ def code_version() -> str:
     return _git_version(REPO)
 
 
+@keyless
 def code_key(*entries: object) -> str:
     """The version of the code an artefact is a function of (ARCHITECTURE §11.3): a hash of the source of ``entries``
     (functions, classes, methods, or ``"module:qualname"``) and of everything in this package they reach, read from
     the syntax tree without comments or docstrings. A name reaches its definition (function, class, module constant,
     through imports, local ones included); ``module.name`` reaches that module's definition; ``x.name`` on any other
-    object reaches every method or class attribute of that name in the package (sound without types: it may include
-    more than is called, never less). A class reached by name brings its body without its ordinary methods. So an edit
-    re-keys exactly the artefacts whose code it can change, where the repository's commit re-keyed every artefact on
-    every commit."""
+    object reaches every method of that name in the package, unless the name is ambiguous, one the builtin types or the
+    array libraries also carry (``add``, ``get``, ``lower``, ``rank``): then only the method of the classes the closure
+    reaches (by name, a base or a subclass). ``set.add`` had reached the lead register's ``add``, and a counting
+    function's key held the solver, the register and the ledger, 574 definitions (the review of the gateway,
+    2026-10-14); restricting every name, a cold study's audit found `questions.ask` running 231 functions its key lacked.
+    A class reached by name brings its body without its ordinary methods; a `keyless` definition is neither hashed nor
+    followed. Checked by running: `key_audit_start` records any function a keyed computation runs that its key lacks."""
     return _code_key(tuple(e if isinstance(e, str) else f"{e.__module__}:{e.__qualname__}" for e in entries))
 
 
+@keyless
 @cache
 def _code_key(entries: tuple[str, ...]) -> str:
     known = _known_keys()
@@ -136,6 +152,7 @@ class StaleCode(RuntimeError):
     """A process asked for the key of code it no longer runs (the sources were edited after it started)."""
 
 
+@keyless
 def _sources_state() -> str:
     """The package's sources as they stand (each file's path, size and modification time): what a code key is a
     function of, read in milliseconds where parsing and dumping every syntax tree took 42 s of a one-state scope's
@@ -152,6 +169,7 @@ def _sources_state() -> str:
 _STATE_AT_IMPORT = _sources_state()
 
 
+@keyless
 @cache
 def _known_keys() -> dict:
     import json
@@ -164,6 +182,7 @@ def _known_keys() -> dict:
     return {"path": path, "keys": keys}
 
 
+@keyless
 def _save_keys(known: dict) -> None:
     """The keys of this state of the sources, written whole and atomically (lanes compute them concurrently: a lost
     write is a key computed again, never a wrong one). Another state's file is removed only when a week old: a lane of
@@ -187,6 +206,7 @@ def _save_keys(known: dict) -> None:
         pass
 
 
+@keyless
 def _computed_key(entries: tuple[str, ...]) -> str:
     idx = _code_index()
     h = hashlib.sha256()
@@ -196,6 +216,7 @@ def _computed_key(entries: tuple[str, ...]) -> str:
     return h.hexdigest()[:16]
 
 
+@keyless
 @cache
 def code_closure(entries: tuple[str, ...]) -> frozenset[tuple[str, str]]:
     """The definitions `code_key` hashes for ``entries`` ("module:qualname" each)."""
@@ -204,20 +225,40 @@ def code_closure(entries: tuple[str, ...]) -> frozenset[tuple[str, str]]:
     idx = _code_index()
     seen: set[tuple[str, str]] = set()
     todo = [tuple(e.split(":", 1)) for e in entries]
+    pending: set[str] = set()                     # attribute names met on objects of no known class
+    classes: set[tuple[str, str]] = set()         # the classes reached, with their bases and subclasses
+
+    def reach(c: tuple[str, str]) -> None:
+        for k in idx.family(c):
+            if k not in classes:
+                classes.add(k)
+                todo.extend((k[0], f"{k[1]}.{a}") for a in pending if (k[0], f"{k[1]}.{a}") in idx.nodes)
+
     while todo:
         item = todo.pop()
-        if item in seen:
+        if item in seen or item in idx.keyless:
             continue
         node = idx.nodes.get(item)
         if node is None:
             raise LookupError(f"code_key: no definition of {item[0]}:{item[1]} in the package")
         seen.add(item)
+        if isinstance(node, ast.ClassDef):
+            reach(item)
+        elif "." in item[1] and (item[0], item[1].split(".")[0]) in idx.nodes:
+            reach((item[0], item[1].split(".")[0]))      # a method reached by name: its class is
         module = item[0]
         local = dict(idx.aliases[module])
         for n in ast.walk(node):
             if isinstance(n, ast.ImportFrom):
                 local.update(_import_aliases(n, module, idx.modules))
         for n in ast.walk(node):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "hasattr")                     and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str):
+                part = n.args[1].value              # an attribute named by a literal: x.part in another spelling
+                if part not in idx.ambiguous:
+                    todo.extend(idx.members.get(part, ()))
+                elif part not in pending:
+                    pending.add(part)
+                    todo.extend(k for k in idx.members.get(part, ()) if (k[0], k[1].split(".")[0]) in classes)
             if isinstance(n, ast.Name):
                 todo.extend(idx.resolve(module, n.id, local))
             elif isinstance(n, ast.Attribute):
@@ -245,13 +286,18 @@ def code_closure(entries: tuple[str, ...]) -> frozenset[tuple[str, str]]:
                             todo.append((c[0], f"{c[1]}.{chain[0]}"))
                     chain = chain[1:]
                 for part in chain:
-                    todo.extend(idx.members.get(part, ()))
+                    if part not in idx.ambiguous:
+                        todo.extend(idx.members.get(part, ()))
+                    elif part not in pending:
+                        pending.add(part)
+                        todo.extend(k for k in idx.members.get(part, ()) if (k[0], k[1].split(".")[0]) in classes)
     return frozenset(seen)
 
 
 _EXTERNAL = object()
 
 
+@keyless
 def _import_aliases(n, module: str, modules: set[str]) -> dict[str, object]:
     """The names an ``import`` statement binds: a package module (its dotted name), a package definition
     ((module, name)), or `_EXTERNAL`."""
@@ -282,6 +328,7 @@ def _import_aliases(n, module: str, modules: set[str]) -> dict[str, object]:
 _PACKAGES: set[str] = set()
 
 
+@keyless
 @cache
 def _code_index():
     """Every definition of the package, by (module, qualname), with its syntax tree and its dump."""
@@ -298,6 +345,12 @@ def _code_index():
         files[".".join(parts)] = path
     modules = set(files)
     nodes, dumps, aliases, members = {}, {}, {}, {}
+    keyless_: set[tuple[str, str]] = set()
+    keyless_modules: set[str] = set()
+
+    def declared_keyless(node) -> bool:
+        return any((isinstance(d, ast.Name) and d.id == "keyless") or (isinstance(d, ast.Attribute) and d.attr == "keyless")
+                   for d in getattr(node, "decorator_list", []))
 
     def strip(node):
         body = getattr(node, "body", None)
@@ -312,6 +365,10 @@ def _code_index():
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 strip(n)
         aliases[module] = {}
+        whole = any(isinstance(s, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__keyless__" for t in s.targets)
+                    and isinstance(s.value, ast.Constant) and s.value.value is True for s in tree.body)
+        if whole:
+            keyless_modules.add(module)
         stmts = list(tree.body)
         while stmts:
             s = stmts.pop(0)
@@ -321,6 +378,8 @@ def _code_index():
                 aliases[module].update(_import_aliases(s, module, modules))
             elif isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 nodes[(module, s.name)] = s
+                if whole or declared_keyless(s):
+                    keyless_.add((module, s.name))
             elif isinstance(s, ast.ClassDef):
                 head = ast.ClassDef(name=s.name, bases=s.bases, keywords=s.keywords, decorator_list=s.decorator_list,
                                     type_params=getattr(s, "type_params", []),
@@ -366,10 +425,25 @@ def _code_index():
                     todo.append(y)
         return tuple(out)
 
+    keyless_ |= {k for k in nodes if k[0] in keyless_modules}
+    # the attribute names an object outside the package also answers to: a call of one may be on a dict, a set, a
+    # string, an array or a table as well as on a package object
+    ambiguous: set[str] = set()
+    for t in (dict, list, set, frozenset, str, bytes, tuple, int, float):
+        ambiguous |= set(dir(t))
+    for module_, names_ in (("numpy", ("ndarray", "generic")), ("pyarrow", ("Table", "Array", "ChunkedArray", "Schema")),
+                            ("pandas", ("DataFrame", "Series", "Index")), ("torch", ("Tensor",))):
+        try:
+            lib = __import__(module_)
+        except ImportError:
+            continue
+        for n in names_:
+            ambiguous |= set(dir(getattr(lib, n, None)))
     return SimpleNamespace(nodes=nodes, dumps=dumps, aliases=aliases, members=members, modules=modules,
-                           resolve=resolve, family=family)
+                           resolve=resolve, family=family, keyless=frozenset(keyless_), ambiguous=frozenset(ambiguous))
 
 
+@keyless
 @lru_cache(maxsize=1)
 def data_version() -> str:
     """The data version in every artefact key: pegasus_data's package version, until it
@@ -381,6 +455,7 @@ def data_version() -> str:
     return importlib.metadata.version("pegasus_data")
 
 
+@keyless
 @cache
 def resource_version(file: str) -> str:
     """The sha256 (12 characters) of one of pegasus_data's shipped resources, from its manifest:
@@ -395,12 +470,14 @@ def resource_version(file: str) -> str:
     return str(entry["sha256"])[:12]
 
 
+@keyless
 @lru_cache(maxsize=1)
 def data_code_version() -> str:
     """pegasus_data's version and commit, recorded in manifests and the ledger."""
     return f"{data_version()}@{_git_version(data_package_dir().parents[1])}"
 
 
+@keyless
 def data_package_dir() -> Path:
     """pegasus_data's package directory, found without importing it (only the gateway imports pegasus_data)."""
     import importlib.util
@@ -408,6 +485,7 @@ def data_package_dir() -> Path:
     return Path(importlib.util.find_spec("pegasus_data").origin).resolve().parent
 
 
+@keyless
 def _git_version(path: Path) -> str:
     try:
         head = subprocess.run(["git", "-C", str(path), "rev-parse", "--short", "HEAD"],
@@ -424,6 +502,7 @@ def _git_version(path: Path) -> str:
 DEVICE_BYTES_PER_CELL, DEVICE_FIXED_BYTES, DEVICE_SHARE = 400, 200 * 2**20, 0.6
 
 
+@keyless
 def device(cells: int | None = None) -> str:
     """Where a model computes: ``PEGASUS_DEVICE`` when set; else CUDA when the card is there and the block's estimated
     memory fits within `DEVICE_SHARE` of its free memory now, else the CPU. The same fit on CUDA is 1.4-1.75 times
@@ -441,6 +520,7 @@ def device(cells: int | None = None) -> str:
     return "cuda" if need <= DEVICE_SHARE * free else "cpu"
 
 
+@keyless
 def array_device() -> str:
     """Where the array work outside a model's fit runs (graph kernels, scans, the relation map's factors):
     ``PEGASUS_DEVICE`` when set, else CUDA when there is a card. Fixed for the process, so tensors made apart stay on
@@ -454,6 +534,7 @@ def array_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+@keyless
 def cuda_failed(exc: BaseException) -> bool:
     """Whether ``exc`` is the card failing (out of its memory, or a kernel error). If so this process computes on the
     CPU from now on: ``PEGASUS_DEVICE`` is set, so `device` and `array_device` answer the CPU, and the graph spectra
@@ -472,6 +553,7 @@ def cuda_failed(exc: BaseException) -> bool:
     return True
 
 
+@keyless
 def on_cpu_if_cuda_fails(fn, *args, **kwargs):
     """``fn(*args, **kwargs)``; if the card fails under it (`cuda_failed`), said, and once more on the CPU."""
     try:
@@ -485,9 +567,19 @@ def on_cpu_if_cuda_fails(fn, *args, **kwargs):
 
 
 def seed(*parts: object) -> int:
-    """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4)."""
-    digest = hashlib.blake2b("|".join(map(str, parts)).encode(), digest_size=8).digest()
+    """A deterministic 64-bit seed from (object, cell, purpose) (ARCHITECTURE §11.4). A part that is a key is read
+    without its code keys (`identity`): the draws of a model's randomised PIT followed its key's code, so an edit of
+    unrelated code drew new random numbers (2026-10-14)."""
+    digest = hashlib.blake2b("|".join(str(identity(p)) if isinstance(p, dict) else str(p) for p in parts).encode(),
+                             digest_size=8).digest()
     return int.from_bytes(digest, "little") & 0x7FFF_FFFF_FFFF_FFFF
+
+
+def identity(key: dict) -> dict:
+    """A stored artefact's key without its code keys (``code`` and every ``*_code``, at any depth): what the artefact is
+    of (its data, field, tier, reader), not the version of the code that made it."""
+    return {k: identity(v) if isinstance(v, dict) else v for k, v in key.items()
+            if not (k == "code" or str(k).endswith("_code"))}
 
 
 def supply_exponents() -> dict[str, float] | None:
@@ -495,3 +587,96 @@ def supply_exponents() -> dict[str, float] | None:
     (`facility.fit_supply`); unset: chosen."""
     raw = os.environ.get("PEGASUS_SUPPLY")
     return None if not raw else {k: float(v) for k, v in (kv.split(":") for kv in raw.split(","))}
+
+
+@keyless
+def key_audit_start(directory: str | Path) -> None:
+    """Record, for this process, every call of a package function made while a keyed function runs that its key's code
+    closure lacks (`code_closure`): an edit to such a definition would change a stored result without changing its key.
+    The keyed functions are the entries of every key recorded under ``code_keys`` (any source state); a nested function,
+    a comprehension or a dunder method counts as its enclosing definition. Written to ``directory/<pid>.json`` at exit.
+    Started at import when ``PEGASUS_KEY_AUDIT`` names a directory, so a study's lanes are audited too: run the tests or
+    a study on a scratch home with it, and keys are checked sound by what actually ran (ARCHITECTURE §11.3)."""
+    import atexit
+    import contextlib
+    import json
+    import sys
+    import threading
+    from collections import Counter
+
+    idx = _code_index()
+    names: set[str] = set()
+    for f in (home() / "code_keys").glob("*.json"):
+        with contextlib.suppress(OSError, ValueError):
+            names |= set(json.loads(f.read_text(encoding="utf-8")))
+    closure_of: dict[tuple[str, str], set] = {}
+    for name in names:
+        entries = tuple(name.split("|"))
+        try:
+            cl = code_closure(entries)
+        except LookupError:
+            continue
+        for e in entries:
+            closure_of.setdefault(tuple(e.split(":", 1)), set()).update(cl)
+    found: dict[str, Counter] = {}
+    paths: dict[str, dict[str, list]] = {}
+    calls: Counter = Counter()
+    local = threading.local()
+    package = __name__.rsplit(".", 1)[0]
+
+    def item_of(frame) -> tuple[str, str] | None:
+        module = frame.f_globals.get("__name__") or ""
+        if not module.startswith(package):
+            return None
+        qn = frame.f_code.co_qualname
+        if "<" in qn:
+            qn = qn.split(".<", 1)[0]
+            if not qn or qn.startswith("<"):
+                return None
+        if qn.rsplit(".", 1)[-1].startswith("__") and "." in qn:
+            qn = qn.rsplit(".", 1)[0]                    # a dunder method is in its class's dump
+        item = (module, qn)
+        return item if item in idx.nodes else None
+
+    def profile(frame, event, arg):
+        stack = getattr(local, "stack", None)
+        if stack is None:
+            stack = local.stack = []
+        if event == "call":
+            item = item_of(frame)
+            if item is None:
+                return
+            for entry, cl, top in stack:
+                if item not in cl and item not in idx.keyless:
+                    name = f"{item[0]}:{item[1]}"
+                    seen_ = found.setdefault(f"{entry[0]}:{entry[1]}", Counter())
+                    if name not in seen_:               # how it was reached: the package frames from the entry down
+                        path, f_ = [], frame
+                        while f_ is not None and f_ is not top:
+                            it = item_of(f_)
+                            if it is not None and (not path or path[-1] != f"{it[0]}:{it[1]}"):
+                                path.append(f"{it[0]}:{it[1]}")
+                            f_ = f_.f_back
+                        paths.setdefault(f"{entry[0]}:{entry[1]}", {})[name] = path[::-1]
+                    seen_[name] += 1
+            if item in closure_of:
+                calls[f"{item[0]}:{item[1]}"] += 1
+                stack.append((item, closure_of[item], frame))
+        elif event == "return" and stack and stack[-1][2] is frame:
+            stack.pop()
+
+    def write() -> None:
+        out = Path(directory)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f"{os.getpid()}.json").write_text(json.dumps(
+            {"entries_run": dict(calls), "missing": {k: dict(v) for k, v in found.items()}, "paths": paths}, indent=1,
+            sort_keys=True),
+            encoding="utf-8")
+
+    sys.setprofile(profile)
+    threading.setprofile(profile)
+    atexit.register(write)
+
+
+if os.environ.get("PEGASUS_KEY_AUDIT"):
+    key_audit_start(os.environ["PEGASUS_KEY_AUDIT"])

@@ -1095,7 +1095,10 @@ task, and replaces `update` and its plans.
 
 - **Content-addressed artefacts** under `PEGASUS_HOME` (`<kind>/<hash>/` with a manifest: key, code and data versions,
   time written). A stale artefact is never served: keys hash the syntax trees of the functions an artefact runs
-  (`config.code_key`).
+  (`config.code_key`), and only those: an ambiguous attribute name (one builtins and array libraries share) reaches the
+  methods of the classes the closure reaches, a lens is reached through its registry, plumbing is `keyless`, seeds
+  carry no code keys. That a key covers what runs is measured, not assumed (`config.key_audit_start` on a cold study);
+  a change of keys alone migrates the store (`pegasus-core keys`, ADR-0037).
 - **Pinning:** entries a study references are pinned while the study exists.
 - **Eviction:** reads stamp their entry; `gc` evicts the least recently read *cache* entries (gateway reads, assembled
   blocks) to a budget; fits, results and registers are never evicted; pinned entries never.

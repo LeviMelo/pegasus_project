@@ -340,6 +340,54 @@ def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g.
 
 
 @app.command()
+def keys(action: str = typer.Argument(..., help="snapshot, migrate or window"),
+         path: str = typer.Argument(..., help="snapshot: the file to write; migrate: the snapshot taken before"),
+         apply: bool = typer.Option(False, help="migrate: move the entries (default: count them only)")) -> None:
+    """The code keys of every entry recorded under code_keys, and the store migrated between two snapshots: run
+    ``snapshot`` on the code before a change that alters what keys cover but no result (keys narrowed, plumbing made
+    keyless, code moved), then ``migrate`` with it on the code after: every stored artefact keyed by an old key is
+    re-addressed to the new one instead of being computed again (`store.migrate`)."""
+    from pathlib import Path
+
+    from . import config, store
+
+    def current() -> dict[str, str]:
+        names: set[str] = set()
+        for f in (config.home() / "code_keys").glob("*.json"):
+            try:
+                names |= set(json.loads(f.read_text(encoding="utf-8")))
+            except ValueError:
+                continue
+        out = {}
+        for name in sorted(names):
+            try:
+                out[name] = config._computed_key(tuple(name.split("|")))
+            except LookupError:
+                continue                    # an entry no longer defined: its artefacts are stale already
+        return out
+
+    if action == "window":
+        # the code-key values of a change of keys alone, before and after: reads that miss adopt entries keyed by them
+        # (``PEGASUS_ADOPT``, `store._entry`)
+        values = sorted(set(json.loads(Path(path).read_text(encoding="utf-8")).values()) | set(current().values()))
+        out = Path(path).with_name(Path(path).stem + "_window.json")
+        out.write_text(json.dumps(values), encoding="utf-8")
+        print(f"{len(values)} code-key values written to {out}: set PEGASUS_ADOPT to it while the studies run")
+        return
+    if action == "snapshot":
+        keys_now = current()
+        Path(path).write_text(json.dumps(keys_now, indent=1, sort_keys=True), encoding="utf-8")
+        print(f"{len(keys_now)} entries' keys written to {path}")
+        return
+    if action != "migrate":
+        raise typer.BadParameter("snapshot or migrate")
+    before, after = json.loads(Path(path).read_text(encoding="utf-8")), current()
+    mapping = {old: after[name] for name, old in before.items() if name in after and after[name] != old}
+    print(f"{len(mapping)} of {len(before)} entries' keys changed")
+    store.migrate(mapping, dry_run=not apply)
+
+
+@app.command()
 def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = typer.Argument(..., help="DATASET:EVENT:NODE"),
             years: str = Years, q: float = 0.05, lags: int = 2, grain: str = typer.Option("year", help="year or month"),
             window: str = typer.Option(None, help="first,last period label, e.g. 201401,201712"),

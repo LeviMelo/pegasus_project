@@ -637,8 +637,8 @@ class Session:
             from . import departures
             return departures.step(s, self.ledger, **kw)
         if lens in ("outbreak", "change_point"):
-            return getattr(lenses, lens)(s, self.ledger, **kw)
-        fn = getattr(lenses, lens)
+            return lenses.LENSES[lens](s, self.ledger, **kw)
+        fn = lenses.LENSES[lens]
         if "q" in kw and "q" not in inspect.signature(fn).parameters:      # the scans name their level alpha
             kw["alpha"] = kw.pop("q")
         if lens in ("space_time", "spatial_cluster") and "spectrum" not in kw and s.extras.get("kind") != "mark":

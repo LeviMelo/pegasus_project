@@ -306,6 +306,23 @@ Dependency exceptions: `update` and `scans/cohort` import `pegasus_data` directl
 
 ## 8. What works, what is partial, what is broken
 
+**The review's structural agenda (2026-10-14).** Nine area reviews (`data/handoffs/review-*.md`, 244 findings) ended
+each with a "Structure" section: the system-level changes the findings point to. The findings were fixed in rounds
+(`fix-*.md` say what each left); of the structure, done: one sequential Monte Carlo helper, answers stored per (field,
+question), the unreachable scan code deleted, depth presets as axes, guarded products, one labelling-table decision
+(pegasus_data ADR-0179), a read that never downloads (ADR-0176), keys that cover what a result depends on (ADR-0037:
+measured by running a cold study under `config.key_audit_start`; a counting function's key 574 definitions -> 88; the
+old keys had never covered the lens that made a stored answer; plumbing keyless, seeds free of code keys, a change of
+keys alone adopted on request). Not done, in order: the gateway's nine readers as one template with one cached store
+(single flight); the study folder as one schema (measure x stratum x geography x period x comparator, one interval
+and unit convention, the codebook generated from it) instead of a table per audit; studies of other sources (SINAN,
+SINASC, SIA) audited as the AMI one was; then per area: query (one catalog snapshot, the planner's read plan, render by
+vintage window), linkage (one role-table service, one placebo and verdict, run fingerprints, entities as components),
+semantics (a curation epoch, typing in declarations, event reading in one function), statistics (one error-control
+layer, a reader-aware evidence grid), study (one field list, one step-key constructor, per-item replication once),
+intake (one transport).
+
+
 Measured 2026-10-10 in the capability assessment (machine shared with the overnight SIM job) and by reading the code. "Works" means ran and produced plausible output when exercised.
 
 **Works**
