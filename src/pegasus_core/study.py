@@ -43,16 +43,23 @@ RELATIONS = ("fields", "contexts", "screen")
 #: every depth is a preset of the declaration's own choices (author, 2026-10-12: choices a person understands, not
 #: budgets); a key the declaration sets overrides its depth's. ``download`` in gigabytes (years in the lake are free),
 #: ``related`` a count of related codes read strongest first (each wherever recorded), ``draws`` plausible link sets for the persons
+#: A depth cuts along the axes a study's time multiplies by (the review of the study, 2026-10-14: the lens passes are
+#: 75-90 % of a lane, and the presets had switched only the fields and the replication): the fields read (readers,
+#: related), the questions asked of each (None: all), the replicate null worlds of every Monte Carlo test (`NULLS`),
+#: the per-item passes (triage and corroboration; the later years' replication; the persons).
 PRESETS = {
     "survey": {"readers": [], "related": 0, "relations": ["fields"], "chapters": False, "persons": False,
-               "replicate": False, "download": 2.0, "draws": 1, "related_questions": []},
+               "replicate": False, "download": 2.0, "draws": 1, "related_questions": [],
+               "questions": ["excess", "step", "trend", "cluster", "share"], "nulls": 0.25, "triage": False},
     "standard": {"readers": list(READERS), "related": 3, "relations": ["fields"], "chapters": False, "persons": False,
-                 "replicate": False, "download": 10.0, "draws": 1, "related_questions": []},
+                 "replicate": False, "download": 10.0, "draws": 1, "related_questions": [],
+                 "questions": None, "nulls": 1.0, "triage": True},
     "deep": {"readers": list(READERS), "related": 8, "relations": ["fields", "contexts"], "chapters": False,
-             "persons": True, "replicate": True, "download": 40.0, "draws": 10, "related_questions": []},
+             "persons": True, "replicate": True, "download": 40.0, "draws": 10, "related_questions": [],
+             "questions": None, "nulls": 1.0, "triage": True},
     "exhaustive": {"readers": list(READERS), "related": 20, "relations": list(RELATIONS), "chapters": False,
                    "persons": True, "replicate": True, "download": float("inf"), "draws": 20,
-                   "related_questions": []},
+                   "related_questions": [], "questions": None, "nulls": 4.0, "triage": True},
 }
 KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "questions",
         "nulls", *PRESETS["survey"]}
@@ -79,8 +86,9 @@ class Declaration:
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
-    questions: list[str] | None = None  # the questions asked of every field (None: all, `questions.QUESTIONS`)
-    nulls: float = 1.0                   # replicate null worlds per test, as a factor on each method's own (`NULLS`)
+    questions: list[str] | None = None  # the questions asked of every field (None: the depth's, `PRESETS`)
+    nulls: float | None = None           # replicate null worlds per test, a factor on each method's own (`NULLS`)
+    triage: bool | None = None           # every answer triaged and corroborated (None: the depth's)
     # the choices each depth presets (`PRESETS`), None where the declaration leaves them to its depth (`choice`)
     readers: list[str] | None = None     # the field kinds read beyond counts (`READERS`)
     related: float | list | None = None  # how many related codes are read as fields of their own, strongest first, or which
@@ -186,8 +194,9 @@ def load(path: str | Path) -> Declaration:
         v = doc.get(k)
         if v is not None and (not isinstance(v, list) or set(v) - set(allowed)):
             problems.append(f"{k} {v!r}: a list among {', '.join(allowed)}")
-    nulls = doc.get("nulls", "standard")
-    if not (nulls in NULLS or (isinstance(nulls, (int, float)) and nulls > 0)):
+    nulls = doc.get("nulls")
+    if nulls is not None and not (isinstance(nulls, str | int | float) and not isinstance(nulls, bool)
+                                  and (nulls in NULLS or (not isinstance(nulls, str) and nulls > 0))):
         problems.append(f"nulls {nulls!r}: {', '.join(NULLS)}, or a factor on each test's replicate null worlds")
     if doc.get("draws") is not None and (not isinstance(doc["draws"], int) or doc["draws"] < 1):
         problems.append(f"draws {doc['draws']!r}: how many plausible link sets the persons step averages over, 1 or more")
@@ -231,7 +240,8 @@ def load(path: str | Path) -> Declaration:
                        chapters=doc.get("chapters"), questions=doc.get("questions"), readers=doc.get("readers"),
                        relations=doc.get("relations"), persons=doc.get("persons"), replicate=doc.get("replicate"),
                        related_questions=doc.get("related_questions"),
-                       nulls=float(NULLS.get(nulls, nulls)) if nulls in NULLS or isinstance(nulls, (int, float)) else 1.0,
+                       nulls=(float(NULLS.get(nulls, nulls)) if nulls is not None else None),
+                       triage=doc.get("triage"),
                        draws=doc.get("draws"))
 
 
@@ -264,6 +274,7 @@ class Item:
     #: before investigation): counted and described, asked nothing, given no supports or linked shares
     count_only: bool = False
     q: float = 0.05                      # the study's false-discovery level, carried to the item's lane (`_plan`)
+    triage: bool = True                  # its answers triaged and corroborated (the depth's, `PRESETS`)
 
 
 @dataclass
@@ -515,15 +526,19 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
     # its estimate (the leptospirosis slice past its cap, 2026-10-13)
     item_steps = [m for m in marks if m.get("step") in ("later_years", "triage", "prospective")]
 
-    def per_item(dataset, years):
+    def per_item(dataset, years, steps):
+        # each step by what it scales with: years only where its mark recorded them (a triage mark has none, and a 46 s
+        # triage had been priced at ten times that for ten years: 30 of Alagoas's estimated minutes; the review of the
+        # study, 2026-10-14), places always
         total = 0.0
-        for step in ("later_years", "triage", "prospective"):
+        for step in steps:
             for pool in ([m for m in item_steps if m.get("step") == step and m.get("dataset") == dataset
                           and m.get("area") == area],
                          [m for m in item_steps if m.get("step") == step and m.get("dataset") == dataset],
                          [m for m in item_steps if m.get("step") == step]):
                 if pool:
-                    total += float(np.median([float(m["seconds"]) * len(years) / max(len(m.get("years") or [1]), 1)
+                    total += float(np.median([float(m["seconds"])
+                                              * (len(years) / max(len(m["years"]), 1) if m.get("years") else 1.0)
                                               * size(tuple(area or ())) / size(tuple(m.get("area") or ()))
                                               for m in pool]))
                     break
@@ -533,32 +548,45 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
     codes = [int(c) for c in gateway.municipality_names() if str(c).isdigit()]
     size = functools.cache(lambda area: max(int(config.in_area(codes, frozenset(area) if area else None).sum()), 1))
 
+    nulls = float(decl.choice("nulls"))
+
     def per_field(dataset, years):
         # a measurement scaled by years and by the places its area holds (a question's cost is per place and period:
-        # Rio Grande do Sul's 497 municipalities against Brazil's 5,570)
+        # Rio Grande do Sul's 497 municipalities against Brazil's 5,570), from marks at the study's replicate scale where
+        # there are any, else scaled by it (an upper bound: not every lens draws replicates; quick slices had priced
+        # standard studies at a quarter, the review of the study, 2026-10-14)
         for pool in ([m for m in asked if m.get("dataset") == dataset and m.get("area") == area],
                      [m for m in asked if m.get("dataset") == dataset],
                      [m for m in asked if m.get("area") == area], asked):
             if pool:
+                same = [m for m in pool if float(m.get("nulls") or 1.0) == nulls]
                 return float(np.median([float(m["seconds"]) * len(years) / max(len(m.get("years") or [1]), 1)
-                                        * size(tuple(area or ())) / size(tuple(m.get("area") or ())) for m in pool]))
+                                        * size(tuple(area or ())) / size(tuple(m.get("area") or ()))
+                                        * (1.0 if same else nulls / float(m.get("nulls") or 1.0))
+                                        for m in (same or pool)]))
         # nothing measured yet: the leptospirosis slice's ~390 fields' fits and questions in Rio Grande do Sul, 9 years,
         # took ~33 min (2026-10-12), about 5 s each, scaled the same way; replaced by the store's own once one ran
         return 5.0 * len(years) / 9 * size(tuple(area or ())) / size((43,))
     for it in items:
         if it.status != "in" or not it.years:
             continue
-        share = len(it.questions if it.questions is not None else decl.questions or QUESTIONS) / len(QUESTIONS)
-        try:
-            n = 1 + len(update.system_readers(_plan(it).systems[0], _plan(it), list(it.blocks)))
-        except Exception:  # noqa: BLE001 - a reader list that cannot be built here is built (and fails) in the run
-            n = 1
+        share = len(it.questions if it.questions is not None else decl.choice("questions") or QUESTIONS) / len(QUESTIONS)
+        if it.count_only:
+            share, n = 0.0, 1                       # a second coding: counted and described, asked nothing
+        else:
+            try:
+                n = 1 + len(update.system_readers(_plan(it).systems[0], _plan(it), list(it.blocks)))
+            except Exception:  # noqa: BLE001 - a reader list that cannot be built here is built (and fails) in the run
+                n = 1
         fit = 0.0
         for block in it.blocks:
             # the nearest stored fit: same dataset and block, the same area and event first, scaled by years and
             # places (a national fit of 14 years, 354 s, had priced each of Rio Grande do Sul's fields)
             same = [m for m in fits if m["key"].get("dataset") == it.dataset and m["key"].get("block") == block]
-            same = ([m for m in same if m["key"].get("area") == area and m["key"].get("event") == it.event]
+            item_codes = sorted((it.source or {}).get("codes") or [])
+            same = ([m for m in same if m["key"].get("area") == area and m["key"].get("event") == it.event
+                     and sorted((m["key"].get("args") or {}).get("codes") or []) == item_codes]
+                    or [m for m in same if m["key"].get("area") == area and m["key"].get("event") == it.event]
                     or [m for m in same if m["key"].get("area") == area] or same)
             if same:
                 m = max(same, key=lambda m: len(m["key"].get("years") or []))
@@ -571,8 +599,9 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
         # (`update._later_years`): priced by its own recorded seconds with the item's other steps (the leptospirosis
         # slice's later years, priced at nothing, took two thirds of its run, 2026-10-13). Doubling every field as
         # well counted it twice: Alagoas's infarction study was priced at 83 minutes and ran in 27 (2026-10-13)
-        replicating = decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2
-        steps = per_item(it.dataset, it.years) if replicating else 0.0
+        replicating = decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2 and not it.count_only
+        steps = per_item(it.dataset, it.years, (("triage",) if decl.choice("triage") and not it.count_only else ())
+                         + (("later_years", "prospective") if replicating else ()))
         it.est_seconds = round(n * (fit + per_field(it.dataset, it.years) * share) + steps, 1)
 
 
@@ -846,7 +875,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
     else:
         os.environ.pop("PEGASUS_AREA", None)
-    os.environ["PEGASUS_NULLS"] = str(decl.nulls)        # every test's replicate worlds (`config.replicates`)
+    os.environ["PEGASUS_NULLS"] = str(decl.choice("nulls"))   # every test's replicate worlds (`config.replicates`)
     items: list[Item] = []
     excluded: list[dict] = []
     served = set(gateway.event_datasets())
@@ -996,7 +1025,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # readers would read every event of the type against the population
         chosen = decl.choice("readers")
         it.readers = {} if it.source else {k: "all" for k in chosen if k != "linked"}
-        it.questions = decl.questions
+        it.questions = decl.choice("questions")
         coded = bool(it.source) and "codes" in it.source and not ({"population", "support"} & set(it.source))
         if coded and "supports" in chosen and not it.count_only:
             it.readers = {"supports": "all"}     # the code set at its other places
@@ -1048,8 +1077,9 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # read to relate it to the topic (`related_questions`, preset none): asked all eleven, 160 related fields made
         # the exhaustive scope's hours (2026-10-12)
         it.questions = ([] if it.count_only else decl.choice("related_questions") if it.reason.startswith("related code")
-                        else decl.questions)
+                        else decl.choice("questions"))
         it.q = float(decl.q)
+        it.triage = bool(decl.choice("triage"))
     overlap, fixed, per_field = _phase_record(decl)
     overhead = fixed + per_field * sum(i.fields for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
@@ -1516,6 +1546,12 @@ def run(decl: Declaration, log=print) -> Path:
         os.environ.pop("PEGASUS_AREA", None)
     out = folder_of(decl)
     out.mkdir(parents=True, exist_ok=True)
+    # this run's products only: an earlier run's report, provenance, README and figures had stood beside a killed run's
+    # new tables, and `body` read the old "every step ran" (the review of the study, 2026-10-14)
+    for old in ("report.html", "provenance.json", "README.md"):
+        (out / old).unlink(missing_ok=True)
+    if (out / "figures").exists():
+        shutil.rmtree(out / "figures", ignore_errors=True)
     shutil.copyfile(decl.path, out / "study.yml")
     phases, t = {}, time.time()
     scope = resolve(decl, log=log)
@@ -1543,7 +1579,7 @@ def run(decl: Declaration, log=print) -> Path:
             "seconds": round(time.time() - t0, 1), "phases": phases, "products_seconds": dict(products),
             "estimated_minutes": estimate,
             "code_version": config.code_version(), "data_version": config.data_version(), "store": prepared,
-            "steps": steps, "store_tables": tables}
+            "steps": steps, "store_tables": tables, "products_failed": dict(products.failed)}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     os.environ.pop("PEGASUS_MAX_DOWNLOAD", None)
     log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
@@ -1710,10 +1746,13 @@ def _lane_file(study_name: str, pid: int) -> Path:
 def _lane_left(study_name: str, seconds: float) -> None:
     """This lane's estimated seconds still to run, for the scheduler (`_run_items`), which ranks lanes by it."""
     path = _lane_file(study_name, os.getpid())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"left": float(seconds)}), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"left": float(seconds)}), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass        # an advisory for the scheduler: the parent reading it (Windows) must not fail the lane's items
 
 
 def _lanes_left(study_name: str) -> dict[int, float]:
@@ -1735,8 +1774,16 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
         os.environ["PEGASUS_DEVICE"] = device
     if threads:
         jobs.threads(threads)
+    import psutil
+
     steps = {}
+    parent = os.getppid()
     for k, it in enumerate(group):
+        if not psutil.pid_exists(parent):
+            # the study that started this lane is gone (killed, or relaunched on new code): its remaining items would
+            # write the register and the ledger with code that no longer runs (the review of the study, 2026-10-14)
+            print(f"study {decl_study}: the parent process {parent} is gone; this lane stops", flush=True)
+            break
         _lane_left(decl_study, sum(i.est_seconds or 0.0 for i in group[k:]))
         print(f"study {decl_study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}"
               + (f" [{device}]" if device else ""), flush=True)
@@ -1978,7 +2025,7 @@ def _plan(it: Item, others: list | None = None):
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
                                                               **it.readers)],
-                       relations=False, triage=True, report=None, questions=it.questions, q=it.q,
+                       relations=False, triage=it.triage, report=None, questions=it.questions, q=it.q,
                        # the held-out later years read prospectively as well: their events against fits on the years
                        # before (BPA for an outbreak), so an event of the later years is discovered, not only replicated;
                        # read retrospectively, B1 learns a statewide one as normal (Porto Alegre's 2024 floods were found
@@ -2018,11 +2065,23 @@ class _Lap(dict):
     def __init__(self):
         super().__init__()
         self._t = time.time()
+        self.failed: dict[str, str] = {}
 
     def __call__(self, name: str) -> None:
         now = time.time()
         self[name] = round(self.get(name, 0.0) + now - self._t, 1)
         self._t = now
+
+    def guard(self, name: str, fn, default, log):
+        """One product run in isolation: an exception is logged and recorded (`provenance.json`'s products_failed, which
+        `body` counts as a failed step), the product's empty ``default`` written, and the others still run. One late
+        error had dropped the report, the README and the provenance after hours of lanes (the review, 2026-10-14)."""
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - recorded and said, never silent
+            self.failed[name] = f"failed: {type(exc).__name__}: {exc}"
+            log(f"study: product {name} failed: {type(exc).__name__}: {exc}")
+            return default
 
 
 def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap | None = None) -> dict[str, str]:
@@ -2112,39 +2171,39 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     lap("fields: tables, figures, maps")
                     groups.extend(_groups(it, s, f, label, log))
                     lap("fields: groups")
-    related = _related(rows, series)
+    related = lap.guard("related", lambda: _related(rows, series), [], log)
     pq.write_table(_rows_table(related) if related else pa.table({"finding": pa.array([], pa.string())}),
                    out / "related.parquet")
     lap("related")
-    assoc = _associated(decl, scope, log)
+    assoc = lap.guard("associated", lambda: _associated(decl, scope, log), [], log)
     pq.write_table(_rows_table(assoc) if assoc else pa.table({"code": pa.array([], pa.string())}),
                    out / "associated.parquet")
     lap("associated")
     chosen = decl.choice("relations")
-    rel = _relations(scope, decl, log) if "fields" in chosen else []
+    rel = lap.guard("relations", lambda: _relations(scope, decl, log), [], log) if "fields" in chosen else []
     lap("relations")
-    rel += _determinants(scope, decl, log) if "contexts" in chosen else []
+    rel += lap.guard("determinants", lambda: _determinants(scope, decl, log), [], log) if "contexts" in chosen else []
     lap("determinants")
-    rel += _screen(scope, decl, log) if "screen" in chosen else []
+    rel += lap.guard("screen", lambda: _screen(scope, decl, log), [], log) if "screen" in chosen else []
     lap("screen")
     pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
-    _institution_facts(rows, log)
-    _institution_explains(rows)
+    lap.guard("institutions", lambda: (_institution_facts(rows, log), _institution_explains(rows)), None, log)
     lap("institutions")
-    persons = _persons(decl, scope, log) if decl.choice("persons") else []
+    persons = lap.guard("persons", lambda: _persons(decl, scope, log), [], log) if decl.choice("persons") else []
     lap("persons")
     pq.write_table(_rows_table(persons) if persons else pa.table({"outcome": pa.array([], pa.string())}),
                    out / "persons.parquet")
-    captured = _capture(decl, scope, log) if decl.choice("persons") else []
+    captured = lap.guard("capture", lambda: _capture(decl, scope, log), [], log) if decl.choice("persons") else []
     lap("capture")
     pq.write_table(_rows_table(captured) if captured else pa.table({"population": pa.array([], pa.string())}),
                    out / "capture.parquet")
-    profile = _context_profiles(decl, scope, rows, log)
+    profile = lap.guard("context profiles", lambda: _context_profiles(decl, scope, rows, log), [], log)
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
-    _stories([r for r in rows if r.get("class") == "signal" and "quality:" not in str(r.get("label"))])  # `story` saved
+    lap.guard("stories", lambda: _stories([r for r in rows if r.get("class") == "signal"
+                                           and "quality:" not in str(r.get("label"))]), None, log)  # `story` saved
     lap("stories")
     for r in rows:
         r.pop("_places", None)
@@ -2157,9 +2216,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     pq.write_table(_rows_table(groups) if groups else pa.table({"field": pa.array([], pa.string())}),
                    out / "groups.parquet")
     db = out / "study.duckdb"
-    if db.exists():
-        db.unlink()
-    con = duckdb.connect(str(db))
+    tmp_db = out / f"study.{os.getpid()}.duckdb.tmp"
+    tmp_db.unlink(missing_ok=True)
+    con = duckdb.connect(str(tmp_db))       # built aside, then moved in: a notebook holding the old one open had failed it
     for name, path in views.items():
         con.execute(f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{path}')")
     # the folder's own tables by absolute path: DuckDB reads a relative path from the reader's working directory, and
@@ -2174,14 +2233,20 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW capture AS SELECT * FROM read_parquet('{(out / 'capture.parquet').as_posix()}')")
     con.close()
+    try:
+        os.replace(tmp_db, db)
+    except PermissionError as exc:
+        lap.failed["tables"] = f"failed: study.duckdb is held open elsewhere ({exc}); the new one is {tmp_db.name}"
+        log(f"study: {lap.failed['tables']}")
     lap("tables")
-    hyp = _hypotheses(decl, scope)
+    hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
     pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
                    out / "hypotheses.parquet")
     lap("hypotheses")
-    _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons, captured)
+    lap.guard("report", lambda: _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons,
+                                        captured), None, log)
     lap("report")
-    _codebook(decl, scope, out)
+    lap.guard("codebook", lambda: _codebook(decl, scope, out), None, log)
     lap("codebook")
     return views
 
@@ -3929,9 +3994,11 @@ COLUMNS = {
     "effect_unit": "the unit of effect",
     "interval_low": "lower 95 % bound of effect where the method gives one (see ratio_low otherwise)",
     "interval_high": "upper 95 % bound of effect where the method gives one",
-    "q": "false-discovery-rate q value in its question family (Benjamini-Hochberg 1995); a scan's p comes from a Gumbel "
-         "tail fitted to its null replicates' maxima (200 replicates), so a q far below 1/200 is that tail extrapolated: "
-         "read it as beyond every replicate, not as a precise probability (1e-83 on a cluster, the review, 2026-10-13)",
+    "q": "false-discovery-rate q value in its question family (Benjamini-Bogomolov over the fields asked, then "
+         "Benjamini-Hochberg within each selected field); a scan's p comes from its null replicates drawn sequentially "
+         "(Besag & Clifford: up to 200 at the standard depth, scaled by the study's `nulls`), from a Gumbel tail fitted to "
+         "their maxima where none reached the observed: a q far below 1/200 is that tail extrapolated, read it as beyond "
+         "every replicate, not as a precise probability (1e-83 on a cluster, the review, 2026-10-13)",
     "family": "the multiple-testing family q is adjusted in",
     "methods": "the methods the question used",
     "class": "recording class: signal (a change in the events), system (a change in recording), noise",
@@ -4204,6 +4271,7 @@ def body(folder: str | Path) -> list[dict]:
     failed = [k for k, v in (prov.get("steps") or {}).items() if isinstance(v, dict) and "error" in v]
     failed += [f"{k}: {sub}" for k, v in (prov.get("steps") or {}).items() if isinstance(v, dict)
                for sub, w in v.items() if isinstance(w, str) and w.startswith("failed:")]
+    failed += [f"product {k}: {w}" for k, w in (prov.get("products_failed") or {}).items()]
     part("every step ran", bool(prov) and not failed, f"{len(prov.get('steps') or {})} steps, {len(failed)} failed"
          + (f": {failed[0][:80]}" if failed else ""))
     return out

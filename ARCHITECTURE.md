@@ -332,6 +332,13 @@ understands, not budgets). Each key the declaration sets overrides its depth's:
 | `replicate` (later years) | false | false | true | true |
 | `download` (GB) | 2 | 10 | 40 | unbounded |
 | `draws` | 1 | 1 | 10 | 20 |
+| `questions` (asked of every field) | excess, step, trend, cluster, share | all | all | all |
+| `nulls` (factor on every Monte Carlo test's replicates) | 0.25 | 1 | 1 | 4 |
+| `triage` (and corroboration of every answer) | false | true | true | true |
+
+The depths cut along the axes a study's time multiplies by: the fields read, the questions asked of each, the replicate
+null worlds of each test, and the per-item passes (the lens passes were 75-90 % of a lane's time; the review of the
+study, 2026-10-14).
 
 Every related code stays listed with its strength in `scope.yml` whatever `related` reads, and `minutes_by_choice`
 there prices each choice before a run (§3.2).
