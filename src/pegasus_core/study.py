@@ -2091,7 +2091,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap = _Lap() if lap is None else lap
 
     names = gateway.municipality_names()
-    rows, desc, views, figs, groups, places, quality, trends = [], [], {}, [], [], [], [], []
+    rows, desc, views, figs, groups, places, quality, trends, seasons = [], [], {}, [], [], [], [], [], []
     series = {}          # each primary field's observed and expected by place and period: the related fields' reading
     current = leads.Register().current()
     for it in (i for i in scope.items if i.status == "in"):
@@ -2158,6 +2158,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 # person-year (its "per 100,000" map and its series had been drawn empty, and counted as figures)
                 if not name and s.expectations.model(f.block).data.n is None:
                     places += lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv: _places(it, s, f, label, sv, names), [], log)
+                    seasons += lap.guard(f"seasons {f.id}", lambda it=it, s=s, f=f, label=label: _seasons(it, s, f, label),
+                                         [], log)
                     try:                   # B0 beside B1: a finding's O/E is against its own tier's expectation
                         mu0 = s.surprise(node, "B0").mu
                     except Exception:  # noqa: BLE001 - a field with no B0: its B0 findings' O/E are said missing
@@ -2222,6 +2224,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "places.parquet")
     pq.write_table(_rows_table(trends) if trends else pa.table({"field": pa.array([], pa.string())}),
                    out / "trends.parquet")
+    pq.write_table(_rows_table(seasons) if seasons else pa.table({"field": pa.array([], pa.string())}),
+                   out / "seasons.parquet")
     linkage = lap.guard("linkage", lambda: _linkage(scope), [], log)
     pq.write_table(_rows_table(linkage) if linkage else pa.table({"link": pa.array([], pa.string())}),
                    out / "linkage.parquet")
@@ -2249,6 +2253,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     con.execute(f"CREATE VIEW places AS SELECT * FROM read_parquet('{(out / 'places.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW trends AS SELECT * FROM read_parquet('{(out / 'trends.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW linkage AS SELECT * FROM read_parquet('{(out / 'linkage.parquet').as_posix()}')")
+    con.execute(f"CREATE VIEW seasons AS SELECT * FROM read_parquet('{(out / 'seasons.parquet').as_posix()}')")
     con.execute(f"CREATE VIEW quality AS SELECT * FROM read_parquet('{(out / 'quality.parquet').as_posix()}')")
     con.close()
     try:
@@ -2910,6 +2915,69 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     return [(k, ev[k], py[k]) for k, _ in units]
 
 
+def _seasons(it: Item, s, f, label: str) -> list[dict]:
+    """A count field by the month of its events' own dates (`gateway.monthly_counts`, the study's area), over the period
+    and each year: events, the days of those months, events per day, and the seasonal index (a month's events per day
+    over the period's) with its exact interval, the period's daily rate fixed; over the period, Pearson's test of the
+    months' events against their days (no seasonality: each day alike). What a paper's seasonality figure and sentence
+    read; the folder had years only (2026-10-14). Each code cut as the model cuts its block (the item's code set, then
+    the field's leaves); events dated outside the item's years are not counted here."""
+    import calendar
+
+    import pyarrow.compute as pc
+    from scipy.stats import chi2
+
+    d = s.expectations.model(f.block).data
+    if d.n is not None:
+        return []
+    src = it.source or {}
+    subset = [str(x) for x in src.get("codes") or []]
+    leaves = [str(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
+    width = max(len(str(c)) for c in d.leaves) if d.leaves else 0
+    area = tuple(sorted(config.study_area())) if config.study_area() else None
+    years = [int(y) for y in it.years]
+    ev = np.zeros((len(years), 12))
+    for y in years:
+        c = gateway.monthly_counts(it.dataset, it.event, y, classifier=src.get("classifier"), area=area).counts
+        if subset:
+            hit = pc.starts_with(c.column("code"), subset[0])
+            for x in subset[1:]:
+                hit = pc.or_(hit, pc.starts_with(c.column("code"), x))
+            c = c.filter(pc.fill_null(hit, False))
+        if f.node != "*" and leaves:
+            c = c.filter(pc.fill_null(pc.is_in(pc.utf8_slice_codeunits(c.column("code"), 0, width),
+                                               value_set=pa.array(leaves, pa.string())), False))
+        yr = c.column("year").to_numpy().astype(int)
+        mo = c.column("month").to_numpy().astype(int)
+        n = c.column("y").to_numpy().astype(float)
+        ok = np.isin(yr, years) & (mo >= 1) & (mo <= 12)
+        np.add.at(ev, (np.searchsorted(years, yr[ok]), mo[ok] - 1), n[ok])
+    days = np.array([[calendar.monthrange(y, m)[1] for m in range(1, 13)] for y in years], dtype=float)
+    out = []
+    period = f"{years[0]}-{years[-1]}"
+
+    def rows(e: np.ndarray, dd: np.ndarray, year: int | None) -> list[dict]:
+        tot, td = float(e.sum()), float(dd.sum())
+        if tot <= 0:
+            return []
+        rate = tot / td
+        exp = rate * dd
+        stat = float(((e - exp) ** 2 / exp).sum())
+        p = float(chi2.sf(stat, 11))
+        lo = np.where(e > 0, chi2.ppf(0.025, 2 * e) / 2, 0.0) / exp
+        hi = chi2.ppf(0.975, 2 * e + 2) / 2 / exp
+        return [{"field": f.id, "label": label, "dataset": it.dataset, "year": year,
+                 "period": None if year is not None else period, "month": m + 1, "events": float(e[m]),
+                 "days": float(dd[m]), "per_day": float(e[m] / dd[m]), "seasonal_index": float(e[m] / exp[m]),
+                 "seasonal_index_low": float(lo[m]), "seasonal_index_high": float(hi[m]), "share": float(e[m] / tot),
+                 "uniformity_chi2": stat, "uniformity_p": p} for m in range(12)]
+
+    out += rows(ev.sum(0), days.sum(0), None)
+    for k, y in enumerate(years):
+        out += rows(ev[k], days[k], y)
+    return out
+
+
 def _band_labels(edges) -> list[str]:
     """Each age band's label from its lower edges: "0", "1-4", ..., "80+" (one labelling for every table: the rates had
     "0-0" where the case mix had "0", 2026-10-14)."""
@@ -3149,6 +3217,9 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "by the year-level Pearson dispersion (quasi-Poisson) and the interval read on Student's t with T - 2 degrees "
         "of freedom; APC = 100 (exp(b) - 1), with the slope's two-sided p (trends.parquet). Provisional years (a "
         "source not yet final) are left out of every trend.",
+        "Seasonality (seasons.parquet): the events by the month of their own dates, each month's events per day over "
+        "the period's (the seasonal index) with its exact interval, and Pearson's chi-square of the months' events "
+        "against their days (11 degrees of freedom).",
         "Case mix: every recorded variable of the events, as counts and shares with Clopper-Pearson intervals, per year "
         "and over the period; 'not recorded' and 'value missing' are values, kept.",
         "Municipalities (places.parquet): crude rates; the standardised ratio against the area's own age-sex rates of "
@@ -4430,6 +4501,16 @@ COLUMNS = {
     "trends.parquet:first_year": "first year of the series",
     "trends.parquet:last_year": "last year of the series",
     "years_read": "the years the trend read (provisional years left out)",
+    "month": "the calendar month of the events' own dates (1-12)",
+    "days": "the days of that month in the row's year or period",
+    "per_day": "events per day of the month",
+    "seasonal_index": "the month's events per day over the row's own events per day (1: no seasonality)",
+    "seasonal_index_low": "lower 95 % bound of the seasonal index (exact Poisson, the row's daily rate fixed)",
+    "seasonal_index_high": "upper 95 % bound of the seasonal index",
+    "uniformity_chi2": "Pearson's statistic of the twelve months' events against their days (11 degrees of freedom)",
+    "uniformity_p": "its p: small when the events are not spread like the days (seasonality)",
+    "seasons.parquet:share": "the month's share of the row's events",
+    "seasons.parquet:events": "the field's events dated in the month",
     "link": "the link (pegasus_data's curation/links.yml)",
     "run_year": "the year of the stored national run (its scope may pad a side by neighbouring years)",
     "linkage.parquet:method": "the linkage method (probabilistic or deterministic)",
@@ -4789,6 +4870,9 @@ def body(folder: str | Path) -> list[dict]:
     part("trends", tr is not None and ((len(tr) > 0 and "apc_low" in tr and tr["apc_low"].notna().all())
                                        or len(decl.years) < 3),
          f"{0 if tr is None else len(tr)} annual percent changes with intervals (crude and age-sex adjusted)")
+    se = table("seasons")
+    part("seasons", se is not None and len(se) > 0 and "seasonal_index_low" in se,
+         f"{0 if se is None else len(se)} month rows (seasonal index with intervals, the test of uniformity)")
     pl = table("places")
     part("places", pl is not None and "smr" in pl and pl["rate_low"].notna().any() and pl["smr"].notna().any(),
          f"{0 if pl is None else len(pl)} municipality rows (rates, standardised ratios, model expectations with "
