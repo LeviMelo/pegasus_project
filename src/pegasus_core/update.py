@@ -65,6 +65,10 @@ class Plan:
     years: list[int]
     systems: list[System]
     questions: list[str] | None = None
+    #: the false-discovery level of every question pass, triage, corroboration and later-years test of the plan (a
+    #: study's declared ``q``: it had reached the products' own tests only, the passes ran at 0.05 under a report
+    #: header saying otherwise; the review of the study, 2026-10-14)
+    q: float = 0.05
     relations: bool = True
     triage: bool = True
     report: str | None = "reports/leads.md"
@@ -171,6 +175,14 @@ def _mark(key: dict[str, Any], result: dict[str, Any]) -> None:
 
 
 resolved: dict[str, list[str]] = {}       # the blocks each system's plan resolved to in the current run
+#: the readers' sources each system's plan asked in the current run (its own field's and its readers'): its triage and
+#: later years read these answers only
+own_sources: dict[str, set[str]] = {}
+
+
+def _source_text(source) -> str:
+    """A reader's source as one comparable string (an answer's ``provenance["source"]`` against a plan's)."""
+    return json.dumps(source or {}, sort_keys=True, default=list)
 
 
 def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: bool, log) -> Any:
@@ -180,9 +192,14 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     blocks = resolved.get(sys_.dataset, sys_.blocks)
     from . import tools
 
+    # the system's own field's leads: retier gives a lead the verdict of the selection that is the same finding and
+    # clears every other, so read over the dataset's every answer the second item of a dataset erased the first's
+    # later-year verdicts (the review of the study, 2026-10-14)
+    answers = [x for x in answers if s._own(x)]
     key = _key("later_years", (tools.Session.train, tools.Session.survey_questions, tools.Session.temporal_confirm,
                                tools.Session.retier), dataset=sys_.dataset, event=sys_.event, blocks=blocks, levels=sys_.levels,
-               questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers))
+               questions=plan.questions, last=last, years=plan.years, leads=sorted(x.id for x in answers),
+               source=sys_.source, q=plan.q)
     if not force and _done(key):
         return "done on these versions"
     t0 = time.perf_counter()
@@ -196,8 +213,8 @@ def _later_years(plan: Plan, sys_: System, s, answers: list, last: int, force: b
     # later years' family
     t.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                        levels=tuple(sys_.levels) if sys_.levels else None, log=log,
-                       nodes=tuple(sys_.nodes) if sys_.nodes else None)
-    selected = s.temporal_confirm(last, log=log)
+                       nodes=tuple(sys_.nodes) if sys_.nodes else None, q=plan.q)
+    selected = s.temporal_confirm(last, q=plan.q, log=log)
     s.register.add(s.retier(answers, selected))
     stood = sum((x.replications.get("prospective") or {}).get("ok") is True for x in answers)
     _mark(key, {"selected": len(selected), "stood": stood, "seconds": round(time.perf_counter() - t0, 2)})
@@ -416,8 +433,9 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 _mark(key, {})
                 out[f"fit {sys_.dataset} {block}"] = "fitted"
         _ensure_total(s, plan, f"{sys_.dataset}", out, log)
+        own_sources[sys_.dataset] = {_source_text(sys_.source)}
         key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
-                   blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years,
+                   blocks=blocks, levels=sys_.levels, questions=plan.questions, years=plan.years, q=plan.q,
                    **({"nodes": sys_.nodes} if sys_.nodes else {}), **({"source": sys_.source} if sys_.source else {}))
         if plan.questions == []:                  # an empty list asks none (a plan of disparities, of fits)
             out[f"questions {sys_.dataset}"] = "none asked"
@@ -425,7 +443,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
             t0 = time.perf_counter()
             leads = s.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                        levels=tuple(sys_.levels) if sys_.levels else None, log=log,
-                                       nodes=tuple(sys_.nodes) if sys_.nodes else None)
+                                       nodes=tuple(sys_.nodes) if sys_.nodes else None, q=plan.q)
             # its seconds: what a scope prices one field's questions at (`study._estimate`)
             _mark(key, {"answers": len(leads), "seconds": round(time.perf_counter() - t0, 2)})
             out[f"questions {sys_.dataset}"] = len(leads)
@@ -453,16 +471,17 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                         out[f"fit {sys_.dataset} {column} {block}"] = f"failed: {type(exc).__name__}: {exc}"
             blocks = [b for b in blocks if f"fit {sys_.dataset} {column} {b}" not in out]
             _ensure_total(ms, plan, f"{sys_.dataset} {column}", out, log)
+            own_sources.setdefault(sys_.dataset, set()).add(_source_text(source))
             key = _key("questions", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
                        blocks=blocks, levels=sys_.levels, measure=column, questions=plan.questions, years=plan.years,
-                       **({"nodes": sys_.nodes} if sys_.nodes else {}))
+                       source=source, q=plan.q, **({"nodes": sys_.nodes} if sys_.nodes else {}))
             if plan.questions == []:
                 out[f"questions {sys_.dataset} {column}"] = "none asked"
             elif force or not _done(key):
                 t0 = time.perf_counter()
                 leads = ms.survey_questions(blocks, tuple(plan.questions) if plan.questions else None,
                                             levels=tuple(sys_.levels) if sys_.levels else None, log=log,
-                                            nodes=tuple(sys_.nodes) if sys_.nodes else None)
+                                            nodes=tuple(sys_.nodes) if sys_.nodes else None, q=plan.q)
                 _mark(key, {"answers": len(leads), "seconds": round(time.perf_counter() - t0, 2)})
                 out[f"questions {sys_.dataset} {column}"] = len(leads)
             else:
@@ -497,11 +516,12 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                 monolith.fit_block(sys_.dataset, sys_.event, block, train, plan.graph, log=log)
                 out[f"fit {sys_.dataset} {block} {train[0]}-{train[-1]}"] = "fitted (prospective)"
         key = _key("prospective", (tools.Session.survey_questions,), dataset=sys_.dataset, event=sys_.event,
-                   blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years)
+                   blocks=blocks, levels=sys_.levels, train_last=int(t0), years=plan.years, source=sys_.source,
+                   nodes=sys_.nodes, q=plan.q)
         if force or not _done(key):
             t0_ = time.perf_counter()
             found = s.survey_questions(blocks, levels=tuple(sys_.levels) if sys_.levels else None, log=log,
-                                       train_last=int(t0), nodes=tuple(sys_.nodes) if sys_.nodes else None)
+                                       train_last=int(t0), nodes=tuple(sys_.nodes) if sys_.nodes else None, q=plan.q)
             _mark(key, {"answers": len(found), "seconds": round(time.perf_counter() - t0_, 2)})
             out[f"prospective {sys_.dataset}"] = len(found)
         else:
@@ -520,13 +540,15 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
         for sys_ in plan.systems:
             s = sessions[sys_.dataset]
             # this plan's answers: the dataset's, on the years its sessions read (another period's are another run's)
+            mine = own_sources.get(sys_.dataset, {_source_text(sys_.source)})
             answers = [x for x in s.register.current(kind="answer") if x.status != "retired"
                        and x.fields and x.fields[0].startswith(f"{sys_.dataset}:")
-                       and list(x.provenance.get("years") or s.years) in (list(s.years), list(plan.years))]
+                       and list(x.provenance.get("years") or s.years) in (list(s.years), list(plan.years))
+                       and _source_text(x.provenance.get("source")) in mine]
             served = [(x.dataset, x.event) for x in plan.systems] +                 [tuple(c) for c in plan.extra.get("corroborators") or ()]
             # the answers with their numbers: one asked again on changed evidence is read again
             key = _key("triage", (tools.Session.triage, tools.Session.corroborate), dataset=sys_.dataset,
-                       leads=sorted(f"{x.id}:{x.effect!r}:{x.q!r}" for x in answers), served=sorted(served))
+                       leads=sorted(f"{x.id}:{x.effect!r}:{x.q!r}" for x in answers), served=sorted(served), q=plan.q)
             if answers and (force or not _done(key)):
                 t_triage = time.perf_counter()
                 # each reader's answers by its own session (S4.3): a measure's are read on its admissions, not on counts
@@ -544,7 +566,7 @@ def run(plan: Plan, force: bool = False, log=print) -> dict[str, Any]:
                     # its own (`leads.Register.add`); every answer re-read on a key change had cost a slice its cap
                     done += rs.triage(register=group, log=log, stale=True)
                 # stage E's independent units: another record system at the lead's places and years (§8.3)
-                corr = s.corroborate(done, served=served, log=log)
+                corr = s.corroborate(done, served=served, q=plan.q, log=log)
                 s.register.add(corr)
                 _mark(key, {"leads": len(answers), "corroborated": len(corr),
                             "seconds": round(time.perf_counter() - t_triage, 2)})

@@ -211,6 +211,13 @@ def load(path: str | Path) -> Declaration:
     except ValueError as exc:
         problems.append(str(exc))
         area = None
+    named = doc.get("contexts", "auto")
+    if isinstance(named, list):
+        known = set(gateway.declared_fields())
+        unknown = [c for c in named if isinstance(c, str) and c not in known]
+        if unknown:
+            problems.append(f"contexts {unknown}: no declared context field of that name (`pegasus-core contexts` "
+                            "lists them)")
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
     return Declaration(study=str(doc["study"]), seeds={k: [str(c) for c in v] for k, v in seeds.items()}, years=years,
@@ -256,6 +263,7 @@ class Item:
     #: a second coding of the topic's own events (an alternative classifier of the primary's structure: SIM's cause
     #: before investigation): counted and described, asked nothing, given no supports or linked shares
     count_only: bool = False
+    q: float = 0.05                      # the study's false-discovery level, carried to the item's lane (`_plan`)
 
 
 @dataclass
@@ -1041,6 +1049,7 @@ def resolve(decl: Declaration, log=print) -> Scope:
         # the exhaustive scope's hours (2026-10-12)
         it.questions = ([] if it.count_only else decl.choice("related_questions") if it.reason.startswith("related code")
                         else decl.questions)
+        it.q = float(decl.q)
     overlap, fixed, per_field = _phase_record(decl)
     overhead = fixed + per_field * sum(i.fields for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
@@ -1327,6 +1336,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
                        "draws": decl.choice("draws"), "q": decl.q, "data": config.data_version(),
                        "code": config.code_key(tools.cohort), "datasets": mine}
+                key = _study_key(key)
                 hit = store.get_table("study_table", key)
                 if hit is not None:
                     out.extend(hit.to_pylist())
@@ -1954,14 +1964,21 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     return steps
 
 
+def _study_key(key: dict) -> dict:
+    """A study-level stored table's key with what every one of them depends on beside its inputs: the study's area and
+    the replicate scale. Five keys had neither, so a study of Rio Grande do Sul and one of Brazil with the same topic
+    read each other's relations, cohorts, determinants and expectation tables (the review of the study, 2026-10-14)."""
+    return {**key, "area": sorted(config.study_area() or []), "nulls": config.replicates(1000, floor=1) / 1000}
+
+
 def _plan(it: Item, others: list | None = None):
-    """The `update` plan of one item: its system with the readers its depth adds."""
+    """The `update` plan of one item: its system with the readers its depth adds, at the study's ``q`` (`Item.q`)."""
     from . import update
 
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
                                                               **it.readers)],
-                       relations=False, triage=True, report=None, questions=it.questions,
+                       relations=False, triage=True, report=None, questions=it.questions, q=it.q,
                        # the held-out later years read prospectively as well: their events against fits on the years
                        # before (BPA for an outbreak), so an event of the later years is discovered, not only replicated;
                        # read retrospectively, B1 learns a statewide one as normal (Porto Alegre's 2024 floods were found
@@ -2041,6 +2058,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "")
                 key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
                        "code": config.code_key(_expectation_table)}
+                key = _study_key(key)
                 path = store.address("study_table", key) / "table.parquet"
                 if not path.exists():
                     store.put_table("study_table", key, _expectation_table(sv, names))
@@ -2061,7 +2079,11 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     for r in rows_:
                         if r.get("year") in shares and r["level"] == _whole()[0]:
                             r["allocated_share"] = shares[r["year"]]
-                desc.extend(rows_ + _apc(rows_))
+                trends = _apc(rows_)
+                for r in rows_:                     # the cells the adjusted trend read, never a column of the table
+                    r.pop("_y", None)
+                    r.pop("_n", None)
+                desc.extend(rows_ + trends)
                 # the field's own answers, on the item's years (each reader is its own field: counts, mentions, an
                 # interval, a composition's share)
                 rows.extend({**_finding(x, it, label, names), "_event": it.event,
@@ -2071,7 +2093,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                             for x in current
                             if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
                             and list(x.provenance.get("years") or []) == list(it.years))
-                if not name:
+                # a count field's series and map: a linked share's or a share's events are trials, not a rate per
+                # person-year (its "per 100,000" map and its series had been drawn empty, and counted as figures)
+                if not name and s.expectations.model(f.block).data.n is None:
                     try:                   # B0 beside B1: a finding's O/E is against its own tier's expectation
                         mu0 = s.surprise(node, "B0").mu
                     except Exception:  # noqa: BLE001 - a field with no B0: its B0 findings' O/E are said missing
@@ -2472,24 +2496,78 @@ def _allocation(it: Item, years: list[int], support: str | None = None) -> dict[
                 return t.filter(pc.fill_null(hit, False))
             tabs = [mine(t) if "code" in t.column_names else t for t in tabs]
         placed = float(pc.sum(tabs[0].column("y")).as_py() or 0)
-        lost = float(pc.sum(tabs[1].column("y")).as_py() or 0) if tabs[1].num_rows else 0.0
-        if placed + lost > 0:
-            out[int(y)] = placed / (placed + lost)
+        un = tabs[1]
+        brazil = pc.ends_with(un.column("reason"), " (Brazil)") if un.num_rows else None
+        lost = float(pc.sum(un.filter(pc.invert(brazil)).column("y")).as_py() or 0) if un.num_rows else 0.0
+        share = placed / (placed + lost) if placed + lost > 0 else None
+        if share is not None and config.study_area() is not None and support is None:
+            # an area's residence share is Brazil's (a record with no residence is never knowably the area's): the
+            # area's own share by sex and age times the national share placed at a residence, where the area's placed
+            # events had been divided by its own unallocated plus Brazil's blanks (the review of the study, 2026-10-14)
+            column = src.get("classifier") or next((c["column"] for c in gateway.event_type(it.dataset, it.event)
+                                                    .get("classifiers") or [] if c["role"] == "primary"), None)
+            try:
+                tot, nowhere = gateway.event_totals(it.dataset, it.event, int(y), column), \
+                    gateway.unplaced(it.dataset, it.event, int(y), column)
+            except Exception:  # noqa: BLE001 - a national total that cannot be read leaves the area's own share
+                tot = nowhere = None
+            if tot is not None:
+                tabs2 = [mine(t) for t in (tot, nowhere)] if codes else [tot, nowhere]
+                total = float(pc.sum(tabs2[0].column("y")).as_py() or 0)
+                blank = float(pc.sum(tabs2[1].column("y")).as_py() or 0) if tabs2[1].num_rows else 0.0
+                share = share * (1.0 - blank / total) if total > 0 else share
+        if share is not None:
+            out[int(y)] = share
     return out
 
 
+def _apc_adjusted(y: np.ndarray, n: np.ndarray) -> tuple[float, float] | None:
+    """The age-sex-adjusted log-linear slope of a series and its variance: counts y[t, g] (years × sex-age cells) ~
+    Poisson(n[t, g] exp(a_g + b·x_t)), each cell's level profiled out (closed form given b), b by Newton on the profile;
+    the variance widened by the year-level Pearson dispersion (quasi-Poisson, never below Poisson's), the trend's own
+    lack of fit. None when the years cannot identify it."""
+    keep = (y.sum(0) > 0) & (n.sum(0) > 0)
+    y, n = y[:, keep], n[:, keep]
+    T = y.shape[0]
+    if T < 3 or y.shape[1] == 0 or int((y.sum(1) > 0).sum()) < 3:
+        return None
+    x = np.arange(T, dtype=float) - (T - 1) / 2
+    b = 0.0
+    for _ in range(100):
+        e = n * np.exp(b * x)[:, None]
+        a = np.log(y.sum(0) / np.maximum(e.sum(0), 1e-300))          # each cell's level given b
+        mu = e * np.exp(a)[None, :]
+        score = float(((y - mu) * x[:, None]).sum())
+        sx = (mu * x[:, None]).sum(0)
+        info = float((mu * (x ** 2)[:, None]).sum() - (sx ** 2 / np.maximum(mu.sum(0), 1e-300)).sum())
+        if not info > 0:
+            return None
+        step = score / info
+        b += step
+        if abs(step) < 1e-12:
+            break
+    yt, mt = y.sum(1), mu.sum(1)
+    disp = max(float(((yt - mt) ** 2 / np.maximum(mt, 1e-300)).sum() / (T - 2)), 1.0)
+    return b, disp / info
+
+
 def _apc(rows: list[dict]) -> list[dict]:
-    """Each series' annual percent change (the descriptive's rows of one field, level, unit and denominator over the
-    years): a Poisson regression of the events on the year with the denominator as offset, the slope's interval
-    widened by the Pearson dispersion (quasi-Poisson; never below Poisson's). APC = 100 (e^b - 1). A paper's trend is
-    a number with an interval; the folder had the yearly rates only (2026-10-12)."""
+    """Each series' annual percent change (the descriptive's rows of one field, level, unit, denominator and group over
+    the years), two ways: crude, a Poisson regression of the events on the year with the denominator as offset; and,
+    where the rows carry their sex-age cells, age-sex adjusted (`_apc_adjusted`): an ageing population read as a rising
+    risk in the crude one (Alagoas's infarction admissions: crude 5.6 %, adjusted about 2.6 %, the review of the study,
+    2026-10-14). Each slope's interval is widened by the year-level Pearson dispersion (quasi-Poisson; never below
+    Poisson's) and read on Student's t with T − 2 degrees of freedom, the dispersion being estimated (1.96 had made a
+    ten-year interval 1.18 times too narrow). APC = 100 (e^b − 1). Provisional years are left out."""
+    from scipy.stats import t as student
+
     series: dict[tuple, list[dict]] = {}
     for r in rows:
         if r.get("year") is not None and not r.get("provisional") and r.get("population") and r.get("per") not in ("share", "mean per event") \
                 and not str(r.get("per", "")).startswith(("days", "median")):
-            series.setdefault((r["field"], r["level"], r["unit"], r["per"]), []).append(r)
+            series.setdefault((r["field"], r["level"], r["unit"], r["per"], r.get("group")), []).append(r)
     out = []
-    for (field_, level, unit, per), rs in series.items():
+    for (field_, level, unit, per, group), rs in series.items():
         rs = sorted(rs, key=lambda r: r["year"])
         t = np.array([float(r["year"]) for r in rs])
         y = np.array([float(r["events"]) for r in rs])
@@ -2513,13 +2591,22 @@ def _apc(rows: list[dict]) -> list[dict]:
         if not np.isfinite(b1) or not var > 0:
             continue                       # a series whose slope the years cannot identify (events in one year only)
         se = var ** 0.5
+        q975 = float(student.ppf(0.975, len(rs) - 2))
         r0 = rs[0]
-        out.append({"field": field_, "label": r0["label"], "dataset": r0["dataset"], "level": level, "unit": unit,
-                    "year": None, "events": float(y.sum()), "population": float(n.sum()),
-                    "per": f"annual percent change, {int(t[0])}-{int(t[-1])}, rate {per}",
-                    "rate": 100 * np.expm1(b1), "rate_low": 100 * np.expm1(b1 - 1.96 * se),
-                    "rate_high": 100 * np.expm1(b1 + 1.96 * se),
-                    "crude_per_100k": None, "standardised_per_100k": None})
+        base = {"field": field_, "label": r0["label"], "dataset": r0["dataset"], "level": level, "unit": unit,
+                "group": group, "year": None, "events": float(y.sum()), "population": float(n.sum()),
+                "crude_per_100k": None, "standardised_per_100k": None}
+        out.append({**base, "per": f"annual percent change (crude), {int(t[0])}-{int(t[-1])}, rate {per}",
+                    "rate": 100 * np.expm1(b1), "rate_low": 100 * np.expm1(b1 - q975 * se),
+                    "rate_high": 100 * np.expm1(b1 + q975 * se)})
+        if all(r.get("_y") is not None for r in rs):
+            adj = _apc_adjusted(np.array([r["_y"] for r in rs], dtype=float), np.array([r["_n"] for r in rs], dtype=float))
+            if adj is not None and np.isfinite(adj[0]) and adj[1] > 0:
+                b, v = adj[0], adj[1] ** 0.5
+                out.append({**base, "per": f"annual percent change (age-sex adjusted), {int(t[0])}-{int(t[-1])}, "
+                                          f"rate {per}",
+                            "rate": 100 * np.expm1(b), "rate_low": 100 * np.expm1(b - q975 * v),
+                            "rate_high": 100 * np.expm1(b + q975 * v)})
     return out
 
 
@@ -2540,8 +2627,15 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     sel = np.isin(d.e, leaves)
     np.add.at(y, (d.u[sel], d.t[sel], d.g[sel]), d.y[sel])
     N = d.N.astype(float)
-    std = N.sum(axis=(0, 1))
-    std = std / std.sum() if std.sum() > 0 else std
+    # a fixed, named standard (Brazil's 2010 population by sex and age band, of the field's own population source): the
+    # area's own pooled structure had been the standard, under a codebook saying "national", so a state-year's rate
+    # changed with the period and compared with nothing (the review of the study, 2026-10-14)
+    std, std_name = _standard(str(d.population), tuple(gateway.age_edges(d.population, it.dataset, it.event)),
+                              it.dataset, N.shape[2])
+    if std is None:
+        std = N.sum(axis=(0, 1))
+        std = std / std.sum() if std.sum() > 0 else std
+        std_name = f"the study's own population, {int(np.asarray(d.years)[0])}-{int(np.asarray(d.years)[-1])}"
     out = []
     # the exposure the block was fitted on: person-years, or other events (a declared ratio, or the event type's
     # declared denominator: live births), reported per 1,000 of them
@@ -2549,23 +2643,50 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     per, scale = ((f"1,000 {d.population[len('events:'):].replace(';', ' + ')} events", 1e3) if ratio
                   else ("100,000 person-years", 1e5))
 
-    def row(level: str, unit: str, t: int, yy: np.ndarray, nn: np.ndarray) -> dict:
+    def row(level: str, unit: str, t: int, yy: np.ndarray, nn: np.ndarray, group: str | None = None) -> dict:
         with np.errstate(divide="ignore", invalid="ignore"):
             rate_g = np.where(nn > 0, yy / nn, 0.0)
         events, pop = float(yy.sum()), float(nn.sum())
         lo = chi2.ppf(0.025, 2 * events) / 2 if events > 0 else 0.0
         hi = chi2.ppf(0.975, 2 * events + 2) / 2
-        return {"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit,
+        out_ = {"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit, "group": group,
                 "year": int(np.asarray(d.years)[t]), "events": events, "population": pop, "per": per,
                 "rate": scale * events / pop if pop else None, "rate_low": scale * lo / pop if pop else None,
                 "rate_high": scale * hi / pop if pop else None,
                 "crude_per_100k": None if ratio or not pop else 1e5 * events / pop,
-                "standardised_per_100k": None if ratio or not pop else 1e5 * float((rate_g * std).sum())}
+                "standardised_per_100k": None, "_y": yy, "_n": nn}
+        if not ratio and pop and group is None and yy.shape == std.shape:
+            # direct standardisation with the gamma interval of Fay & Feuer (1997): the standardised rate is a weighted
+            # sum of Poisson counts, w_g = std_g / n_g
+            with np.errstate(divide="ignore", invalid="ignore"):
+                w = np.where(nn > 0, std / nn, 0.0)
+            dsr, var = float((w * yy).sum()), float((w * w * yy).sum())
+            wm = float(w[nn > 0].max()) if (nn > 0).any() else 0.0
+            low = chi2.ppf(0.025, 2 * dsr * dsr / var) * var / (2 * dsr) if dsr > 0 and var > 0 else 0.0
+            vh = var + wm * wm
+            high = chi2.ppf(0.975, 2 * (dsr + wm) ** 2 / vh) * vh / (2 * (dsr + wm)) if vh > 0 else None
+            out_.update({"standardised_per_100k": 1e5 * float((rate_g * std).sum()),
+                         "standardised_low": 1e5 * float(low), "standardised_high": 1e5 * float(high) if high else None,
+                         "standard": std_name})
+        return out_
 
     for t in range(T):
         out.append(row(*_whole(), t, y[:, t].sum(0), N[:, t].sum(0)))
         for level, unit, sel_u in _levels_below(np.asarray(d.places)):
             out.append(row(level, unit, t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
+    if not ratio and G >= 4 and G % 2 == 0:
+        # rates by sex and by age band, for the whole: the risk a paper's first tables give (the case-mix shares say
+        # nothing about it), each with its exact interval and its own trend (`_apc`)
+        nB = G // 2
+        edges = gateway.age_edges(d.population, it.dataset, it.event)
+        bands = [f"{a}-{b - 1}" for a, b in zip(edges[:-1], edges[1:], strict=True)] + [f"{edges[-1]}+"] \
+            if len(edges) == nB else [str(k) for k in range(nB)]
+        groups = [("sex: male", slice(0, nB)), ("sex: female", slice(nB, G))] + \
+            [(f"age {bands[k]}", [k, nB + k]) for k in range(nB)]
+        for t in range(T):
+            for name, cells in groups:
+                yy, nn = y[:, t][:, cells].sum(0), N[:, t][:, cells].sum(0)
+                out.append(row(*_whole(), t, yy, nn, group=name))
     if not ratio and _birth_related(it, d):
         # a perinatal or pregnancy field's rate is per live births, the convention of infant and maternal mortality
         # (RIPSA C.1, C.3): congenital toxoplasmosis' deaths had been given per 100,000 person-years of everyone
@@ -2583,6 +2704,29 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
             for level, unit, sel_u in _levels_below(np.asarray(d.places)):
                 out.append(per_births(level, unit, t, sel_u))
     return out
+
+
+@functools.lru_cache(maxsize=32)
+def _standard(population: str, edges: tuple | list, dataset: str, cells: int) -> tuple[np.ndarray | None, str]:
+    """The standard population of a direct standardisation: Brazil's population of 2010 by sex and the field's age bands,
+    from the field's own population source, as weights over the model's sex-age cells; (None, "") when that source has
+    no 2010 or the cells do not match. Fixed across studies, periods and areas, so every standardised rate compares."""
+    from . import monolith
+
+    edges = list(edges)
+    try:
+        pop = gateway.population([2010], source=population if not population.startswith("events:") else None,
+                                 dataset=dataset)
+    except Exception:  # noqa: BLE001 - a source with no 2010: the caller falls back to the study's own, and says so
+        return None, ""
+    nB = len(edges)
+    if 2 * nB != cells or pop.num_rows == 0:
+        return None, ""
+    g = (pop.column("sex").to_numpy().astype(int) - 1) * nB + monolith.age_band(pop.column("age").to_numpy(), edges)
+    w = np.bincount(g, weights=pop.column("n").to_numpy().astype(float), minlength=cells)[:cells]
+    if w.sum() <= 0:
+        return None, ""
+    return w / w.sum(), f"Brazil, 2010 ({population}), by sex and age band"
 
 
 def _birth_related(it: Item, d) -> bool:
@@ -2613,10 +2757,15 @@ def _births(d) -> np.ndarray:
 
 def _states_besides_whole(state: np.ndarray) -> list:
     """The states whose rows the descriptive tables write beside the whole: none when the area is one state (its rows
-    would repeat the area's)."""
+    would repeat the area's), and in an area only the states it holds whole: a municipality's area wrote a row "state
+    43" holding one municipality's events (the review of the study, 2026-10-14)."""
     area = config.study_area()
     states = list(np.unique(state))
-    return [] if area is not None and len(states) == 1 and set(area) == {int(states[0])} else states
+    if area is None:
+        return states
+    whole_states = {int(a) for a in area if int(a) < 100}
+    kept = [st for st in states if int(st) in whole_states]
+    return [] if len(states) == 1 and kept == states else kept
 
 
 #: IBGE's macro-regions, the first digit of a state's code: how Brazil's epidemiology reports between the nation and
@@ -2862,6 +3011,7 @@ def _relations(scope: Scope, decl: Declaration, log) -> list[dict]:
             continue
         key = {"what": "study_relations", "fields": [list(f[:3]) + [f[4]] for f in members], "years": years,
                "q": decl.q, "data": config.data_version(), "code": config.code_key(tools.relate)}
+        key = _study_key(key)
         hit = store.get_table("study_table", key)
         if hit is not None:
             rows = hit.to_pylist()
@@ -2890,7 +3040,10 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
     table; rows are associations with their adjustment set, never effects."""
     from . import tools
 
-    contexts = gateway.rated(scope.contexts)
+    left: list = []
+    contexts = gateway.rated(scope.contexts, left)
+    for name, why in left:
+        log(f"study: determinants: context {name} left out: {why}")
     out = []
     for it in (i for i in scope.items if i.status == "in" and "population" not in (i.source or {})):
         for node in _study_nodes(it, None):
@@ -2900,6 +3053,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
             key = {"what": "study_determinants", "x": list(x), "source": it.source, "years": it.years,
                    "contexts": contexts, "q": decl.q,
                    "data": config.data_version(), "code": config.code_key(tools.determinants)}
+            key = _study_key(key)
             hit = store.get_table("study_table", key)
             if hit is not None:
                 rows = hit.to_pylist()
@@ -2924,6 +3078,7 @@ def _determinants(scope: Scope, decl: Declaration, log) -> list[dict]:
              for node in _study_nodes(it, None)]
     key = {"what": "study_field_map", "fields": topic, "contexts": contexts, "data": config.data_version(),
            "code": config.code_key(dependency.field_map)}
+    key = _study_key(key)
     hit = store.get_table("study_table", key)
     if hit is not None:
         rows = hit.to_pylist()
@@ -3107,15 +3262,20 @@ def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) ->
     # a context is a rate over its declared denominator; a count with none would rank places by size alone (every
     # capital at p100), so size enters once, as the residents
     values = {"population (residents)": np.asarray(pop.column("n_sum").to_numpy(), dtype=float)}
-    for entry in gateway.rated(scope.contexts):
+    left: list = []
+    for entry in gateway.rated(scope.contexts, left):
         name = gateway.context_name(entry)
         try:
             v, _ = gateway.context_value(entry, list(decl.years), places)
         except Exception as exc:  # noqa: BLE001 - a context without data for the period is skipped, said
             log(f"study: context {name}: {type(exc).__name__}: {exc}")
             continue
-        if np.isfinite(v).sum() >= 100:
+        if np.isfinite(v).sum() >= min(100, max(10, len(places) // 2)):
             values[name] = v
+        else:
+            log(f"study: context {name}: {int(np.isfinite(v).sum())} of {len(places)} places hold a value: left out")
+    for name_, why in left:
+        log(f"study: context {name_} left out: {why}")
     out = []
     for r in rows:
         idx = [index[u] for u in r.get("_places") or [] if u in index]
@@ -3419,24 +3579,31 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     rows = [r for r in rows if "quality:" not in str(r.get("label"))]
     signal = [r for r in rows if r.get("class") == "signal"]
     institutional = [r for r in rows if r.get("class") == "facility" or r.get("institution_facts")]
-    other = [r for r in rows if r.get("class") not in ("signal", "facility") and not r.get("institution_facts")]
+    other = [r for r in rows if r.get("class") not in ("signal", "facility", "noise") and not r.get("institution_facts")]
+    noise = [r for r in rows if r.get("class") == "noise"]
     rank = sorted(signal, key=lambda r: (r["q"], -abs(np.log(r["ratio"])) if r.get("ratio") and r["ratio"] > 0 else 0))
     stories = _stories(signal)
 
-    def table(rs: list[dict], cols: list[tuple[str, str]], cap: int = 40) -> str:
+    def table(rs: list[dict], cols: list[tuple[str, str]], cap: int = 40, where: str = "findings.parquet") -> str:
         head = "".join(f"<th>{e(c)}</th>" for _, c in cols)
         body = "".join("<tr>" + "".join(f"<td>{e(_fmt(r.get(k)))}</td>" for k, _ in cols) + "</tr>" for r in rs[:cap])
-        more = f"<p class=more>{len(rs) - cap} more in findings.parquet</p>" if len(rs) > cap else ""
+        more = f"<p class=more>{len(rs) - cap} more in {e(where)}</p>" if len(rs) > cap else ""
         return f"<table><tr>{head}</tr>{body}</table>{more}"
 
-    nat = [d for d in desc if d["level"] == _whole()[0]]
+    nat = [d for d in desc if d["level"] == _whole()[0] and not d.get("group")]
+    sources = sorted({i.dataset for i in read})
+    level, unit = _whole()
     parts = [f"<h1>{e(decl.study)}</h1>",
-             f"<p class=meta>depth {e(decl.depth)} · period {decl.years[0]}–{decl.years[-1]} · q {decl.q} · written "
-             f"{time.strftime('%Y-%m-%d %H:%M')}</p>",
+             f"<p class=meta>{'Brazil' if level == 'national' else 'area ' + e(unit)} · depth {e(decl.depth)} · period "
+             f"{decl.years[0]}–{decl.years[-1]} · q {decl.q} · written {time.strftime('%Y-%m-%d %H:%M')}</p>",
              "<h2>1. Summary</h2>",
-             f"<p>{len(read)} sources read, {len(rows)} findings: {len(signal)} unexplained by recording "
-             f"(signal), {len(other)} with a recording or denominator explanation, in {len(stories)} stories (findings "
-             "sharing a place and overlapping years, across fields and sources).</p>",
+             # the counts as they are: sources are datasets (fields are items), and a noise finding (an exact interval
+             # holding 1) is no recording explanation (731 of Alagoas's 751 "explained" findings were noise; the
+             # review of the study, 2026-10-14)
+             f"<p>{len(sources)} sources read ({e(', '.join(sources))}) in {len(read)} fields, {len(rows)} findings: "
+             f"{len(signal)} unexplained by recording (signal), {len(other)} with a recording, denominator or system "
+             f"explanation, {len(noise)} within chance (their exact interval holds 1), in {len(stories)} stories "
+             "(findings sharing a place and overlapping years, across fields and sources).</p>",
              "".join(_story_html(k, st, e) for k, st in enumerate(stories[:15], 1)),
              (f"<p class=more>{len(stories) - 15} more stories in findings.parquet (column story)</p>"
               if len(stories) > 15 else ""),
@@ -3447,9 +3614,11 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                           ("corroborated", "corroborated"), ("related", "related fields there (O/E, 95%)"),
                           ("context", "context (national percentile)")], cap=20),
              "<h2>2. Descriptive epidemiology</h2>",
-             table(nat, [("label", "field"), ("dataset", "source"), ("year", "year"), ("events", "events"),
-                         ("rate", "rate"), ("rate_low", "95% from"), ("rate_high", "to"), ("per", "per"),
-                         ("standardised_per_100k", "standardised /100k")], cap=80),
+             table(nat, [("label", "field"), ("dataset", "source"), ("unit", "where"), ("year", "year"),
+                         ("events", "events"), ("rate", "rate"), ("rate_low", "95% from"), ("rate_high", "to"),
+                         ("per", "per"), ("standardised_per_100k", "standardised /100k"),
+                         ("standardised_low", "95% from"), ("standardised_high", "to")], cap=80,
+                   where="descriptive.parquet (with sex, age, region rows and the standard population named)"),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
              "<h2>3. Institutional findings</h2><p>Departures concentrated in one establishment: often real (a referral "
              "centre, a new service, a screening programme), read with the establishment's registration.</p>",
@@ -3471,7 +3640,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                   "not a birth date, for the link to match) raises the estimate, and lists that record the same "
                   "persons more often than chance lower it.</p>"
                 if any(r.get("patterns") for r in captured or []) else f"<p>{e(_capture_note(scope))}</p>"),
-             "<h2>3b. Findings with a recording explanation</h2>",
+             "<h2>3b. Findings with a recording, denominator or system explanation</h2>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                            ("class", "class"), ("class_reason", "why")], cap=30),
@@ -3710,9 +3879,10 @@ COLUMNS = {
     "field": "the field's id: dataset, event, classifier and codes or reader, block",
     "label": "the field's name as a reader reads it: event, codes with their labels, reader",
     "dataset": "the source (DATASUS system and series)",
-    "level": "the row's geography: national (Brazil), area (the declared study area), region (IBGE macro-region) or state",
-    "unit": "the geography's code: BR, the area's IBGE codes joined by +, the region's digit and name, or the state's "
-            "two-digit IBGE code",
+    "level": "the row's geography: national (Brazil), area (the declared study area), region (IBGE macro-region), state "
+             "(one the area holds whole), health macro-region or health region (the SUS regionalisation, an area's)",
+    "unit": "the geography's code: BR, the area's IBGE codes joined by +, the region's digit and name, the state's "
+            "two-digit IBGE code, or the health (macro-)region's code and name",
     "year": "the year of the events (the event type's own date)",
     "events": "the field's events in the row's geography and year",
     "population": "the denominator: person-years of residents (POPSVS; with the account's age 0 for a newborn field), "
@@ -3720,12 +3890,21 @@ COLUMNS = {
                   "own age-sex rates; "
                   "or the events named in per",
     "per": "the denominator's unit: 100,000 person-years, 1,000 of the named events (live births: SINASC-DN), share, "
-           "days, median",
-    "rate": "events over population, times the per unit; a share's proportion; an interval's median days",
-    "rate_low": "lower 95 % bound: exact Poisson (Garwood 1936), the denominator fixed; Clopper-Pearson for a share",
+           "days, median; or an annual percent change, crude or age-sex adjusted, over the years named",
+    "rate": "events over population, times the per unit; a share's proportion; an interval's median days; an annual "
+            "percent change: 100 (e^b − 1) of a Poisson log-linear slope (age-sex adjusted: each sex-age cell its own "
+            "level)",
+    "rate_low": "lower 95 % bound: exact Poisson (Garwood 1936), the denominator fixed; Clopper-Pearson for a share; "
+                "for an annual percent change, quasi-Poisson (the year-level Pearson dispersion) on Student's t with "
+                "T − 2 degrees of freedom",
     "rate_high": "upper 95 % bound, as rate_low",
     "crude_per_100k": "crude rate per 100,000 person-years (none for a rate per other events)",
-    "standardised_per_100k": "directly age-sex-standardised rate per 100,000, standard the period's national structure",
+    "standardised_per_100k": "directly age-sex-standardised rate per 100,000, to the population named in `standard`",
+    "standardised_low": "lower 95 % bound of the standardised rate (Fay & Feuer's gamma interval)",
+    "standardised_high": "upper 95 % bound of the standardised rate (Fay & Feuer's gamma interval)",
+    "standard": "the standard population of the direct standardisation: Brazil's 2010 population by sex and age band of "
+                "the field's own population source (fixed, so rates compare across studies, periods and areas)",
+    "group": "a row's sex or age band (rates by sex and by age band, the whole's); empty for every person",
     "p90": "90th percentile of an interval's days",
     "provisional": "true for a year the source declares not yet final (its notifications still being investigated "
                    "and closed): a fall in it may be the year still filling in",
@@ -3946,7 +4125,7 @@ def body(folder: str | Path) -> list[dict]:
         # the meaning of the numbers, not their presence (2026-10-12): an area's total is not Brazil's; a notified
         # condition with a confirmed-case event is rated on its cases; a pregnancy or perinatal field per live births
         whole = "national" if decl.where in (None, "BR") else "area"
-        wrong = sorted(set(desc["level"]) - {whole, "region", "state"})
+        wrong = sorted(set(desc["level"]) - {whole, "region", "state", *(level for _, level in HEALTH_LEVELS)})
         part("descriptive: geography", not wrong, f"the whole at level {whole}" + (f"; also {wrong}" if wrong else ""))
         cased = sorted({x["dataset"] for x in read if x.get("event") == "case"})
         uncased = sorted({x["dataset"] for x in read if not x.get("source") and any(

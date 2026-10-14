@@ -394,8 +394,12 @@ failing the gate.
 
 What a row of numbers must carry so that it cannot mislead (the review of the RS slices, 2026-10-13):
 - every rate row: the year's `allocated_share` of the field's events its counts can place (SIA's serology by
-  residence rose 65-fold as its consolidated production gave way to individual records), and `provisional` where the
-  source declares the year not final; trends (APC) are fitted on final years only;
+  residence rose 65-fold as its consolidated production gave way to individual records; in an area study the residence
+  part is Brazil's, a record with no residence never knowably the area's, the sex and age part the area's), and
+  `provisional` where the source declares the year not final; trends (APC) are fitted on final years only, crude and
+  age-sex adjusted (each sex-age cell its own level), quasi-Poisson at the year level with a t(T − 2) interval;
+- every standardised rate: direct, to a fixed and named standard (Brazil's 2010 population by sex and age band of the
+  field's own population source), with Fay & Feuer's gamma interval; rates by sex and by age band beside it;
 - every finding: its locus's observed over expected against its own tier (B0 national rates for clusters and levels,
   B1 the place's own level), with the exact interval, and "noise" only where that interval holds 1, never below a
   count of events (4 pregnancy admissions against 0.2 expected were noise);

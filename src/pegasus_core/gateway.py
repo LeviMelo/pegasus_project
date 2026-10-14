@@ -1160,6 +1160,28 @@ def _area_key(area) -> dict:
     return {"area": sorted(int(a) for a in area)} if area else {}
 
 
+def event_totals(dataset: str, event: str, year: int, classifier: str | None) -> pa.Table:
+    """Brazil's events of ``year`` by code alone (code, y): the denominator of the national share of a field's events
+    placed at a residence, beside `unplaced` (an area's own counts cannot say it). One column counted, cached."""
+    import pegasus_data as pg
+
+    key = {"what": "event_totals", "dataset": dataset, "event": event, **_declared_key(dataset, event), "year": year,
+           "classifier": classifier, "data": config.data_version(), "code": config.code_key(event_totals)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = pg.count_events(dataset, event, period=year, geography="BR", by=[classifier] if classifier else None,
+                              root=config.data_root(), allow_partial=False, max_download=max_download())
+    con = duckdb.connect()
+    con.register("r", raw)
+    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    out = con.execute(f"SELECT {code} AS code, CAST(sum(events) AS BIGINT) AS y FROM r GROUP BY ALL").fetch_arrow_table()
+    store.put_table("gateway", key, out, {"source": f"pegasus_data.count_events({dataset}, {event}) by code"})
+    return out
+
+
 def unplaced(dataset: str, event: str, year: int, classifier: str | None) -> pa.Table:
     """Brazil's events of ``year`` whose residence is blank or no municipality code, by code (year, reason, code, y):
     an area's filtered read cannot see them (no prefix matches a blank), and they are the area's possibly, never
@@ -1904,16 +1926,20 @@ def context_name(entry: str | dict) -> str:
     return entry.get("name") or entry["field"] + (f" [{entry['where']}]" if entry.get("where") else "")
 
 
-def rated(contexts: list) -> list:
+def rated(contexts: list, left: list | None = None) -> list:
     """The context entries that are rates (a declared or an entry's own denominator): a count with none would rank
-    places by their size alone."""
+    places by their size alone. Each entry left out goes to ``left`` as (name, reason): two of Alagoas's ten declared
+    contexts had vanished from its products unsaid (the review of the study, 2026-10-14)."""
     out = []
     for c in contexts:
         try:
             if _context_entry(c)[2]:
                 out.append(c)
-        except (KeyError, ValueError):
-            continue
+            elif left is not None:
+                left.append((str(context_name(c)), "a count with no declared denominator: it would rank places by size"))
+        except (KeyError, ValueError) as exc:
+            if left is not None:
+                left.append((str(c), f"not readable as a context: {type(exc).__name__}: {exc}"))
     return out
 
 
