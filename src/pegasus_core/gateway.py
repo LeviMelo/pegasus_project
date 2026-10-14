@@ -819,7 +819,8 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
         # the duplicates rule alone: the status is applied below, as for every event
         only = dataclasses.replace(data_event_type(dataset, event), status_column=None, consolidation_key=())
         keep = [c for c in dict.fromkeys(wanted + (["_rid"] if identity else [])) if c in table.column_names]
-        table = events_of(table, only).select(keep)
+        # a form or a year without the source's duplicate flag flags none: said by this reader, which read without it
+        table = events_of(table, only, flag_absent_ok=bool(flag) and flag not in table.column_names).select(keep)
     if status.get("column") and status.get("values"):
         table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
                                       value_set=pa.array([str(v) for v in status["values"]])))

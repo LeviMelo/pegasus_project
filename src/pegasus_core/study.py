@@ -809,18 +809,16 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
     procedures = sorted({r["code"] for r in ix["labels"] if r["structure"] == "SIGTAP" and r["level"] == "procedure"})
     for ds in sorted(served):
         for et in gateway.event_types(ds):
-            primary_structure = next((c.get("structure") for c in et.get("classifiers") or []
-                                      if c.get("role") == "primary"), None)
             for c in et.get("classifiers") or []:
                 if c.get("role") == "primary" and c.get("structure") == "ICD10":
                     continue                    # read by the primary loop, with its tree
                 if c.get("structure") == "ICD10" and prefixes:       # its records decide (`_records`)
-                    # an alternative of the primary's own structure codes the same events again (SIM's CAUSABAS_O, the
-                    # cause before investigation): its rates are described beside the primary's, its questions,
-                    # supports and links would restate the primary's (Alagoas's infarction deaths were asked twice
-                    # over, 2026-10-14); of another structure (SIA's diagnosis beside its procedure) it reaches records
-                    # the primary's codes do not, and is read whole
-                    again = c.get("role") != "primary" and c.get("structure") == primary_structure
+                    # a classifier pegasus_data declares a recoding of the primary (`recodes`: SIM's CAUSABAS_O, the
+                    # cause before investigation) codes the same events again: its rates are described beside the
+                    # primary's, its questions, supports and links would restate the primary's (Alagoas's infarction
+                    # deaths were asked twice over, 2026-10-14); another facet (SIA's diagnosis beside its procedure)
+                    # reaches records the primary's codes do not, and is read whole
+                    again = bool(c.get("recodes"))
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its {c['role']} classifier {c['column']} "
                                       f"(ICD-10) carries {', '.join(prefixes)}, read as one code set"
                                       + (": a second coding of the same events, counted and described only" if again
