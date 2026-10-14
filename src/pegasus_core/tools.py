@@ -903,12 +903,14 @@ class Session:
                 continue
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
+            by_group = None
             for x in group:
                 rows = np.array([index[int(p)] for p in x.locus.get("places", []) if int(p) in index], dtype=int)
                 span, direction = replication.span_direction(x)
                 st = x.provenance.get("stats", {})
                 if x.estimand == "group_disparity":
-                    ev.group_spread = explain.group_spread(*self._by_group_cells(node), rows)
+                    by_group = by_group or self._by_group_cells(node)       # constant over the node's leads
+                    ev.group_spread = explain.group_spread(*by_group, rows)
                 if fac is not None and rows.size:
                     ev.facility = fac.tally(block, block_codes, lead_codes, rows)
                 obs, exp_ = st.get("observed"), st.get("expected")
@@ -1367,8 +1369,7 @@ class Session:
                 weak = min(parts, key=lambda t: sign * t[0] if np.isfinite(t[0]) else -1e9)
                 out["spatial"] = {"log_rr": [p[0] for p in parts], "p": [p[1] for p in parts],
                                   "ok": control.replicates(full, sign * weak[0] if np.isfinite(weak[0]) else 0.0, weak[1])}
-        near = np.unique(np.concatenate([edges[edges[:, 0] == r, 1] for r in rows] +
-                                        [edges[edges[:, 1] == r, 0] for r in rows] + [np.array([], dtype=int)]))
+        near = np.unique(np.concatenate([edges[np.isin(edges[:, 0], rows), 1], edges[np.isin(edges[:, 1], rows), 0]]))
         near = near[~np.isin(near, rows)]
         if near.size:
             eff, p = explain.split_effect(s.y, s.mu, s.phi, near, win, sign)
@@ -1597,7 +1598,7 @@ class Session:
             batch = self._ledger_open("corroboration", [(x, {"source": src.label}) for src in held])
             for src in held:
                 def run(x=x, src=src, cats=cats, rows=rows, span=span, direction=direction):
-                    c = corroborate.corroborate(grid, src, cats, rows, span, direction, replicates)
+                    c = corroborate.corroborate(grid, src, cats, rows, span, direction, replicates, q=q)
                     run.result = c
                     return {"tested": c.tested, "p": c.p, "effect": c.observed, "reason": (c.detail or {}).get("reason")}
 

@@ -192,7 +192,12 @@ def tail_p(null: np.ndarray, h: np.ndarray, exceedances: int = 250) -> np.ndarra
         return emp
     u = null[n - exceedances - 1]
     exc = null[n - exceedances:] - u
-    shape, _, scale = stats.genpareto.fit(exc, floc=0.0)
+    if not np.ptp(exc) > 0:     # exceedances all equal (a discrete or empty-celled null): no tail to fit, the empirical p stands
+        return emp
+    try:
+        shape, _, scale = stats.genpareto.fit(exc, floc=0.0)
+    except (FloatingPointError, RuntimeError, ValueError):
+        return emp
     if shape < 0:          # a bounded tail would give p = 0 past its endpoint: the exponential (Gumbel domain, where
         shape, scale = 0.0, float(exc.mean())     # a smooth Gaussian field's peaks lie) is the conservative bound
     beyond = h > u
@@ -348,13 +353,19 @@ def peaks(s: surprise.Surprise, spectrum: GraphSpectrum, scales: list[float], sh
         KB = K @ CB if burden else None
         KWratio = (K @ CWb) / torch.clamp(K @ CWn, min=1e-30) if shift_burden else None
         null[places[k]] = float(rpeak[k].sum()) / replicates
+        # the contrasts of one absorption class share one null (calibrated together above): their replicate peaks are
+        # pooled, so a class has one tail fit per scale, on a null as many times larger as the class has contrasts
+        pooled = {}
+        for a in np.unique(absorb):
+            js = np.flatnonzero(absorb == a)
+            pooled[a] = torch.sort(torch.cat([Sr_all[k][:, :, j][rpeak[k][:, :, j]] for j in js])).values.cpu().numpy()
         for j in range(m):
-            null_heights = torch.sort(Sr_all[k][:, :, j][rpeak[k][:, :, j]]).values
+            null_heights = pooled[absorb[j]]
             cs = torch.nonzero(is_peak[k][:, j], as_tuple=True)[0]
-            if cs.numel() == 0 or null_heights.numel() == 0:
+            if cs.numel() == 0 or null_heights.size == 0:
                 continue
             h = S_all[k][cs, j]
-            p = torch.as_tensor(tail_p(null_heights.cpu().numpy(), h.cpu().numpy()), device=dev)
+            p = torch.as_tensor(tail_p(null_heights, h.cpu().numpy()), device=dev)
             if gauss:                # exp of the mean log difference; relevance against log θ0 per unit of contrast
                 kd = KC[cs, j] - KM[cs, j]
                 rr = torch.exp(kd / torch.clamp(KM[cs, j], min=1e-12))

@@ -240,11 +240,10 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
 
 
 def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, min_years: int = 2,
-                 replicates: int | None = None, rate_ratio: float | None = None, min_past: int = 3) -> list[Finding]:
+                 rate_ratio: float | None = None, min_past: int = 3) -> list[Finding]:
     """A level shift in a place's trailing years: for each window [t, T−1] (at least ``min_years`` long, after at
     least ``min_past`` years), the upper tail of its total; the place's p is the smallest window p times the number
     of windows (Bonferroni: conservative across nested windows, no simulation and no floor). BH across places.
-    ``replicates`` is accepted and unused.
 
     The window is read against the place's own course, estimated from the years before it and extrapolated
     (`_past_course`; ADR-0027). This is the baseline of outbreak detectors since Farrington (1996): a persistent place

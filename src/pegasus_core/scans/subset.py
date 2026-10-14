@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 
-from .. import config
+from .. import config, mc
 
 
 @dataclass
@@ -179,43 +179,44 @@ def replicate(m: np.ndarray, phi: np.ndarray | float, rng: np.random.Generator, 
     return rng.poisson(lam).astype(float)
 
 
-#: replicates at or above a score at which its Monte Carlo test stops (Besag and Clifford 1991): the score is far from
-#: significant, and its p-value h/N is a valid one
-SEQUENTIAL_EXCEEDANCES = 10
+SEQUENTIAL_EXCEEDANCES = mc.EXCEEDANCES
 BLOCK = 32             # replicates drawn at a time
 MIN_POSITIVE = 20      # positive null maxima needed to fit the tail
 MAX_REPLICATES = 2000  # replicates drawn, at most, to reach them
 
 
 class Null:
-    """The null of the maximum score, drawn on demand. ``cap`` replicates (the study's scale of them) test a score
-    sequentially: the p-value is h/N when the h-th replicate at or above it came at the N-th, and (b + 1)/(n + 1) when
-    the cap leaves b < h of n. A score the cap does not settle takes the tail model: an atom at zero (mass π0, no
-    subset above the expectation) and a Gumbel fitted to the positive maxima, P(F ≥ s) = (1 − π0)·Gumbel_sf(s)
-    (a Gumbel fitted to all maxima failed on sparse fields, survey of IX, I63, 2026-10-04), drawing more replicates (up
-    to `MAX_REPLICATES`) until `MIN_POSITIVE` are positive. When too few are, or all are equal, the field carries too
-    little information for the tail and the p-value is the empirical one at all the replicates drawn, not 1: an
-    untestable tail is not "no cluster"."""
+    """The null of the maximum score, drawn on demand (`mc.Draws`). ``cap`` replicates (the study's scale of them, in
+    blocks) test a score sequentially (`mc.Draws.test`): the p-value is h/N when the h-th replicate at or above it came
+    at the N-th, and (b + 1)/(n + 1) when the cap leaves b < h of n. A score the cap does not settle takes the tail
+    model: an atom at zero (mass π0, no subset above the expectation) and a Gumbel fitted to the positive maxima,
+    P(F ≥ s) = (1 − π0)·Gumbel_sf(s) (a Gumbel fitted to all maxima failed on sparse fields, survey of IX, I63,
+    2026-10-04), drawing more replicates (up to `MAX_REPLICATES`) until `MIN_POSITIVE` are positive. When too few are,
+    or all are equal, the field carries too little information for the tail and the p-value is the empirical one at
+    all the replicates drawn, not 1: an untestable tail is not "no cluster"."""
 
     def __init__(self, scanner: Scanner, m: np.ndarray, phi: np.ndarray | float, cap: int, seed_parts: tuple,
                  noise=None):
         self.scanner, self.m, self.phi, self.noise = scanner, m, phi, noise
-        self.cap, self.seed_parts = max(int(cap), BLOCK), seed_parts
-        self.maxima = np.zeros(0)
+        self.cap, self.seed_parts = -(-max(int(cap), BLOCK) // BLOCK) * BLOCK, seed_parts
+        self.draws = mc.Draws(self._block, BLOCK)
         self._fit: tuple | None = None          # (n drawn, loc, scale, π0, testable)
         self.kind = "none"                      # how the last `p` was reached
 
-    def _block(self) -> None:
-        seed = config.seed(*self.seed_parts, "block", len(self.maxima) // BLOCK)
-        self.maxima = np.concatenate([self.maxima, _maxima_batched(self.scanner, self.m, self.phi, BLOCK, seed,
-                                                                    chunk=BLOCK, noise=self.noise)])
+    @property
+    def maxima(self) -> np.ndarray:
+        return self.draws.values
+
+    def _block(self, start: int, count: int) -> np.ndarray:
+        seed = config.seed(*self.seed_parts, "block", start // BLOCK)
+        return _maxima_batched(self.scanner, self.m, self.phi, count, seed, chunk=BLOCK, noise=self.noise)
 
     def tail(self) -> tuple[float, float, float, bool]:
         """(loc, scale, π0, testable) of the tail model over the replicates drawn: to the cap, then on until
         `MIN_POSITIVE` of them are positive."""
-        while len(self.maxima) < self.cap or ((self.maxima > 0).sum() < MIN_POSITIVE
-                                              and len(self.maxima) < MAX_REPLICATES):
-            self._block()
+        self.draws.extend(self.cap)
+        while (self.maxima > 0).sum() < MIN_POSITIVE and len(self.draws) < MAX_REPLICATES:
+            self.draws.more()
         if self._fit is None or self._fit[0] != len(self.maxima):
             positive = self.maxima[self.maxima > 0]
             pi0 = 1 - len(positive) / len(self.maxima)
@@ -242,14 +243,10 @@ class Null:
         if s <= 0:
             self.kind = "none"
             return 1.0
-        while True:
-            hits = np.flatnonzero(self.maxima >= s)
-            if len(hits) >= h:
-                self.kind = "sequential"
-                return float(h / (hits[h - 1] + 1))
-            if len(self.maxima) >= self.cap:
-                break
-            self._block()
+        r = self.draws.test(s, h, max(self.cap, len(self.draws)))
+        if r.settled:
+            self.kind = "sequential"
+            return r.p
         loc, sc, pi0, testable = self.tail()
         if not testable:
             self.kind = "empirical"

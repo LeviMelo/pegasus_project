@@ -32,7 +32,7 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
-from . import config, control, gateway, store
+from . import config, control, gateway, mc, store
 
 
 def _system(dataset: str) -> str:
@@ -297,20 +297,20 @@ def _grow(adj: list[np.ndarray], seed: int, size: int, rng: np.random.Generator)
     return chosen
 
 
-def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, replicates: int, connected: bool = True
-               ) -> np.ndarray:
+def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, replicates: int, connected: bool = True,
+               comps: list[np.ndarray] | None = None) -> np.ndarray:
     """[replicates, len(rows)] place indices. A lead's places that touch each other are a cluster, and a cluster
     shares its neighbours' shocks in the other field: each cluster of c places is replaced by a random connected set
     of c places grown from a random seed of the cluster's state (``connected``; a set that cannot reach c places is
     redrawn). Places with no neighbour in the lead, and every place when ``connected`` is False or the graph is
     unknown, are replaced by a random place of the same state and population quintile (the state alone if fewer than
-    five), distinct within a draw where possible."""
+    five), distinct within a draw where possible. ``comps``: the lead's components, when already known."""
     out = np.empty((replicates, len(rows)), dtype=np.int64)
     position = {int(r): j for j, r in enumerate(rows)}
     rest = list(range(len(rows)))
     if connected and fields.edges is not None:
         adj = fields.adjacent()
-        for comp in _components(fields, rows):
+        for comp in _components(fields, rows) if comps is None else comps:
             if len(comp) < 2:
                 continue
             cols = [position[int(r)] for r in comp]
@@ -334,7 +334,7 @@ def _null_sets(fields: Fields, rows: np.ndarray, rng: np.random.Generator, repli
 
 
 def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.ndarray, years: list[int],
-                direction: int, replicates: int = 4999, connected: bool = True) -> Corroboration:
+                direction: int, replicates: int = 4999, connected: bool = True, q: float = 0.05) -> Corroboration:
     """Is the lead's place set × years unusual in the independent field, against the field's own variation?"""
     replicates = config.replicates(replicates)          # the study's `nulls`
     sid = f"{source.kind}:{source.dataset}:{source.event}"
@@ -372,33 +372,71 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
     null_of = ratio
     detail["unit"] = "log (window count + ½) / (the places' median year × years + ½)"
     detail["observed_count"] = float(y[rows][:, cols].sum())
-    chunk = max(1, min(replicates, int(2e7 // max(len(rows) * int(cols.sum()), 1))))      # bounded memory at any replicate count
-    sets = _lead_null_sets(fields, rows, replicates, connected)       # one draw of the lead's places for every source
-    null = np.concatenate([null_of(sets[i:i + chunk]) for i in range(0, replicates, chunk)])
-    p, detail["p_method"] = tail_p(null, obs)
+    chunk = max(1, int(2e7 // max(len(rows) * int(cols.sum()), 1)))      # bounded memory at any block size
+    sets = _lead_sets(fields, rows, connected)       # one sequence of the lead's null places for every source
+
+    def draw(start: int, count: int) -> np.ndarray:
+        block = sets.get(start, count)
+        return np.concatenate([null_of(block[i:i + chunk]) for i in range(0, len(block), chunk)])
+
+    # sequentially (Besag and Clifford 1991, `mc`): a source whose p-value is far above what any lead could be rejected
+    # at stops at the tenth null set at or above its statistic; one that is not is drawn to all ``replicates`` and read
+    # from the null's tail (`tail_p`)
+    draws = mc.Draws(draw, SET_BLOCK)
+    seq = draws.test(obs, mc.EXCEEDANCES, replicates)
+    if seq.settled and seq.p > SCREEN * q:
+        p = seq.p
+        detail["p_method"] = f"sequential: {seq.hits} of {seq.n} null sets at or above (Besag and Clifford 1991)"
+    else:
+        draws.extend(replicates)
+        p, detail["p_method"] = tail_p(draws.values, obs)
+    null = draws.values
     if detail["observed_count"] == 0:
         p = 1.0                                   # nothing at the places in the window corroborates nothing
-    detail["replicates"] = replicates
+    detail["replicates"] = len(null)
     return Corroboration(True, sid, source.label, obs, float(np.median(null)), p, detail)
 
 
-#: the null place sets of the leads read last (`_lead_null_sets`): a lead is asked of every source on the same draws
-_NULLS: dict[tuple, tuple[Fields, np.ndarray]] = {}
+#: place sets drawn at a time; a block's seed is its number, so the sequence does not depend on where a test stopped
+SET_BLOCK = 250
+#: a source's sequential p above this many times the level cannot corroborate the lead at it (Benjamini-Hochberg rejects
+#: at most at the level, Bonferroni over sources only lowers it) and is not refined
+SCREEN = 3.0
 
 
-def _lead_null_sets(fields: Fields, rows: np.ndarray, replicates: int, connected: bool) -> np.ndarray:
-    """The lead's null place sets (`_null_sets`), drawn once for all its sources from a seed of its places: grown again
-    for each source, a TOXG lead's corroboration was 84 % of its lane (2026-10-12)."""
-    key = (id(fields), np.asarray(rows, dtype=np.int64).tobytes(), int(replicates), bool(connected))
+class _LeadSets:
+    """A lead's null place sets (`_null_sets`), drawn in blocks of `SET_BLOCK` as the sources' tests need them and kept:
+    every source of the lead reads the same sequence, which a TOXG lead's corroboration grew again for each source (84 %
+    of its lane, 2026-10-12)."""
+
+    def __init__(self, fields: Fields, rows: np.ndarray, connected: bool):
+        self.fields, self.rows, self.connected = fields, np.asarray(rows, dtype=np.int64), connected
+        self.name = "null|" + self.rows.tobytes().hex()
+        self.comps = _components(fields, self.rows) if connected and fields.edges is not None else []
+        self.blocks: dict[int, np.ndarray] = {}
+
+    def get(self, start: int, count: int) -> np.ndarray:
+        """Sets ``start`` on (a multiple of the block), ``count`` of them: [count, len(rows)] place indices."""
+        i = start // SET_BLOCK
+        if i not in self.blocks:
+            rng = np.random.default_rng(config.seed(self.name, "block", i))
+            self.blocks[i] = _null_sets(self.fields, self.rows, rng, SET_BLOCK, self.connected, self.comps)
+        return self.blocks[i][:count]
+
+
+#: the leads read last (`_lead_sets`); an entry holds ``fields`` itself: an `id` of an object that is gone is reused by
+#: the next one, which then read the previous grid's place indices (another session's, with the same rows)
+_NULLS: dict[tuple, _LeadSets] = {}
+
+
+def _lead_sets(fields: Fields, rows: np.ndarray, connected: bool) -> _LeadSets:
+    key = (id(fields), np.asarray(rows, dtype=np.int64).tobytes(), bool(connected))
     hit = _NULLS.get(key)
-    if hit is None or hit[0] is not fields:
-        rng = np.random.default_rng(config.seed("null|" + key[1].hex()))
-        # the entry holds ``fields`` itself: an `id` of an object that is gone is reused by the next one, which then
-        # read the previous grid's place indices (another session's, with the same rows)
-        hit = _NULLS[key] = (fields, _null_sets(fields, rows, rng, replicates, connected))
+    if hit is None or hit.fields is not fields:
+        hit = _NULLS[key] = _LeadSets(fields, rows, connected)
         while len(_NULLS) > 32:
             _NULLS.pop(next(iter(_NULLS)))
-    return hit[1]
+    return hit
 
 
 #: a permutation p-value with fewer exceedances than this is read from the null's fitted tail (`tail_p`)

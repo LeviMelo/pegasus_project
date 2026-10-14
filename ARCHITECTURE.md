@@ -805,7 +805,7 @@ Prospective use is not a component: it is every component tested against BP/BPA 
   a BYM2 excess for levels (Richardson et al. 2004); place × group interactions for heterogeneity.
 - **Space at unknown scale.** Heat kernels `K_s = exp(−sL)` of the place graph give a continuum of neighbourhoods;
   multiscale peak testing (STEM, Schwartzman et al. 2011) over places × scales × temporal contrasts (spike, step from
-  τ, trend bending at τ), the peaks' tail by a generalised Pareto, one BH over peaks. A finding carries its scale and
+  τ, trend bending at τ), the peaks' tail by a generalised Pareto fitted once per scale and absorption class (the contrasts that share an empirical null share their replicate peaks), one BH over peaks. A finding carries its scale and
   footprint.
 - **Shape attribution** (Chen & Liu 1993): each finding's series decomposed into additive outliers, temporary changes,
   level shifts and ramps under N1's covariance; the finding carries the shape it takes.
@@ -813,7 +813,9 @@ Prospective use is not a component: it is every component tested against BP/BPA 
   over places in graph neighbourhoods (the prefix's connected component, observed and replicates alike: a cluster is one
   piece), contiguous windows; null by replicate fields (places' frailty independent: N1's spatial structure is not
   drawn), drawn on demand: a score is tested by Besag–Clifford sequential Monte Carlo (stop at the tenth replicate at
-  or above it), only a score the replicates do not settle takes the Gumbel tail, and where that cannot be fitted the
+  or above it; one helper, `mc`, serves the scans, a lead's corroboration, whose source tests stop at ten null place sets
+  above their statistic unless their p is within 3 q, and the propagation test, which stops at floor(q (N + 1))
+  surrogates, where the decision is certain), only a score the replicates do not settle takes the Gumbel tail, and where that cannot be fitted the
   empirical p stands (never "no cluster"). A subset is a proposal; the departure model reads it.
 - **Merging.** The methods of one component are run, their answers merged by overlapping locus; agreement and the
   shape are reported. Each method carries its measured record (§11.6).

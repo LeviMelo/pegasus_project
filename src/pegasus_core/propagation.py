@@ -45,7 +45,7 @@ import hashlib
 import numpy as np
 from scipy import stats
 
-from . import control, departures, gateway, graphs, surprise
+from . import config, control, departures, gateway, graphs, mc, surprise
 from .scans import lenses
 
 MIN_PLACES = 10          # a wave needs this many departing places to be tested (debt: ARCHITECTURE §12)
@@ -177,44 +177,62 @@ def radii(dist: np.ndarray) -> np.ndarray:
     return np.append(r[r < top], top)
 
 
-def _disc_scan(rt: np.ndarray, dist: np.ndarray, rd: np.ndarray, ladder: np.ndarray, ok: np.ndarray) -> tuple:
+class _Discs:
+    """What the disc scan holds constant over a wave's places, on the device: the distances, the distance ranks, the
+    sources that reach every place."""
+
+    def __init__(self, dist: np.ndarray, rd: np.ndarray, ladder: np.ndarray, ok: np.ndarray):
+        import torch
+
+        self.dev = torch.device(config.array_device())
+        self.dist = torch.as_tensor(dist, dtype=torch.float64, device=self.dev)
+        self.rd = torch.as_tensor(rd, dtype=torch.float32, device=self.dev)
+        self.ok = torch.as_tensor(ok, device=self.dev)
+        self.ladder = [float(r) for r in ladder]
+
+
+def _disc_scan(rt: np.ndarray, discs: _Discs) -> tuple:
     """For each column of ``rt`` [n, B] (onset ranks), the largest over sources o and radii R of the Fisher z of the
     rank correlation, among the places within R of o, between onset and distance from o, times sqrt(n_disc - 3) (so the
     scales compare: the scan statistic of Kulldorff 1997 for a correlation). Also returns the argmax (source, radius
-    index) of the first column. Discs of fewer than MIN_PLACES places are not scored."""
-    n, B = rt.shape
-    best = np.full(B, -np.inf)
+    index) of the first column. Discs of fewer than MIN_PLACES places are not scored. On the device, in float32."""
+    import torch
+
+    rt = torch.as_tensor(rt, dtype=torch.float32, device=discs.dev)
+    B = rt.shape[1]
+    best = torch.full((B,), -float("inf"), device=discs.dev)
     arg = (-1, -1)
     rt2 = rt ** 2
-    for j, r in enumerate(ladder):
-        m = ((dist <= r) & ok[:, None]).astype(np.float32)
+    for j, r in enumerate(discs.ladder):
+        m = ((discs.dist <= r) & discs.ok[:, None]).to(torch.float32)
         k = m.sum(1)
         keep = k >= MIN_PLACES
-        if not keep.any():
+        if not bool(keep.any()):
             continue
-        md = m * rd
-        sd, sdd = md.sum(1), (md * rd).sum(1)
+        md = m * discs.rd
+        sd, sdd = md.sum(1), (md * discs.rd).sum(1)
         st, stt, sdt = m @ rt, m @ rt2, md @ rt
-        with np.errstate(divide="ignore", invalid="ignore"):
-            num = sdt - (sd / k)[:, None] * st
-            den = np.sqrt(np.maximum(sdd - sd ** 2 / k, 0)[:, None] * np.maximum(stt - st ** 2 / k[:, None], 0))
-            corr = np.where(den > 0, num / den, 0.0)
-            z = np.arctanh(np.clip(corr, -0.999999, 0.999999)) * np.sqrt(np.maximum(k - 3, 0))[:, None]
-        z[~keep] = -np.inf
-        top = z.max(0)
+        num = sdt - (sd / k)[:, None] * st
+        den = torch.sqrt(torch.clamp(sdd - sd ** 2 / k, min=0)[:, None] * torch.clamp(stt - st ** 2 / k[:, None], min=0))
+        corr = torch.where(den > 0, num / den, torch.zeros_like(num))
+        z = torch.atanh(corr.clamp(-0.999999, 0.999999)) * torch.clamp(k - 3, min=0).sqrt()[:, None]
+        z[~keep] = -float("inf")
+        top = z.max(0).values
         if B and top[0] > best[0]:
             arg = (int(z[:, 0].argmax()), j)
-        best = np.maximum(best, top)
-    return best, arg
+        best = torch.maximum(best, top)
+    return best.double().cpu().numpy(), arg
 
 
-def fit_wave(t: np.ndarray, dist: np.ndarray, null: str, seed_parts: tuple,
-             surrogates: int = SURROGATES) -> dict:
+def fit_wave(t: np.ndarray, dist: np.ndarray, null: str, seed_parts: tuple, surrogates: int = SURROGATES,
+             q: float | None = None) -> dict:
     """One wave over the places whose onsets are ``t`` [n] and whose distances to each other are ``dist`` [n, n]: the
     source and the disc of places around it (radius from `radii`) whose onsets rise most steadily with distance from it
     (`_disc_scan`), the test against ``surrogates`` surrogates of the onsets (the search over sources and radii is
     inside every surrogate's maximum), and the speed by Theil-Sen over the disc. Sources unreachable from some place
-    (hops across islands) are not scored."""
+    (hops across islands) are not scored. With a level ``q`` the test is sequential (`mc`): it stops as soon as
+    floor(q (N + 1)) surrogates reach the observed statistic, because the p-value (b + 1)/(N + 1) of the whole set
+    exceeds q whatever the rest give, and returns that bound (the decision is exact, which is all `waves` reads)."""
     n = len(t)
     ok = np.isfinite(dist).all(1)
     if not ok.any() or np.ptp(t) == 0:
@@ -222,18 +240,23 @@ def fit_wave(t: np.ndarray, dist: np.ndarray, null: str, seed_parts: tuple,
     d = np.where(np.isfinite(dist), dist, 0.0)
     rd = stats.rankdata(d, axis=1).astype(np.float32) / n
     ladder = radii(d)
+    discs = _Discs(d, rd, ladder, ok)
     rt = (stats.rankdata(t) / n).astype(np.float32)[:, None]
-    obs, (src, rad) = _disc_scan(rt, d, rd, ladder, ok)
+    obs, (src, rad) = _disc_scan(rt, discs)
     if src < 0:
         return {"p": 1.0}
     rng = np.random.default_rng(int.from_bytes(hashlib.sha256(repr(seed_parts).encode()).digest()[:4], "little"))
     sur = _Surrogates(t, d, null, rng)
-    top = np.empty(0)
-    for start in range(0, surrogates, 100):
-        block = sur.draw(t, min(100, surrogates - start))
-        rs = (stats.rankdata(block, axis=0) / n).astype(np.float32)
-        top = np.append(top, _disc_scan(rs, d, rd, ladder, ok)[0])
-    p = float((1 + (top >= obs[0]).sum()) / (1 + len(top)))
+
+    def draw(start: int, count: int) -> np.ndarray:
+        block = sur.draw(t, count)
+        return _disc_scan((stats.rankdata(block, axis=0) / n).astype(np.float32), discs)[0]
+
+    h = surrogates + 2 if q is None else max(1, int(np.floor(q * (surrogates + 1) + 1e-9)))
+    seq = mc.sequential_p(draw, float(obs[0]), h, surrogates, 100)
+    if seq.settled:
+        return {"p": (h + 1) / (surrogates + 1), "stopped": seq.n}
+    p = seq.p
     disc = np.flatnonzero(d[src] <= ladder[rad])
     slope, intercept, lo, hi = stats.theilslopes(t[disc], d[src][disc])
     return {"p": p, "source": src, "radius": float(ladder[rad]), "length": sur.length, "z": float(obs[0]), "disc": disc,
@@ -260,7 +283,7 @@ def waves(t: np.ndarray, dist: np.ndarray, q: float, null: str, seed_parts: tupl
     out: list[dict] = []
     while len(left) >= MIN_PLACES and len(out) < max_waves:
         sub = dist[np.ix_(left, left)]
-        w = fit_wave(t[left], sub, null, (*seed_parts, len(out)), surrogates)
+        w = fit_wave(t[left], sub, null, (*seed_parts, len(out)), surrogates, q)
         if w["p"] > q or w.get("slope", 0.0) <= 0:
             break
         disc = w.pop("disc")

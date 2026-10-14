@@ -23,6 +23,7 @@ its support and the municipalities it covers.
 
 from __future__ import annotations
 
+import copy
 import functools
 
 import numpy as np
@@ -95,11 +96,24 @@ def bayes_select(p_null: np.ndarray, eligible: np.ndarray, q: float) -> np.ndarr
     return order[:k]
 
 
+def _kept(s: surprise.Surprise, key: tuple, compute):
+    """A quantity of the field computed once per surprise (`surprise.memo`), keyed also by the identity of the counts and
+    scores it reads, which a surprise and its mirror (the deficit side of a two-sided scan) do not share; the value
+    holds them, so an identity cannot be reused while it is kept."""
+    m = s.__dict__.setdefault("_kept", {})
+    full = (key, id(s.y), id(s.z), id(s.mu), id(s.phi), id(s.w), id(s.noise), id(s.flags))
+    if full not in m:
+        m[full] = (s.y, s.z, s.mu, s.phi, s.w, s.noise, s.flags, compute())
+    return m[full][-1]
+
+
 def _ladder(s: surprise.Surprise, scales: list | None) -> list[tuple[surprise.Surprise, object]]:
-    """The field at each support: (the Surprise there, its scale; None for the municipality itself)."""
+    """The field at each support: (the Surprise there, its scale; None for the municipality itself). A lifted support
+    is made once per surprise: the cell and the step departure models and the propagation's onsets read the same."""
     if not scales:
         return [(s, None)]
-    return [(s, None) if sc.name == "municipality" else (surprise.lift(s, sc), sc) for sc in scales]
+    return [(s, None) if sc.name == "municipality" else (_kept(s, ("lift", sc.name), lambda sc=sc: surprise.lift(s, sc)), sc)
+            for sc in scales]
 
 
 def _members(s: surprise.Surprise, sc, k: int) -> list[int]:
@@ -128,6 +142,14 @@ def size_classes(mu: np.ndarray, ok: np.ndarray) -> np.ndarray:
 
 def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
                 scales: list | None = None) -> list:
+    """`_cell_excess`, computed once per surprise, level, minimum effect, supports and ledger: the question pass and the
+    propagation's onsets read the same departures (a copy of them: findings are the caller's to change)."""
+    key = ("cell_excess", q, rate_ratio, None if scales is None else tuple(sc.name for sc in scales), id(ledger))
+    return copy.deepcopy(_kept(s, key, lambda: (ledger, _cell_excess(s, ledger, q, rate_ratio, scales)))[1])
+
+
+def _cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_ratio: float | None = None,
+                 scales: list | None = None) -> list:
     """Cell excess departures of a field (stage C) over the ladder of supports ``scales`` (None: the municipality):
     at each support and size class (`size_classes`, Efron's separate classes) the two-group model on its predictive
     scores, its empirical-null p-values scaled by its π0; one BH at q over every class's and support's cells (the classes
