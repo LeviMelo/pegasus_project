@@ -498,6 +498,31 @@ def declared_codes(dataset: str) -> list[Declared]:
     return out
 
 
+def classifier_of(dataset: str, event: str, source: dict | None, primary: bool = True):
+    """The column a field's codes are read from: a code list's columns as a tuple (`codes_source`, `mentions_source`: the
+    gateway explodes them into categories), the source's own classifier column, else (``primary``) the event type's
+    primary classifier. Each reader had taken ``source["classifier"]``, which for a code list is its field's name, not a
+    column (the SINASC study, 2026-10-14)."""
+    from . import gateway
+
+    src = source or {}
+    if src.get("source") == "code_list":
+        cols = src.get("column")
+        return tuple(cols) if isinstance(cols, (list, tuple)) else (cols,)
+    if src.get("classifier") or not primary:
+        return src.get("classifier")
+    return next((c["column"] for c in (gateway.event_type(dataset, event) or {}).get("classifiers") or []
+                 if c.get("role") == "primary"), None)
+
+
+def codes_of(source: dict | None, nodes=None) -> tuple[str, ...]:
+    """A field's own codes (prefixes): a code set's, or a code list's nodes (the categories its item reads)."""
+    src = source or {}
+    if src.get("codes"):
+        return tuple(str(c) for c in src["codes"])
+    return tuple(str(c) for c in nodes or ()) if src.get("source") == "code_list" else ()
+
+
 def codes_source(dataset: str, column: str) -> dict:
     """The reader of a code-tree column (`declared_codes`) on the tree its codelist names: a column pegasus_data
     declares to pack several codes a cell (`gateway.token_rule`: SINASC's anomalies) by the code-list reader, every

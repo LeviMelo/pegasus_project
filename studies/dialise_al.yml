@@ -1,0 +1,14 @@
+# The second paper audit's SIA study (2026-10-14): chronic kidney disease on dialysis in Alagoas, the outpatient
+# authorisations (APAC) of renal replacement therapy. What one row is (a patient's month of treatment, not a patient)
+# is the meaning at stake; the national prevalence of dialysis is published independently (the SBN census: about
+# 150,000 patients in 2022).
+study: dialise_al
+topic:
+  seeds:
+    icd10: [N18]
+  only: [SIASUS-ATD]
+period: 2014-2023
+where: AL
+grain: [year]
+depth: standard
+nulls: quick

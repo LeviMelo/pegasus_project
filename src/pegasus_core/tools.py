@@ -288,8 +288,7 @@ class Session:
         y_g, mu_g = self.by_group(node)
         collapsed = str(d.population).startswith("events:")
         leaves = set(self.expectations.registry.leaves(f.node))
-        primary = (self.source or {}).get("classifier") or next(
-            (c["column"] for c in gateway.event_type(self.dataset, self.event).get("classifiers") or [] if c["role"] == "primary"), None)
+        primary = fields.classifier_of(self.dataset, self.event, self.source)
         edges = gateway.age_edges(d.population, self.dataset, self.event)
         nB = d.N.shape[2] // 2
         # the field's events: a code set's codes (prefixes, as its counts read them: a code-set field's node is "*", and

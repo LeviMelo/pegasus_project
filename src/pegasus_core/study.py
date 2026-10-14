@@ -2198,7 +2198,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 # the share placed, for the counts and for each other place they are read at: a place of infection
                 # or of care left blank for 35-44 % of gestational cases makes its rates lower bounds (the review);
                 # each year's share placed is a completeness row ("events placed"), once
-                if (not name or support) and (not it.source or (it.source or {}).get("codes")):
+                if (not name or support) and (not it.source or (it.source or {}).get("codes")
+                                              or (it.source or {}).get("source") == "code_list"):
                     _allocation(it, list(it.years), support=support, lost=quality,
                                 base={"dataset": it.dataset, "field": f.id, "label": label})
                 # guarded as every product: an unguarded trend error had ended a slice's whole study (2026-10-14)
@@ -2330,8 +2331,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     # every descriptive number as one schema (MEASURES): ten tables, each with its own columns, had grown one audit at a
     # time (docs/plans/study-estimates.md)
     est = [*desc, *trends, *places, *seasons, *code_rows, *groups, *quality, *measures, *assoc, *covariates]
-    pq.write_table(_rows_table(est) if est else pa.table({"section": pa.array([], pa.string())}),
-                   out / "estimates.parquet")
+    pq.write_table(_estimates_table(est), out / "estimates.parquet")
     lap("places and quality")
     hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
     pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
@@ -2712,7 +2712,9 @@ def _allocation(it: Item, years: list[int], support: str | None = None, lost: li
     import pyarrow.compute as pc
 
     src = it.source or {}
-    codes = list(src.get("codes") or [])
+    codes = list(fields.codes_of(src, it.nodes))
+    listed = fields.classifier_of(it.dataset, it.event, src, primary=False)
+    listed = listed if isinstance(listed, tuple) else None
     out, keep = {}, lost
     base = base or {"dataset": it.dataset}
     ec_codes = tuple(codes) if it.extract else ()
@@ -2720,8 +2722,11 @@ def _allocation(it: Item, years: list[int], support: str | None = None, lost: li
         try:
             # the rates' own cells (residence, sex and age): counted by residence alone, a certificate with no sex or
             # age was "placed" and in no rate (Alagoas 2016: 1,504 placed, 1,503 rated; the paper audit, 2026-10-14)
-            ec = gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"),
-                                      codes=tuple(codes) if it.extract else (), support=support, area=(tuple(sorted(config.study_area())) if config.study_area() else None))
+            area_ = tuple(sorted(config.study_area())) if config.study_area() else None
+            # a code list's events by each category they carry, as its field counts them
+            ec = (gateway.code_list_counts(it.dataset, it.event, int(y), list(listed), area=area_) if listed else
+                  gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"),
+                                       codes=tuple(codes) if it.extract else (), support=support, area=area_))
         except Exception:  # noqa: BLE001 - a year that cannot be counted has no share
             continue
         tabs = [ec.counts, ec.unallocated]
@@ -2747,8 +2752,7 @@ def _allocation(it: Item, years: list[int], support: str | None = None, lost: li
             # an area's residence share is Brazil's (a record with no residence is never knowably the area's): the
             # area's own share by sex and age times the national share placed at a residence, where the area's placed
             # events had been divided by its own unallocated plus Brazil's blanks (the review of the study, 2026-10-14)
-            column = src.get("classifier") or next((c["column"] for c in gateway.event_type(it.dataset, it.event)
-                                                    .get("classifiers") or [] if c["role"] == "primary"), None)
+            column = listed or fields.classifier_of(it.dataset, it.event, src)
             try:
                 tot, nowhere = gateway.event_totals(it.dataset, it.event, int(y), column, codes=ec_codes), \
                     gateway.unplaced(it.dataset, it.event, int(y), column)
@@ -2765,8 +2769,10 @@ def _allocation(it: Item, years: list[int], support: str | None = None, lost: li
                     # and those with a residence but no sex, age or valid municipality: in no reference rate of Brazil
                     # (descriptive's level reference), which is total - blank - these (the audit, 2026-10-14)
                     try:
-                        national = gateway.event_counts(it.dataset, it.event, int(y), classifier=src.get("classifier"),
-                                                        codes=ec_codes).counts
+                        national = (gateway.code_list_counts(it.dataset, it.event, int(y), list(listed)).counts
+                                    if listed else gateway.event_counts(it.dataset, it.event, int(y),
+                                                                        classifier=src.get("classifier"),
+                                                                        codes=ec_codes).counts)
                         placed_br = float(pc.sum((mine(national) if codes else national).column("y")).as_py() or 0)
                     except Exception:  # noqa: BLE001 - Brazil's placed events unreadable: the row is not written
                         placed_br = None
@@ -3152,6 +3158,17 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
             out += per_births(*_whole(), t, np.ones(U, bool))
             for level, unit, sel_u in below:
                 out += per_births(level, unit, t, sel_u)
+        # Brazil's and the macro-regions' (and the region's without the area) per live births: what an area's birth
+        # prevalence is compared with
+        rb = _reference_births([int(x) for x in np.asarray(d.years)], [k for k, *_ in references])
+        for unit, yr_, _ in references:
+            for t in [*range(T), None]:
+                ev_ = float(yr_[t].sum()) if t is not None else float(yr_.sum())
+                bb = float(rb[unit][t]) if t is not None else float(rb[unit].sum())
+                base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": "reference", "place": unit,
+                        "stratum": None, **_period(int(np.asarray(d.years)[t]) if t is not None else None,
+                                                   None if t is not None else period)}
+                out += _rated(base, ev_, bb, "1,000 SINASC-DN:birth events", 1e3, "live births")
     _ratio_to_brazil(out)
     return out
 
@@ -3169,6 +3186,26 @@ def _rated(base: dict, events: float, pop: float, per: str, scale: float, kind: 
                                  high=scale * hi / pop, interval="exact Poisson (Garwood), denominator fixed",
                                  numerator=events, denominator=pop, denominator_kind=kind, per=scale,
                                  unit=f"per {per}", _cells=cells))
+    return out
+
+
+def _reference_births(years: list[int], units: list[str]) -> dict[str, np.ndarray]:
+    """Live births by year of each reference unit of `_reference_cells` (Brazil, a macro-region by its digit, the region
+    without the area)."""
+    t = gateway.population(years, source=BIRTHS)
+    u = t.column("u").to_numpy().astype(np.int64)
+    yr = t.column("year").to_numpy().astype(np.int64)
+    n = np.nan_to_num(t.column("n").to_numpy(zero_copy_only=False).astype(float))
+    pos = np.searchsorted(np.asarray(years), yr)
+    ok = np.isin(yr, years)
+    out = {}
+    for k in units:
+        m = ok.copy()
+        if k != "BR":
+            m &= u // 100000 == int(k.split()[0])
+            if k.endswith("without the area"):
+                m &= ~config.in_area(u)
+        out[k] = np.bincount(pos[m], weights=n[m], minlength=len(years))[:len(years)]
     return out
 
 
@@ -3243,6 +3280,8 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     years = np.asarray(d.years).astype(np.int64)
     if area is None or d.key.get("collapse") or years.max() > 9999 or str(d.population).startswith(("events:", "hybrid")):
         return []
+    src = it.source or {}
+    cols = fields.classifier_of(it.dataset, it.event, src, primary=False)
     U, T, G = d.N.shape
     nB = G // 2
     edges = list(gateway.age_edges(d.population, it.dataset, it.event))
@@ -3252,7 +3291,6 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     if not leaves and f.node != "*":
         return []
     width = max(len(str(c)) for c in d.leaves)
-    src = it.source or {}
     subset = [str(x) for x in src.get("codes") or []]
     codes = tuple(subset) if it.extract else ()
     regions = sorted({int(str(int(a))[0]) for a in area})
@@ -3263,7 +3301,9 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     ev = {k: np.zeros((T, G)) for k, *_ in units}
     py = {k: np.zeros((T, G)) for k, *_ in units}
     for t, yr in enumerate(years):
-        c = gateway.event_counts(it.dataset, it.event, int(yr), classifier=src.get("classifier"), codes=codes).counts
+        # a code list's events by each category they carry, as its field counts them (`gateway.code_list_counts`)
+        c = (gateway.code_list_counts(it.dataset, it.event, int(yr), list(cols)).counts if isinstance(cols, tuple)
+             else gateway.event_counts(it.dataset, it.event, int(yr), classifier=cols, codes=codes).counts)
         if subset:
             # the item's code set first, as the assembly cuts its block (`monolith._assemble`'s ``of_subset``): a code
             # set's field is its block's whole (node *), and Brazil's every death had been its reference (2026-10-14)
@@ -3415,6 +3455,15 @@ MUNICIPALITIES_VIEW = """SELECT field, label, dataset, place AS u, place_name AS
         max(estimate) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area,
         max(estimate) FILTER (WHERE measure = 'model_rate') AS model_rate
     FROM estimates WHERE section = 'municipalities' GROUP BY ALL"""
+
+
+def _estimates_table(rows: list[dict]) -> pa.Table:
+    """estimates.parquet: every column of the schema, typed, whatever the producers emitted (a folder without ratios had
+    no ``comparator``, and its views' SQL failed, 2026-10-14); a row's private keys (``_``) never written."""
+    cols = [*ESTIMATE_TEXT, *ESTIMATE_NUMBER, *ESTIMATE_INT, "provisional"]
+    types = {**{c: pa.string() for c in ESTIMATE_TEXT}, **{c: pa.float64() for c in ESTIMATE_NUMBER},
+             **{c: pa.int64() for c in ESTIMATE_INT}, "provisional": pa.bool_()}
+    return pa.table({c: pa.array([r.get(c) for r in rows], types[c]) for c in cols})
 
 
 def _estimate_row(section: str, measure: str, base: dict, **row) -> dict:
@@ -3600,13 +3649,13 @@ def _measures(it: Item, f, label: str, log) -> list[dict]:
     from . import fields as fields_
 
     src = it.source or {}
-    if src.get("source") or it.count_only or (not src.get("codes") and config.study_area() is None):
+    codes = fields_.codes_of(src, it.nodes)
+    if src.get("source") not in (None, "code_list") or it.count_only or (not codes and config.study_area() is None):
         return []           # a linked share or a second coding; a whole type nationally is described by its readers
     et = gateway.event_type(it.dataset, it.event) or {}
     if et.get("weight") or et.get("grid"):
         return []
-    classifier = src.get("classifier") or next((c["column"] for c in et.get("classifiers") or []
-                                                if c.get("role") == "primary"), None)
+    classifier = fields_.classifier_of(it.dataset, it.event, src)
     specs = []
     for d in fields_.declared(it.dataset):
         if d.kind == "measure":
@@ -3631,8 +3680,7 @@ def _measures(it: Item, f, label: str, log) -> list[dict]:
 
     for y in it.years:
         try:
-            t = gateway.mark_values(it.dataset, it.event, int(y), columns, classifier,
-                                    tuple(src.get("codes") or ()), area)
+            t = gateway.mark_values(it.dataset, it.event, int(y), columns, classifier, codes, area)
         except Exception as exc:  # noqa: BLE001 - a year that cannot be read is said, the others described
             log(f"study: measures {it.dataset} {y}: {type(exc).__name__}: {exc}")
             continue
@@ -3700,7 +3748,7 @@ def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
     import duckdb
 
     src = it.source or {}
-    codes = tuple(str(x) for x in src.get("codes") or [])
+    codes = fields.codes_of(src, it.nodes)
     acc: dict[tuple, list[np.ndarray]] = {}
     for y in it.years:
         try:
@@ -3708,8 +3756,7 @@ def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
             if not strata.get("age"):
                 return []
             cols = tuple(c for c in (strata["age"], strata.get("sex")) if c)
-            t = gateway.mark_values(it.dataset, it.event, int(y), cols,
-                                    (src.get("classifier") or classifier) if codes else None, codes, area)
+            t = gateway.mark_values(it.dataset, it.event, int(y), cols, classifier if codes else None, codes, area)
         except Exception:  # noqa: BLE001 - a year that cannot be read has no age row (the rates say why)
             continue
         x = f'trim(CAST("{strata["age"]}" AS VARCHAR))'
@@ -3773,7 +3820,9 @@ def _seasons(it: Item, s, f, label: str) -> list[dict]:
     years = [int(y) for y in it.years]
     ev = np.zeros((len(years), 12))
     for y in years:
-        c = gateway.monthly_counts(it.dataset, it.event, y, classifier=src.get("classifier"), area=area).counts
+        c = gateway.monthly_counts(it.dataset, it.event, y, classifier=fields.classifier_of(it.dataset, it.event, src,
+                                                                                            primary=False),
+                                   area=area).counts
         if subset:
             hit = pc.starts_with(c.column("code"), subset[0])
             for x in subset[1:]:
@@ -4472,11 +4521,19 @@ def _methods_markdown(decl: Declaration, scope: Scope, desc: list[dict], linkage
 
 
 def _birth_related(it: Item, d) -> bool:
-    """Whether a count field's events belong to pregnancy or the perinatal period: its codes all in ICD-10 chapter XV
-    (O00–O99) or XVI (P00–P96), or its events mostly at age 0 (the model's newborn exposure, `monolith.default_population`)."""
+    """Whether a count field is rated per live births: its events are births themselves (SINASC's: an anomaly is a birth
+    prevalence, and microcephaly had been rated per person-years of every resident, 2026-10-14), or they belong to
+    pregnancy or the perinatal period: its codes all in ICD-10 chapter XV (O00–O99) or XVI (P00–P96), or its events
+    mostly at age 0 (the model's newborn exposure, `monolith.default_population`)."""
+    if f"events:{it.dataset}:{it.event}" == BIRTHS:
+        return True
     codes = [str(c) for c in ((it.source or {}).get("codes") or it.nodes or [])]
     icd = (it.source or {}).get("structure", "ICD10") == "ICD10" and all(c[:1].isalpha() for c in codes)
     return str(d.population).startswith("hybrid") or bool(codes and icd and all(c[:1] in "OP" for c in codes))
+
+
+#: the live births a perinatal or a birth field is rated per (SINASC's declaration)
+BIRTHS = "events:SINASC-DN:birth"
 
 
 def _births(d) -> np.ndarray:
@@ -4484,7 +4541,7 @@ def _births(d) -> np.ndarray:
     import pyarrow.compute as pc
 
     years = [int(x) for x in np.asarray(d.years)]
-    t = gateway.population(years, source="events:SINASC-DN:birth")
+    t = gateway.population(years, source=BIRTHS)
     u = t.column("u").to_numpy().astype(np.int64)
     yr = t.column("year").to_numpy().astype(np.int64)
     n = pc.fill_null(t.column("n"), 0.0).to_numpy()
@@ -5605,7 +5662,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     nat: list[dict] = []
     if desc:                            # the rates as the view `rates` shapes them, the whole and the references' periods
         con = duckdb.connect()
-        con.register("estimates", _rows_table(desc))
+        con.register("estimates", _estimates_table(desc))
         cur = con.execute(f"""SELECT * FROM ({RATES_VIEW}) WHERE stratum IS NULL
             AND (geography = '{_whole()[0]}' OR (geography = 'reference' AND period_kind = 'period'))
             ORDER BY field, geography, place, period_kind DESC, first""")

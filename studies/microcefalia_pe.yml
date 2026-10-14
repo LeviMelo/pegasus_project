@@ -1,0 +1,15 @@
+# The second paper audit's SINASC study (2026-10-14): microcephaly among live births in Pernambuco, the epicentre of
+# the 2015-2016 Zika epidemic, whose surge from August 2015 is documented (Brazil's ESPIN of November 2015; de Araújo
+# et al. 2016). The births' own record (SINASC CODANOMAL) read at the standard depth, a blind audit writing the paper.
+study: microcefalia_pe
+topic:
+  seeds:
+    icd10: [Q02]
+  only: [SINASC-DN]
+period: 2012-2019
+where: PE
+grain: [year]
+depth: standard
+nulls: quick
+hypotheses:
+  - {component: transient, where: [2611606], when: 2015-08..2016-06, note: "Zika microcephaly epidemic, Recife (PE)"}

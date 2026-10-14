@@ -992,6 +992,36 @@ def _cells(dataset: str, event: str, year: int, columns: list[str], strata: dict
     return con
 
 
+def _code_cols(classifier) -> list[str]:
+    """The columns a classifier reads: its column, or a code list's (a tuple of columns read together)."""
+    return [] if not classifier else list(classifier) if isinstance(classifier, (list, tuple)) else [classifier]
+
+
+def _categories_sql(columns) -> str:
+    """The distinct ICD-10 categories a record's code list carries (SINASC's CODANOMAL "Q02Q690", a certificate's
+    lines), as a list."""
+    text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
+    return f"list_distinct(list_transform(regexp_extract_all(upper({text}), '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3)))"
+
+
+def _code_sql(classifier) -> str:
+    """A record's code in a reader's frame: its classifier column's, trimmed and upper-cased; for a code list (a tuple of
+    columns) one row per distinct category it carries, the rule of `code_list_counts`, so a record counts once under each
+    category and a record carrying none is in no row; '*' without a classifier. Each reader had its own copy of the
+    column form, and a code list's name was read as a column (the SINASC study, 2026-10-14)."""
+    if not classifier:
+        return "'*'"
+    if isinstance(classifier, (list, tuple)):
+        return f"unnest({_categories_sql(classifier)})"
+    return f'upper(trim(CAST("{classifier}" AS VARCHAR)))'
+
+
+def _code_rows(classifier, codes) -> dict:
+    """The lake filter of a code set on its classifier (`_records` ``rows``): a column's codes by prefix; a code list's
+    cannot be filtered in the lake (a code may stand anywhere in it), so its records are read and cut by their codes."""
+    return {classifier: list(codes)} if codes and isinstance(classifier, str) else {}
+
+
 def _reason(*more: tuple[str, str]) -> str:
     """Why a cell is in no count: no valid place, no sex, no age, then each reader's own (condition, reason) in order."""
     return ("CASE WHEN u IS NULL OR u NOT IN (SELECT u FROM v) THEN 'municipality' WHEN sex IS NULL THEN 'sex' "
@@ -1045,14 +1075,10 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
                       **({"support": support} if support else {}))
 
     def compute() -> dict[str, pa.Table]:
-        code = f'upper(trim(CAST("{spec_class}" AS VARCHAR)))' if spec_class else "'*'"
-        where = ""
-        if code_list:
-            code = (f"""unnest(list_distinct(list_transform(regexp_extract_all(upper(CAST("{spec_class}" AS VARCHAR)),
-                    '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3))))""")
-            where = f"""\"{spec_class}\" IS NOT NULL AND trim(CAST("{spec_class}" AS VARCHAR)) <> ''"""
-        con = _cells(dataset, event, year, [when, *([spec_class] if spec_class else [])], strata, area=area,
-                     places=places, select=f"{code} AS code, {_date_sql(when)} AS d", where=where)
+        # ``code_list``: the classifier column holds a code list (a tuple of one column)
+        reading = tuple(_code_cols(spec_class)) if code_list else spec_class
+        con = _cells(dataset, event, year, [when, *_code_cols(spec_class)], strata, area=area, places=places,
+                     select=f"{_code_sql(reading)} AS code, {_date_sql(when)} AS d")
         reason = _reason(("code IS NULL OR code = ''", "code"), ("d IS NULL", "date"))
         counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST(year(d) AS SMALLINT) AS year,
                 CAST(month(d) AS TINYINT) AS month, CAST(sex AS TINYINT) AS sex, age, code,
@@ -1153,12 +1179,12 @@ def _mark_frame(con, dataset: str, event: str, year: int, mark: str, bounds: tup
     fcol = facility_column(dataset)[0] if (facility_effects or facility) else None
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), mark] + ([anchor] if anchor else []) + \
         ([strata["sex"]] if strata["sex"] else []) + \
-        ([classifier] if classifier else []) + ([casemix] if casemix else []) + ([fcol] if fcol else [])
+        _code_cols(classifier) + ([casemix] if casemix else []) + ([fcol] if fcol else [])
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
-    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    code = _code_sql(classifier)
     pg = f"coalesce(left(trim(CAST(\"{casemix}\" AS VARCHAR)), {CASEMIX_CHARS}), '')" if casemix else "''"
     fac = f"coalesce(trim(CAST(\"{fcol}\" AS VARCHAR)), '')" if fcol else "''"
     value = (f"CAST({int(sign)} * date_diff('day', {_date_sql(anchor)}, {_date_sql(mark)}) + 1 AS DOUBLE)" if anchor
@@ -1231,15 +1257,21 @@ def mark_values(dataset: str, event: str, year: int, columns: tuple[str, ...], c
     study describes its topic's own measures from (`study._measures`). Cached."""
     strata = _strata(dataset, event, year)
     _per_record(dataset, event, "a measure's values")
-    rows = {**({classifier: list(codes)} if classifier and codes else {}), **_area_rows(strata["residence"], area)}
+    rows = {**_code_rows(classifier, codes), **_area_rows(strata["residence"], area)}
     key = {"what": "mark_values", "code": config.code_key(mark_values), "dataset": dataset, "event": event,
            **_declared_key(dataset, event), "year": int(year), "columns": sorted(columns), "classifier": classifier,
            "codes": sorted(codes), "data": config.data_version(), **_data_key(dataset, year), **_area_key(area)}
 
     def compute():
-        cols = list(dict.fromkeys([strata["residence"], *([classifier] if classifier else []), *columns]))
+        cols = list(dict.fromkeys([strata["residence"], *_code_cols(classifier), *columns]))
         table = _records(dataset, event, int(year), cols, rows=rows or None)
         table = table.select([c for c in cols if c in table.column_names])
+        if codes and isinstance(classifier, (list, tuple)):
+            con = duckdb.connect()
+            con.register("r", table)
+            hit = " OR ".join(f"starts_with(x, '{c}')" for c in codes)
+            table = con.execute(f"SELECT * FROM r WHERE len(list_filter({_categories_sql(classifier)}, x -> {hit})) > 0"
+                                ).fetch_arrow_table()
         return table
     return _one(key, compute, {"source": f"values of {dataset} {event}", "rows": rows})
 
@@ -1300,7 +1332,9 @@ def event_totals(dataset: str, event: str, year: int, classifier: str | None, co
     field's events placed at a residence, beside `unplaced` (an area's own counts cannot say it). Summed from Brazil's
     `event_counts`, the one national read an area study makes (it gives the area's reference rates too), where this had
     been a scan of its own (2026-10-14). A weight grid's uncounted groups are rows, not events."""
-    ec = event_counts(dataset, event, int(year), classifier, codes=tuple(codes))
+    # a code list's events by each category they carry (`code_list_counts`), as its field counts them
+    ec = (code_list_counts(dataset, event, int(year), list(classifier)) if isinstance(classifier, (list, tuple))
+          else event_counts(dataset, event, int(year), classifier, codes=tuple(codes)))
     un = ec.unallocated.filter(pc.invert(pc.equal(ec.unallocated.column("reason"), "groups not counted (rows, not events)")))
     schema = pa.schema([("code", pa.string()), ("y", pa.int64())])
     both = pa.concat_tables([ec.counts.select(["code", "y"]).cast(schema), un.select(["code", "y"]).cast(schema)])
@@ -1321,15 +1355,17 @@ def unplaced(dataset: str, event: str, year: int, classifier: str | None) -> pa.
 
     def compute() -> pa.Table:
         spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
-        raw = _records(dataset, event, year, list(dict.fromkeys([strata["residence"], *([classifier] if classifier else [])])))
+        raw = _records(dataset, event, year, list(dict.fromkeys([strata["residence"], *_code_cols(classifier)])))
         con = duckdb.connect()
         con.register("r", raw)
-        code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+        code = _code_sql(classifier)
         wt = f'coalesce(TRY_CAST("{spec["weight"]}" AS DOUBLE), 0)' if spec.get("weight") and spec["weight"] in raw.column_names \
             else "1"
+        # the code in a subquery: a code list's is one row per category (`_code_sql`), which no aggregate can unnest
         return con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, 'residence not recorded (Brazil)' AS reason,
-                {code} AS code, CAST(sum({wt}) AS INTEGER) AS y FROM r WHERE {_residence_sql(strata["residence"])} IS NULL
-                GROUP BY ALL HAVING sum({wt}) > 0""").fetch_arrow_table()
+                code, CAST(sum(w) AS INTEGER) AS y
+            FROM (SELECT {code} AS code, {wt} AS w FROM r WHERE {_residence_sql(strata["residence"])} IS NULL)
+            GROUP BY ALL HAVING sum(w) > 0""").fetch_arrow_table()
     return _one(key, compute, {"source": f"pegasus_data.query({dataset}): records without a residence"})
 
 
@@ -1388,7 +1424,7 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
     from .tools import group_columns
 
     strata = _strata(dataset, event, year)
-    rows = {**({classifier: list(codes)} if codes else {}), **_area_rows(strata["residence"], area)}
+    rows = {**_code_rows(classifier, codes), **_area_rows(strata["residence"], area)}
     batch = {column: tuple(missing)}
     try:
         siblings = group_columns(dataset, event)
@@ -1403,13 +1439,13 @@ def composition_counts(dataset: str, event: str, year: int, column: str, missing
         if col not in batch and not _composition_stored(_composition_key(dataset, event, year, col, miss, classifier,
                                                                           places, codes, area)):
             batch[col] = tuple(miss)
-    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + ([classifier] if classifier else [])
+    cols = [strata["residence"], *([strata["age"]] if strata["age"] else []), *batch] +         ([strata["sex"]] if strata["sex"] else []) + _code_cols(classifier)
     con = duckdb.connect()
     raw = _records(dataset, event, year, list(dict.fromkeys(cols)), rows=rows or None)
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
     con.register("v", pa.table({"u": valid}))
-    code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+    code = _code_sql(classifier)
     xs = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "x_{i}"' for i, c in enumerate(batch))
     con.execute(f"""CREATE TEMP TABLE e0 AS SELECT {_cells_sql(strata, dataset, raw)}, {code} AS code, {xs} FROM r""")
     del raw
@@ -1454,11 +1490,11 @@ def composition_facility(dataset: str, event: str, year: int, indicator: str, su
            "code": config.code_key(composition_facility), **_data_key(dataset, year)}
 
     def compute():
-        cols = [strata["residence"], indicator, fac] + ([classifier] if classifier else [])
+        cols = [strata["residence"], indicator, fac] + _code_cols(classifier)
         raw = _records(dataset, event, year, list(dict.fromkeys(cols)))
         con = duckdb.connect()
         con.register("r", raw)
-        code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+        code = _code_sql(classifier)
         miss = ", ".join("'" + str(v).replace("'", "''") + "'" for v in missing) or "NULL"
         yes = ", ".join("'" + str(s).replace("'", "''") + "'" for s in success)
         wt = '"__w"' if "__w" in raw.column_names else "1"
@@ -1515,10 +1551,10 @@ def away_counts(dataset: str, event: str, year: int, place: str, classifier: str
                       classifier=classifier, **({"width": width} if width != 6 else {}))
 
     def compute() -> dict[str, pa.Table]:
-        code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+        code = _code_sql(classifier)
         div = 10 ** (6 - width)
         w_sql = _residence_sql(place) if width == 6 else f'TRY_CAST(left(CAST("{place}" AS VARCHAR), {width}) AS INTEGER)'
-        con = _cells(dataset, event, year, [place, *([classifier] if classifier else [])], strata, area=area,
+        con = _cells(dataset, event, year, [place, *_code_cols(classifier)], strata, area=area,
                      places=places, select=f"{code} AS code, {w_sql} AS w")
         reason = _reason(("code IS NULL OR code = ''", "code"),
                          (f"w IS NULL OR w NOT IN (SELECT DISTINCT u // {div} FROM v)", "place not recorded"))
@@ -1619,19 +1655,26 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     family (a declared group's role) and reads nothing."""
     columns = [column] if isinstance(column, str) else list(column)
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
+    categories = _categories_sql(columns)
     key = _reader_key("code_list_counts", code_list_counts, dataset, event, year, places=places, area=area,
                       column=column)
 
     def compute() -> dict[str, pa.Table]:
         con = _cells(dataset, event, year, columns, _strata(dataset, event), area=area, places=places,
-                     select=f"""list_distinct(list_transform(regexp_extract_all(upper({text}),
-                         '[A-Z][0-9]{{2}}[0-9X]?'), x -> left(x, 3))) AS codes""", where=f"trim({text}) <> ''")
+                     select=f"{categories} AS codes", where=f"trim({text}) <> ''")
         reason = _reason(("len(codes) = 0", "code"))
         counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
                 CAST(sex AS TINYINT) AS sex, age, code, CAST(sum(wt) AS INTEGER) AS y
             FROM (SELECT u, sex, age, wt, unnest(codes) AS code FROM e WHERE ({reason}) IS NULL)
             GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
-        return {"": counts, "unallocated": _unallocated(con, year, reason, "NULL")}
+        # the unallocated by category too, as the counts are: a block's lost events are its chapter's (the assembly
+        # attributes them by code), and a code-list field's placed share needs its own; a record of no category is the
+        # reason 'code', its code null (a code list's had all been null: no block counted them, 2026-10-14)
+        unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, reason, code, CAST(sum(wt) AS INTEGER) AS y
+            FROM (SELECT {reason} AS reason, wt,
+                         unnest(CASE WHEN len(codes) = 0 THEN [NULL::VARCHAR] ELSE codes END) AS code FROM e)
+            WHERE reason IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
+        return {"": counts, "unallocated": unallocated}
     return _counted(key, compute, {"source": f"pegasus_data.query({dataset}): {columns} exploded"})
 
 
@@ -2704,9 +2747,9 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         pairs = side_pairs(link, side, year)
         ids = pairs.column("l" if side == "left" else "r")
         p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
-        code = f'upper(trim(CAST("{classifier}" AS VARCHAR)))' if classifier else "'*'"
+        code = _code_sql(classifier)
         # the area and the code set are in ``rows`` (a grouped side reads every record: its groups cross places)
-        con = _cells(dataset, event, year, [*([classifier] if classifier else []), *group], strata, places=places,
+        con = _cells(dataset, event, year, [*_code_cols(classifier), *group], strata, places=places,
                      identity=True, rows=rows, select=f"{code} AS code, {_rep_sql(group)} AS rid")
         con.register("pm", pa.table({"rid": ids, "p": p}))
         reason = _reason(("code IS NULL OR code = ''", "code"))
