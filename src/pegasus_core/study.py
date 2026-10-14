@@ -1564,8 +1564,9 @@ def run(decl: Declaration, log=print) -> Path:
     # new tables, and `body` read the old "every step ran" (the review of the study, 2026-10-14)
     for old in ("report.html", "provenance.json", "README.md"):
         (out / old).unlink(missing_ok=True)
-    if (out / "figures").exists():
-        shutil.rmtree(out / "figures", ignore_errors=True)
+    for old in ("figures", "expectations"):
+        if (out / old).exists():
+            shutil.rmtree(out / old, ignore_errors=True)
     shutil.copyfile(decl.path, out / "study.yml")
     phases, t = {}, time.time()
     scope = resolve(decl, log=log)
@@ -2129,13 +2130,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 # a share's name is COLUMN=value: named as the source labels it ("Critério de Confirmação: Laboratorial (1)")
                 shown = _group_text(it, [name]) if name and "=" in name and " " not in name else name
                 label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "") + _link_text(it)
-                key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
-                       "code": config.code_key(_expectation_table)}
-                key = _study_key(key)
-                path = store.address("study_table", key) / "table.parquet"
-                if not path.exists():
-                    store.put_table("study_table", key, _expectation_table(sv, names))
-                views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
+                # the field's observed and expected per municipality and period, into the folder: a view into the
+                # store's private table had left a folder sent away without them (2026-10-14)
+                exp_name = f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"
+                (out / "expectations").mkdir(exist_ok=True)
+                pq.write_table(_expectation_table(sv, names, f.id, label), out / "expectations" / f"{exp_name}.parquet")
+                views[exp_name] = f"expectations/{exp_name}.parquet"
                 rows_ = _descriptive(it, s, f, label, reference=not name) + \
                     (_race_rates(it, s, f, label) if not name else []) + \
                     (lap.guard(f"proportional {f.id}", lambda it=it, label=label, f=f: _proportional(it, f, label), [],
@@ -2269,14 +2269,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     tmp_db = out / f"study.{os.getpid()}.duckdb.tmp"
     tmp_db.unlink(missing_ok=True)
     con = duckdb.connect(str(tmp_db))       # built aside, then moved in: a notebook holding the old one open had failed it
-    for name, path in views.items():
-        con.execute(f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{path}')")
-    # every table of the folder by absolute path (DuckDB reads a relative path from the reader's working directory, and
-    # the survey's folder opened only from the directory the study ran in, 2026-10-11), each its own view: a list kept by
-    # hand had left associated and hypotheses out (2026-10-14)
+    # every table of the folder, the expectations included, as a table of the database's own: views read paths, which
+    # DuckDB resolves from the reader's directory (relative) or this machine's (absolute), so a folder sent to a
+    # researcher opened nothing (2026-10-14); a list kept by hand had left associated and hypotheses out
     out = out.resolve()
-    for path in sorted(out.glob("*.parquet")):
-        con.execute(f"CREATE VIEW {path.stem} AS SELECT * FROM read_parquet('{path.as_posix()}')")
+    for path in sorted([*out.glob("*.parquet"), *out.glob("expectations/*.parquet")]):
+        con.execute(f"CREATE TABLE {path.stem} AS SELECT * FROM read_parquet('{path.as_posix()}')")
     con.close()
     try:
         os.replace(tmp_db, db)
@@ -2495,12 +2493,15 @@ def _slug(text: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_").lower()
 
 
-def _expectation_table(sv, names: dict) -> pa.Table:
-    """Observed against expected per municipality and period, with the surprise and the place's names."""
+def _expectation_table(sv, names: dict, field_id: str, label: str) -> pa.Table:
+    """Observed against expected per municipality and period, with the surprise, the field and the place's names."""
     t = sv.table()
     u = [str(x) for x in t.column("u").to_pylist()]
-    return t.append_column("municipality", pa.array([(names.get(c) or {}).get("name") for c in u])) \
-            .append_column("state", pa.array([(names.get(c) or {}).get("uf_sigla") for c in u]))
+    n = t.num_rows
+    return pa.table({"field": pa.array([field_id] * n), "label": pa.array([label] * n), "u": t.column("u"),
+                     "municipality": pa.array([(names.get(c) or {}).get("name") for c in u]),
+                     "state": pa.array([(names.get(c) or {}).get("uf_sigla") for c in u]),
+                     **{c: t.column(c) for c in t.column_names if c != "u"}})
 
 
 #: the population account's race slices by the label a source gives its race codes (labels, never code numbers: SIH's
@@ -4821,6 +4822,18 @@ COLUMNS = {
     "trends.parquet:last_year": "last year of the series",
     "years_read": "the years the trend read (provisional years left out)",
     "month": "the calendar month of the events' own dates (1-12)",
+    "expectations:year": "the period (a year, or YYYYMM at the monthly grain)",
+    "expectations:y": "the field's observed events in the municipality and period",
+    "expectations:mu": "the events expected there under the hierarchical model (tier B1: the place's own level and the "
+                       "shared course)",
+    "expectations:phi": "the cell's negative-binomial dispersion under the predictive with the field's noise structure: "
+                        "variance mu + mu^2/phi (infinite: Poisson)",
+    "expectations:pit": "the randomised probability integral transform of the observed count under the predictive "
+                        "(uniform on [0, 1] when the model holds)",
+    "expectations:z": "the normal score of pit (standard normal when the model holds): the cell's surprise",
+    "expectations:w": "the cell's weight in the scans: the inverse of its predictive variance (mu / (1 + mu/phi))",
+    "expectations:flags": "a bitmask: 1 events without person-years (denominator), 2 the field failed calibration at this "
+                          "tier, 8 no information (mu near 0), 16 a category the training fit never saw",
     "measure": "the measure's column (an interval: its end date's column)",
     "measure_name": "the measure's name in the source's dictionary (an interval: the days from its start to it)",
     "kind": "measure (a declared quantity of the event), interval (days between two of its dates, plus one) or age (the "
@@ -5079,11 +5092,13 @@ def _codebook(decl: Declaration, scope: Scope, out: Path) -> list[str]:
         lines.append(text)
     lines += ["", "## Tables", ""]
     missing = []
-    for path in sorted(out.glob("*.parquet")):
+    for path in sorted([*out.glob("*.parquet"), *out.glob("expectations/*.parquet")]):
         cols = pq.read_schema(path).names
-        lines += [f"### {path.name} ({pq.read_metadata(path).num_rows:,} rows)", "", "| column | meaning |", "|---|---|"]
+        shown = path.name if path.parent == out else f"{path.parent.name}/{path.name}"
+        lines += [f"### {shown} ({pq.read_metadata(path).num_rows:,} rows)", "", "| column | meaning |", "|---|---|"]
         for c in cols:
-            meaning = COLUMNS.get(f"{path.name}:{c}") or COLUMNS.get(c)
+            meaning = (COLUMNS.get(f"{path.name}:{c}") or (COLUMNS.get(f"expectations:{c}") if path.parent != out else None)
+                       or COLUMNS.get(c))
             if meaning is None:
                 missing.append(f"{path.name}:{c}")
             lines.append(f"| {c} | {meaning or 'UNDOCUMENTED'} |")
@@ -5389,27 +5404,19 @@ def audit(folder: str | Path) -> list[dict]:
 
 
 def export(folder: str | Path, to: str | Path, tables: list[str] | None = None, fmt: str = "parquet") -> Path:
-    """Materialise a study folder (ARCHITECTURE §3.6): every view of its `study.duckdb` (or ``tables``) written as a
-    file, with the folder's own files, so it stands alone away from this machine. The only operation that copies."""
+    """A study folder copied elsewhere (ARCHITECTURE §3.6). It stands alone already: its tables are its own files and
+    study.duckdb's own tables (2026-10-14: views had read this machine's paths); with ``fmt="csv"`` every table of the
+    database (or ``tables``) is also written as CSV under tables/."""
     import duckdb
 
     folder, to = Path(folder), Path(to)
-    to.mkdir(parents=True, exist_ok=True)
-    for p in folder.iterdir():
-        if p.name == "study.duckdb":
-            continue
-        if p.is_dir():
-            shutil.copytree(p, to / p.name, dirs_exist_ok=True)
-        else:
-            shutil.copy2(p, to / p.name)
-    con = duckdb.connect(str(folder / "study.duckdb"), read_only=True)
-    names = [r[0] for r in con.execute("SELECT view_name FROM duckdb_views() WHERE NOT internal").fetchall()]
-    (to / "tables").mkdir(exist_ok=True)
-    for name in names:
-        if (tables and name not in tables) or (folder / f"{name}.parquet").exists():
-            continue                     # a view of the folder's own file: copied above, wherever the folder was made
-        target = to / "tables" / f"{name}.{fmt}"
-        con.execute(f"COPY (SELECT * FROM {name}) TO '{target.as_posix()}' "
-                    f"(FORMAT {'parquet' if fmt == 'parquet' else 'csv, HEADER'})")
-    con.close()
+    shutil.copytree(folder, to, dirs_exist_ok=True)
+    if fmt != "parquet":
+        con = duckdb.connect(str(folder / "study.duckdb"), read_only=True)
+        (to / "tables").mkdir(exist_ok=True)
+        for (name,) in con.execute("SELECT table_name FROM duckdb_tables() WHERE NOT internal").fetchall():
+            if tables and name not in tables:
+                continue
+            con.execute(f"COPY {name} TO '{(to / 'tables' / f'{name}.csv').as_posix()}' (FORMAT csv, HEADER)")
+        con.close()
     return to

@@ -354,8 +354,8 @@ cache eviction never removes them while the study exists. Two studies sharing a 
 toxoplasmosis/
   study.yml                 the declaration as written
   scope.yml                 what it resolved to, with reasons and costs
-  study.duckdb              every table below as a view, and expectations_<field> (observed against expected per
-                              municipality and period, in the store)
+  study.duckdb              every table below as a table of its own (it opens on any machine)
+  expectations/             each field's observed and expected per municipality and period, with its surprise
   findings.parquet          one row per finding (schema below), its story in a column
   hypotheses.parquet        the declared tests and their answers
   descriptive.parquet       events, denominators, crude and directly standardised rates with intervals, each year
