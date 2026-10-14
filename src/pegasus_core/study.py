@@ -2113,7 +2113,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     continue
                 # a share's name is COLUMN=value: named as the source labels it ("Critério de Confirmação: Laboratorial (1)")
                 shown = _group_text(it, [name]) if name and "=" in name and " " not in name else name
-                label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "")
+                label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "") + _link_text(it)
                 key = {"what": "study_expectations", "field": f.id, "years": list(it.years), "data": config.data_version(),
                        "code": config.code_key(_expectation_table)}
                 key = _study_key(key)
@@ -2976,6 +2976,17 @@ def _seasons(it: Item, s, f, label: str) -> list[dict]:
     for k, y in enumerate(years):
         out += rows(ev[k], days[k], y)
     return out
+
+
+def _link_text(it: Item) -> str:
+    """A linked share's label: the share of the field's records paired with the partner's, and through which link (a
+    linked share had the count field's own label, "hospitalisation: I21 ...", and read as admissions, 2026-10-14)."""
+    src = it.source or {}
+    if src.get("source") != "linked" or not src.get("link"):
+        return ""
+    spec = gateway.link_specs().get(src["link"])
+    partner = (spec.right.dataset if src.get("side", "left") == "left" else spec.left.dataset) if spec else "partner"
+    return f" — share paired with a {partner} record ({src['link']})"
 
 
 def _band_labels(edges) -> list[str]:
@@ -3914,10 +3925,13 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     quant: dict[int, dict] = {}
     out = []
 
-    def row(level: str, unit: str, t: int, keep: np.ndarray) -> dict:
+    period = f"{int(np.asarray(d.years)[0])}-{int(np.asarray(d.years)[-1])}"
+
+    def row(level: str, unit: str, t: int | None, keep: np.ndarray) -> dict:
         nn = float(n[keep].sum())
         base = {"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit,
-                "year": int(np.asarray(d.years)[t]), "events": nn, "population": None}
+                "year": int(np.asarray(d.years)[t]) if t is not None else None,
+                "period": None if t is not None else period, "events": nn, "population": None}
         if nn <= 0:
             return base
         if kind == "mark":
@@ -3936,14 +3950,16 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
         if kind == "count":
             return {**base, "per": "mean per event", "rate": float((n[keep] * y[keep]).sum() / nn)}
         k = float((n[keep] * y[keep]).sum())
-        return {**base, "per": "share", "rate": k / nn,
+        return {**base, "per": "share", "numerator": k, "rate": k / nn,
                 "rate_low": float(beta.ppf(0.025, k, nn - k + 1)) if k > 0 else 0.0,
                 "rate_high": float(beta.ppf(0.975, k + 1, nn - k)) if k < nn else 1.0}
 
-    for t in range(len(d.years)):
-        at = t_of == t
+    below = _levels_below(np.asarray(d.places)[d.u[sel]])
+    # each year, then the period (a median is read per year only: no period row for a mark)
+    for t in [*range(len(d.years)), *([None] if kind != "mark" else [])]:
+        at = t_of == t if t is not None else np.ones(len(t_of), bool)
         out.append(row(*_whole(), t, at))
-        for level, unit, sel_u in _levels_below(np.asarray(d.places)[d.u[sel]]):
+        for level, unit, sel_u in below:
             out.append(row(level, unit, t, at & sel_u))
     return out
 
@@ -4554,7 +4570,7 @@ COLUMNS = {
                       "toward its neighbours)",
     "model_rate": "expected_model over the population, per the row's per",
     "indicator": "what the completeness row measures",
-    "numerator": "the events the indicator counts",
+    "numerator": "the events the share or indicator counts (a linked share: the records paired)",
     "denominator": "the events it is a share of (empty when the share is a product of shares)",
     "proportion": "the indicator's share",
     "proportion_low": "lower 95 % bound of the share (Clopper-Pearson)",
@@ -4669,6 +4685,7 @@ COLUMNS = {
     "answer": "the answer: supported, not supported, or not testable and why",
     "p_holm": "p adjusted by Holm over the hypothesis's tests",
     "with_code": "the topic's records (in the area and years) that also name the category",
+    "records_with_code": "every record of the area and years naming the category, the topic's or not",
     "topic_records": "the topic's records (in the area and years) the share is of: those naming a seed code on any of "
                      "the group's columns (a certificate's lines: the deaths the infarction took part in, beside those it "
                      "is the underlying cause of)",
