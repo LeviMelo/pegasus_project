@@ -253,15 +253,19 @@ def test_the_audit_reads_a_findings_places_as_written(tmp_path):
 
 
 def test_levels_below_the_whole_are_regions_then_states(monkeypatch):
-    """The descriptive tables' geographies (`study._levels_below`): macro-regions when the study spans several, then
-    states; none below an area that is one state. Its patch had made it call itself (2026-10-13)."""
+    """The descriptive tables' geographies (`study._levels_below`, over municipalities): macro-regions when the study
+    spans several, then states; below an area that is one state, no state row (it would repeat the area's) but its
+    health macro-regions and health regions. Its patch had made it call itself (2026-10-13)."""
     import numpy as np
 
     from pegasus_core import study
 
     monkeypatch.delenv("PEGASUS_AREA", raising=False)
-    levels = study._levels_below(np.array([43, 43, 42, 35, 11]))
+    # Porto Alegre, Caxias do Sul, Florianópolis, São Paulo, Porto Velho
+    levels = study._levels_below(np.array([431490, 430510, 420540, 355030, 110020]))
     assert [x[0] for x in levels] == ["region"] * 3 + ["state"] * 4
     assert levels[0][1] == "1 Norte" and levels[-1][1] == "43"
     monkeypatch.setenv("PEGASUS_AREA", "43")
-    assert study._levels_below(np.array([43, 43])) == []
+    below = study._levels_below(np.array([431490, 430510]))
+    assert {x[0] for x in below} == {"health macro-region", "health region"}
+    assert all(sel.sum() == 1 for level, _, sel in below if level == "health region")

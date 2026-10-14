@@ -540,7 +540,7 @@ def _assemble(dataset: str, event: str, block: str, years: range | list[int], pr
     for year in years:
         # a code set's codes go to the event counts, which read them from an extract where one holds them whole
         extra = ({"codes": subset} if subset and getattr(readers[source], "func", readers[source])
-                 in (gateway.event_counts, gateway.share_moments)
+                 in (gateway.event_counts, gateway.share_moments, gateway.linked_counts)
                  else {})          # a share of a code set: only its records' compositions are read (`composition_counts`)
         area = config.study_area()
         # an area reads the national counts (cached, shared with Brazil's studies) and keeps its own places' rows: read

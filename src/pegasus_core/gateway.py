@@ -759,11 +759,11 @@ def _df_key(dataset: str, year: int) -> dict:
 def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False,
              rows: dict[str, list[str]] | None = None) -> pa.Table:
     """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` adds each
-    record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`, numbered before any filter):
-    what its links pair."""
+    record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`): what its links pair. A
+    ``rows`` filter keeps the identities: a record's key is the MD5 of its own fields and its number counts the exact
+    duplicates of a file, which every filter on its fields keeps or drops together (the fallback, file and row, does
+    not depend on the filter)."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
-    if rows and identity:
-        raise ValueError("record identities are numbered before any filter: read them unfiltered")
     import pegasus_data as pg
     import pyarrow.compute as pc
 
@@ -2338,7 +2338,8 @@ def link_runs_key(link: str) -> str:
 
 
 def linked_counts(dataset: str, event: str, year: int, link: str, side: str, classifier: str | None = None,
-                  places: pa.Array | None = None, runs: str | None = None) -> EventCounts:
+                  places: pa.Array | None = None, runs: str | None = None,
+                  codes: tuple[str, ...] | list[str] = ()) -> EventCounts:
     """The events of one side of a declared link per (u, year, sex, age, code): n, kv the variance of the linked count
     (Σ p(1 − p), the linkage's own uncertainty), and k the expected number with a
     partner on the other side (each record's largest `p_match`; pegasus_data's probabilistic linkage, its stored
@@ -2347,7 +2348,9 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     keeps the event type's denominator: its records outside the filter are unlinked by construction. A side whose
     records the spec groups (the live births of one delivery) pairs one record per group, the smallest identity, as
     pegasus_data's engine chooses it: every member takes its group's partner. A side exploded into days pairs the
-    record itself."""
+    record itself. A study's area and a code set's ``codes`` are filtered in the lake's scan (`_records`'s ``rows``):
+    Alagoas's infarction admissions had been counted from every admission in Brazil, 799 s of a 27-minute study
+    (2026-10-13)."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
 
     spec = link_specs()[link]
@@ -2361,6 +2364,15 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
            "link": link, "side": side, "classifier": classifier, "data": config.data_version(), "ids": 2,
            "runs": runs or link_runs_key(link),
            **_df_key(dataset, year), "code": config.code_key(linked_counts)}
+    area = config.study_area()
+    codes = sorted({str(c).replace(".", "").upper() for c in codes})
+    rows = {}
+    if area is not None and not group:
+        rows[strata["residence"]] = sorted(str(a) for a in area)
+        key["area"] = sorted(area)
+    if codes and classifier and not group:
+        rows[classifier] = codes
+        key["codes"] = codes
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
@@ -2370,7 +2382,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
     p = pairs.column("p_match") if "p_match" in pairs.column_names else pa.array([1.0] * pairs.num_rows)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + \
         ([classifier] if classifier else []) + group
-    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True)
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True, rows=rows or None)
     con = duckdb.connect()
     con.register("r", raw)
     con.register("pm", pa.table({"rid": ids, "p": p}))
@@ -2390,7 +2402,7 @@ def linked_counts(dataset: str, event: str, year: int, link: str, side: str, cla
         WHERE ({reason}) IS NULL GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(sum(wt) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL GROUP BY ALL""").fetch_arrow_table()
-    if pairs.num_rows and not con.execute("SELECT count(*) FROM e JOIN pm USING (rid)").fetchone()[0]:
+    if pairs.num_rows and not rows and not con.execute("SELECT count(*) FROM e JOIN pm USING (rid)").fetchone()[0]:
         # pairs that name none of the side's records name them another way (runs stored under the fallback identity
         # read zero everywhere until pegasus_data relabelled them, 2026-10-10): an empty share must not look measured
         raise LookupError(f"{link}: {pairs.num_rows} pairs, none naming a {dataset} record of {year}")

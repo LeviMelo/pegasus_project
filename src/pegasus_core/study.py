@@ -555,12 +555,13 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
             else:
                 fit += float(np.exp(a + b * np.log(max(float(it.records or 1), 1.0))))
         it.fields = n
-        # a replicating depth runs each field twice: on the whole years, and trained on the years before the later
-        # ones and confirmed on them (`update._later_years`), its fits and questions again (the leptospirosis slice's
-        # later years, priced at nothing, took two thirds of its run, 2026-10-13)
-        again = 2.0 if decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2 else 1.0
-        steps = per_item(it.dataset, it.years) if again > 1 else 0.0
-        it.est_seconds = round(again * n * (fit + per_field(it.dataset, it.years) * share) + steps, 1)
+        # a replicating depth also trains on the years before the later ones and confirms on them
+        # (`update._later_years`): priced by its own recorded seconds with the item's other steps (the leptospirosis
+        # slice's later years, priced at nothing, took two thirds of its run, 2026-10-13). Doubling every field as
+        # well counted it twice: Alagoas's infarction study was priced at 83 minutes and ran in 27 (2026-10-13)
+        replicating = decl.choice("replicate") and len(it.years) >= 2 * LATER_YEARS + 2
+        steps = per_item(it.dataset, it.years) if replicating else 0.0
+        it.est_seconds = round(n * (fit + per_field(it.dataset, it.years) * share) + steps, 1)
 
 
 def _associated(decl: Declaration, scope: Scope, log) -> list[dict]:
@@ -704,6 +705,25 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
                     if not kept:
                         excluded.append({"seed": f"{it.dataset}:{column}", "why": f"its side keeps none of the code "
                                          f"set's {n} records of {max(it.years)} ({spec_side.where})"})
+                        continue
+                other_side = getattr(gateway.link_specs()[p["link"]], "right" if side == "left" else "left")
+                if (it.source or {}).get("codes") and other_side.where:
+                    # the partner side filtered to other events (an infarction admission paired only with maternal
+                    # deaths): the share would measure those events, never the topic's; read on its primary classifier
+                    other_cls = next((c["column"] for e in gateway.event_types(other)
+                                      for c in e.get("classifiers") or [] if c["role"] == "primary"), None)
+                    try:
+                        if other_cls is None:
+                            raise KeyError(f"{other}: no primary classifier, its side's filter cannot be tested on "
+                                           "the code set")
+                        n, kept = gateway.side_holds(p["link"], "right" if side == "left" else "left", other_cls,
+                                                     list(it.source["codes"]), max(it.years))
+                    except KeyError as exc:
+                        excluded.append({"seed": f"{it.dataset}:{column}", "why": str(exc).strip("'\"")})
+                        continue
+                    if not kept:
+                        excluded.append({"seed": f"{it.dataset}:{column}", "why": f"its partner side, {other}, keeps "
+                                         f"none of the code set's {n} records of {max(it.years)} ({other_side.where})"})
                         continue
 
                 def usable(z: int, link: str = p["link"], method: str = method) -> bool:
@@ -1019,7 +1039,9 @@ def _one_per_field(items: list[Item]) -> list[Item]:
     out, seen = [], set()
     for it in items:
         src = dict(it.source or {})
-        if src.get("classifier") and src.get("codes"):
+        # a plain code set only: a linked share reads its classifier explicitly (`gateway.linked_counts` counts under
+        # "*" without one, and Alagoas's linked infarction shares read no event, 2026-10-13)
+        if src.get("classifier") and src.get("codes") and not src.get("source"):
             primary = next((c["column"] for c in gateway.event_type(it.dataset, it.event).get("classifiers") or []
                             if c["role"] == "primary"), None)
             if src["classifier"] == primary:
@@ -2373,7 +2395,6 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     rate = np.divide(yg.sum(0), N.sum(0), out=np.zeros((T, G)), where=N.sum(0) > 0)          # [T, G]
     years = [int(x) for x in np.asarray(d.years)]
     index = {int(p_): i for i, p_ in enumerate(np.asarray(d.places))}
-    state = np.asarray(d.places) // 10000
     races = {k: ACCOUNT_RACE.get(plain(labels.get(v, ""))) for k, v in enumerate(values)}
     races = {k: r for k, r in races.items() if r}
     # what the source says of its race column (pegasus_data's role note: SIH's code 04), on every row it makes
@@ -2391,7 +2412,7 @@ def _race_rates(it: Item, s, f, label: str) -> list[dict]:
     for k, race in races.items():
         v = values[k]
         for ti, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(U, bool))] +                     _levels_below(state):
+            for level, unit, sel in [(*_whole(), np.ones(U, bool))] +                     _levels_below(np.asarray(d.places)):
                 # the expectation of the events whose race is recorded: each race's share of the population's expected
                 # events times them (the unrecorded had lowered every race's ratio alike)
                 recorded = float(sum(y[sel, ti, j].sum() for j in races))
@@ -2507,7 +2528,6 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
     N = d.N.astype(float)
     std = N.sum(axis=(0, 1))
     std = std / std.sum() if std.sum() > 0 else std
-    state = np.asarray(d.places) // 10000
     out = []
     # the exposure the block was fitted on: person-years, or other events (a declared ratio, or the event type's
     # declared denominator: live births), reported per 1,000 of them
@@ -2530,7 +2550,7 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
 
     for t in range(T):
         out.append(row(*_whole(), t, y[:, t].sum(0), N[:, t].sum(0)))
-        for level, unit, sel_u in _levels_below(state):
+        for level, unit, sel_u in _levels_below(np.asarray(d.places)):
             out.append(row(level, unit, t, y[sel_u, t].sum(0), N[sel_u, t].sum(0)))
     if not ratio and _birth_related(it, d):
         # a perinatal or pregnancy field's rate is per live births, the convention of infant and maternal mortality
@@ -2546,7 +2566,7 @@ def _descriptive(it: Item, s, f, label: str) -> list[dict]:
                                        "rate_high": r["rate_high"] / scale * 1e3} if pop else {})}
         for t in range(T):
             out.append(per_births(*_whole(), t, np.ones(U, bool)))
-            for level, unit, sel_u in _levels_below(state):
+            for level, unit, sel_u in _levels_below(np.asarray(d.places)):
                 out.append(per_births(level, unit, t, sel_u))
     return out
 
@@ -2590,15 +2610,38 @@ def _states_besides_whole(state: np.ndarray) -> list:
 REGIONS = {1: "Norte", 2: "Nordeste", 3: "Sudeste", 4: "Sul", 5: "Centro-Oeste"}
 
 
-def _levels_below(state: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
-    """The geographies below the whole a descriptive table writes, each (level, unit, mask over ``state``): the macro-
-    regions when the study spans more than one, then the states (none when the area is one state)."""
-    state = np.asarray(state)
+#: the health system's own regionalisation, written below an area's states: how a state's epidemiology reports (its
+#: macro-regions and the CIR's health regions), pegasus_data's memberships (`gateway.regions`)
+HEALTH_LEVELS = (("health_macroregion", "health macro-region"), ("health_region", "health region"))
+
+
+def _levels_below(places: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
+    """The geographies below the whole a descriptive table writes, each (level, unit, mask over ``places``, the
+    municipality of each element): the macro-regions when the study spans more than one, then the states (none when
+    the area is one state), then, for a declared area, its health macro-regions and health regions (`HEALTH_LEVELS`):
+    a state's profile tabulates its regions, where Alagoas's infarction study had the state's rows alone (2026-10-13).
+    Brazil's own study stops at the states; its municipalities are the findings' and maps'."""
+    import pegasus_data as pg
+
+    places = np.asarray(places).astype(np.int64)
+    state = places // 10000
     region = state // 10
     out = []
     if len(np.unique(region)) > 1:
         out += [("region", f"{int(rg)} {REGIONS.get(int(rg), '')}".strip(), region == rg) for rg in np.unique(region)]
     out += [("state", str(int(st)), state == st) for st in _states_besides_whole(state)]
+    if config.study_area() is None or not len(places):
+        return out
+    uniq, inv = np.unique(places, return_inverse=True)
+    for classification, level in HEALTH_LEVELS:
+        try:
+            unit = gateway.regions(uniq, classification)[inv]
+        except LookupError:
+            continue                    # a municipality without the membership: the level is not written, never guessed
+        for code in np.unique(unit):
+            sel = unit == code
+            m = pg.memberships(str(int(places[sel][0]))).get(classification)
+            out.append((level, f"{code} {m.member_label}" if m is not None else str(code), sel))
     return out
 
 
@@ -2644,7 +2687,7 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
                                      ("age band", "Faixa etária (anos)", by_age, [(b, b) for b in bands])):
         for t, year in enumerate(np.asarray(d.years)):
             for level, unit, rows_u in [(*_whole(), np.ones(len(state), bool))] + \
-                    _levels_below(state):
+                    _levels_below(np.asarray(d.places)):
                 obs = arr[rows_u, t].sum(0)
                 tot = float(obs.sum())
                 if tot <= 0:
@@ -2668,7 +2711,6 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
         return []
     out = []
     places = np.asarray(s.expectations.model(f.block).data.places)
-    state = places // 10000
     years = np.asarray(s.expectations.model(f.block).data.years)
     from scipy.stats import beta
 
@@ -2694,7 +2736,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
         shown = {v: (vl[str(v)] if str(v) in vl else (str(v) if str(v) in ("not recorded", "value missing")
                                                        else f"{v} (undecoded)")) for v in values}
         for t, year in enumerate(years):
-            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     _levels_below(state):
+            for level, unit, sel in [(*_whole(), np.ones(len(places), bool))] +                     _levels_below(places):
                 obs, exp = y[sel, t].sum(0), mu[sel, t].sum(0)
                 # each value's share of the field's events, with its exact (Clopper–Pearson) interval: a case mix is
                 # described by proportions, and the table gave counts against a model's expectation only (2026-10-12)
@@ -3084,7 +3126,6 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     days = 1.0 if (s.source or {}).get("anchor") else 0.0
     leaves = [d.leaves.index(c) for c in s.expectations.registry.leaves(f.node) if c in d.leaves]
     sel = np.isin(d.e, leaves)
-    state = np.asarray(d.places)[d.u[sel]] // 10000
     t_of, n, y = d.t[sel], d.n[sel].astype(float), d.y[sel].astype(float)
     src = s.source or {}
     # the node's codes (a whole tree's field reads every event)
@@ -3121,7 +3162,7 @@ def _descriptive_cells(it: Item, s, f, label: str, d) -> list[dict]:
     for t in range(len(d.years)):
         at = t_of == t
         out.append(row(*_whole(), t, at))
-        for level, unit, sel_u in _levels_below(state):
+        for level, unit, sel_u in _levels_below(np.asarray(d.places)[d.u[sel]]):
             out.append(row(level, unit, t, at & sel_u))
     return out
 
