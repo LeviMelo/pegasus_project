@@ -452,23 +452,21 @@ def _g2(Y: np.ndarray, M: np.ndarray, min_expected: float, k: np.ndarray | float
     one); each group's deviance divided by its variance factor ``k`` (the pooled group: M-weighted mean)."""
     n, G = Y.shape
     k = np.broadcast_to(k, Y.shape)
-    G2, df, big = np.zeros(n), np.zeros(n, dtype=int), [np.zeros(G, dtype=bool)] * n
-    for u in range(n):
-        yy, mm = Y[u], M[u]
-        b = mm >= min_expected
-        big[u] = b
-        if b.sum() < 2:
-            continue
-        kk = np.append(k[u][b], (k[u][~b] * mm[~b]).sum() / max(mm[~b].sum(), 1e-300) if (~b).any() else 1.0)
-        yy = np.append(yy[b], yy[~b].sum())
-        mm = np.append(mm[b], mm[~b].sum())
-        keep = mm > 0
-        yy, mm, kk = yy[keep], mm[keep], kk[keep]
-        sir = yy.sum() / mm.sum()
-        e = mm * sir
-        with np.errstate(divide="ignore", invalid="ignore"):
-            G2[u] = 2 * np.sum((np.where(yy > 0, yy * np.log(yy / e), 0) - (yy - e)) / kk)
-        df[u] = len(yy) - 1
+    big = min_expected <= M                                                    # [n, G]
+    small = ~big
+    Mp = np.where(small, M, 0.0).sum(1)                                        # the pooled group, last column
+    kp = np.where(small.any(1), np.where(small, k * M, 0.0).sum(1) / np.maximum(Mp, 1e-300), 1.0)
+    yy = np.concatenate([np.where(big, Y, 0.0), np.where(small, Y, 0.0).sum(1)[:, None]], 1)
+    mm = np.concatenate([np.where(big, M, 0.0), Mp[:, None]], 1)
+    kk = np.concatenate([np.where(big, k, 1.0), kp[:, None]], 1)
+    keep = mm > 0
+    sir = np.where(keep, yy, 0.0).sum(1) / np.maximum(np.where(keep, mm, 0.0).sum(1), 1e-300)
+    e = mm * sir[:, None]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        term = (np.where(yy > 0, yy * np.log(np.where(yy > 0, yy, 1.0) / np.where(e > 0, e, 1.0)), 0.0) - (yy - e)) / kk
+    ok = big.sum(1) >= 2                                                       # a unit with fewer than two groups tests none
+    G2 = np.where(ok, 2 * np.where(keep, term, 0.0).sum(1), 0.0)
+    df = np.where(ok, keep.sum(1) - 1, 0).astype(int)
     return G2, df, big
 
 

@@ -104,10 +104,10 @@ class Session:
 
     # ---- reading ---------------------------------------------------------------
 
-    def fields(self, block: str, lens: str | None = None) -> list[fields.Field]:
+    def fields(self, block: str) -> list[fields.Field]:
         """Every field of a fitted block with an event in the fit, top-down. No field is left out for low power
         (ARCHITECTURE §8.4, P9): a lens's BH runs within each field, so a weak field dilutes no other, and its leads
-        carry their method's record. ``lens`` is accepted and unused."""
+        carry their method's record."""
         m = self.expectations.model(block)
         reg = self.expectations.registry
         leaf = {c: i for i, c in enumerate(m.data.leaves)}
@@ -1779,14 +1779,14 @@ def fitted(dataset: str | None = None, event: str | None = None, graph: str | No
            years: list[int] | None = None) -> list[dict[str, Any]]:
     """The fitted monolith blocks in the store (their manifests' keys), optionally narrowed."""
     out = []
-    for d in sorted(store.address("monolith", {}).parent.glob("*/manifest.json")):
-        k = json.loads(d.read_text(encoding="utf-8"))["key"]
+    for man in store.manifests("monolith"):           # read once per process (the 2,549 manifests took 5-7 s a call)
+        k = man["key"]
         if k.get("block") is None or any(want is not None and k.get(name) != want for name, want in
                                          (("dataset", dataset), ("event", event), ("graph", graph), ("years", years))):
             continue
         out.append({"dataset": k["dataset"], "event": k["event"], "graph": k.get("graph"), "years": k.get("years"),
-                    "block": k["block"], "model": d.parent.name, "key": k})
-    return out
+                    "block": k["block"], "model": store.address("monolith", k).name, "key": k})
+    return sorted(out, key=lambda r: r["model"])
 
 
 def lead_row(x: leads.Lead) -> dict[str, Any]:

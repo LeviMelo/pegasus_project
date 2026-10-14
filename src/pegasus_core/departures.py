@@ -318,17 +318,19 @@ def attribute(y: np.ndarray, mu: np.ndarray, cov: np.ndarray, window: tuple | No
             cands.append(("step", tau, (t >= tau).astype(float)))
         cands.append(("trend", tau, np.clip(t - tau + 1, 0, None).astype(float)))
     X = np.stack([c[2] for c in cands], 1)                                              # [T, n]
+    XP = X.T @ P                                    # [n, T]: X'P, and the candidates' variances diag(X'PX), once
+    den = np.sqrt(np.clip(np.einsum("is,si->i", XP, X), 1e-300, None))
 
     def joint(idx):
         Xs = X[:, idx]
-        Ai = np.linalg.pinv(Xs.T @ P @ Xs, hermitian=True)
-        b = Ai @ (Xs.T @ P @ r)
+        Ai = np.linalg.pinv(XP[idx] @ Xs, hermitian=True)
+        b = Ai @ (XP[idx] @ r)
         return b, b / np.sqrt(np.clip(np.diag(Ai), 1e-300, None))
 
     chosen: list[int] = []
     for _ in range(2 * T):
         e = r - X[:, chosen] @ joint(chosen)[0] if chosen else r
-        z = (X.T @ P @ e) / np.sqrt(np.clip(np.einsum("ti,ts,si->i", X, P, X), 1e-300, None))
+        z = (XP @ e) / den
         z[chosen] = 0.0
         j = int(np.argmax(np.abs(z)))
         if abs(z[j]) < critical:

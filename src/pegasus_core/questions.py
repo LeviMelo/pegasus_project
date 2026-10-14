@@ -225,6 +225,7 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     methods = [m for m in qn.methods if kind in m.kinds]
     k = max(len(methods), 1)
     answers: list[Answer] = []
+    by_place: dict[int, set[int]] = {}         # place -> the answers (by index) holding it: a finding's candidates
     failed = {} if methods else {"*": f"no method of {question!r} reads a {kind} field yet"}
     for m in methods:
         try:
@@ -236,17 +237,21 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
             if "shape" not in f.stats:
                 f.stats["shape"] = _shape(session, node, f, f.tier, kw.get("train_last"))
             pl, (y0, y1) = {int(p) for p in f.locus.get("places", [])}, _years(f, session.years)
+            # the first answer, in creation order, that shares a place and overlaps in years (a scan of every answer for
+            # each finding was quadratic: 119 s for 20,000 findings)
             home = None
-            for a in answers:
-                if a.places & pl and a.years[0] <= y1 and y0 <= a.years[1]:
-                    home = a
+            for i in sorted(set().union(*(by_place.get(p, ()) for p in pl))):
+                if answers[i].years[0] <= y1 and y0 <= answers[i].years[1]:
+                    home, home_i = answers[i], i
                     break
             if home is None:
-                home = Answer(question, set(pl), (y0, y1))
+                home, home_i = Answer(question, set(pl), (y0, y1)), len(answers)
                 answers.append(home)
             else:
                 home.places |= pl
                 home.years = (min(home.years[0], y0), max(home.years[1], y1))
+            for p in pl:
+                by_place.setdefault(p, set()).add(home_i)
             if m.id not in home.findings or f.p < home.findings[m.id].p:
                 home.findings[m.id] = f
     answers.sort(key=lambda a: a.p)
