@@ -300,7 +300,9 @@ Relations are found jointly across all fields; pairwise tests only confirm.
 
 **Commits.**
 - Batch related work into one commit, not one per increment.
-- Work on a branch; the author merges and pushes.
+- The agent manages branches and merges its own verified work into the working branch at once, so a
+  change is live before anything runs on it (a fix waiting for a merge had left live runs measuring
+  outdated code; user, 2026-10-14). Pushing or publishing still needs explicit authorisation.
 
 ---
 
