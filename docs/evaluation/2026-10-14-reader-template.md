@@ -22,3 +22,15 @@ the same). Time per call unchanged (the slowest, mark moments of 7.4 million cel
 **The store.** `pegasus-core keys gc`: 182,828 entries no code computes a key for any more (every code value outside the
 window of the current and adoptable keys), 33.9 GB, removed; 37,980 live entries (2.8 GB) and 10,347 whose key holds no
 code value kept.
+
+**One reader of events (later the same day).** `_records` reads through pegasus_data's `read_events(consolidate=False)`
+(pegasus_data ADR-0187), where PegaSUS had kept its own copy of the select, the flag retry, the duplicates rule, the
+status and the weight. `__w` is now on every record (1 when unweighted), which `unplaced` reads too: it had read a
+weighted event's weight column itself. The harness was run cold on the new code (`run.py`, `run2.py`, scratch homes)
+against the reader template's outputs:
+- 31 of 33 tables are equal (mark moments' log sums to 1.2e-15);
+- `code_list_counts`' unallocated now splits by category (ADR-free, the code-list note);
+- the linked reader found no stored run: pegasus_data's linkage round re-keyed every run (`LINKAGE_VERSION` 3), and the
+  runs the studies read are being recomputed.
+Direct `_records` against `read_events` on eight reads (SIM, SIH, SINAN, SINASC, SIA-PS weighted, with and without
+identity) gave the same records.

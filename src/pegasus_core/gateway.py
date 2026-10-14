@@ -855,67 +855,38 @@ def _lake_key(dataset: str, year: int) -> dict:
 
 def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False,
              rows: dict[str, list[str]] | None = None) -> pa.Table:
-    """Raw-coded records of one event type for one year (the event type's status applied); ``identity`` adds each
-    record's identity ``_rid`` by pegasus_data's own rule (`linkage.identity.record_ids`): what its links pair. A
-    ``rows`` filter keeps the identities: a record's key is the MD5 of its own fields and its number counts the exact
-    duplicates of a file, which every filter on its fields keeps or drops together (the fallback, file and row, does
-    not depend on the filter)."""
+    """Raw-coded records of one event type for one year (pegasus_data `read_events`, its records: the duplicates rule
+    and the status applied, no consolidation), ``columns``, the status column and ``__w`` (the events each record
+    stands for: its weight, else 1). ``identity`` adds each record's identity ``_rid`` by pegasus_data's own rule
+    (`linkage.identity.record_ids`): what its links pair. A ``rows`` filter keeps the identities: a record's key is the
+    MD5 of its own fields and its number counts the exact duplicates of a file, which every filter on its fields keeps or
+    drops together (the fallback, file and row, does not depend on the filter). PegaSUS had its own copy of the event
+    reading (the select, the flag retry, the duplicates, the status, the weight), shown equal to this on eight real reads
+    (2026-10-14)."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
-    import pyarrow.compute as pc
+    from pegasus_data.semantics.event_types import event_type as data_event_type
+    from pegasus_data.semantics.event_types import read_events
 
     spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
     if spec.get("grid"):
         raise ValueError(f"{dataset} {event}: a row is a grid of events by sex and age band, not a record of one")
-    status = spec.get("status") or {}
-    weight = [spec["weight"]] if spec.get("weight") else []
-    wanted = list(dict.fromkeys(columns + ([status["column"]] if status.get("column") else []) + weight))
-    # pegasus_data's duplicates rule (its decision 0159): rows compared on every column need every column; the source's
-    # own flag (SINAN's NDUPLIC_N) needs that column, which a form or a year may lack
-    rule = spec.get("duplicates") or {}
-    dups = bool(rule)
-    flag = (rule.get("flag") or {}).get("column")
-    select = None if "except" in rule else wanted + ([flag] if flag else [])
     # ``rows`` ({column: code prefixes}): only those records, filtered in the lake's scan (pegasus_data `query(rows=)`)
     kwargs = {"root": config.data_root(), "max_download": max_download(), **({"provenance": "all"} if identity else {}),
               **({"rows": rows} if rows else {})}
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        try:
-            table = pg.query(dataset, period=year, geography="BR", select=select, present="codes", **kwargs)
-        except Exception as exc:
-            if not (flag and f"'{flag}' is not present" in str(exc)):
-                raise
-            table = pg.query(dataset, period=year, geography="BR", select=wanted, present="codes", **kwargs)
+    prepare = None
     if identity:
         from pegasus_data.linkage.identity import record_ids
 
-        table = table.append_column("_rid", record_ids(table))
-    if dups:
-        import dataclasses
-
-        from pegasus_data.semantics.event_types import event_type as data_event_type
-        from pegasus_data.semantics.event_types import events_of
-
-        # the duplicates rule alone: the status is applied below, as for every event
-        only = dataclasses.replace(data_event_type(dataset, event), status_column=None, consolidation_key=())
-        keep = [c for c in dict.fromkeys(wanted + (["_rid"] if identity else [])) if c in table.column_names]
-        # a form or a year without the source's duplicate flag flags none: said by this reader, which read without it
-        table = events_of(table, only, flag_absent_ok=bool(flag) and flag not in table.column_names).select(keep)
-    if status.get("column") and status.get("values"):
-        table = table.filter(pc.is_in(pc.cast(table[status["column"]], pa.string()),
-                                      value_set=pa.array([str(v) for v in status["values"]])))
-    if status.get("column") and status.get("excluded"):
-        col = pc.cast(table[status["column"]], pa.string())
-        table = table.filter(pc.invert(pc.fill_null(pc.is_in(col, value_set=pa.array(
-            [str(v) for v in status["excluded"]])), False)))
-    if weight:
-        # a row of a weighted event stands for its quantity of events (SIA's production rows, pegasus_data OQ 75)
-        from pegasus_data.semantics.event_types import event_type as data_event_type
-        from pegasus_data.semantics.event_types import event_weights
-
-        table = table.append_column("__w", event_weights(table, data_event_type(dataset, event)))
-    return table
+        def prepare(t: pa.Table) -> pa.Table:        # made from the record's fields, before the rule compares them
+            return t.append_column("_rid", record_ids(t))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        table = read_events(dataset, data_event_type(dataset, event), columns, consolidate=False, period=year,
+                            geography="BR", prepare=prepare, **kwargs)
+    status = (spec.get("status") or {}).get("column")
+    keep = dict.fromkeys([*columns, *([status] if status else []), *(["_rid"] if identity else []), "__w"])
+    return table.select([c for c in keep if c in table.column_names])
 
 
 #: the properties of the date a record enters its system (SINAN's data entry, SIM's and SINASC's registration, SIH's
@@ -1348,19 +1319,16 @@ def unplaced(dataset: str, event: str, year: int, classifier: str | None) -> pa.
     knowably. Said beside an area's counts as Brazil's ('residence not recorded (Brazil)'): CIHA 2019 holds 13.4 % of
     its records without a residence (the review of the gateway, 2026-10-14). One two-column scan per dataset-year,
     shared by every area."""
-    import pegasus_data as pg
 
     strata = _strata(dataset, event, year)
     key = _reader_key("unplaced", unplaced, dataset, event, year, classifier=classifier)
 
     def compute() -> pa.Table:
-        spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
         raw = _records(dataset, event, year, list(dict.fromkeys([strata["residence"], *_code_cols(classifier)])))
         con = duckdb.connect()
         con.register("r", raw)
         code = _code_sql(classifier)
-        wt = f'coalesce(TRY_CAST("{spec["weight"]}" AS DOUBLE), 0)' if spec.get("weight") and spec["weight"] in raw.column_names \
-            else "1"
+        wt = '"__w"' if "__w" in raw.column_names else "1"       # the events a record stands for (`_records`)
         # the code in a subquery: a code list's is one row per category (`_code_sql`), which no aggregate can unnest
         return con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, 'residence not recorded (Brazil)' AS reason,
                 code, CAST(sum(w) AS INTEGER) AS y
