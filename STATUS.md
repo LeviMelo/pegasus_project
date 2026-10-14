@@ -378,7 +378,9 @@ Fixed before the survey: persons read nothing through link runs stored before 20
   source, the cohort scan on a code set's persons, a link's description carried into its shares (sih_deaths_to_sim pairs
   in-hospital deaths only), every table a view. Open: climate from INMET stations covers a few municipalities and has
   sensor gaps (Maceió's gauge silent February-July 2021 in INMET's own file): gridded products (BR-DWGD and others) in
-  progress in pegasus_data; a prospective finding's O/E against its own tier's expectation.
+  progress in pegasus_data. Done later the same day: a prospective finding's O/E against its own fit, a same-event link's
+  validation roles out of the cohort's attributes, a missing level's contrast marked as recording, the scan nulls'
+  spatial share, compositions read once, the reserve under one lock (1f9d199-662a3c7).
 
 Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).

@@ -64,4 +64,6 @@ that outcome (its fit diverged: log RR 27.7, sd 6,969, p 0.5); a column a link's
 after 7f93a06 and 9eb9296 re-keyed every read and fit: 79.4 min of wall clock, of which the laptop slept 54 min (Windows'
 Power-Troubleshooter log: 09:40:45-10:02:03 and 10:15:02-10:47:45, exactly the silences of the first question step and of
 the groups product): about 25 min computed. Warm, the next run: 2.7 min (scope 25 s, lanes 28 s, products 100 s), every
-`body` part met. A run measures wall time: a sleep reads as a slow step, and had been read as one twice the same day.
+`body` part met. A run measures wall time: a sleep reads as a slow step, and had been read as one twice the same day. On 662a3c7 (compositions and the fits reaching them
+re-keyed): 13.7 min, every `body` part met; the SIM cohort leaves LOCOCOR out as the SIH cohort leaves MORTE; its strongest
+remaining contrasts are missing levels (education blank, RR 5.4: hospital certificates), now marked `recording`.

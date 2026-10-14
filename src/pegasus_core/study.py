@@ -1395,6 +1395,11 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 rows += [{"cohort": label, "year": y, **n} for n in notes]     # an outcome no direct link reached
                 store.put_table("study_table", key, _rows_table(rows) if rows else pa.table({"cohort": pa.array([], pa.string())}))
                 out.extend(rows)
+    for r in out:
+        # a contrast of a missing level is the records' completeness, not a risk: Alagoas's deaths with a linked
+        # admission had education blank 5.4x as often, hospital certificates leaving it (2026-10-14); kept, and said
+        if r.get("level") is not None:
+            r["recording"] = str(r["level"]) in ("blank", "not recorded", "value missing")
     if not out:
         # said, never an empty table: leptospirosis' slice wrote none, read as a part missing (2026-10-12)
         topic = sorted({i.dataset for i in scope.items if i.status == "in" and i.reason.startswith("seed sinan:")})
@@ -4985,6 +4990,8 @@ COLUMNS = {
     "attribute": "the person's attribute contrasted",
     "reference": "the attribute's reference level",
     "rr": "rate ratio against the reference (Rubin's rules over link draws)",
+    "persons.parquet:recording": "true when the level is a missing one (blank, not recorded): a difference in the "
+                                 "records' completeness between persons with and without the outcome, not a risk",
     "persons": "persons in the cohort",
     "with_outcome": "persons with the outcome (mean over link draws)",
     "note": "why a value is absent, or what was tested",
