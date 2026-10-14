@@ -376,9 +376,10 @@ Fixed before the survey: persons read nothing through link runs stored before 20
   (`link_report`); a read key never saw the lake (`_lake_key`); citing a source re-keyed every count (`_declared_key`).
   Then (same day): the topic's own measures and ages (measures.parquet), its share of its ICD-10 group, chapter and
   source, the cohort scan on a code set's persons, a link's description carried into its shares (sih_deaths_to_sim pairs
-  in-hospital deaths only), every table a view. Open: climate from INMET stations covers a few municipalities and has
-  sensor gaps (Maceió's gauge silent February-July 2021 in INMET's own file): gridded products (BR-DWGD and others) in
-  progress in pegasus_data. Done later the same day: a prospective finding's O/E against its own fit, a same-event link's
+  in-hospital deaths only), every table a view (later: tables of its own, the folder standing alone). Climate: the context
+  fields read BR-DWGD's municipal means (pegasus_data ADR-0178; every municipality-month 1961 to 2024-03-20, 5,563 of
+  5,571 municipalities); INMET's stations, which covered 8 of Alagoas's 102 municipalities and lost a gauge for months,
+  are kept for validation. Open: the months after 2024-03-20. Done later the same day: a prospective finding's O/E against its own fit, a same-event link's
   validation roles out of the cohort's attributes, a missing level's contrast marked as recording, the scan nulls'
   spatial share, compositions read once, the reserve under one lock (1f9d199-662a3c7).
 

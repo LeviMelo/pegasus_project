@@ -2109,7 +2109,12 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     names = gateway.municipality_names()
     rows, desc, views, figs, groups, places, quality, trends, seasons, measures = [], [], {}, [], [], [], [], [], [], []
     series = {}          # each primary field's observed and expected by place and period: the related fields' reading
-    current = leads.Register().current()
+    # the register's current answers by field, once: each field had scanned all of them (65,725 SIM-DO answers in
+    # the national register, times every field of the study; the review of the study, 2026-10-14)
+    by_field: dict[str, list] = {}
+    for x in leads.Register().current():
+        if x.fields and x.kind == "answer" and x.status != "retired":
+            by_field.setdefault(x.fields[0], []).append(x)
     for it in (i for i in scope.items if i.status == "in"):
         for name, src in _fields_of(it):
             if name == "!":
@@ -2170,9 +2175,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                              "_train_last": x.train_last,
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
                                                      | ({str(f_)} if (f_ := _one_institution(x)) else set()))}
-                            for x in current
-                            if x.fields and x.kind == "answer" and x.status != "retired" and x.fields[0] == f.id
-                            and list(x.provenance.get("years") or []) == list(it.years))
+                            for x in by_field.get(f.id, ())
+                            if list(x.provenance.get("years") or []) == list(it.years))
                 # a count field's series and map: a linked share's or a share's events are trials, not a rate per
                 # person-year (its "per 100,000" map and its series had been drawn empty, and counted as figures)
                 if not name and s.expectations.model(f.block).data.n is None:
@@ -4159,7 +4163,6 @@ def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) ->
     declared fields, each over its declared denominator, `gateway.context_value`), the mean over the finding's places
     in the study's period and its percentile among Brazil's municipalities. Each finding row also names its three most
     extreme contexts (``context``). A context that cannot be read is skipped and logged, never zero."""
-    from scipy.stats import percentileofscore
 
     if not rows or not scope.contexts:
         return []
@@ -4184,6 +4187,14 @@ def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) ->
     for name_, why in left:
         log(f"study: context {name_} left out: {why}")
     out = []
+    ranked = {name: np.sort(v[np.isfinite(v)]) for name, v in values.items()}
+
+    def percentile(a: np.ndarray, m: float) -> float:
+        """scipy's percentileofscore of ``m`` in ``a`` (kind "rank": ties count half), on ``a`` sorted once a context:
+        it had ranked the whole context again for every finding (the review of the study, 2026-10-14)."""
+        left, right = int(np.searchsorted(a, m, "left")), int(np.searchsorted(a, m, "right"))
+        return (left + right + (1 if right > left else 0)) * 50.0 / len(a)
+
     for r in rows:
         idx = [index[u] for u in r.get("_places") or [] if u in index]
         if not idx:
@@ -4194,7 +4205,7 @@ def _context_profiles(decl: Declaration, scope: Scope, rows: list[dict], log) ->
             if not np.isfinite(here).any():
                 continue
             m = float(np.nanmean(here))
-            pct = float(percentileofscore(v[np.isfinite(v)], m))
+            pct = percentile(ranked[name], m)
             out.append({"finding": r["id"], "context": name, "value": m, "percentile": pct,
                         "places_with_value": int(np.isfinite(here).sum()), "places": len(idx)})
             extreme.append((abs(pct - 50.0), name, pct))
