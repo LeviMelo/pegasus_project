@@ -35,7 +35,7 @@ def facility_cube(dataset: str, event: str, year: int) -> pa.Table:
     classifier = next((c["column"] for c in spec["classifiers"] if c["role"] == "primary"), None)
     fcol, mcol = gateway.facility_column(dataset)
     key = {"what": "facility_cube", "dataset": dataset, "event": event, "year": year, "classifier": classifier,
-           "facility": fcol, "data": config.data_version(), "code": config.code_key(facility_cube), **gateway._df_key(dataset, year)}
+           "facility": fcol, "data": config.data_version(), "code": config.code_key(facility_cube), **gateway._data_key(dataset, year)}
     hit = store.get_table("gateway", key)
     if hit is not None:
         return hit
