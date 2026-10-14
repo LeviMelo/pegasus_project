@@ -38,3 +38,11 @@ August 2015 to June 2016 against 1.5 expected; at the place of birth, 424 agains
 **Left to pegasus_data** (fix-data9): SINASC's sex coded 1/2 in some years and letters in others, measures' sentinels
 (SINASC's measures; ATD's laboratory values), ATD's evidence measured on ATD. **Next here:** distinct persons where a
 source identifies its subject (the SIA folder had no patient count), then a third audit.
+
+**Distinct persons (the same day).** A source whose roles name its subject's registry identifier (`property: cns`: SIA's
+APAC and BPA families, the oncology panel, SINAN-ANTR) now counts each person once per place and year
+(`gateway.person_places`), with the treated prevalence per 100,000 residents and its trend. Rerun on the SIA folder
+(products only), Alagoas's N18 patients are 541 in 2014 (partial), 657 in 2015 and 260 in 2016, as counted directly on
+the records (531, 635, 266), and 1,075 over the decade. The joinpoint of their rate places the coding break at 2017
+(-39.9 % a year, then -0.8 %). One helper (`_mark_years`) now marks provisional and partial years on every row of a field,
+so the person rows' trend starts at 2015 too.

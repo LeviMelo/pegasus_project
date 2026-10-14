@@ -2193,17 +2193,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     (_race_rates(it, s, f, label) if not name else []) + \
                     (lap.guard(f"proportional {f.id}", lambda it=it, label=label, f=f: _proportional(it, f, label), [],
                                log) if not name else [])
-                # a year the source says is not final yet (pegasus_data's ``final_after_years``: SINAN's notifications
-                # are closed over three years; RS's 2023 congenital records had no closing date, the review, 2026-10-13)
-                final = ((gateway.event_type(it.dataset, it.event) or {}).get("source_notes") or {}).get("final_after_years")
-                if final:
-                    for r in rows_:
-                        if r["period_kind"] == "year":
-                            r["provisional"] = int(r["first"]) > int(time.strftime("%Y")) - int(final)
-                for r in rows_:
-                    why = partial.get((it.dataset, r["first"])) if r["period_kind"] == "year" else None
-                    if why:
-                        r["partial"] = why
+                _mark_years(rows_, it, partial)          # provisional and partial years: no trend reads them
                 # the share placed, for the counts and for each other place they are read at: a place of infection
                 # or of care left blank for 35-44 % of gestational cases makes its rates lower bounds (the review);
                 # each year's share placed is a completeness row ("events placed"), once
@@ -2231,8 +2221,16 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 # a count field's series and map: a linked share's or a share's events are trials, not a rate per
                 # person-year (its "per 100,000" map and its series had been drawn empty, and counted as figures)
                 if not name and s.expectations.model(f.block).data.n is None:
-                    places += lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv, refs=refs: _places(
+                    mine = lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv, refs=refs: _places(
                         it, s, f, label, sv, names, refs), [], log)
+                    places += mine
+                    held = lap.guard(f"persons {f.id}", lambda it=it, s=s, f=f, label=label, mine=mine: _persons(
+                        it, s, f, label, mine), [], log)
+                    _mark_years(held, it, partial)
+                    places += [r for r in held if r["section"] == "municipalities"]
+                    desc.extend(r for r in held if r["section"] == "rates")
+                    trends.extend(lap.guard(f"person trends {f.id}", lambda held=held: _apc(
+                        [r for r in held if r["section"] == "rates"]), [], log))
                     seasons += lap.guard(f"seasons {f.id}", lambda it=it, s=s, f=f, label=label: _seasons(
                         it, s, f, label, skip={y for (ds, y) in partial if ds == it.dataset}), [], log)
                     measures += lap.guard(f"measures {f.id}", lambda it=it, f=f, label=label: _measures(it, f, label, log),
@@ -2841,12 +2839,12 @@ def _apc(rows: list[dict]) -> list[dict]:
 
     series: dict[tuple, list[dict]] = {}
     for r in rows:
-        if r["measure"] in ("crude_rate", "smr") and r["period_kind"] == "year" and not r.get("provisional") \
+        if r["measure"] in ("crude_rate", "smr", "person_rate") and r["period_kind"] == "year" and not r.get("provisional") \
                 and not r.get("partial") and r.get("denominator"):
             series.setdefault((r["field"], r["geography"], r["place"], r.get("unit") or "standardised ratio (observed "
-                               "over expected)", r.get("stratum"), r.get("value")), []).append(r)
+                               "over expected)", r.get("stratum"), r.get("value"), r["measure"]), []).append(r)
     out = []
-    for (field_, level, place, unit, group, _), rs in series.items():
+    for (field_, level, place, unit, group, _, _), rs in series.items():
         rs = sorted(rs, key=lambda r: r["first"])
         t = np.array([float(r["first"]) for r in rs])
         y = np.array([float(r["numerator"]) for r in rs])
@@ -2900,7 +2898,8 @@ def _apc(rows: list[dict]) -> list[dict]:
         # adjusted model's slope is not the standardised series' (the paper audit, 2026-10-14). The fitted rates on the
         # series' own scale: a perinatal series' crude rate is per 1,000 live births, and its fitted rates had been per
         # 100,000 under that unit (2026-10-14); the standardised rate is per 100,000 already
-        first = "joinpoint: standardised ratio" if rs[0]["measure"] == "smr" else "joinpoint: crude rate"
+        first = {"smr": "joinpoint: standardised ratio", "person_rate": "joinpoint: person rate"}.get(
+            rs[0]["measure"], "joinpoint: crude rate")
         inputs = [(first, np.log(y / n) if (y > 0).all() else None, y, float(rs[0].get("per") or 1.0))]
         std = [r.get("_std") for r in rs]
         if all(x is not None and x.get("estimate") and x.get("variance") for x in std):
@@ -3223,6 +3222,82 @@ def _reference_births(years: list[int], units: list[str]) -> dict[str, np.ndarra
     return out
 
 
+def _persons(it: Item, s, f, label: str, places: list[dict]) -> list[dict]:
+    """A field's distinct persons where its source identifies its subject (`gateway.person_identifier`): each year, for
+    the whole, each unit below it and each municipality, the persons and their rate per 100,000 residents (the treated
+    prevalence: dialysis is a prevalent cohort, read as authorisations it had no patient, the SIA audit, 2026-10-14);
+    over the period, the persons once. ``places`` (the municipalities' estimates) give each municipality's residents."""
+    if gateway.person_identifier(it.dataset, it.event) is None:
+        return []
+    d = s.expectations.model(f.block).data
+    if d.n is not None or str(d.population).startswith("events:"):
+        return []
+    import pyarrow.compute as pc
+
+    src = it.source or {}
+    classifier = fields.classifier_of(it.dataset, it.event, src)
+    codes = fields.codes_of(src, it.nodes) or tuple(str(c) for c in s.expectations.registry.leaves(f.node)
+                                                    if f.node != "*")
+    area = tuple(sorted(config.study_area())) if config.study_area() else None
+    years = [int(y) for y in np.asarray(d.years)]
+    U = len(d.places)
+    places_ = np.asarray(d.places, dtype=np.int64)
+    N = d.N.astype(float).sum(2)                                 # [U, T]: residents' person-years
+    pairs, every = {}, []
+    for y in years:
+        t = gateway.person_places(it.dataset, it.event, y, classifier if codes else None, codes, area)
+        t = t.filter(pc.is_in(t.column("u"), value_set=pa.array(places_.astype(np.int32))))
+        pairs[y] = t
+        every.append(t.column("person"))
+    out = []
+    period = f"{years[0]}-{years[-1]}"
+    levels = [(*_whole(), np.ones(U, bool)), *_levels_below(places_)]
+    for level, unit, sel in levels:
+        members = pa.array(places_[sel].astype(np.int32))
+        for k, y in enumerate([*years, None]):
+            if y is None:
+                ts = [pairs[z].filter(pc.is_in(pairs[z].column("u"), value_set=members)) for z in years]
+                n_p = len(set().union(*(set(x.column("person").to_pylist()) for x in ts))) if ts else 0
+                base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": level, "place": unit,
+                        **_period(None, period)}
+                out.append(_estimate_row("rates", "persons", base, estimate=float(n_p)))
+                continue
+            t = pairs[y].filter(pc.is_in(pairs[y].column("u"), value_set=members))
+            n_p = len(set(t.column("person").to_pylist()))
+            pop = float(N[sel, k].sum())
+            base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": level, "place": unit,
+                    **_period(y, None)}
+            out.append(_estimate_row("rates", "persons", base, estimate=float(n_p)))
+            out += _person_rate("rates", base, n_p, pop)
+    for ui, u in enumerate(places_):
+        for k, y in enumerate(years):
+            t = pairs[y].filter(pc.equal(pairs[y].column("u"), int(u)))
+            n_p = t.num_rows
+            row = next((r for r in places if r["measure"] == "count" and str(r["place"]) == str(int(u))
+                        and r["period_kind"] == "year" and r["first"] == y), None)
+            base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": "municipality",
+                    "place": int(u), **({k_: row.get(k_) for k_ in ("place_name", "state", "health_region",
+                                                                   "health_macroregion")} if row else {}),
+                    **_period(y, None)}
+            out.append(_estimate_row("municipalities", "persons", base, estimate=float(n_p)))
+            out += _person_rate("municipalities", base, n_p, float(N[ui, k]))
+    return out
+
+
+def _person_rate(section: str, base: dict, persons: float, pop: float) -> list[dict]:
+    """Distinct persons per 100,000 residents' person-years, with the exact Poisson interval, the denominator fixed."""
+    from scipy.stats import chi2
+
+    if pop <= 0:
+        return []
+    lo = chi2.ppf(0.025, 2 * persons) / 2 if persons > 0 else 0.0
+    hi = chi2.ppf(0.975, 2 * persons + 2) / 2
+    return [_estimate_row(section, "person_rate", base, estimate=1e5 * persons / pop, low=1e5 * lo / pop,
+                          high=1e5 * hi / pop, interval="exact Poisson (Garwood), denominator fixed", numerator=persons,
+                          denominator=pop, denominator_kind="person-years", per=1e5,
+                          unit="persons per 100,000 person-years")]
+
+
 def _ratio_to_brazil(rows: list[dict]) -> None:
     """Each standardised rate's ratio to Brazil's of the same period and stratum, with its 95 % interval on the log scale
     from the two gamma variances (Brazil holds the area, so the interval is conservative): what a paper states as "x
@@ -3396,6 +3471,10 @@ MEASURES = {
     "proportion": "numerator over denominator, exact (Clopper-Pearson) interval",
     "expected": "events expected (`model`), no interval",
     "model_rate": "the hierarchical model's expected events per `per` person-years (tier B1)",
+    "persons": "distinct persons among the events, by the source's registry identifier of its subject (the CNS): each "
+               "once in a place and year, once over the period in the period's row (no interval)",
+    "person_rate": "distinct persons in the year per `per` residents' person-years: the treated prevalence, exact "
+                   "Poisson interval (Garwood) with the denominator fixed",
     "mean": "mean of the valid values", "sd": "standard deviation of the valid values",
     "quantile": "a quantile of the valid values (`value`: its probability)",
     "median": "the median of the records' values (a mark: a stay, an interval)",
@@ -3505,6 +3584,20 @@ def _estimate_row(section: str, measure: str, base: dict, **row) -> dict:
         else:
             raise ValueError(f"estimate {section}/{measure}: no column {k!r}")
     return out
+
+
+def _mark_years(rows: list[dict], it: Item, partial: dict) -> None:
+    """A year's estimates marked as the source says of the year: ``provisional``, not final yet (pegasus_data's
+    ``final_after_years``: SINAN's notifications are closed over three years; RS's 2023 congenital records had no
+    closing date, the review, 2026-10-13), and ``partial``, a part of a year (`_partial_years`). No trend reads either."""
+    final = ((gateway.event_type(it.dataset, it.event) or {}).get("source_notes") or {}).get("final_after_years")
+    for r in rows:
+        if r["period_kind"] != "year":
+            continue
+        if final:
+            r["provisional"] = int(r["first"]) > int(time.strftime("%Y")) - int(final)
+        if why := partial.get((it.dataset, r["first"])):
+            r["partial"] = why
 
 
 def _partial_years(files: pa.Table | None) -> dict[tuple[str, int], str]:

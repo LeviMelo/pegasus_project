@@ -1654,6 +1654,37 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     return _counted(key, compute, {"source": f"pegasus_data.query({dataset}): {columns} exploded"})
 
 
+def person_identifier(dataset: str, event: str | None = None) -> str | None:
+    """The column identifying the event's own subject in a national registry (a role of the subject's entity whose
+    property is ``cns``, the Cartão Nacional de Saúde), or None: what distinct persons are counted by."""
+    entity = _strata(dataset, event).get("entity")
+    return next((r["column"] for r in roles(dataset) if r.get("kind") == "identifier" and r.get("property") == "cns"
+                 and str(r.get("role", "")).split(".")[0] == entity), None)
+
+
+def person_places(dataset: str, event: str, year: int, classifier=None, codes: tuple[str, ...] = (),
+                  area=None) -> pa.Table:
+    """The distinct (u, person) pairs of a year's events of the field (``classifier`` and ``codes``, as `mark_values`
+    reads them), by the subject's registry identifier (`person_identifier`): a person counted once in each municipality
+    of residence and once in any set of them, never once per record (an APAC is a period of treatment, the same patient
+    authorised four times a year). Cached."""
+    ident = person_identifier(dataset, event)
+    if ident is None:
+        raise LookupError(f"{dataset}: no registry identifier of its subject among its roles")
+    strata = _strata(dataset, event, year)
+    key = _reader_key("person_places", person_places, dataset, event, year, area=area, identifier=ident,
+                      classifier=classifier, codes=sorted(codes))
+
+    def compute() -> pa.Table:
+        t = mark_values(dataset, event, year, (ident,), classifier, tuple(codes), area)
+        con = duckdb.connect()
+        con.register("r", t)
+        return con.execute(f"""SELECT DISTINCT CAST({_residence_sql(strata["residence"])} AS INTEGER) AS u,
+                trim(CAST("{ident}" AS VARCHAR)) AS person
+            FROM r WHERE "{ident}" IS NOT NULL AND trim(CAST("{ident}" AS VARCHAR)) <> ''""").fetch_arrow_table()
+    return _one(key, compute, {"source": f"pegasus_data.query({dataset}): distinct {ident}"})
+
+
 def strata(dataset: str, event: str | None = None) -> dict:
     """The subject's residence, sex and age columns, their entity, and the sex implied when the strata are another
     person's (SINASC: the mother's), from pegasus_data's roles."""
