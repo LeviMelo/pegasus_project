@@ -196,12 +196,17 @@ def optimal_weights(xi: np.ndarray, alpha: float = 0.05) -> np.ndarray:
     return w
 
 
-def adjusted(p: np.ndarray) -> np.ndarray:
-    """BH-adjusted p-values (q-values)."""
+def adjusted(p: np.ndarray, weights: np.ndarray | None = None) -> np.ndarray:
+    """BH-adjusted p-values (q-values): the smallest level at which `bh` (with the same ``weights``) rejects a
+    hypothesis. Their minimum is the field's Simes p-value."""
     p = np.asarray(p, dtype=float)
     m = len(p)
     if m == 0:
         return p
+    if weights is not None:
+        w = np.asarray(weights, dtype=float)
+        w = w * (m / w.sum()) if w.sum() > 0 else np.ones(m)
+        p = np.divide(p, w, out=np.full(m, np.inf), where=w > 0)
     order = np.argsort(p)
     q = p[order] * m / np.arange(1, m + 1)
     q = np.minimum.accumulate(q[::-1])[::-1]
@@ -217,16 +222,15 @@ def simes(p: np.ndarray) -> float:
     return float(np.min(p * m / np.arange(1, m + 1))) if m else 1.0
 
 
-def bogomolov(families: dict[str, np.ndarray], q: float = 0.05) -> dict[str, np.ndarray]:
-    """Benjamini–Bogomolov selective inference across families (ARCHITECTURE §8.2):
-    select families by BH on their Simes p-values; inside each selected family,
-    BH at q · |selected| / |families|."""
-    names = list(families)
-    family_p = np.array([simes(families[n]) for n in names])
-    selected = bh(family_p, q)
-    level = q * selected.sum() / max(len(names), 1)
-    return {n: (bh(families[n], level) if s else np.zeros(len(families[n]), dtype=bool))
-            for n, s in zip(names, selected, strict=True)}
+def bogomolov(field_p: np.ndarray, q: float = 0.05) -> tuple[np.ndarray, float, np.ndarray]:
+    """Benjamini–Bogomolov selective inference (ARCHITECTURE §8.2) for one family of fields, ``field_p`` each field's
+    p-value (its Simes p-value over everything it tested, 1 for a field that tested nothing: the number of fields
+    asked, not of those with a finding, is the family). Fields are selected by BH at q; inside a selected field the
+    hypotheses are tested by BH at q · |selected| / |fields|. Returns the selection, that level and each field's
+    BH-adjusted p."""
+    field_p = np.asarray(field_p, dtype=float)
+    selected = bh(field_p, q)
+    return selected, (q * selected.sum() / len(field_p) if len(field_p) else 0.0), adjusted(field_p)
 
 
 def tree_bh(p_leaf: dict[str, float], parent: dict[str, str | None], q: float = 0.05) -> set[str]:

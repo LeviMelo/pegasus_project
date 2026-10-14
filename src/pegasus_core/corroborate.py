@@ -383,7 +383,7 @@ def corroborate(fields: Fields, source: Source, categories: list[str], rows: np.
 
 
 #: the null place sets of the leads read last (`_lead_null_sets`): a lead is asked of every source on the same draws
-_NULLS: dict[tuple, np.ndarray] = {}
+_NULLS: dict[tuple, tuple[Fields, np.ndarray]] = {}
 
 
 def _lead_null_sets(fields: Fields, rows: np.ndarray, replicates: int, connected: bool) -> np.ndarray:
@@ -391,12 +391,14 @@ def _lead_null_sets(fields: Fields, rows: np.ndarray, replicates: int, connected
     for each source, a TOXG lead's corroboration was 84 % of its lane (2026-10-12)."""
     key = (id(fields), np.asarray(rows, dtype=np.int64).tobytes(), int(replicates), bool(connected))
     hit = _NULLS.get(key)
-    if hit is None:
+    if hit is None or hit[0] is not fields:
         rng = np.random.default_rng(config.seed("null|" + key[1].hex()))
-        hit = _NULLS[key] = _null_sets(fields, rows, rng, replicates, connected)
+        # the entry holds ``fields`` itself: an `id` of an object that is gone is reused by the next one, which then
+        # read the previous grid's place indices (another session's, with the same rows)
+        hit = _NULLS[key] = (fields, _null_sets(fields, rows, rng, replicates, connected))
         while len(_NULLS) > 32:
             _NULLS.pop(next(iter(_NULLS)))
-    return hit
+    return hit[1]
 
 
 #: a permutation p-value with fewer exceedances than this is read from the null's fitted tail (`tail_p`)

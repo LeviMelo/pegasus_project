@@ -16,7 +16,6 @@ ledger. The event sides survive for sizes only: `honest_sizes`.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import gc
 import inspect
@@ -456,25 +455,30 @@ class Session:
             places = self.expectations.model(self.expectations.field(node).block).data.places
             phi = float(self.expectations.model(self.expectations.field(node).block).phi)
             fid = self.expectations.field(node).id
-            out = lenses.group_disparity(y_g, mu_g, places, fid, self.ledger, **{"phi": phi, **kw})
-            if self.source.get("source", "events") != "events" or str(self.source.get("population", "")).startswith("events:"):
-                return out
             # a group dimension needs two groups the lens can test (each with its `min_expected` events): a field with
             # fewer events tests none, and reading every composition of a national system for it is wasted (CIHA's 7
-            # O98.6 admissions read 19 M records a year per column, 2026-10-10)
+            # O98.6 admissions read 19 M records a year per column, 2026-10-10). A drawn world (`harness.grid`) holds
+            # no compositions: they are read from the real records, so against a world's expectation they were the 40 of
+            # 40 null worlds' findings (TOXG, 2026-10-11); the world's own sex-age groups are its question
             min_expected = kw.get("min_expected", inspect.signature(lenses.group_disparity).parameters["min_expected"].default)
-            if float(y_g.sum()) < 2 * min_expected:
-                return out
-            # a drawn world (`harness.grid`) holds no compositions: they are read from the real records, so against a
-            # world's expectation they were the 40 of 40 null worlds' findings (TOXG, 2026-10-11); the world's own
-            # sex-age groups are its question
-            if getattr(self, "drawn", False):
-                return out
+            columns = ([] if self.source.get("source", "events") != "events"
+                       or str(self.source.get("population", "")).startswith("events:")
+                       or float(y_g.sum()) < 2 * min_expected or getattr(self, "drawn", False)
+                       else list(group_columns(self.dataset, self.event)))
+            # the sex-by-age call and one call per composition column are each a BH of their own: the group question
+            # pays for all of them (a null field had 1 - (1 - q)^33 = 81 % of a finding at q = 0.05): q divided among the
+            # calls, and each finding's field-level p multiplied by their number (Bonferroni)
+            calls = 1 + len(columns)
+            kw = {**kw, "q": kw.get("q", 0.05) / calls}
+            out = lenses.group_disparity(y_g, mu_g, places, fid, self.ledger, **{"phi": phi, **kw})
             # every composition column is a group dimension too (ARCHITECTURE §5.3): its own family, its loci naming it
-            for column in group_columns(self.dataset, self.event):
+            for column in columns:
                 y_c, mu_c, values = self.by_composition(node, column)
                 out.extend(read_composition(y_c, mu_c, values, self._is_race(column, values), np.asarray(self.expectations.model(self.expectations.field(node).block).data.years),
                                             places, f"{fid}|by:{column}", column, self.ledger, **{"phi": phi, **kw}))
+            for f in out:
+                f.adj = min(1.0, calls * f.field_p)
+                f.stats["calls"] = calls
             return out
         if lens == "institution_step":               # one institution against its catchment (E_i, §4.5)
             from scipy import stats as st
@@ -491,6 +495,12 @@ class Session:
             from . import departures
             if str(self.source.get("population", "")).startswith("events:"):
                 raise ValueError(f"{self.dataset}: a ratio field's share of all events is its numerator's code set's question")
+            if (other := [k for k in ("support", "place", "link", "indicator", "quality", "mark") if self.source.get(k)])                     or self.source.get("source") in ("share", "linked", "away"):
+                # the total is the event type's events by residence: a reader at another place or basis (a support's
+                # deaths by the verification service's municipality, an away place's) counts others than that total
+                # holds, and the cells whose numerator exceeded it were certain findings (2026-10-14)
+                raise ValueError(f"{self.dataset}: a share of all events is not defined for a reader at another place or "
+                                 f"basis ({', '.join(other) or self.source.get('source')})")
             s = self.surprise(node, "B1")
             # a code set's share is of all the type's events: the total and its fit are the unrestricted reader's (the
             # code set's own fit as the total read every place's share as ~0 against ~1, CIH-CR P37.1: 4185 "departures"
@@ -531,6 +541,8 @@ class Session:
             for f in down:
                 f.locus["direction"] = "down"
                 f.effect = 1.0 / f.effect if f.effect else f.effect
+            for f in up + down:
+                f.adj = min(1.0, 2 * f.field_p)           # two sides, each at q/2
             return up + down
         if lens in ("cell_excess", "step") and "scales" not in kw:
             kw["scales"] = self.scales()              # the departure models run over the ladder of supports
@@ -662,7 +674,6 @@ class Session:
         names = tuple(n for n in (questions or tuple(qs.QUESTIONS))
                       if qs.QUESTIONS[n].prospective == (train_last is not None) and qs.QUESTIONS[n].grain in ("", grain))
         ask_kw = {"train_last": train_last} if train_last is not None else {}
-        found: dict[str, list] = {}
         src = self.source
         measure = (f"|{'interval:' if src.get('anchor') else ''}{src['mark']}" if src.get("mark") else
                    f"|quality:{src['indicator']}" if src.get("quality") else
@@ -674,9 +685,11 @@ class Session:
                    f"|classifier:{src['classifier']}" if src.get("classifier") else "")   # its own family
         code = config.code_key(qs.ask)
         suffix = f"|t{train_last}" if train_last else ""
-        asked_fields, asked_families = set(), set()
+        asked: set[tuple[str, str]] = set()         # (field id, family) answered by this pass
+        failed_pairs: set[tuple[str, str]] = set()  # (field id, family) a question failed on
+        collected: list[tuple[str, str, list, int]] = []       # (field id, family, answers, k)
+        nulls = config.replicates(1000)
         for block in blocks or self._blocks():
-            asked_families |= {f"{qn}|{block}{measure}{suffix}" for qn in names}
             within = None
             if nodes:
                 reg = self.expectations.registry
@@ -686,76 +699,119 @@ class Session:
                     continue
                 if within is not None and not any(set(self.expectations.registry.leaves(f.node)) <= w for w in within):
                     continue
-                asked_fields.add(f.id)
-                # each field's answers are an object of the state (work plan §2): stored when every question was
-                # answered, keyed by the fit, the reader, the questions and the code, so a run killed mid-chapter
-                # resumes at the next field and a rerun recomputes only what changed
+                # each (field, question)'s answers are an object of the state (work plan §2): stored when the question
+                # was answered, keyed by the fit, the reader, the question, the study's replicate scale and the code,
+                # so a run killed mid-chapter resumes at the next field, a rerun recomputes only what changed, and one
+                # question's failure neither retires nor recomputes the field's others
                 m = self.expectations.model(block)
                 fit = store.manifest("monolith", m.key()) or {}
-                key = {"what": "field_answers", "field": f.id, "source": json.loads(json.dumps(src, default=str)),
-                       "questions": list(names), "q": q, "years": list(self.years), "graph": self.graph,
-                       "fit": m.key(), "fitted": fit.get("written"), "code": code, **ask_kw}
-                hit = store.get_arrays("answers", key)
-                if hit is not None:
-                    rows = pickle.loads(hit["rows"].tobytes())
-                    log(f"{f.id}: answers stored")
-                else:
-                    self._local.memo = {}           # a field's surprises computed once for all its questions
-                    rows, failed = [], False
-                    for qn in names:
+                base = {"what": "field_answers", "field": f.id, "source": json.loads(json.dumps(src, default=str)),
+                        "q": q, "years": list(self.years), "graph": self.graph, "fit": m.key(),
+                        "fitted": fit.get("written"), "code": code, "nulls": nulls, **ask_kw}
+                for qn in names:
+                    fam = f"{qn}|{block}{measure}{suffix}"
+                    hit = store.get_arrays("answers", {**base, "question": qn})
+                    if hit is not None:
+                        answers, k = pickle.loads(hit["rows"].tobytes())
+                        log(f"{f.id} {qn}: answers stored")
+                    else:
+                        if getattr(self._local, "memo", None) is None:
+                            self._local.memo = {}   # a field's surprises computed once for all its questions
                         try:
                             answers = self.ask(qn, f.node, q=q, **ask_kw)
                             k = getattr(answers, "k", len(qs.QUESTIONS[qn].methods))
-                        except Exception as exc:  # noqa: BLE001 - a field that fails is reported, the survey goes on
+                        except Exception as exc:  # noqa: BLE001 - a question that fails is reported, the survey goes on
                             log(f"FAIL {f.id} {qn}: {type(exc).__name__}: {exc}")
-                            failed = True
+                            failed_pairs.add((f.id, fam))
                             continue
-                        failed = failed or any(m != "*" for m in getattr(answers, "failed", {}))  # "*": no method reads it
-                        rows.append((qn, list(answers), k))
                         log(f"{f.id} {qn}: {len(answers)} answers {qs.agreement(answers)}, "
                             f"{len(getattr(answers, 'other_shape', []))} of another shape")
-                    self._local.memo = None
-                    if not failed:                  # a failure is retried by the next run, never stored
-                        store.put_arrays("answers", key, {"rows": np.frombuffer(pickle.dumps(rows), dtype=np.uint8)})
-                for qn, answers, k in rows:
-                    for a in answers:
-                        found.setdefault(f"{qn}|{block}{measure}{suffix}", []).append((f.id, a, min(1.0, a.p * k)))
+                        if any(m_ != "*" for m_ in getattr(answers, "failed", {})):     # "*": no method reads it
+                            failed_pairs.add((f.id, fam))       # retried by the next run, never stored
+                        else:
+                            store.put_arrays("answers", {**base, "question": qn},
+                                             {"rows": np.frombuffer(pickle.dumps((list(answers), k)), dtype=np.uint8)})
+                    asked.add((f.id, fam))
+                    collected.append((f.id, fam, list(answers), k))
+                self._local.memo = None
         self._local.memo = None
-        families = {k: np.array([p for *_, p in v]) for k, v in found.items() if v}
-        rejected = control.bogomolov(families, q)
+        if failed_pairs:
+            log(f"{len(failed_pairs)} (field, question) pairs failed: their earlier answers are kept, not retired")
+        # ---- the cross-field error control (ARCHITECTURE §8.2), over the fields asked, not the answers that survived
+        # each field's own control. An answer's level is its methods' smallest field-level p (`Finding.field_p`: the
+        # BH-adjusted p of the lens's own control, or its max-statistic p) times the number of methods (the union
+        # bound); a field's p is its smallest answer's (the lens's Simes p, 1 where nothing was found: a p-value
+        # censored at the lens's level is still a p-value). Fields are selected by BH at q across the family's fields,
+        # and a selected field's answers are admitted at q · |selected| / |fields|. The step method's posterior
+        # probability of no step is no p-value: an answer found by it alone is its own family, a Bayesian FDR selection
+        scored: dict[str, dict[str, list]] = {}                     # family -> field id -> [(answer, level, k)]
+        posterior: dict[str, list] = {}                             # family -> [(field id, answer)]
+        for fid, fam, answers, k in collected:
+            scored.setdefault(fam, {}).setdefault(fid, [])
+            for a in answers:
+                levels_ = [x.field_p for x in a.findings.values() if x.stats.get("p_kind") != "posterior"]
+                if levels_:
+                    scored[fam][fid].append((a, min(1.0, min(levels_) * k), k))
+                else:
+                    posterior.setdefault(fam + "|posterior", []).append((fid, a))
         by_lens = qs.method_records()                 # keyed by lens: a method's record is its lens's
         records = {m.id: {**by_lens[m.lens or m.id], "tier": LENS_TIERS.get(m.lens or m.id)}
                    for qn in qs.QUESTIONS.values() for m in qn.methods if (m.lens or m.id) in by_lens}
         admitted = []
-        for fam, mask in rejected.items():
-            qv = control.adjusted(families[fam])
-            for (fid, a, p), keep, qq in zip(found[fam], mask, qv, strict=True):
-                if not keep:
+
+        def lead(fam, fid, a, p, qq, null, calibrated, extra):
+            best = min(a.findings.values(), key=lambda x: x.p)
+            return leads.Lead(
+                kind="answer", estimand=fam.split("|")[0], tier=best.tier, fields=[fid], train_last=train_last,
+                locus={"places": sorted(a.places), "years": list(a.years),
+                       **({"institutions": inst} if (inst := sorted({i for x in a.findings.values()
+                                                                     for i in x.locus.get("institutions", [])}))
+                          else {}),
+                       # a group dimension's departing value (a composition column's, `scan` group_disparity)
+                       **({"groups": grp} if (grp := sorted({f"{x.locus['groups_by']}={x.locus['group_value']}"
+                                                             for x in a.findings.values() if x.locus.get("groups_by")}))
+                          else {})}, effect=float(best.effect),
+                scale=SCALE.get(best.lens, "rate_ratio"), interval=None, p=float(p), q=float(qq), family=fam,
+                null=null, calibrated=calibrated,
+                method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"}) for m in a.methods},
+                provenance={"graph": self.graph, "methods": a.methods, "source": dict(self.source),
+                            "years": list(self.years), **extra,
+                            "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
+                                          for m, x in a.findings.items()}})
+
+        scan_null = ("each method's own (questions.QUESTIONS); cluster scans draw each place's frailty independently "
+                     "of its neighbours' (their p can be too small where neighbours are correlated)")
+        for fam, per_field in scored.items():
+            ids = sorted(per_field)
+            field_p = np.array([min([lv for _, lv, _ in per_field[i]], default=1.0) for i in ids])
+            selected, level, field_q = control.bogomolov(field_p, q)
+            for i, fid in enumerate(ids):
+                if not selected[i]:
                     continue
-                best = min(a.findings.values(), key=lambda x: x.p)
-                admitted.append(leads.Lead(
-                    kind="answer", estimand=fam.split("|")[0], tier=best.tier, fields=[fid], train_last=train_last,
-                    locus={"places": sorted(a.places), "years": list(a.years),
-                           **({"institutions": inst} if (inst := sorted({i for x in a.findings.values()
-                                                                         for i in x.locus.get("institutions", [])}))
-                              else {}),
-                           # a group dimension's departing value (a composition column's, `scan` group_disparity)
-                           **({"groups": grp} if (grp := sorted({f"{x.locus['groups_by']}={x.locus['group_value']}"
-                                                                 for x in a.findings.values() if x.locus.get("groups_by")}))
-                              else {})}, effect=float(best.effect),
-                    scale=SCALE.get(best.lens, "rate_ratio"), interval=None, p=float(p), q=float(qq), family=fam,
-                    null="each method's own (questions.QUESTIONS)",
-                    calibrated=all(records.get(m, {}).get("calibrated") is True for m in a.methods),
-                    method={m: records.get(m, {"calibrated": None, "evidence": "not characterised"})
-                            for m in a.methods},
-                    provenance={"graph": self.graph, "methods": a.methods, "source": dict(self.source),
-                                "years": list(self.years), "by_method": {m: {"effect": float(x.effect), "p": float(x.p), "stats": x.stats}
-                                              for m, x in a.findings.items()}}))
+                for a, lv, k in per_field[fid]:
+                    if lv > level:
+                        continue
+                    # the q of an answer: the smaller of the levels at which its field is selected and it is admitted
+                    # inside it (the selection held at q)
+                    qq = min(1.0, max(field_q[i], lv * q / max(level, 1e-300)))
+                    admitted.append(lead(fam, fid, a, min(1.0, a.p * k), qq, scan_null,
+                                         all(records.get(m, {}).get("calibrated") is True for m in a.methods),
+                                         {"fields_asked": len(ids), "fields_selected": int(selected.sum()),
+                                          "field_p": float(field_p[i]), "level": float(level)}))
+        for fam, items in posterior.items():
+            for fid, a in items:
+                p_null = min(x.p for x in a.findings.values())
+                admitted.append(lead(fam, fid, a, p_null, p_null,
+                                     "the posterior probability of no step (a Bayesian FDR selection at q/k inside its "
+                                     "field); a probability, not a p-value, so outside the cross-field control",
+                                     False, {"posterior": True}))
         # an earlier answer of the same families and fields that this pass no longer selects is retired (the data,
-        # the model or the code changed), never left open beside the current answers; a person's verdict keeps it
+        # the model or the code changed), never left open beside the current answers; a person's verdict keeps it. A
+        # (field, question) that failed this pass keeps its answers: an empty result must not read as "not selected"
+        families = {fam for _, fam in asked} | {fam + "|posterior" for _, fam in asked}
         new = {x.id for x in admitted}
-        stale = [x for x in self.register.current(family=set(asked_families), kind="answer") if x.family in asked_families
-                 and x.fields and x.fields[0] in asked_fields and x.id not in new
+        stale = [x for x in self.register.current(family=families, kind="answer")
+                 if x.fields and x.id not in new and (x.fields[0], x.family.removesuffix("|posterior")) in asked
                  and x.status in ("open", "replicated", "rescoped") and not x.robustness.get("verdict")]
         when = time.strftime("%Y-%m-%d")
         for x in stale:
@@ -826,7 +882,7 @@ class Session:
         if facility and fac is None:
             self._prepare_grid()
             log("facility read skipped: " + ("the cube is by year, the grain here is monthly" if self._per_year > 1
-                                             else "the dataset names no facility"))
+                                             else getattr(self, "_fac_error", None) or "the dataset names no facility"))
         for i, ((node, train_last, tier), group) in enumerate(sorted(by_node.items())):
             if node != "*" and node not in self.expectations.registry.level:
                 # a lead of a field this registry does not hold (an older version's node, SINAN's "notification"):
@@ -840,6 +896,11 @@ class Session:
                 lead_codes = [block_codes[j] for j in self._leaves(node)[1]]
             index = {int(p): j for j, p in enumerate(self._grid_places)}
             s = (self.surprise(node, tier, train_last) if train_last else self.surprise(node, "B1")) if replicate else None
+            if s is not None and not np.array_equal(np.asarray(self._grid_places), np.asarray(s.places)):
+                # the evidence grid (population's places) and the field (the block's cells) index places by row: a
+                # place without cells would shift every row after it onto another place, silently
+                log(f"triage: {len(group)} leads of {node!r}: the evidence grid's places differ from the field's: skipped")
+                continue
             half = self._trend_halves(s, edges) if replicate and any(x.estimand == "trend_divergence" for x in group) else None
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
@@ -1078,8 +1139,12 @@ class Session:
             if self._per_year == 1:         # the cube is by year: no facility read at the monthly grain (`triage` says so)
                 # the dataset names no facility (LookupError), or its every event is not held (a source read as an
                 # extract of its codes, beyond which a study downloads nothing: ValueError): no facility evidence
-                with contextlib.suppress(LookupError, ValueError):
+                try:
                     self._fac = facility.Facilities(self.dataset, self.event, self.years, self._grid_places, self._grid_years)
+                except LookupError:
+                    pass
+                except ValueError as exc:        # said in the triage's log, not read as "no facility named"
+                    self._fac_error = f"{type(exc).__name__}: {exc}"
         return self._fac
 
     def _prepare_grid(self) -> None:
@@ -2198,7 +2263,9 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
             conc, below, at, upper = departures.betabinom_central(o[use], n[use], p0[use], ("disparity", dataset, node, k))
             pv[use] = np.minimum(1.0, 2 * np.minimum(below + at, upper))
         for i in np.flatnonzero(use):
-            rr = (o[i] / e[i]) / max(o_ref[i] / e_ref[i], 1e-12) if o_ref[i] > 0 else np.inf
+            # continuity-corrected as `lenses._rr`: a place with none in the reference race had an infinite ratio,
+            # reported as 1e6, which outranked every real effect (`Lead.rank` reads log of it)
+            rr = ((o[i] + 0.5) / (e[i] + 0.5)) / ((o_ref[i] + 0.5) / (e_ref[i] + 0.5))
             out_rows.append((k, int(s.places[i]), float(rr), float(theta), float(pv[i]), float(o[i]), float(o_ref[i])))
     if not out_rows:
         return []
@@ -2209,7 +2276,7 @@ def disparity(dataset: str, event: str, node: str, years: list[int], races: tupl
     field_id = ref.field.id
     admitted = [leads.Lead(kind="residual", estimand="race_disparity", tier="B0", fields=[field_id],
                            locus={"places": [u], "years": [years[0], years[-1]], "race": k, "reference": reference},
-                           effect=rr if np.isfinite(rr) else 1e6, scale="rate_ratio", interval=None, p=p, q=float(qq),
+                           effect=rr, scale="rate_ratio", interval=None, p=p, q=float(qq),
                            family=f"disparity|{field_id}", null="the national disparity (beta-binomial, central matching)",
                            calibrated=False, provenance={"national_disparity": theta, "events": o_k, "events_reference": o_r})
                 for (k, u, rr, theta, p, o_k, o_r), kp, qq in zip(out_rows, keep, qv, strict=True) if kp]

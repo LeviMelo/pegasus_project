@@ -159,7 +159,11 @@ def scan(table: pa.Table, attributes: list[str], outcomes: list[str], ledger: co
         z = (np.abs(est) - np.log(delta_rr)) / np.maximum(sd, 1e-12)
         p = special.ndtr(-z)
         others = [lv for lv in levels if lv != ref]
-        rows.append((test, float(p.min()) if len(p) else 1.0, float(est[np.argmin(p)]) if len(p) else None,
+        # one hypothesis per (attribute, outcome) whose p is the smallest of its levels': Bonferroni over them (the
+        # leads read each level's own p and BH over levels; the ledger's family is the attribute's, so its p is the
+        # union test's)
+        rows.append((test, min(1.0, len(p) * float(p.min())) if len(p) else 1.0,
+                     float(est[np.argmin(p)]) if len(p) else None,
                      {"levels": len(others), "events": y_tot}))
         if y_tot < min_events:
             continue

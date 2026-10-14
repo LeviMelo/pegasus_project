@@ -810,8 +810,11 @@ Prospective use is not a component: it is every component tested against BP/BPA 
 - **Shape attribution** (Chen & Liu 1993): each finding's series decomposed into additive outliers, temporary changes,
   level shifts and ramps under N1's covariance; the finding carries the shape it takes.
 - **Subset scans** (search): expectation-based Poisson score `F(S) = Y log(Y/M) + M − Y`, linear-time subset scanning
-  over places in graph neighbourhoods, contiguous windows, codes within subtrees, groups; null by replicate fields with
-  a Gumbel tail (no Monte-Carlo floor). A subset is a proposal; the departure model reads it.
+  over places in graph neighbourhoods (the prefix's connected component, observed and replicates alike: a cluster is one
+  piece), contiguous windows; null by replicate fields (places' frailty independent: N1's spatial structure is not
+  drawn), drawn on demand: a score is tested by Besag–Clifford sequential Monte Carlo (stop at the tenth replicate at
+  or above it), only a score the replicates do not settle takes the Gumbel tail, and where that cannot be fitted the
+  empirical p stands (never "no cluster"). A subset is a proposal; the departure model reads it.
 - **Merging.** The methods of one component are run, their answers merged by overlapping locus; agreement and the
   shape are reported. Each method carries its measured record (§11.6).
 - **Size classes for cell tests** (ADR-0035 amended): each class of expected count has its own empirical null
@@ -831,8 +834,16 @@ from the power surface (§11.4), so "nothing found" says what could have been mi
 
 - **Families.** One family per component × field kind × study (and per support class where scales are tested
   separately). Within a family Benjamini–Hochberg at the study's q (Benjamini–Yekutieli where dependence is not
-  positive); down code trees TreeBH; across families Benjamini–Bogomolov selection. Departure models choose their set
-  by Bayesian FDR (expected false discovery proportion from posterior probabilities ≤ q).
+  positive); down code trees TreeBH. **Across fields, `tools.Session.survey_questions` applies Benjamini–Bogomolov to
+  the fields asked, not to the answers that survived:** a lens returns its findings with `Finding.adj`, the level at
+  which its own control over the whole field selects each (the BH-adjusted p, its minimum the field's Simes p; a scan's
+  max-statistic p is its own); an answer's level is its methods' smallest times their number k (union bound); a field's
+  p is its smallest answer's (1 where nothing was found: a p censored at the lens's level is still a p); fields are
+  selected by BH at q within each (question, block) family and a selected field's answers are admitted at
+  q·|selected|/|fields| (`control.bogomolov`). A question with several calls (group: the sex-by-age call and one per
+  composition column) pays for all of them. Departure models choose their set by Bayesian FDR (expected false discovery
+  proportion from posterior probabilities ≤ q); an answer only the step method found carries that posterior probability,
+  not a p-value, and is its own family outside the cross-field control.
 - **Weights, not exclusion.** Hypotheses are weighted a priori by power (Roeder–Wasserman; IHW where cross-weighting is
   built); no field is excluded for low power.
 - **The ledger.** Every test is written before it runs (family, hypothesis, data and model versions) and its result

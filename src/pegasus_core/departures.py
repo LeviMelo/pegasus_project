@@ -177,6 +177,11 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
     sig = np.zeros(len(p_all), dtype=bool)
     sig[testable] = control.bh(p_all[testable], q)
     sig &= rel_all <= q
+    # the level at which the lens's own control selects a cell: both tests must pass (an intersection-union test: the
+    # larger of the BH-adjusted p and the relevance test's); the minimum is the field's Simes p
+    adj_all = np.ones(len(p_all))
+    adj_all[testable] = control.adjusted(p_all[testable])
+    adj_all = np.maximum(adj_all, rel_all)
     out, offset = [], 0
     for sk, sc, fits, lfdr, _ok in parts:
         U, T = sk.y.shape
@@ -191,7 +196,7 @@ def cell_excess(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, r
                                        "expected": float(sk.mu.flat[i]), "lfdr": float(lfdr.flat[i]),
                                        "relevant_ratio": round(float(floor_all[offset + i]), 4),
                                        "null": {k: round(fit[k], 4) for k in ("delta0", "sigma0", "pi0")},
-                                       "size_class": int(cls_all[offset + i])}))
+                                       "size_class": int(cls_all[offset + i])}, float(adj_all[offset + i])))
         offset += U * T
     ledger.complete(test, float(p_all.min()) if p_all.size else 1.0, None,
                     {"cells": int(sum(o.sum() for *_, o in parts)), "hits": len(out),
@@ -231,6 +236,9 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
         return []
     p = np.array([pk.p for pk in found])
     keep = control.bh(p, q) & (np.array([pk.relevance_z for pk in found]) >= stats.norm.isf(q))
+    # the level at which the lens's own control selects a peak: the larger of the BH-adjusted p and the relevance
+    # test's (an intersection-union test)
+    adj = np.maximum(control.adjusted(p), stats.norm.sf(np.array([pk.relevance_z for pk in found])))
     chosen, taken = [], []
     for i in np.argsort(p):
         if not keep[i]:
@@ -244,14 +252,15 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
             continue
         taken.append((pk.centre, fp, pk.window))
         chosen.append((pk, sorted(fp), attribute(*series(s, multiscale.kernel_row(spectrum, pk.centre, pk.s)),
-                                                 window=pk.window, years=s.years)))
+                                                 window=pk.window, years=s.years), float(adj[i])))
     out = [lenses.Finding("excess" if shape == "spike" else f"excess_{shape}", s.field.id, s.tier,
                           {"places": [int(s.places[u]) for u in fp],
                            "years": [int(s.years[pk.window[0]]), int(s.years[pk.window[1] - 1])]},
                           float(pk.rate_ratio), float(pk.p),
                           {"centre": int(s.places[pk.centre]), "scale_places": round(pk.places, 1), "s": pk.s,
-                           "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3), "shape": shp})
-           for pk, fp, shp in chosen]
+                           "height": round(pk.height, 3), "relevance_z": round(pk.relevance_z, 3), "shape": shp},
+                          a)
+           for pk, fp, shp, a in chosen]
     ledger.complete(test, float(p.min()), None, {"peaks": len(found), "hits": len(out),
                                                  "null": {str(k): v for k, v in null.items()}})
     return out
@@ -420,7 +429,10 @@ def step(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate_rat
                                        "unit": str(sk.places[f["rows"][i]]), "p_step": float(1 - f["p_null"][i]),
                                        "delta": float(f["d"][i]), "delta_sd": float(f["sd"][i]),
                                        "p_relevant": float(f["p_relevant"][i]), "start": int(sk.years[t0]),
-                                       "relevant_ratio": round(float(f["floor"][i]), 4), "shape": shp}))
+                                       "relevant_ratio": round(float(f["floor"][i]), 4), "shape": shp,
+                                       # P(no step | data) is a posterior probability, uniform under no null: it is
+                                       # selected by the Bayesian FDR above and kept out of the p-value families
+                                       "p_kind": "posterior"}))
         offset += len(f["rows"])
     ledger.complete(test, float(p_null.min()), None, {"units": len(p_null), "hits": len(out)})
     return out
@@ -571,6 +583,12 @@ def betabinom_central(y: np.ndarray, n: np.ndarray, p: np.ndarray, seed_parts: t
     return (th, *betabinom_tails(y, n, p * th, (1 - p) * th))
 
 
+#: a share is tested when its field holds this many events, in this share of the place-periods: under them the PIT
+#: scores that set the beta-binomial's overdispersion are almost all one value
+MIN_SHARE_EVENTS = 50
+MIN_SHARE_CELLS = 0.01
+
+
 def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, mu_total: np.ndarray,
                  places: np.ndarray, years: np.ndarray, field_id: str, ledger: control.Ledger, q: float = 0.05,
                  min_total: float = 20.0, ratio: float = 1.25) -> list:
@@ -582,26 +600,41 @@ def share_excess(y_part: np.ndarray, n_total: np.ndarray, mu_part: np.ndarray, m
     share can fall as practice improves. One BH at q over the cells with n ≥ ``min_total``; relevance (P5) asks the
     observed share to differ from the expected by at least ``ratio`` either way."""
 
-    from .scans import lenses
+    from .scans import explain, lenses
 
     ok = (n_total >= min_total) & (mu_total > 0) & (mu_part > 0)
+    test = ledger.register(control.Hypothesis(f"share|{field_id}", "departure",
+                                              {"model": "beta-binomial share, central-matching θ", "field": field_id}))
     p = np.clip(np.where(ok, mu_part / np.where(mu_total > 0, mu_total, 1.0), 0.5), 1e-6, 1 - 1e-6)
     y, n, pp = y_part[ok], n_total[ok].round(), p[ok]
+    if (y > n).any():
+        # a numerator above its total is two bases (a support's or another place's count against the residents'): the
+        # beta-binomial tail of such a cell is exactly 0, a certain "finding" (478 of them, 474 at p = 0, 2026-10-14)
+        ledger.complete(test, 1.0, None, {"cells": int(ok.sum()), "reason": "numerator above total"})
+        raise ValueError(f"{field_id}: {int((y > n).sum())} cells hold more events than their total: the numerator and "
+                         "the total are not on one basis, a share of it is undefined")
+    if not ok.any() or y.sum() < MIN_SHARE_EVENTS or (y > 0).mean() < MIN_SHARE_CELLS:
+        # the overdispersion θ is fitted on the PIT's quartiles, which carry no information when almost every cell
+        # holds none (θ came out 0.6 or 1.5e6 for fields of the same event count): untestable, said, not fitted
+        ledger.complete(test, 1.0, None, {"cells": int(ok.sum()), "events": float(y.sum()),
+                                          "reason": "too few events for the share's overdispersion"})
+        return []
     th, below, at, upper = betabinom_central(y, n, pp, ("share_excess", field_id))
     lower = below + at
     pv = np.clip(2 * np.minimum(upper, lower), 0, 1)
     share, expect = y / np.maximum(n, 1), pp
-    relevant = (share >= ratio * expect) | (share <= expect / ratio)
-    test = ledger.register(control.Hypothesis(f"share|{field_id}", "departure",
-                                              {"model": "beta-binomial share, central-matching θ", "field": field_id}))
+    # relevant: the share differs by the ratio either way AND the events by the burden a departure is noise below
+    # (`explain.MIN_EXCESS`, as every other lens): one event against 1e-4 expected passed the ratio alone
+    relevant = ((share >= ratio * expect) | (share <= expect / ratio)) & (np.abs(y - n * expect) >= explain.MIN_EXCESS)
     keep = control.bh(pv, q) & relevant
+    adj = control.adjusted(pv)
     ui, ti = np.nonzero(ok)
     out = [lenses.Finding("share_excess", field_id, "B1",
                           {"places": [int(places[ui[i]])], "years": [int(years[ti[i]]), int(years[ti[i]])]},
                           float(share[i] / max(expect[i], 1e-12)), float(pv[i]),
                           {"observed_share": round(float(share[i]), 4), "expected_share": round(float(expect[i]), 4),
                            "total": int(n[i]), "theta": round(th, 1),
-                           "direction": "up" if share[i] > expect[i] else "down"})
+                           "direction": "up" if share[i] > expect[i] else "down"}, float(adj[i]))
            for i in np.flatnonzero(keep)]
     ledger.complete(test, float(pv.min()) if pv.size else 1.0, None, {"cells": int(ok.sum()), "hits": len(out),
                                                                        "theta": th})

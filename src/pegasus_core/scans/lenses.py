@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from scipy import special, stats
 
-from .. import control, surprise
+from .. import config, control, surprise
 from . import scales as scales_mod
 from . import subset
 
@@ -78,6 +78,14 @@ class Finding:
     effect: float            # rate ratio, or posterior-sd divergence
     p: float
     stats: dict
+    adj: float | None = None
+    """The smallest level at which the lens's own multiplicity control over its whole field selects this finding: its
+    BH-adjusted p (the minimum of a field's is its Simes p-value). None: ``p`` is already the field-level p (a scan's
+    max-statistic p, a union bound). The survey's cross-field control reads `field_p`, never ``p`` (ARCHITECTURE §8.2)."""
+
+    @property
+    def field_p(self) -> float:
+        return self.p if self.adj is None else self.adj
 
 
 # ---------------------------------------------------------------------- scans over cells
@@ -97,6 +105,12 @@ def space_time(s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, 
     """Place sets × contiguous windows of at most ``max_window`` years."""
     return _cells("space_time", s, edges, ledger, k, replicates, alpha, max_window=max_window,
                   rate_ratio=minimum_effect("space_time", s.field.id) if rate_ratio is None else rate_ratio)
+
+
+def _cluster_mu(mu: np.ndarray, usable: np.ndarray, f) -> float:
+    """The expected count of a scan cluster: its usable cells' μ over its places and window (inclusive)."""
+    cells = np.ix_(f.places, np.arange(f.window[0], f.window[1] + 1))
+    return float(np.where(usable, mu, 0.0)[cells].sum())
 
 
 def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.Ledger, k: int, replicates: int,
@@ -128,7 +142,8 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
         ledger.complete(test, 1.0, None, {"subsets": 0, "reason": "no usable cell"})
         return []
     nbr = subset.neighbourhoods(edges, len(s.places), k)
-    scanner = subset.Scanner(nbr, max_window=max_window, full_period=full_period,
+    adj = subset.adjacency(edges, nbr)
+    scanner = subset.Scanner(nbr, adj, max_window=max_window, full_period=full_period,
                              kind="gaussian" if mark else "poisson")
     # a mark departs in either direction (low birth weight matters as much as high): both tails,
     # one null serving both (the Gaussian null is symmetric)
@@ -137,32 +152,44 @@ def _cells(lens: str, s: surprise.Surprise, edges: np.ndarray, ledger: control.L
     if mark:
         directions = (("up", 1.0, y_up, m, scanner), ("down", -1.0, y_down, m, scanner))
     else:
-        low = subset.Scanner(nbr, max_window=max_window, full_period=full_period, kind="poisson_low")
+        low = subset.Scanner(nbr, adj, max_window=max_window, full_period=full_period, kind="poisson_low")
         directions = (("up", 1.0, y, m, scanner), ("down", -1.0, y, m_low, low))
-    out = []
+    out, nulls = [], []
     for name, sign, data, mm, sc in directions:
-        # the null depends on (μ, φ, neighbourhoods, windows, direction) only: one per field and
-        # direction, shared by every scan of it, surrogates included
-        null_key = (lens, name, s.field.id, s.tier, k, max_window, full_period, replicates, mark,
-                    s.mu.ctypes.data, s.mu.shape, float(np.nansum(s.mu)), s.noise)
+        # the null depends on (m = the minimum-effect expectation, φ, noise, neighbourhoods, windows, direction, the
+        # study's replicate scale): one per field, θ0 and direction, shared by every scan of them, surrogates
+        # included. The entry holds the arrays it was keyed by, so their identities cannot be reused while it
+        # lives (an address key survived a garbage collection and served another array's null)
+        null_key = (lens, name, s.field.id, s.tier, k, max_window, full_period, config.replicates(replicates), mark,
+                    float(rr), id(s.mu), id(s.phi), s.mu.shape, float(np.sum(mm)), s.noise)
+        cached = _NULLS.get(null_key)
         found, nul = subset.scan(data, mm, s.phi, sc, alpha=alpha, replicates=replicates,
-                                 seed_parts=(lens, name, s.field.id, s.tier), nul=_NULLS.get(null_key),
-                                 noise=None if mark else s.noise)
-        if nul is not None:
-            _NULLS[null_key] = nul
+                                 seed_parts=(lens, name, s.field.id, s.tier, float(rr)),
+                                 nul=cached[2] if cached else None, noise=None if mark else s.noise)
+        if nul is not None and cached is None:
+            _NULLS[null_key] = (s.mu, s.phi, nul)
+            while len(_NULLS) > 16:
+                _NULLS.pop(next(iter(_NULLS)))
+        nulls.append(nul)
+        # the cluster's expectation is its cells' own Σμ: the scan's is Σ floor·μ (up) or Σ μ/floor (down), each cell's
+        # floor its own (a capital-sized cell's is near 1), so dividing by the scalar θ0 over-stated the ratio of a
+        # cluster holding cells of different size (4 cells with one capital: 2.62 for a true 1.77, expected -32 %)
         out += [Finding(lens, s.field.id, s.tier,
                         {"places": s.places[f.places].tolist(),
                          "years": [int(s.years[f.window[0]]), int(s.years[f.window[1]])], "direction": name},
                         float(np.exp(sign * f.observed / f.expected + sign * MARK_LOG)) if mark
-                        else _rr(f.observed, f.expected / (rr if name == "up" else 1 / rr)),
+                        else _rr(f.observed, mu_in := _cluster_mu(s.mu, usable, f)),
                         min(1.0, f.p * len(directions)),
                         {"score": f.score, "observed": f.observed,
-                         "expected": f.expected if mark else f.expected / (rr if name == "up" else 1 / rr),
-                         "p_empirical": f.p_empirical, "null": "minimum effect",
+                         "expected": f.expected if mark else mu_in, "expected_floor": f.expected,
+                         "p_empirical": f.p_empirical, "p_method": f.null,
+                         "null": "minimum effect; places independent (no spatial frailty)",
                          "calibrated": bool(s.calibration.get("calibrated", True))}) for f in found]
     out = [f for f in out if f.p <= alpha]   # α after the two directions' doubling
     ledger.complete(test, min([f.p for f in out], default=1.0), out[0].effect if out else None,
                     {"subsets": len(out), "null_loc": getattr(nul, "loc", None), "null_scale": getattr(nul, "scale", None),
+                     "null": {n: (x.kind if x is not None else "none") for n, x in zip(("up", "down"), nulls, strict=False)},
+                     "replicates_drawn": [len(x.maxima) if x is not None else 0 for x in nulls],
                      "calibrated": s.calibration.get("calibrated")})
     return out
 
@@ -201,10 +228,12 @@ def outbreak(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, rate
             ws.append(control.optimal_weights(xi.ravel(), q))
         w = np.mean(ws, axis=0)             # each averages 1, so their mean does: the weighted BH keeps FDR <= q
     hits = np.nonzero(control.bh(flat, q, weights=w))[0]
+    adj = control.adjusted(flat, w) if hits.size else None
     U, T = s.y.shape
     out = [Finding("outbreak", s.field.id, s.tier, {"places": [int(s.places[i // T])], "years": [int(s.years[i % T])]},
                    _rr(s.y.flat[i], s.mu.flat[i]), float(flat[i]),
-                   {"observed": float(s.y.flat[i]), "expected": float(s.mu.flat[i]), "z": float(s.z.flat[i])})
+                   {"observed": float(s.y.flat[i]), "expected": float(s.mu.flat[i]), "z": float(s.z.flat[i])},
+                   float(adj[i]))
            for i in hits]
     ledger.complete(test, float(flat.min()) if flat.size else 1.0, None, {"cells": int(ok.sum()), "hits": len(out)})
     return out
@@ -261,6 +290,7 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
     ok = ((s.flags & surprise.DENOMINATOR) == 0).all(1)
     p = np.where(ok, p, 1.0)
     hits = np.nonzero(control.bh(p, q))[0]
+    adj = control.adjusted(p) if hits.size else None
     out = []
     for u in hits:
         t = int(starts[k[u]])
@@ -269,7 +299,7 @@ def change_point(s: surprise.Surprise, ledger: control.Ledger, q: float = 0.05, 
                                                                 "years": [int(s.years[t]), int(s.years[-1])]},
                            _rr(Y[u, k[u]], base), float(p[u]),
                            {"observed": float(Y[u, k[u]]), "expected": float(base), "windows": len(starts),
-                            "baseline": "past course"}))
+                            "baseline": "past course"}, float(adj[u])))
     ledger.complete(test, float(p.min()), None, {"places": int(ok.sum()), "hits": len(out)})
     return out
 
@@ -386,22 +416,29 @@ def group_disparity(y_g: np.ndarray, mu_g: np.ndarray, places: np.ndarray, field
                     else 1.0)
         lam0 = sd_of(s_.name) ** 2 * (M / kfac).sum(1)
         p = np.where(tested, stats.ncx2.sf(G2 / c, np.maximum(df, 1), np.maximum(lam0, 1e-9)), 1.0)
-        rows.append((s_, G2, df, c, p, Y, M))
+        rows.append((s_, G2, df, c, p, Y, M, np.broadcast_to(kfac, Y.shape)))
     pool = np.concatenate([r[4] for r in rows])
     hit = _bh_by_scale([r[4] for r in rows], q)
+    adj = _adjusted_by_scale([r[4] for r in rows])
     out, off = [], 0
-    for s_, G2, df, c, p, Y, M in rows:
+    for s_, G2, df, c, p, Y, M, kfac in rows:
         for k in np.nonzero(hit[off:off + s_.n])[0]:
-            sir_g = np.divide(Y[k], M[k], out=np.full(M.shape[1], np.nan), where=M[k] > 0)
             overall = Y[k].sum() / M[k].sum()
-            worst = int(np.nanargmax(np.abs(np.log(np.where(M[k] >= min_expected, sir_g, np.nan) / overall))))
+            # the group driving G²: the largest deviance term of a group the test kept (Y log(Y/E) − (Y − E), over the
+            # group's variance factor; zero events is the finite term E, not log 0 = −inf, which had named the empty
+            # group the "worst" whatever the well-measured excess elsewhere, 2026-10-14)
+            e_g = M[k] * overall
+            with np.errstate(divide="ignore", invalid="ignore"):
+                term = (np.where(Y[k] > 0, Y[k] * np.log(np.where(Y[k] > 0, Y[k], 1.0) / np.where(e_g > 0, e_g, 1.0)), 0.0)
+                        - (Y[k] - e_g)) / kfac[k]
+            worst = int(np.argmax(np.where(M[k] >= min_expected, term, -np.inf)))
             mem = s_.members(k)
             locus = {"places": [int(places[u]) for u in mem], "groups": [worst]}
             if s_.name != "municipality":
                 locus.update(scale=s_.name, unit=str(s_.units[k]))
             out.append(Finding("group_disparity", field_id, "B0", locus, _rr(Y[k, worst], M[k, worst] * overall),
                                float(p[k]), {"G2": float(G2[k]), "df": int(df[k]), "gc": float(c[k]),
-                                             "sir": float(overall), "scale": s_.name}))
+                                             "sir": float(overall), "scale": s_.name}, float(adj[off + k])))
         off += s_.n
     ledger.complete(test, float(pool.min()) if pool.size else 1.0, None,
                     {"units": {r[0].name: int((r[2] > 0).sum()) for r in rows},
@@ -433,6 +470,12 @@ def _g2(Y: np.ndarray, M: np.ndarray, min_expected: float, k: np.ndarray | float
             G2[u] = 2 * np.sum((np.where(yy > 0, yy * np.log(yy / e), 0) - (yy - e)) / kk)
         df[u] = len(yy) - 1
     return G2, df, big
+
+
+def _adjusted_by_scale(ps: list[np.ndarray]) -> np.ndarray:
+    """The level at which `_bh_by_scale` selects each unit: its BH-adjusted p within its scale times the number of
+    scales."""
+    return np.concatenate([np.minimum(1.0, len(ps) * control.adjusted(p)) for p in ps])
 
 
 def _bh_by_scale(ps: list[np.ndarray], q: float) -> np.ndarray:
@@ -614,6 +657,7 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
         rows.append((x, b, mean_ref(b, diff), d, p, kappa))
     pool = np.concatenate([r[4] for r in rows])
     hit = _bh_by_scale([r[4] for r in rows], q)
+    adj = _adjusted_by_scale([r[4] for r in rows])
     out, off = [], 0
     for x, b, ref, d, p, kappa in rows:
         for k in np.nonzero(hit[off:off + x.n])[0]:
@@ -623,7 +667,8 @@ def trend_divergence(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
             out.append(Finding("trend_divergence", s.field.id, "B2", locus, float(d[k]), float(p[k]),
                                {"beta": float(b[k]), "neighbours" if reference == "neighbours" else "reference":
                                 float(ref[k]), "rate_ratio_per_sd_year": float(np.exp(b[k])),
-                                "scale": x.name, "dispersion": float(kappa[k]), "estimand": reference}))
+                                "scale": x.name, "dispersion": float(kappa[k]), "estimand": reference},
+                               float(adj[off + k])))
         off += x.n
     ledger.complete(test, float(pool.min()), None, {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
     return out
@@ -763,6 +808,7 @@ def season_departure(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
         rows.append((x, d, th, ref, het, p, years))
     pool = np.concatenate([r[5] for r in rows])
     hit = _bh_by_scale([r[5] for r in rows], q)
+    adj = _adjusted_by_scale([r[5] for r in rows])
     out, off = [], 0
 
     def peak(v):                                                   # the harmonic's maximum, as the middle of its month
@@ -783,7 +829,7 @@ def season_departure(s: surprise.Surprise, edges: np.ndarray, ledger: control.Le
                                 "amplitude": [float(np.hypot(*start)), float(np.hypot(*end))],
                                 "peak_month": [peak(start), peak(end)], "shift_months": [_phase_shift(start, g), _phase_shift(end, g)],
                                 "between_year_variance": float(het[k, 0]), "heterogeneity": float(het[k, 1]),
-                                "years": int(len(years)), "shape": {"shape": "season"}}))
+                                "years": int(len(years)), "shape": {"shape": "season"}}, float(adj[off + k])))
         off += x.n
     ledger.complete(test, float(pool.min()) if pool.size else 1.0, None,
                     {"units": {r[0].name: r[0].n for r in rows}, "hits": len(out)})
