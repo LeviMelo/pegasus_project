@@ -231,7 +231,8 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
                         family: str, iterations: int = 50) -> Departures:
     """A time-varying context's departures on the same footing as a field's (`innovations`; ARCHITECTURE §8.2): its own
     predictive, the context's numerator k [U, T] against its denominator n (``binomial``: k of n, the samples with E. coli
-    present of those assessed; ``poisson``: k on the exposure n, beds per resident) with a place and a period effect on
+    present of those assessed; ``poisson``: k on the exposure n, beds per resident; ``gaussian``: the mean level k/n, a
+    temperature over the months observed, weighted by n, identity link) with a place and a period effect on
     the link scale (the place's level and the nation's course are the expectation, as B1 is a field's), a
     quasi-likelihood dispersion φ, and the within-place serial correlation of the Pearson residuals as an AR(1) pooled
     over places, whitened as a field's frailty is. A cell with no denominator carries no information (v infinite).
@@ -244,7 +245,8 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
     T = k.shape[1]
     rate = k0.sum() / max(n0.sum(), 1e-12)
     a = np.zeros(k.shape[0])
-    b = np.full(T, np.log(rate / (1 - rate)) if family == "binomial" and 0 < rate < 1 else np.log(max(rate, 1e-12)))
+    b = np.full(T, rate if family == "gaussian" else
+                np.log(rate / (1 - rate)) if family == "binomial" and 0 < rate < 1 else np.log(max(rate, 1e-12)))
     ridge = 1.0               # places with a few samples shrink toward the national level, not to their raw share
 
     def score(a_: np.ndarray, b_: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -252,6 +254,8 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
         if family == "binomial":
             p = expit(eta)
             E, V = n0 * p, n0 * p * (1 - p)
+        elif family == "gaussian":
+            E, V = n0 * eta, n0          # the level's variance per unit of n: its scale is the dispersion φ below
         else:
             E = n0 * np.exp(eta)
             V = E
@@ -266,7 +270,9 @@ def context_innovations(name: str, k: np.ndarray, n: np.ndarray, places: np.ndar
     ok = obs & (V > 1e-12)
     x = np.where(ok, (k0 - E) / np.sqrt(np.where(ok, V, 1.0)), 0.0)
     dof = max(int(ok.sum()) - int(ok.any(1).sum()) - T, 1)
-    phi = max(float((x ** 2).sum()) / dof, 1.0)
+    phi = float((x ** 2).sum()) / dof
+    # a count's dispersion is never below the law's (1); a level's is its whole scale, any size
+    phi = max(phi, 1e-12) if family == "gaussian" else max(phi, 1.0)
     x = x / np.sqrt(phi)
     both = ok[:, 1:] & ok[:, :-1]
     rho = float(np.clip((x[:, 1:] * x[:, :-1])[both].sum() / max((x[:, :-1] ** 2)[both].sum(), 1e-12), -0.9, 0.9))

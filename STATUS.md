@@ -374,10 +374,11 @@ Fixed before the survey: persons read nothing through link runs stored before 20
   (places.parquet), completeness (quality.parquet), seasonality (seasons.parquet), the linkage runs (linkage.parquet) and
   METHODS.md; the Alagoas deep study runs in 8.6 min (26.6 the day before). Stale link runs had been served as current
   (`link_report`); a read key never saw the lake (`_lake_key`); citing a source re-keyed every count (`_declared_key`).
-  Open: a code-set item reads no measure, share or interval of its own events (a deep study read `supports` only: length
-  of stay and cost absent; measures.parquet queued); the cohort scan does not take a code set (the SIH-SIM persons of a
-  narrow topic are not scanned); the link's capture of in-hospital deaths is not a column; climate is not readable as a
-  context (pegasus_data, in progress).
+  Then (same day): the topic's own measures and ages (measures.parquet), its share of its ICD-10 group, chapter and
+  source, the cohort scan on a code set's persons, a link's description carried into its shares (sih_deaths_to_sim pairs
+  in-hospital deaths only), every table a view. Open: climate from INMET stations covers a few municipalities and has
+  sensor gaps (Maceió's gauge silent February-July 2021 in INMET's own file): gridded products (BR-DWGD and others) in
+  progress in pegasus_data; a prospective finding's O/E against its own tier's expectation.
 
 Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).

@@ -2065,7 +2065,8 @@ def records(dataset: str, event: str, year: int, columns: list[str], places: lis
 
 
 def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]], year: int, draws: int = 10,
-           q: float = 0.05, log=print, datasets=None, notes: list | None = None) -> list[leads.Lead]:
+           q: float = 0.05, log=print, datasets=None, notes: list | None = None, classifier: str | None = None,
+           codes: tuple[str, ...] | list[str] = ()) -> list[leads.Lead]:
     """The cohort scan (ARCHITECTURE §7.8) on persons: every event of ``dataset`` in ``year`` is a person in ``role``
     (a birth's baby); each outcome is that person having a record of another kind (pegasus_data dataset code, person
     role: an infant death certificate, a newborn admission) through any route of the linked persons (`gateway.persons`:
@@ -2096,12 +2097,25 @@ def cohort(dataset: str, event: str, role: str, outcomes: list[tuple[str, str]],
     for _, spec in same:
         same_cols.append(_record_outcome(spec)[0])
     attrs = [d for d in attrs if d.column not in same_cols]       # an outcome's column is not its own attribute
+    # nor a column that decides which of the persons a link can pair: sih_deaths_to_sim pairs only the admissions that
+    # ended in death (MORTE = 1), and MORTE "explained" every linked death by construction, its fit diverging (log RR
+    # 27.7, sd 6,969) where it was the outcome's own condition (Alagoas 2022, 2026-10-14)
+    defining = {r["column"] for o in outcomes if o[0] != "record"
+                for link in {x["link"] for x in gateway.direct_reach((gateway.data_code(dataset), role), o, year)}
+                for r in gateway.roles(dataset) if r.get("role") in gateway.link_side_roles(link, dataset)}
+    dropped = sorted(d.column for d in attrs if d.column in defining)
+    if dropped and notes is not None:
+        notes.append({"note": f"not read as attributes: {', '.join(dropped)}, which decide the records a link to the "
+                              "outcome can pair"})
+    attrs = [d for d in attrs if d.column not in defining]
     scopes = gateway.person_scopes(kind, year) if linked else []
     if linked and not scopes:
         raise ValueError(f"{kind}: no declared link holds a person of this kind")
     if not linked:
         draws = 1
-    t, ids = gateway.cohort_records(dataset, event, year, list(dict.fromkeys([d.column for d in attrs] + same_cols)))
+    # ``codes``: the persons of a code set only (`gateway.cohort_records`), a narrow topic's own
+    t, ids = gateway.cohort_records(dataset, event, year, list(dict.fromkeys([d.column for d in attrs] + same_cols)),
+                                    classifier=classifier, codes=tuple(codes))
     log(f"{dataset} {year}: {t.num_rows} persons; outcomes {outcomes} over the persons of {scopes}; {draws} draws")
     base = {"place": pa.array([str(u) for u in t["u"].to_pylist()]),
             "age_band": pa.array([str(a) for a in t["age"].to_pylist()]),

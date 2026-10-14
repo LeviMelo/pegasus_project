@@ -625,7 +625,8 @@ def _associated(decl: Declaration, scope: Scope, log) -> list[dict]:
             except Exception as exc:  # noqa: BLE001 - a source whose records cannot be read is said
                 log(f"study: associated {it.dataset} {role}: {type(exc).__name__}: {exc}")
                 continue
-            out += [{"dataset": it.dataset, "where": role, "years": f"{min(it.years)}-{max(it.years)}", **r} for r in rows]
+            out += [{"dataset": it.dataset, "recorded_on": role, "years": f"{min(it.years)}-{max(it.years)}", **r}
+                    for r in rows]
     return out
 
 
@@ -1350,10 +1351,17 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                     if o.status == "in" and gateway.same_dataset(o.dataset, it.dataset) and o.nodes
                     and (o.source or {}).get("source") == "code_list" for col in (o.source or {}).get("column") or []]
             same = list(dict.fromkeys(same))
-            # the persons must be the topic's: an agravo's own notifications (every record is the topic), or a source
-            # whose own records carry the topic's related codes (a birth's anomalies); every admission of SIH is not
-            if not (it.reason.startswith("seed sinan:") or same):
+            # the persons must be the topic's: an agravo's own notifications (every record is the topic), a source
+            # whose own records carry the topic's related codes (a birth's anomalies), or a code set's own records (the
+            # topic's admissions, read at the scan by their codes: every admission of SIH is not; the Alagoas study's
+            # SIH-SIM persons had been said "no source", 2026-10-14)
+            src = it.source or {}
+            coded = bool(src.get("codes")) and not src.get("source") and not it.count_only
+            if not (it.reason.startswith("seed sinan:") or same or coded):
                 continue
+            classifier = (src.get("classifier") or next((c["column"] for c in gateway.event_type(it.dataset, it.event)
+                                                         .get("classifiers") or [] if c.get("role") == "primary"), None)
+                          if coded else None)
             outcomes = [(d, role) for d, role in sorted(reach)] + same
             years = [y for y in sorted(it.years)[::-1] if gateway.person_scopes(kind, y)][:PERSON_YEARS]
             label = f"{it.dataset} {kind[1]}"
@@ -1363,6 +1371,7 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
             for y in years:
                 mine = sorted({o.dataset for o in scope.items if o.status == "in"})   # the persons of its own links
                 key = {"what": "study_cohort", "kind": list(kind), "event": it.event, "outcomes": outcomes, "year": y,
+                       **({"classifier": classifier, "codes": sorted(src["codes"])} if coded else {}),
                        "draws": decl.choice("draws"), "q": decl.q, "data": config.data_version(),
                        "code": config.code_key(tools.cohort), "datasets": mine}
                 key = _study_key(key)
@@ -1373,7 +1382,8 @@ def _persons(decl: Declaration, scope: Scope, log) -> list[dict]:
                 notes: list[dict] = []
                 try:
                     found = tools.cohort(it.dataset, it.event, kind[1], outcomes, y, draws=decl.choice("draws"),
-                                         q=decl.q, log=log, datasets=mine, notes=notes)
+                                         q=decl.q, log=log, datasets=mine, notes=notes, classifier=classifier,
+                                         codes=tuple(src.get("codes") or ()) if coded else ())
                 except Exception as exc:  # noqa: BLE001 - a cohort that cannot be read is said; the others run
                     out.append({"cohort": label, "year": y, "note": f"not scanned: {type(exc).__name__}: {exc}"})
                     continue
@@ -2091,7 +2101,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap = _Lap() if lap is None else lap
 
     names = gateway.municipality_names()
-    rows, desc, views, figs, groups, places, quality, trends, seasons = [], [], {}, [], [], [], [], [], []
+    rows, desc, views, figs, groups, places, quality, trends, seasons, measures = [], [], {}, [], [], [], [], [], [], []
     series = {}          # each primary field's observed and expected by place and period: the related fields' reading
     current = leads.Register().current()
     for it in (i for i in scope.items if i.status == "in"):
@@ -2122,7 +2132,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     store.put_table("study_table", key, _expectation_table(sv, names))
                 views[f"expectations_{_slug(f'{it.dataset}_{name}_{node}')}"] = path.as_posix()
                 rows_ = _descriptive(it, s, f, label, reference=not name) + \
-                    (_race_rates(it, s, f, label) if not name else [])
+                    (_race_rates(it, s, f, label) if not name else []) + \
+                    (lap.guard(f"proportional {f.id}", lambda it=it, label=label, f=f: _proportional(it, f, label), [],
+                               log) if not name else [])
                 # a year the source says is not final yet (pegasus_data's ``final_after_years``: SINAN's notifications
                 # are closed over three years; RS's 2023 congenital records had no closing date, the review, 2026-10-13)
                 final = ((gateway.event_type(it.dataset, it.event) or {}).get("source_notes") or {}).get("final_after_years")
@@ -2149,6 +2161,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 # interval, a composition's share)
                 rows.extend({**_finding(x, it, label, names), "_event": it.event,
                              "_places": [int(q) for q in x.locus.get("places") or []],
+                             "_groups": [str(g) for g in x.locus.get("groups") or []],
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
                                                      | ({str(f_)} if (f_ := _one_institution(x)) else set()))}
                             for x in current
@@ -2160,6 +2173,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     places += lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv: _places(it, s, f, label, sv, names), [], log)
                     seasons += lap.guard(f"seasons {f.id}", lambda it=it, s=s, f=f, label=label: _seasons(it, s, f, label),
                                          [], log)
+                    measures += lap.guard(f"measures {f.id}", lambda it=it, f=f, label=label: _measures(it, f, label, log),
+                                          [], log)
                     try:                   # B0 beside B1: a finding's O/E is against its own tier's expectation
                         mu0 = s.surprise(node, "B0").mu
                     except Exception:  # noqa: BLE001 - a field with no B0: its B0 findings' O/E are said missing
@@ -2193,7 +2208,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap("screen")
     pq.write_table(_rows_table(rel) if rel else pa.table({"field": pa.array([], pa.string())}),
                    out / "relations.parquet")
-    lap.guard("institutions", lambda: (_institution_facts(rows, log), _institution_explains(rows)), None, log)
+    lap.guard("institutions", lambda: (_institution_facts(rows, log), _institution_explains(rows),
+                                       _recording_groups(rows)), None, log)
     lap("institutions")
     persons = lap.guard("persons", lambda: _persons(decl, scope, log), [], log) if decl.choice("persons") else []
     lap("persons")
@@ -2212,6 +2228,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap("stories")
     for r in rows:
         r.pop("_places", None)
+        r.pop("_groups", None)
         r.pop("_institutions", None)
         r.pop("_event", None)
     findings = _rows_table(rows) if rows else pa.table({"id": pa.array([], pa.string())})
@@ -2226,6 +2243,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "trends.parquet")
     pq.write_table(_rows_table(seasons) if seasons else pa.table({"field": pa.array([], pa.string())}),
                    out / "seasons.parquet")
+    pq.write_table(_rows_table(measures) if measures else pa.table({"field": pa.array([], pa.string())}),
+                   out / "measures.parquet")
     linkage = lap.guard("linkage", lambda: _linkage(scope), [], log)
     pq.write_table(_rows_table(linkage) if linkage else pa.table({"link": pa.array([], pa.string())}),
                    out / "linkage.parquet")
@@ -2233,28 +2252,22 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     pq.write_table(_rows_table(quality) if quality else pa.table({"indicator": pa.array([], pa.string())}),
                    out / "quality.parquet")
     lap("places and quality")
+    hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
+    pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
+                   out / "hypotheses.parquet")
+    lap("hypotheses")
     db = out / "study.duckdb"
     tmp_db = out / f"study.{os.getpid()}.duckdb.tmp"
     tmp_db.unlink(missing_ok=True)
     con = duckdb.connect(str(tmp_db))       # built aside, then moved in: a notebook holding the old one open had failed it
     for name, path in views.items():
         con.execute(f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{path}')")
-    # the folder's own tables by absolute path: DuckDB reads a relative path from the reader's working directory, and
-    # the survey's folder opened only from the directory the study ran in (2026-10-11)
+    # every table of the folder by absolute path (DuckDB reads a relative path from the reader's working directory, and
+    # the survey's folder opened only from the directory the study ran in, 2026-10-11), each its own view: a list kept by
+    # hand had left associated and hypotheses out (2026-10-14)
     out = out.resolve()
-    con.execute(f"CREATE VIEW findings AS SELECT * FROM read_parquet('{(out / 'findings.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW descriptive AS SELECT * FROM read_parquet('{(out / 'descriptive.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW groups AS SELECT * FROM read_parquet('{(out / 'groups.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW context_profile AS SELECT * FROM read_parquet('{(out / 'context_profile.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW related AS SELECT * FROM read_parquet('{(out / 'related.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW relations AS SELECT * FROM read_parquet('{(out / 'relations.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW persons AS SELECT * FROM read_parquet('{(out / 'persons.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW capture AS SELECT * FROM read_parquet('{(out / 'capture.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW places AS SELECT * FROM read_parquet('{(out / 'places.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW trends AS SELECT * FROM read_parquet('{(out / 'trends.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW linkage AS SELECT * FROM read_parquet('{(out / 'linkage.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW seasons AS SELECT * FROM read_parquet('{(out / 'seasons.parquet').as_posix()}')")
-    con.execute(f"CREATE VIEW quality AS SELECT * FROM read_parquet('{(out / 'quality.parquet').as_posix()}')")
+    for path in sorted(out.glob("*.parquet")):
+        con.execute(f"CREATE VIEW {path.stem} AS SELECT * FROM read_parquet('{path.as_posix()}')")
     con.close()
     try:
         os.replace(tmp_db, db)
@@ -2262,10 +2275,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
         lap.failed["tables"] = f"failed: study.duckdb is held open elsewhere ({exc}); the new one is {tmp_db.name}"
         log(f"study: {lap.failed['tables']}")
     lap("tables")
-    hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
-    pq.write_table(_rows_table(hyp) if hyp else pa.table({"hypothesis": pa.array([], pa.string())}),
-                   out / "hypotheses.parquet")
-    lap("hypotheses")
+
     lap.guard("report", lambda: _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons,
                                         captured, quality, trends, linkage, assoc), None, log)
     lap("report")
@@ -2399,23 +2409,36 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
                 out.append({**base, "answer": "not testable: none of the places is in the fit"})
                 continue
             yrs = np.asarray(sv.years)
-            var = sv.mu + np.where(np.isfinite(sv.phi), sv.mu ** 2 / np.where(np.isfinite(sv.phi), sv.phi, 1.0), 0.0)
+            from . import surprise as surprise_
 
-            def window(sel_t, sv=sv, rows_u=rows_u, var=var):
+            cv = surprise_.field_cell_variance(sv)
+
+            def window(sel_t, sv=sv, rows_u=rows_u, cv=cv):
+                # a window's variance under the field's predictive: each cell's, and twice the covariances of a place's
+                # cells over the periods of the window (the field's measured serial correlation, `sv.noise`); summed as
+                # independent cells, a window of several years was too narrow, its p too small (the review of the study)
                 Y = float(sv.y[np.ix_(rows_u, sel_t)].sum())
                 M = float(sv.mu[np.ix_(rows_u, sel_t)].sum())
-                V = float(var[np.ix_(rows_u, sel_t)].sum())
-                return Y, M, V
+                V = float(cv[np.ix_(rows_u, sel_t)].sum())
+                for k in range(1, int(sel_t.sum())):
+                    if abs(sv.noise.corr(k)) < 1e-4:
+                        break
+                    both = sel_t[:-k] & sel_t[k:]
+                    if both.any():
+                        V += 2.0 * float(surprise_.field_lag_covariance(sv, k)[np.ix_(rows_u, both)].sum())
+                return Y, M, max(V, M)
 
             monthly = bool(yrs.size) and int(yrs.max()) > 9999
             inside = np.isin(yrs, months) if monthly else np.isin(yrs, years)
             Y, M, V = window(inside)
             if comp == "step":
-                Yb, Mb, _ = window(yrs < years[0])
+                Yb, Mb, Vb = window(yrs < years[0])
                 after = np.isin(yrs, [y for y in yrs if y >= years[0]])
-                Ya, Ma, _ = window(after)
+                Ya, Ma, Va = window(after)
                 ratio = (Ya / Ma) / (Yb / Mb) if Ma > 0 and Mb > 0 and Yb > 0 else None
-                se = np.sqrt(1 / max(Ya, 0.5) + 1 / max(Yb, 0.5))
+                # the log ratio's standard error by the delta method on the model's variances (overdispersion and the
+                # serial correlation included); 1/Y + 1/Y had been Poisson's alone
+                se = np.sqrt(Va / max(Ma, 1e-9) ** 2 + Vb / max(Mb, 1e-9) ** 2)
                 p = float(stats.norm.sf(np.log(ratio) / se)) if ratio else None
                 out.append({**base, "observed": Ya, "expected": Ma, "effect": ratio, "effect_unit": "ratio of O/E after to before",
                             "low": float(ratio * np.exp(-1.96 * se)) if ratio else None,
@@ -2915,6 +2938,227 @@ def _reference_cells(it: Item, s, f, d) -> list[tuple[str, np.ndarray, np.ndarra
     return [(k, ev[k], py[k]) for k, _ in units]
 
 
+@functools.lru_cache(maxsize=256)
+def _area_events(dataset: str, event: str, year: int, classifier: str | None, area) -> tuple[np.ndarray, np.ndarray]:
+    """Every event of the type in the area (or Brazil) in ``year`` by code (codes, events): those the counts placed and
+    those lost for the area's own reasons (not Brazil's blank residences), from `gateway.event_counts` (the read the
+    model made). The denominator of a proportional share and of the ill-defined-cause share."""
+    import pyarrow.compute as pc
+
+    ec = gateway.event_counts(dataset, event, int(year), classifier=classifier, area=area)
+    un = ec.unallocated.filter(pc.invert(pc.ends_with(ec.unallocated.column("reason"), " (Brazil)")))
+    both = [ec.counts.select(["code", "y"]), un.select(["code", "y"])]
+    code = np.array([str(x or "") for t_ in both for x in t_.column("code").to_pylist()], dtype=object)
+    n = np.concatenate([x.column("y").to_numpy(zero_copy_only=False).astype(float) for x in both])
+    return code, n
+
+
+@functools.cache
+def _icd_ancestors() -> dict[str, list[tuple[str, str]]]:
+    """Each ICD-10 category's ancestors, nearest first, as (code, label): I21 -> (I20-I25, ischaemic heart diseases),
+    (IX, the circulatory chapter). From the canonical tree (`gateway.code_tree`)."""
+    rows = {r["code"]: r for r in gateway.code_tree("ICD10").to_pylist()}
+    out = {}
+    for code, r in rows.items():
+        if r.get("level") != "category":
+            continue
+        chain, p = [], r.get("parent")
+        while p and p in rows:
+            chain.append((p, rows[p]["label"]))
+            p = rows[p].get("parent")
+        out[code] = chain
+    return out
+
+
+def _proportional(it: Item, f, label: str) -> list[dict]:
+    """A code set's share of the events it belongs among (proportional mortality, morbidity): of each ICD-10 ancestor
+    of its codes (I21-I22: the ischaemic heart diseases, chapter IX) and of all the source's events, in the area, each
+    year and over the period, with its exact (Clopper-Pearson) interval. Every event counted, placed or not (a share is
+    no rate: no denominator of persons). A paper states "acute myocardial infarction caused N % of deaths"; the folder
+    had no such row (2026-10-14)."""
+    src = it.source or {}
+    codes = [str(c) for c in src.get("codes") or []]
+    et = gateway.event_type(it.dataset, it.event) or {}
+    classifier = src.get("classifier") or next((c["column"] for c in et.get("classifiers") or []
+                                                if c.get("role") == "primary"), None)
+    structure = next((c.get("structure") for c in et.get("classifiers") or [] if c.get("column") == classifier), None)
+    if not codes or src.get("source") or it.count_only or structure != "ICD10":
+        return []
+    anc = _icd_ancestors()
+    mine = {a for c in codes for a in anc.get(c[:3], [])}
+    if any(len(c) < 3 for c in codes):
+        return []
+    area = tuple(sorted(config.study_area())) if config.study_area() else None
+    level, unit = _whole()
+    per_year: dict[int, dict[str, tuple[float, float]]] = {}
+    for y in it.years:
+        try:
+            code, n = _area_events(it.dataset, it.event, int(y), classifier, area)
+        except Exception:  # noqa: BLE001 - a year that cannot be counted has no share (the rates say why)
+            continue
+        cat = np.array([c[:3] for c in code], dtype=object)
+        topic = np.zeros(len(code), bool)
+        for c in codes:
+            topic |= np.array([x.startswith(c) for x in code], dtype=bool)
+        k = float(n[topic].sum())
+        shares = {"all the source's events": (k, float(n.sum()))}
+        for a, a_label in sorted(mine):
+            inside = np.array([any(x == a for x, _ in anc.get(c, [])) for c in cat], dtype=bool)
+            shares[f"{a_label} ({a})"] = (k, float(n[inside].sum()))
+        per_year[int(y)] = shares
+    out = []
+    years = sorted(per_year)
+    for y in [*years, None]:
+        for name in (per_year[years[0]] if years else {}):
+            k, tot = (per_year[y][name] if y is not None else
+                      tuple(sum(per_year[z][name][i] for z in years) for i in range(2)))
+            if tot <= 0:
+                continue
+            out.append({"field": f.id, "label": label, "dataset": it.dataset, "level": level, "unit": unit,
+                        "stratum": None, "year": y, "period": None if y is not None else f"{years[0]}-{years[-1]}",
+                        "events": tot, "numerator": k, "population": None, "per": f"share of {name}",
+                        **dict(zip(("rate", "rate_low", "rate_high"), _proportion(k, tot).values(), strict=True))})
+    return out
+
+
+def _measures(it: Item, f, label: str, log) -> list[dict]:
+    """Every measure and interval the source declares, on the field's own events in the area (`gateway.mark_values`,
+    one filtered scan a year): per year and over the period, the events, those with a valid value, those not recorded
+    (a declared missing code) and those out of the declared domain, and the mean, standard deviation, quartiles and 90th
+    percentile of the valid values; an interval in days from the event's own date (plus one: a same-day date is 1).
+    A measure the models do not read (an administrative fact: a value paid) is described all the same: a paper reports
+    the length of stay and the cost of the topic's admissions, which the folder did not hold (2026-10-14)."""
+    from . import fields as fields_
+
+    src = it.source or {}
+    if src.get("source") or it.count_only or (not src.get("codes") and config.study_area() is None):
+        return []           # a linked share or a second coding; a whole type nationally is described by its readers
+    et = gateway.event_type(it.dataset, it.event) or {}
+    if et.get("weight") or et.get("grid"):
+        return []
+    classifier = src.get("classifier") or next((c["column"] for c in et.get("classifiers") or []
+                                                if c.get("role") == "primary"), None)
+    specs = []
+    for d in fields_.declared(it.dataset):
+        if d.kind == "measure":
+            lo, hi = d.domain if d.domain else (0.0, float("inf"))
+            specs.append({"measure": d.column, "measure_name": d.name, "kind": "measure", "anchor": None,
+                          "lo": lo, "hi": hi, "missing": [str(x) for x in d.missing]})
+        elif d.kind == "interval" and not d.reason:
+            try:
+                iv = fields_.interval_source(it.dataset, it.event, d.column, int(it.years[-1]))
+            except (ValueError, LookupError):
+                continue
+            specs.append({"measure": iv["mark"], "measure_name": f"days from {iv['anchor']} to {d.name}",
+                          "kind": "interval", "anchor": iv["anchor"], "sign": iv.get("sign", 1), "lo": 1.0,
+                          "hi": float("inf"), "missing": []})
+    area = tuple(sorted(config.study_area())) if config.study_area() else None
+    if not specs:
+        return _ages(it, f, label, classifier, area)
+    columns = tuple(dict.fromkeys(c for sp in specs for c in (sp["measure"], sp["anchor"]) if c))
+    vals: dict[tuple[str, int], np.ndarray] = {}
+    counts: dict[tuple[str, int], tuple[int, int, int]] = {}
+    import duckdb
+
+    for y in it.years:
+        try:
+            t = gateway.mark_values(it.dataset, it.event, int(y), columns, classifier,
+                                    tuple(src.get("codes") or ()), area)
+        except Exception as exc:  # noqa: BLE001 - a year that cannot be read is said, the others described
+            log(f"study: measures {it.dataset} {y}: {type(exc).__name__}: {exc}")
+            continue
+        con = duckdb.connect()
+        con.register("r", t)
+        for sp in specs:
+            if sp["measure"] not in t.column_names or (sp["anchor"] and sp["anchor"] not in t.column_names):
+                continue
+            raw = f'trim(CAST("{sp["measure"]}" AS VARCHAR))'
+            value = (f"CAST({int(sp['sign'])} * date_diff('day', {gateway._date_sql(sp['anchor'])}, "
+                     f"{gateway._date_sql(sp['measure'])}) + 1 AS DOUBLE)" if sp["anchor"]
+                     else f'TRY_CAST({raw} AS DOUBLE)')
+            # a value IN an empty list is never true, NOT IN (NULL) never true either: no missing code, no clause
+            miss = ", ".join("'" + m.replace("'", "''") + "'" for m in sp["missing"])
+            is_miss = f"{raw} IN ({miss})" if miss else "FALSE"
+            r = con.execute(f"""SELECT count(*) AS events, count(*) FILTER (WHERE {is_miss}) AS not_recorded,
+                    list(m) FILTER (WHERE m IS NOT NULL AND NOT ({is_miss}) AND m >= {sp['lo']}
+                                    AND m <= {sp['hi'] if sp['hi'] != float('inf') else 1e300}) AS v
+                FROM (SELECT {raw} AS mraw_, {value} AS m, * FROM r)""").fetchone()
+            v = np.asarray(r[2] or [], dtype=float)
+            vals[(sp["measure"], int(y))] = v
+            counts[(sp["measure"], int(y))] = (int(r[0]), int(r[1]), int(r[0]) - int(r[1]) - len(v))
+        con.close()
+    out = _ages(it, f, label, classifier, area)
+    period = f"{min(it.years)}-{max(it.years)}"
+    for sp in specs:
+        years = sorted(y for (m, y) in vals if m == sp["measure"])
+        for y in [*years, None]:
+            v = vals[(sp["measure"], y)] if y is not None else np.concatenate([vals[(sp["measure"], z)] for z in years]) \
+                if years else np.array([])
+            ev, nr, ob = counts[(sp["measure"], y)] if y is not None else tuple(
+                sum(counts[(sp["measure"], z)][k] for z in years) for k in range(3))
+            if not ev:
+                continue
+            q = np.percentile(v, [25, 50, 75, 90]) if len(v) else [None] * 4
+            out.append({"field": f.id, "label": label, "dataset": it.dataset, "measure": sp["measure"],
+                        "measure_name": sp["measure_name"], "kind": sp["kind"],
+                        "year": y, "period": None if y is not None else period, "events": float(ev),
+                        "n": float(len(v)), "not_recorded": float(nr), "out_of_domain": float(ob),
+                        "mean": float(v.mean()) if len(v) else None,
+                        "sd": float(v.std(ddof=1)) if len(v) > 1 else None,
+                        "q25": None if q[0] is None else float(q[0]), "median": None if q[1] is None else float(q[1]),
+                        "q75": None if q[2] is None else float(q[2]), "q90": None if q[3] is None else float(q[3])})
+    return out
+
+
+def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
+    """The age at the event of the field's events in the area (the counts' single years, `gateway.event_counts`, the
+    read the model made: a cache hit), per year and over the period, for everyone and by sex: the first line of a
+    paper's table 1 (mean age, its standard deviation and quartiles), which the folder gave only as age bands."""
+    import pyarrow.compute as pc
+
+    subset = [str(x) for x in (it.source or {}).get("codes") or []]
+    acc: dict[tuple, list[np.ndarray]] = {}
+    for y in it.years:
+        try:
+            c = gateway.event_counts(it.dataset, it.event, int(y), classifier=(it.source or {}).get("classifier"),
+                                     area=area).counts
+        except Exception:  # noqa: BLE001 - a year that cannot be counted has no age row (the rates say why)
+            continue
+        if subset:
+            hit = pc.starts_with(c.column("code"), subset[0])
+            for x in subset[1:]:
+                hit = pc.or_(hit, pc.starts_with(c.column("code"), x))
+            c = c.filter(pc.fill_null(hit, False))
+        age = c.column("age").to_numpy().astype(float)
+        sex = c.column("sex").to_numpy().astype(int)
+        n = c.column("y").to_numpy().astype(float)
+        for key, m in ((None, np.ones(len(age), bool)), (1, sex == 1), (2, sex == 2)):
+            acc.setdefault((int(y), key), []).append(np.stack([age[m], n[m]]))
+    out = []
+    period = f"{min(it.years)}-{max(it.years)}"
+    years = sorted({y for y, _ in acc})
+    for sx in (None, 1, 2):
+        for y in [*years, None]:
+            parts = acc.get((y, sx), []) if y is not None else [a for z in years for a in acc.get((z, sx), [])]
+            if not parts:
+                continue
+            a, w = np.concatenate(parts, axis=1)
+            if w.sum() <= 0:
+                continue
+            order = np.argsort(a)
+            a, w = a[order], w[order]
+            cum = np.cumsum(w) / w.sum()
+            q = [float(a[min(np.searchsorted(cum, p), len(a) - 1)]) for p in (0.25, 0.5, 0.75, 0.9)]
+            mean = float((a * w).sum() / w.sum())
+            sd = float(np.sqrt((w * (a - mean) ** 2).sum() / max(w.sum() - 1, 1)))
+            out.append({"field": f.id, "label": label, "dataset": it.dataset, "measure": "age",
+                        "measure_name": "age at the event, years" + {None: "", 1: " (male)", 2: " (female)"}[sx],
+                        "kind": "age", "year": y, "period": None if y is not None else period,
+                        "events": float(w.sum()), "n": float(w.sum()), "not_recorded": None, "out_of_domain": None,
+                        "mean": mean, "sd": sd, "q25": q[0], "median": q[1], "q75": q[2], "q90": q[3]})
+    return out
+
+
 def _seasons(it: Item, s, f, label: str) -> list[dict]:
     """A count field by the month of its events' own dates (`gateway.monthly_counts`, the study's area), over the period
     and each year: events, the days of those months, events per day, and the seasonal index (a month's events per day
@@ -2986,7 +3230,11 @@ def _link_text(it: Item) -> str:
         return ""
     spec = gateway.link_specs().get(src["link"])
     partner = (spec.right.dataset if src.get("side", "left") == "left" else spec.left.dataset) if spec else "partner"
-    return f" — share paired with a {partner} record ({src['link']})"
+    # the link's own description says which records it pairs: sih_deaths_to_sim pairs the admissions that ended in
+    # death, so its share of a topic's admissions is their in-hospital deaths found in SIM, not death after admission
+    # (the cohort of Alagoas's 2022 admissions: 159 linked, all among the 168 with MORTE = 1, 2026-10-14)
+    what = gateway.link_description(src["link"])
+    return f" — share paired with a {partner} record ({src['link']}" + (f": {what}" if what else "") + ")"
 
 
 def _band_labels(edges) -> list[str]:
@@ -3139,8 +3387,6 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
     share of all its events in the area with an ill-defined cause (R00-R99, the cause-of-death quality indicator; for
     admissions, an ill-defined principal diagnosis), each year; and for each composition column the share of the field's
     events with the value not recorded, each year and over the period. Each share with its exact interval."""
-    import pyarrow.compute as pc
-
     out = []
     area = tuple(sorted(config.study_area())) if config.study_area() else None
     done = set()
@@ -3154,15 +3400,11 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
             continue
         for y in it.years:
             try:
-                ec = gateway.event_counts(it.dataset, it.event, int(y), area=area)
+                code, n = _area_events(it.dataset, it.event, int(y), None, area)
             except Exception as exc:  # noqa: BLE001 - a year that cannot be counted has no quality row, said
                 log(f"study: quality {it.dataset} {y}: {type(exc).__name__}: {exc}")
                 continue
-            # every event of the area: placed, and lost for its own reasons (not Brazil's blank residences)
-            un = ec.unallocated.filter(pc.invert(pc.ends_with(ec.unallocated.column("reason"), " (Brazil)")))
-            both = [ec.counts.select(["code", "y"]), un.select(["code", "y"])]
-            n = np.concatenate([x.column("y").to_numpy(zero_copy_only=False).astype(float) for x in both])
-            ill = np.array([str(x or "")[:1] == "R" for t_ in both for x in t_.column("code").to_pylist()], dtype=bool)
+            ill = np.array([str(x or "")[:1] == "R" for x in code], dtype=bool)
             k, tot = float(n[ill].sum()), float(n.sum())
             out.append({"dataset": it.dataset, "field": None, "label": f"every {it.event} of the source",
                         "year": int(y), "indicator": f"ill-defined causes (ICD-10 R00-R99) on {primary['column']}",
@@ -3170,9 +3412,9 @@ def _quality(scope: Scope, groups: list[dict], log) -> list[dict]:
     whole = _whole()[0]
     blank: dict[tuple, list[float]] = {}
     for g in groups:
-        if g.get("level") != whole or g.get("by") in ("sex", "age band"):
+        if g.get("level") != whole or g.get("variable") in ("sex", "age band"):
             continue
-        key = (g["dataset"], g["field"], g["label"], g.get("year"), g.get("by_name") or g["by"])
+        key = (g["dataset"], g["field"], g["label"], g.get("year"), g.get("variable_name") or g["variable"])
         acc = blank.setdefault(key, [0.0, float(g.get("total") or 0.0)])
         if str(g.get("value")) in ("not recorded", "value missing"):
             acc[0] += float(g.get("observed") or 0.0)
@@ -3228,6 +3470,9 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "by the year-level Pearson dispersion (quasi-Poisson) and the interval read on Student's t with T - 2 degrees "
         "of freedom; APC = 100 (exp(b) - 1), with the slope's two-sided p (trends.parquet). Provisional years (a "
         "source not yet final) are left out of every trend.",
+        "Measures (measures.parquet): every quantity and interval the source declares on the topic's own events (a "
+        "length of stay, a value paid), per year and over the period: mean, standard deviation, quartiles and 90th "
+        "percentile of the valid values, with the counts not recorded and outside the declared domain.",
         "Seasonality (seasons.parquet): the events by the month of their own dates, each month's events per day over "
         "the period's (the seasonal index) with its exact interval, and Pearson's chi-square of the months' events "
         "against their days (11 degrees of freedom).",
@@ -3239,6 +3484,9 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "Associated causes (multiple-cause analysis, where a source carries every certificate line or diagnosis): each "
         "ICD-10 category named beside the topic on its own records, its share with a Clopper-Pearson interval and its "
         "ratio to the records of the same sex and ten-year age band without the topic.",
+        "Proportional measures (descriptive.parquet, per 'share of ...'): a code set's events over every event of each "
+        "ICD-10 ancestor of its codes (its group, its chapter) and of the whole source, in the area, placed or not, with "
+        "Clopper-Pearson intervals.",
         "Completeness (quality.parquet): the share of the events placed by residence, sex and age, every reason the "
         "rest were not, the share of ill-defined causes (R00-R99) and each variable's share not recorded, with exact "
         "intervals."]
@@ -3294,7 +3542,8 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
             return f"{min(v):.2f}-{max(v):.2f}" if v else "not measured"
         method = sorted({str(r.get("method")) for r in rs})
         linked.append(
-            f"{link} ({', '.join(method)}), runs {rs[0]['run_year']}-{rs[-1]['run_year']}: "
+            f"{link} ({', '.join(method)}; {gateway.link_description(link) or 'no description'}), runs "
+            f"{rs[0]['run_year']}-{rs[-1]['run_year']}: "
             f"{sum(int(r['pairs'] or 0) for r in rs):,} pairs; false-match rate {span('false_match_percent')} % "
             f"(upper 95 % bound up to {span('false_match_upper95_percent').split('-')[-1]} %); agreement on independent "
             f"validation fields {span('independent_agreement_percent')} %; verdicts "
@@ -3466,7 +3715,7 @@ def _sex_age(it: Item, s, f, label: str) -> list[dict]:
                     if obs[k] <= 0:
                         continue
                     o = float(obs[k])
-                    out.append({"field": f.id, "label": label, "dataset": it.dataset, "by": by, "by_name": by_name,
+                    out.append({"field": f.id, "label": label, "dataset": it.dataset, "variable": by, "variable_name": by_name,
                                 "value": v, "value_label": vl, "level": level, "unit": unit,
                                 "year": int(year) if year is not None else None,
                                 "period": None if year is not None else f"{int(yrs[0])}-{int(yrs[-1])}",
@@ -3517,7 +3766,7 @@ def _groups(it: Item, s, f, label: str, log) -> list[dict]:
                 with np.errstate(invalid="ignore", divide="ignore"):
                     lo = np.where(obs > 0, beta.ppf(0.025, obs, tot - obs + 1), 0.0) if tot else None
                     hi = np.where(obs < tot, beta.ppf(0.975, obs + 1, tot - obs), 1.0) if tot else None
-                out.extend({"field": f.id, "label": label, "dataset": it.dataset, "by": column, "by_name": names.get(column, "race"),
+                out.extend({"field": f.id, "label": label, "dataset": it.dataset, "variable": column, "variable_name": names.get(column, "race"),
                             "value": v, "value_label": shown[v], "level": level, "unit": unit,
                             "year": int(year) if year is not None else None,
                             "period": None if year is not None else f"{int(years[0])}-{int(years[-1])}",
@@ -3555,6 +3804,12 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
                 # is against them; read against B1, a region persistently 13x the national rate read as 1.05, its own
                 # usual level (the review of the RS slice, 2026-10-13)
                 e_ = float(mu0[np.ix_(ui, ti)].sum()) if mu0 is not None else float("nan")
+            if fid == r["field"] and str(r.get("tier", "")).startswith("BP"):
+                # a prospective finding departs from an expectation fitted on the years before its window; B1, fitted
+                # on every year, absorbs it (Alagoas: "q 2.6e-5, O/E 1.00 [0.95, 1.05]", 2026-10-14): its observed
+                # count only, its effect its estimate
+                r["observed"] = o
+                continue
             if fid == r["field"]:
                 # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation. A
                 # group answer's effect is its group's, against the place's own mix: the field's totals beside it read
@@ -3796,6 +4051,22 @@ def _institution_explains(rows: list[dict]) -> None:
                                      f"{st['id']}): recording, not the events; was signal ({r.get('class_reason')})")
                 r["class"] = "system"
                 break
+
+
+def _recording_groups(rows: list[dict]) -> None:
+    """A group finding whose groups are a column's missing levels ("not recorded", "value missing") departs in the
+    records' completeness, not in the events: its class becomes "system", the reason said, the column's completeness in
+    quality.parquet (Inhapi's "Necrópsia: not recorded" and "Recebeu assistência médica: not recorded" had led the
+    Alagoas study's first story as signals, 2026-10-14)."""
+    for r in rows:
+        groups = r.get("_groups") or []
+        if r.get("class") != "signal" or not groups:
+            continue
+        levels = {str(g).partition("=")[2] for g in groups}
+        if levels <= {"not recorded", "value missing"}:
+            r["class_reason"] = (f"the group is its column's {' and '.join(sorted(levels))} level: the records' "
+                                 f"completeness, not the events (quality.parquet); was signal ({r.get('class_reason')})")
+            r["class"] = "system"
 
 
 def _institution_facts(rows: list[dict], log) -> None:
@@ -4218,7 +4489,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     sources = sorted({i.dataset for i in read})
     level, unit = _whole()
     parts = [f"<h1>{e(decl.study)}</h1>",
-             f"<p class=meta>{'Brazil' if level == 'national' else 'area ' + e(unit)} · depth {e(decl.depth)} · period "
+             f"<p class=meta>{e(_area_text())} · depth {e(decl.depth)} · period "
              f"{decl.years[0]}–{decl.years[-1]} · q {decl.q} · written {time.strftime('%Y-%m-%d %H:%M')}</p>",
              "<h2>1. Summary</h2>",
              # the counts as they are: sources are datasets (fields are items), and a noise finding (an exact interval
@@ -4302,7 +4573,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                                                for i in scope.items if i.status != "in") + "</ul>",
              "<h3>Codes found with the topic's on the same records</h3>"
              + (table(sorted([r for r in associated or [] if r.get("related")], key=lambda r: -r["lift"]),
-                      [("code", "code"), ("label", "condition"), ("dataset", "source"), ("where", "on"),
+                      [("code", "code"), ("label", "condition"), ("dataset", "source"), ("recorded_on", "on"),
                        ("with_code", "records with both"), ("expected", "expected"), ("share", "share of the topic's"),
                        ("lift", "lift"), ("lift_low", "95% from"), ("lift_high", "to"), ("q", "q")], cap=25,
                       where="associated.parquet")
@@ -4462,11 +4733,15 @@ def _story_html(k: int, rows: list[dict], e) -> str:
         if r.get("groups"):
             ci = (f" [{_fmt(r.get('interval_low'))}, {_fmt(r.get('interval_high'))}]"
                   if r.get("interval_low") is not None else "")
-            return (f", {e(str(r['effect_unit']))} {_fmt(r['effect'])}{ci}; all the field's events there: "
-                    f"{_fmt(r.get('locus_observed'))} against {_fmt(r.get('locus_expected'))} expected")
+            there = (f"; all the field's events there: {_fmt(r.get('locus_observed'))} against "
+                     f"{_fmt(r.get('locus_expected'))} expected" if r.get("locus_observed") is not None else "")
+            return f", {e(str(r['effect_unit']))} {_fmt(r['effect'])}{ci}{there}"
         if r.get("ratio") is not None:
             return (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected, "
                     f"O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]")
+        if str(r.get("tier", "")).startswith("BP"):
+            return (f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} against the expectation fitted on the years "
+                    f"before (observed {_fmt(r.get('observed'))})")
         return f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} (the method's statistic)"
 
     items = "".join(f"<li>{e(r['label'])} ({e(r['dataset'])}): {e(str(r['component']))}"
@@ -4518,6 +4793,20 @@ COLUMNS = {
     "trends.parquet:last_year": "last year of the series",
     "years_read": "the years the trend read (provisional years left out)",
     "month": "the calendar month of the events' own dates (1-12)",
+    "measure": "the measure's column (an interval: its end date's column)",
+    "measure_name": "the measure's name in the source's dictionary (an interval: the days from its start to it)",
+    "kind": "measure (a declared quantity of the event), interval (days between two of its dates, plus one) or age (the "
+            "subject's age at the event, from the counts' single years: events placed by sex and age only)",
+    "measures.parquet:events": "the field's events in the area and year (or period)",
+    "measures.parquet:n": "those with a valid value: recorded, numeric and within the declared domain",
+    "not_recorded": "those whose value is a declared missing code",
+    "out_of_domain": "those with a value that is not numeric or outside the declared domain",
+    "mean": "mean of the valid values",
+    "sd": "standard deviation of the valid values",
+    "q25": "first quartile of the valid values",
+    "median": "median of the valid values",
+    "q75": "third quartile of the valid values",
+    "q90": "90th percentile of the valid values",
     "days": "the days of that month in the row's year or period",
     "per_day": "events per day of the month",
     "seasonal_index": "the month's events per day over the row's own events per day (1: no seasonality)",
@@ -4535,7 +4824,8 @@ COLUMNS = {
     "candidates": "candidate pairs scored",
     "threshold_bits": "the score above which a pair is kept (sum of log2 likelihood ratios)",
     "pairs": "pairs kept, one to one",
-    "linked_share": "the share of the left side's records paired",
+    "linked_share": "the share of the left side's records paired; for a link of one event recorded twice (same_event: "
+                    "an admission that ended in death and its certificate) the link's sensitivity",
     "false_match_percent": "the false-match rate estimated from the placebo, in percent",
     "false_match_upper95_percent": "its upper 95 % bound",
     "linkage.parquet:verdict": "the run's verdict (viable, or why not)",
@@ -4618,7 +4908,8 @@ COLUMNS = {
     "locus_observed": "a group finding's locus: all the field's events there",
     "locus_expected": "a group finding's locus: their expected count",
     "observed": "the field's events at the finding's locus (places and years)",
-    "expected": "the expected count there under the model of the finding's tier (findings.parquet: `tier`): B1, fitted on "
+    "expected": "the expected count there under the model of the finding's tier (findings.parquet: `tier`; empty for a "
+                "prospective finding, BP or BPA, whose estimate is its `effect` against the fit on the years before): B1, fitted on "
                 "the same years with each year's own effect, so it reads a departure of the place from its own level and "
                 "from the shared course, never a rise every place shares (a national or statewide one is absorbed: those "
                 "are read prospectively, hypotheses and series); B0, the whole's rates without place effects",
@@ -4639,8 +4930,9 @@ COLUMNS = {
     "related": "other fields departing at the same locus, with their ratio and interval",
     "context": "contexts (water, sanitation, ...) in which the locus stands out",
     "story": "the number of the story (findings of one place and period, read together in the report) it belongs to",
-    "by": "the column the field is split by",
-    "by_name": "that column's name in the source's dictionary",
+    "variable": "the column the field is split by",
+    "variable_name": "that column's name in the source's dictionary",
+    "recorded_on": "where on the records the codes are read together (a certificate's lines, an admission's diagnoses)",
     "value": "the column's code as recorded",
     "value_label": "the code's label from the source's dictionary; undecoded when none",
     "total": "the field's events in the row's geography and year (the share's denominator; by sex or age band, those "
@@ -4774,7 +5066,8 @@ def _fmt(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, float):
-        return f"{v:.3g}" if abs(v) < 1e4 else f"{v:,.0f}"
+        # three significant digits below a thousand, whole numbers with separators above ("1.61e+03" had been a count)
+        return f"{v:.3g}" if abs(v) < 1e3 else f"{v:,.0f}"
     return str(v)
 
 
@@ -4855,7 +5148,7 @@ def body(folder: str | Path) -> list[dict]:
         ok = "share" in g and g["share"].notna().mean() > 0.99 and "value_label" in g
         # an undecoded value is shown as such, never guessed (CLAUDE.md §6): named here, not a threshold to fail on
         und = g[g["value_label"].astype(str).str.endswith("(undecoded)")] if "value_label" in g else g
-        cols = sorted(set(und["dataset"].astype(str) + ":" + und["by"].astype(str))) if len(und) else []
+        cols = sorted(set(und["dataset"].astype(str) + ":" + und["variable"].astype(str))) if len(und) else []
         part("groups", bool(ok), f"{len(g)} rows, shares with intervals {'present' if ok else 'missing'}; "
              f"{len(und) / max(len(g), 1):.0%} of values undecoded" + (f" ({', '.join(cols[:5])})" if cols else ""))
     rel = table("relations")
@@ -4887,6 +5180,9 @@ def body(folder: str | Path) -> list[dict]:
     part("trends", tr is not None and ((len(tr) > 0 and "apc_low" in tr and tr["apc_low"].notna().all())
                                        or len(decl.years) < 3),
          f"{0 if tr is None else len(tr)} annual percent changes with intervals (crude and age-sex adjusted)")
+    me = table("measures")
+    if any(x.get("dataset") for x in read):
+        part("measures", me is not None, f"{0 if me is None else len(me)} measure rows (the topic's own quantities)")
     se = table("seasons")
     part("seasons", se is not None and len(se) > 0 and "seasonal_index_low" in se,
          f"{0 if se is None else len(se)} month rows (seasonal index with intervals, the test of uniformity)")

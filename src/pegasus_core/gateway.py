@@ -1181,6 +1181,27 @@ def mark_quantiles(dataset: str, event: str, year: int, mark: str, bounds: tuple
     return table
 
 
+def mark_values(dataset: str, event: str, year: int, columns: tuple[str, ...], classifier: str | None,
+                codes: tuple[str, ...] = (), area=None) -> pa.Table:
+    """The raw values of ``columns`` on one year's events whose ``classifier`` code starts with one of ``codes`` (all
+    without), resident in ``area`` (Brazil without): one scan filtered in the lake (`_records` with ``rows``), what a
+    study describes its topic's own measures from (`study._measures`). Cached."""
+    strata = _strata(dataset, event, year)
+    _per_record(dataset, event, "a measure's values")
+    rows = {**({classifier: list(codes)} if classifier and codes else {}), **_area_rows(strata["residence"], area)}
+    key = {"what": "mark_values", "code": config.code_key(mark_values), "dataset": dataset, "event": event,
+           **_declared_key(dataset, event), "year": int(year), "columns": sorted(columns), "classifier": classifier,
+           "codes": sorted(codes), "data": config.data_version(), **_data_key(dataset, year), **_area_key(area)}
+    cached = store.get_table("gateway", key)
+    if cached is not None:
+        return cached
+    cols = list(dict.fromkeys([strata["residence"], *([classifier] if classifier else []), *columns]))
+    table = _records(dataset, event, int(year), cols, rows=rows or None)
+    table = table.select([c for c in cols if c in table.column_names])
+    store.put_table("gateway", key, table, {"source": f"values of {dataset} {event}", "rows": rows})
+    return table
+
+
 def mark_moments(dataset: str, event: str, year: int, mark: str, bounds: tuple[float, float],
                  classifier: str | None = None, places: pa.Array | None = None, casemix: str | None = None,
                  facility_effects: str | None = None, missing: tuple[str, ...] | list = (), anchor: str | None = None,
@@ -2095,10 +2116,11 @@ def context_value(entry: str | dict, years: list[int], places: np.ndarray) -> tu
 
 def context_series(entry: str | dict, years: list[int], places: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[int], str]:
     """A time-varying context on ``places`` year by year (ARCHITECTURE §8.2): its numerator and denominator [U, T] over
-    the declared years inside ``years``, and its family: ``binomial`` where the denominator is a field the numerator
-    is part of (samples with E. coli present of those assessed: never above it), ``poisson`` on residents or on a
-    field it is a rate of. A context with no denominator, or with fewer than three declared years in the window, has
-    no series (a census is read by `context_value`)."""
+    the declared years inside ``years``, and its family: the field's declared ``family`` when it has one (``gaussian``:
+    a mean level, a temperature summed over the months observed and read over them, pegasus_data ADR-0177), else
+    ``binomial`` where the denominator is a field the numerator is part of (samples with E. coli present of those
+    assessed: never above it), ``poisson`` on residents or on a field it is a rate of. A context with no denominator, or
+    with fewer than three declared years in the window, has no series (a census is read by `context_value`)."""
     names, where, over, declared = _context_entry(entry)
     inside = [y for y in declared if years[0] <= y <= years[-1]]
     if not over or len(inside) < 3:
@@ -2112,7 +2134,12 @@ def context_series(entry: str | dict, years: list[int], places: np.ndarray) -> t
     inside, parts = [inside[j] for j in held], [parts[j] for j in held]
     k, n = np.stack([p[0] for p in parts], 1), np.stack([p[1] for p in parts], 1)
     ok = np.isfinite(k) & np.isfinite(n) & (n > 0)
-    family = "binomial" if over != "population" and ok.any() and bool((k[ok] <= n[ok] + 1e-9).all()) else "poisson"
+    law = {declared_fields()[x].get("family") for x in names} - {None}
+    if len(law) > 1:
+        raise ValueError(f"{entry}: the summed fields declare different families {sorted(law)}")
+    # a mean level is no count: by numerator <= denominator, a temperature summed over months read as Poisson events
+    family = law.pop() if law else ("binomial" if over != "population" and ok.any()
+                                    and bool((k[ok] <= n[ok] + 1e-9).all()) else "poisson")
     return k, n, inside, family
 
 
@@ -2376,6 +2403,35 @@ def stored_pairs(link: str, year: int, compute: bool | None = None) -> pa.Table:
         return pg.link(link, period=year, geography="BR", method=method, root=config.data_root()).pairs
 
 
+@functools.cache
+def link_description(link: str) -> str:
+    """A declared link's own description (pegasus_data `curation/links.yml`), its first sentence on one line: which
+    records it pairs, so a share or a cohort through it says what it counts."""
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    text = " ".join(str(((read_yaml(links_file()).get("links") or {}).get(link) or {}).get("description") or "").split())
+    return text.split(". ")[0].rstrip(".")
+
+
+@functools.cache
+def link_side_roles(link: str, dataset: str) -> frozenset[str]:
+    """The roles a declared link's side filters ``dataset``'s records on (its ``where``, e.g. "admission.death"): a
+    record outside them is never paired, so a column with such a role is part of what the link's outcome means."""
+    import re
+
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    body = (read_yaml(links_file()).get("links") or {}).get(link) or {}
+    out = set()
+    for side in ("left", "right"):
+        spec = body.get(side) or {}
+        if same_dataset(str(spec.get("dataset") or ""), dataset):
+            out |= set(re.findall(r'"([a-z_]+\.[a-z_]+)"', str(spec.get("where") or "")))
+    return frozenset(out)
+
+
 def link_report(link: str, year: int) -> dict | None:
     """The report of ``link``'s stored national run for ``year`` without reading its pairs (None when not stored, or
     not current: pegasus_data's `linkage.store.report`): what a scope checks and prices a run by
@@ -2614,15 +2670,19 @@ def _identities_meet(dataset: str, event: str, year: int, side: str, pairs: pa.T
     return bool(pc.any(pc.is_in(rid, value_set=pc.cast(ids, rid.type))).as_py())
 
 
-def cohort_records(dataset: str, event: str, year: int, columns: list[str]) -> tuple[pa.Table, pa.Array]:
+def cohort_records(dataset: str, event: str, year: int, columns: list[str], classifier: str | None = None,
+                   codes: tuple[str, ...] | list[str] = ()) -> tuple[pa.Table, pa.Array]:
     """One event type's records of ``year`` as persons (`tools.cohort`): on the lattice (u, sex, age class) with
-    ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name)."""
+    ``columns`` raw-coded, and each record's identity by pegasus_data's rule (what its links and persons name). With
+    ``codes``, only the records whose ``classifier`` starts with one (a code set's persons: a narrow topic's admissions),
+    filtered at the scan like the area."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     strata = _strata(dataset, event, year)
     cols = [strata["residence"], *([strata["age"]] if strata["age"] else [])] + ([strata["sex"]] if strata["sex"] else []) + columns
     # the study's area's persons, at the scan: a record's identity does not depend on the filter (`_records`)
-    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True,
-                   rows=_area_rows(strata["residence"], config.study_area()) or None)
+    rows = {**_area_rows(strata["residence"], config.study_area()),
+            **({classifier: [str(c) for c in codes]} if classifier and codes else {})}
+    raw = _records(dataset, event, year, list(dict.fromkeys(cols)), identity=True, rows=rows or None)
     con = duckdb.connect()
     con.register("r", raw)
     keep = ", ".join(f'trim(CAST("{c}" AS VARCHAR)) AS "{c}"' for c in columns)
