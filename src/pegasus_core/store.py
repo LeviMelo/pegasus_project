@@ -116,6 +116,39 @@ def get_table(kind: str, key: dict[str, Any]) -> pa.Table | None:
     return pq.read_table(path)
 
 
+def cached(kind: str, key: dict[str, Any], compute, parts: tuple[str, ...] = ("",),
+           meta: dict[str, Any] | None = None) -> dict[str, pa.Table]:
+    """The tables stored under ``key`` (part ``""`` is the key itself, any other ``{**key, "part": name}``), or, when one
+    is missing, ``compute()``'s (a dict of the same parts), stored with ``meta`` and returned. One process computes at a
+    time: a lock beside the entry makes the others wait and then read what it stored, where the lanes of a study each
+    computed the same national table (the review of the gateway, finding 17); and a reader's parts are stored together,
+    so counts without their unallocated part are never read as whole."""
+    from filelock import FileLock
+
+    def of(part: str) -> dict[str, Any]:
+        return key if not part else {**key, "part": part}
+
+    def read() -> dict[str, pa.Table] | None:
+        got = {p_: get_table(kind, of(p_)) for p_ in parts}
+        return got if all(t is not None for t in got.values()) else None
+
+    got = read()
+    if got is not None:
+        return got
+    lock = config.home() / kind / f".{address(kind, key).name}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(lock)):
+        got = read()
+        if got is None:
+            got = compute()
+            missing = set(parts) - set(got)
+            if missing:
+                raise ValueError(f"{kind}: compute returned no {sorted(missing)}")
+            for p_ in parts:
+                put_table(kind, of(p_), got[p_], meta if not p_ else None)
+    return {p_: got[p_] for p_ in parts}
+
+
 def has_table(kind: str, key: dict[str, Any]) -> bool:
     """Whether a table is stored under the key: a path test, nothing read (``get_table`` reads the Parquet file)."""
     return (_entry(kind, key, "table.parquet") / "table.parquet").exists()
@@ -242,6 +275,38 @@ def migrate(mapping: dict[str, str], dry_run: bool = True, log=print) -> dict[st
         if n["moved"] or n["taken"]:
             log(f"{folder.name}: {n['read']:,} read, {n['moved']:,} {'to move' if dry_run else 'moved'}, "
                 f"{n['taken']:,} whose new address is taken")
+    _MANIFESTS.clear()
+    return out
+
+
+def unreachable(window: frozenset[str] | set[str], remove: bool = False, log=print) -> dict[str, list[int]]:
+    """The entries no code computes a key for any more: a code value of the key outside ``window`` (the values of
+    the code running and of an adoption window, `pegasus-core keys window`), so neither a read nor an adoption reaches
+    them. Removed with ``remove``. An entry whose key holds no code value is never one (its key does not say which code
+    made it). Counts and bytes per kind: under the broad rule nearly every edit re-keyed nearly every artefact, and
+    182,828 entries (33.9 GB) had piled up so (2026-10-14)."""
+    import shutil
+
+    out: dict[str, list[int]] = {}
+    for folder in sorted(p for p in config.home().iterdir()
+                         if p.is_dir() and not p.name.startswith(("_", "code_keys", "leads", "ledger", "lanes"))):
+        n = out.setdefault(folder.name, [0, 0])
+        for entry in os.scandir(folder):
+            if not entry.is_dir():
+                continue
+            try:
+                key = json.loads((Path(entry.path) / "manifest.json").read_text(encoding="utf-8")).get("key")
+            except (OSError, ValueError):
+                continue
+            codes = _codes(key)
+            if not codes or codes <= window:
+                continue
+            n[0] += 1
+            n[1] += sum(f.stat().st_size for f in os.scandir(entry.path) if f.is_file())
+            if remove:
+                shutil.rmtree(entry.path, ignore_errors=True)
+        if n[0]:
+            log(f"{folder.name}: {n[0]:,} entries ({n[1] / 1e9:.2f} GB) {'removed' if remove else 'unreachable'}")
     _MANIFESTS.clear()
     return out
 

@@ -340,7 +340,7 @@ def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g.
 
 
 @app.command()
-def keys(action: str = typer.Argument(..., help="snapshot, migrate or window"),
+def keys(action: str = typer.Argument(..., help="snapshot, migrate, window or gc"),
          path: str = typer.Argument(..., help="snapshot: the file to write; migrate: the snapshot taken before"),
          apply: bool = typer.Option(False, help="migrate: move the entries (default: count them only)")) -> None:
     """The code keys of every entry recorded under code_keys, and the store migrated between two snapshots: run
@@ -366,6 +366,11 @@ def keys(action: str = typer.Argument(..., help="snapshot, migrate or window"),
                 continue                    # an entry no longer defined: its artefacts are stale already
         return out
 
+    if action == "gc":
+        # the entries no code computes a key for: every code value outside the window `path` (keys window's file)
+        window = frozenset(json.loads(Path(path).read_text(encoding="utf-8"))) | frozenset(current().values())
+        store.unreachable(window, remove=apply)
+        return
     if action == "window":
         # the code-key values of a change of keys alone, before and after: reads that miss adopt entries keyed by them
         # (``PEGASUS_ADOPT``, `store._entry`)
