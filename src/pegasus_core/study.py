@@ -2162,6 +2162,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                 rows.extend({**_finding(x, it, label, names), "_event": it.event,
                              "_places": [int(q) for q in x.locus.get("places") or []],
                              "_groups": [str(g) for g in x.locus.get("groups") or []],
+                             "_train_last": x.train_last,
                              "_institutions": sorted({str(i) for i in x.locus.get("institutions") or []}
                                                      | ({str(f_)} if (f_ := _one_institution(x)) else set()))}
                             for x in current
@@ -2179,7 +2180,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                         mu0 = s.surprise(node, "B0").mu
                     except Exception:  # noqa: BLE001 - a field with no B0: its B0 findings' O/E are said missing
                         mu0 = None
-                    series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu, mu0)
+                    # a prospective tier's surprise on demand (the session keeps it): a BP finding's O/E reads it
+                    series[f.id] = (label, it.dataset, np.asarray(sv.places), np.asarray(sv.years), sv.y, sv.mu, mu0,
+                                    lambda tier, last, s=s, node=node: s.surprise(node, tier, last))
                     figs.append(_series_figure(out, sv, f, label, it, session=s))
                     try:
                         d = s.expectations.model(f.block).data
@@ -2229,6 +2232,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     for r in rows:
         r.pop("_places", None)
         r.pop("_groups", None)
+        r.pop("_train_last", None)
         r.pop("_institutions", None)
         r.pop("_event", None)
     findings = _rows_table(rows) if rows else pa.table({"id": pa.array([], pa.string())})
@@ -3792,7 +3796,7 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
             continue
         lo_y, hi_y = int(r["first_year"]), int(r["last_year"] or r["first_year"])
         notes = []
-        for fid, (label, dataset, pl, yrs, y, mu, mu0) in series.items():
+        for fid, (label, dataset, pl, yrs, y, mu, mu0, prospective) in series.items():
             ui = np.flatnonzero(np.isin(pl, list(places)))
             year_of = yrs // 100 if yrs.max() > 9999 else yrs          # YYYYMM periods at the monthly grain
             ti = np.flatnonzero((year_of >= lo_y) & (year_of <= hi_y))
@@ -3806,9 +3810,24 @@ def _related(rows: list[dict], series: dict) -> list[dict]:
                 e_ = float(mu0[np.ix_(ui, ti)].sum()) if mu0 is not None else float("nan")
             if fid == r["field"] and str(r.get("tier", "")).startswith("BP"):
                 # a prospective finding departs from an expectation fitted on the years before its window; B1, fitted
-                # on every year, absorbs it (Alagoas: "q 2.6e-5, O/E 1.00 [0.95, 1.05]", 2026-10-14): its observed
-                # count only, its effect its estimate
+                # on every year, absorbs it (Alagoas: "q 2.6e-5, O/E 1.00 [0.95, 1.05]", 2026-10-14): its O/E is
+                # against its own tier's expectation, read from the training fit (its observed count only when that
+                # cannot be read)
                 r["observed"] = o
+                try:
+                    bp = prospective(str(r["tier"]), int(r["_train_last"]))
+                    by = np.asarray(bp.years)
+                    by = by // 100 if by.max() > 9999 else by
+                    bu = np.flatnonzero(np.isin(np.asarray(bp.places), list(places)))
+                    bt = np.flatnonzero((by >= lo_y) & (by <= hi_y))
+                    o_bp, e_bp = float(np.asarray(bp.y)[np.ix_(bu, bt)].sum()), float(np.asarray(bp.mu)[np.ix_(bu, bt)].sum())
+                except Exception:  # noqa: BLE001 - a training fit that cannot be read leaves the observed count alone
+                    continue
+                if e_bp > 0:
+                    r["observed"], r["expected"], r["excess"] = o_bp, e_bp, o_bp - e_bp
+                    r["ratio"] = o_bp / e_bp
+                    r["ratio_low"] = (chi2.ppf(0.025, 2 * o_bp) / 2 if o_bp > 0 else 0.0) / e_bp
+                    r["ratio_high"] = chi2.ppf(0.975, 2 * o_bp + 2) / 2 / e_bp
                 continue
             if fid == r["field"]:
                 # the finding's own burden (BACKLOG 7.3): its field's events at its locus against the expectation. A
@@ -4740,7 +4759,11 @@ def _story_html(k: int, rows: list[dict], e) -> str:
             return (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected, "
                     f"O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]")
         if str(r.get("tier", "")).startswith("BP"):
-            return (f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} against the expectation fitted on the years "
+            ratio = (f", O/E {_fmt(r.get('ratio'))} [{_fmt(r.get('ratio_low'))}, {_fmt(r.get('ratio_high'))}]"
+                     if r.get("ratio") is not None else "")
+            return (f", observed {_fmt(r.get('observed'))} against {_fmt(r.get('expected'))} expected from the fit on "
+                    f"the years before{ratio}" if r.get("expected") is not None else
+                    f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} against the expectation fitted on the years "
                     f"before (observed {_fmt(r.get('observed'))})")
         return f", {e(str(r['effect_unit']))} {_fmt(r['effect'])} (the method's statistic)"
 
@@ -4908,8 +4931,8 @@ COLUMNS = {
     "locus_observed": "a group finding's locus: all the field's events there",
     "locus_expected": "a group finding's locus: their expected count",
     "observed": "the field's events at the finding's locus (places and years)",
-    "expected": "the expected count there under the model of the finding's tier (findings.parquet: `tier`; empty for a "
-                "prospective finding, BP or BPA, whose estimate is its `effect` against the fit on the years before): B1, fitted on "
+    "expected": "the expected count there under the model of the finding's tier (findings.parquet: `tier`; BP or BPA, a "
+                "prospective finding: the fit on the years before its window, `train_last`): B1, fitted on "
                 "the same years with each year's own effect, so it reads a departure of the place from its own level and "
                 "from the shared course, never a rise every place shares (a national or statewide one is absorbed: those "
                 "are read prospectively, hypotheses and series); B0, the whole's rates without place effects",
