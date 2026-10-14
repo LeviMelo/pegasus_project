@@ -1962,7 +1962,7 @@ def context_field(name: str, years: list[int] | None = None) -> pa.Table:
     import pegasus_data as pg
 
     key = {"what": "context_field", "name": name, "years": sorted(years) if years else None,
-           "data": config.data_version()}
+           "data": config.data_version(), "code": config.code_key(context_field), **_field_key(name, years)}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
@@ -1984,7 +1984,8 @@ def context_sum(name: str, year: int, where: dict[str, str] | None = None) -> pa
     (u, value) summed over the rows with ``where`` (column = value) for one year, u 6-digit."""
     import pegasus_data as pg
 
-    key = {"what": "context_sum", "name": name, "year": year, "where": where or {}, "data": config.data_version()}
+    key = {"what": "context_sum", "name": name, "year": year, "where": where or {}, "data": config.data_version(),
+           "code": config.code_key(context_sum), **_field_key(name, [year])}
     cached = store.get_table("gateway", key)
     if cached is not None:
         return cached
@@ -1993,7 +1994,12 @@ def context_sum(name: str, year: int, where: dict[str, str] | None = None) -> pa
         raw = pg.load_field(name, years=[year], settings=pg.load_settings(root=config.data_root()))
     con = duckdb.connect()
     con.register("r", raw)
-    cond = " AND ".join(f"CAST(\"{c}\" AS VARCHAR) = '{v}'" for c, v in (where or {}).items()) or "true"
+    # a declared value or a list of them (persons_low_income: income_band in [le_half, none]; a list compared as one
+    # string had failed, and the context left every study, 2026-10-14)
+    def among(v) -> str:
+        vs = v if isinstance(v, (list, tuple)) else [v]
+        return ", ".join("'" + str(x).replace("'", "''") + "'" for x in vs)
+    cond = " AND ".join(f"CAST(\"{c}\" AS VARCHAR) IN ({among(v)})" for c, v in (where or {}).items()) or "true"
     table = con.execute(f"""SELECT CAST(left(CAST(municipality AS VARCHAR), 6) AS INTEGER) AS u, sum(CAST(value AS DOUBLE)) AS value
                             FROM r WHERE {cond} AND year = {year} GROUP BY 1 ORDER BY 1""").fetch_arrow_table()
     store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name}) summed"})
@@ -2008,6 +2014,26 @@ def declared_fields() -> dict:
     return declared()
 
 
+def _field_key(name: str, years: list[int] | None) -> dict:
+    """What a context field's stored reading is a function of: its declaration (pegasus_data's fields.yml) and the lake
+    files it was built into (each year's partition: path, size, time of writing). Keyed by its name and years alone, the
+    climate fields rebuilt from BR-DWGD (pegasus_data ADR-0178) were served as INMET's 8 stations of Alagoas
+    (2026-10-14)."""
+    import json
+    from pathlib import Path
+
+    h = hashlib.sha256(json.dumps(declared_fields().get(name) or {}, sort_keys=True, default=str).encode())
+    root = Path(config.data_root()) / "lake" / "fields" / name
+    if root.exists():
+        wanted = {f"year={int(y)}" for y in years or []}
+        for p in sorted(root.rglob("*.parquet")):
+            if wanted and not wanted & set(p.relative_to(root).parts):
+                continue
+            st = p.stat()
+            h.update(f"{p.relative_to(root).as_posix()}:{st.st_size}:{st.st_mtime_ns}".encode())
+    return {"field_state": h.hexdigest()[:16]}
+
+
 def _context_entry(entry: str | dict) -> tuple[list[str], dict | None, str | None, list[int]]:
     """A context entry's numerator fields (``a+b`` summed), its strata filter, its one denominator (pegasus_data
     `fields.yml` ``over``: another field, or ``population``) and its declared years."""
@@ -2017,7 +2043,11 @@ def _context_entry(entry: str | dict) -> tuple[list[str], dict | None, str | Non
     names = entry["field"].split("+") if isinstance(entry, dict) else entry.split("+")
     # a field whose rows are strata declares the rows that make it one value per place (ANS's medical-hospital
     # plans, INEP's total margin); read by name without them it failed on a missing status (the survey, 2026-10-11)
-    where = entry.get("where") if isinstance(entry, dict) else (spec_of[names[0]].get("where") if len(names) == 1 else None)
+    # (a field built from a SIDRA series has its ``where`` applied by pegasus_data when it is built: applied again,
+    # persons_low_income's income bands were looked for in a table without them, 2026-10-14)
+    spec0 = spec_of[names[0]]
+    where = entry.get("where") if isinstance(entry, dict) else (
+        spec0.get("where") if len(names) == 1 and not spec0.get("series") else None)
     if isinstance(entry, dict) and "over" in entry:
         # an entry's own denominator: a stratum of a field (a medicine's sales of all medicines sold) is a rate of
         # something the whole field is not
@@ -2461,6 +2491,33 @@ def link_side_roles(link: str, dataset: str) -> frozenset[str]:
                     roles |= {str(v[side])} if v.get(side) else set()
                     out |= {r for r in roles if r.split(".")[0] in mine}
     return frozenset(out)
+
+
+@functools.cache
+def link_side_condition(link: str, side: str) -> str:
+    """The SQL over role names a record of a declared link's ``side`` must meet to be paired: its ``where``, and for a
+    link of one event recorded twice (`same_event`) the conditions its validations put on that side (sih_deaths_to_sim:
+    an admission that ended in death; a certificate of a death in hospital). "" when the side is every record."""
+    import re
+
+    from pegasus_data.linkage.engine import links_file
+    from pegasus_data.semantics.curation import read_yaml
+
+    body = (read_yaml(links_file()).get("links") or {}).get(link) or {}
+    parts = [" ".join(str((body.get(side) or {}).get("where") or "").split())]
+    if body.get("same_event"):
+        alias = "l" if side == "left" else "r"
+        for v in body.get("validate") or []:
+            sql = str(v.get("sql") or "")
+            if sql and re.search(rf"\b{alias}\.", sql) and not re.search(rf"\b{'r' if alias == 'l' else 'l'}\.", sql):
+                parts.append(re.sub(rf"\b{alias}\.", "", sql))
+    return " AND ".join(f"({p})" for p in parts if p)
+
+
+def completeness_system(dataset: str) -> str | None:
+    """The completeness series (`completeness`) of a dataset whatever its spelling: SYSTEM is spelled SIM.DO, a study
+    SIM-DO (the review of the gateway: "+kappa" on "SIM-DO" raised "no completeness series")."""
+    return next((v for k, v in SYSTEM.items() if same_dataset(k, dataset)), None)
 
 
 def _side_entities(body: dict, side: str) -> set[str]:

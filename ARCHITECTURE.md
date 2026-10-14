@@ -355,28 +355,36 @@ toxoplasmosis/
   study.yml                 the declaration as written
   scope.yml                 what it resolved to, with reasons and costs
   study.duckdb              every table below as a table of its own (it opens on any machine)
-  expectations/             each field's observed and expected per municipality and period, with its surprise
+  expectations.parquet      every field's observed and expected per municipality and period, with its scale and
+                              surprise (one table keyed by field)
   findings.parquet          one row per finding (schema below), its story in a column
   hypotheses.parquet        the declared tests and their answers
   descriptive.parquet       events, denominators, crude and directly standardised rates with intervals, each year
                               and over the period, for the whole, its regions, states and health regions, by sex, age
                               band and sex within age band; an area's reference rows (Brazil, its macro-regions); a
-                              code set's share of its ICD-10 group, chapter and source; linked shares
-  trends.parquet            each series' APC, crude and age-sex adjusted, with its interval and p
+                              code set's share of its ICD-10 group, chapter and source; linked shares and a same-event
+                              link's share of the records it can pair; each standardised rate's ratio to Brazil's
+  standard.parquet          the direct standardisation's standard: weights by sex and age band
+  codes.parquet             the topic's events by category and code, labelled, with shares
+  trends.parquet            each series' APC, crude and age-sex adjusted, and its joinpoint segments and AAPC (crude
+                              and standardised rate), with intervals and p
   measures.parquet          the topic's own measures and intervals (length of stay, value paid) and the age at the
                               event: mean, sd, quartiles, p90, each year and over the period
-  seasons.parquet           the events by calendar month: seasonal index with intervals, the test of uniformity
+  seasons.parquet           the events by calendar month (the date column named): over the period a quasi-Poisson
+                              regression on year and month (index, F test, harmonic peak and amplitude); each year's
   linkage.parquet           every link run a linked field read: pairs, false-match rate, validations
-  places.parquet            per municipality, each year and the period: rates, indirectly standardised ratios, the
-                              model's expected events, all with intervals (what a map or a spatial model reads)
+  places.parquet            per municipality, each year and the period: rates, standardised ratios against the
+                              area and against Brazil (p, BH q), the model's expected events, all with intervals
+  municipalities.geojson    the places' boundaries (IBGE's mesh), keyed as places.parquet
+  contexts.parquet          every context's value per municipality, each year and over the period
   groups.parquet            the case mix: every recorded variable's values, counts and shares with intervals, each
                               year and over the period
   quality.parquet           completeness: events placed and every reason the rest were not, ill-defined causes,
-                              each variable's share not recorded, with intervals
+                              each variable's share not recorded, columns with one value, SIM/SINASC coverage
   associated.parquet        causes named beside the topic on its own records, with lift against sex-age peers
   related.parquet, relations.parquet, context_profile.parquet   cross-field and context structure (§8.1–8.2)
   persons.parquet, capture.parquet   linked cohorts and capture–recapture (§8.4)
-  figures/                  maps, series against expectation
+  figures/, figures.parquet maps, series against expectation, and what each figure shows
   report.html               the report (§3.5), opens offline
   METHODS.md                the methods as a paper states them, written from what the run read and computed (one
                               text with the report's section 6)

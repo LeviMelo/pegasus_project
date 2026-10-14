@@ -381,7 +381,16 @@ Fixed before the survey: persons read nothing through link runs stored before 20
   5,571 municipalities); INMET's stations, which covered 8 of Alagoas's 102 municipalities and lost a gauge for months,
   are kept for validation. Open: the months after 2024-03-20. Done later the same day: a prospective finding's O/E against its own fit, a same-event link's
   validation roles out of the cohort's attributes, a missing level's contrast marked as recording, the scan nulls'
-  spatial share, compositions read once, the reserve under one lock (1f9d199-662a3c7).
+  spatial share, compositions read once, the reserve under one lock (1f9d199-662a3c7). Then the folder audited by
+  writing the paper from it (docs/evaluation/2026-10-14-paper-audit.md): an agent with the folder alone ranked 18
+  gaps; four were wrong numbers or labels (expectations of three fields in one file, "placed" counted by residence
+  alone, a linked share called the link's sensitivity, a list-valued context filter failing everywhere), fixed, and a
+  fifth found by the fix: every context field's cached reading was keyed by its name, so the climate contexts were
+  still INMET's 8 stations after the BR-DWGD rebuild (now keyed by the field's lake files); added
+  joinpoints, seasonality by regression, sex-specific and Brazil-relative standardised rates, SMRs against Brazil with
+  q, SIM coverage, the topic by code, contexts per municipality, the boundaries. Open, pegasus_data: SIH RACA_COR's
+  codelist and the declared missing codes of Table 1's columns, the files read (hash, server date, status), the
+  population's vintage; open, PegaSUS: 30-day case fatality (a person link of every admission), garbage codes.
 
 Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).
