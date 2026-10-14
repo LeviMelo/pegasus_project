@@ -360,8 +360,13 @@ toxoplasmosis/
   hypotheses.parquet        the declared tests and their answers
   descriptive.parquet       events, denominators, crude and directly standardised rates with intervals, each year
                               and over the period, for the whole, its regions, states and health regions, by sex, age
-                              band and sex within age band; an area's reference rows (Brazil, its macro-regions);
-                              each series' APC, crude and age-sex adjusted
+                              band and sex within age band; an area's reference rows (Brazil, its macro-regions); a
+                              code set's share of its ICD-10 group, chapter and source; linked shares
+  trends.parquet            each series' APC, crude and age-sex adjusted, with its interval and p
+  measures.parquet          the topic's own measures and intervals (length of stay, value paid) and the age at the
+                              event: mean, sd, quartiles, p90, each year and over the period
+  seasons.parquet           the events by calendar month: seasonal index with intervals, the test of uniformity
+  linkage.parquet           every link run a linked field read: pairs, false-match rate, validations
   places.parquet            per municipality, each year and the period: rates, indirectly standardised ratios, the
                               model's expected events, all with intervals (what a map or a spatial model reads)
   groups.parquet            the case mix: every recorded variable's values, counts and shares with intervals, each
@@ -590,7 +595,7 @@ population).
   hospital), never at a place the record merely names (`mark`: the registry office, the death-verification service, a
   managing authority) (`support:<column>`), its records without one unallocated by municipality, the exposure the
   place's residents. The topic's own field is always by **residence**: an area study reads every state's files and
-  keeps, in the lake's scan, the records whose residence is in the area (pegasus_data ADR-0043).
+  keeps, in the lake's scan, the records whose residence is in the area (pegasus_data's decision 0043).
 - **A second coding of the same events** (an alternative classifier of the primary's own structure: SIM's cause before
   investigation, `CAUSABAS_O`) is counted and described beside the primary, asked no questions and given no supports
   or linked shares (`study.Item.count_only`); an alternative of another structure (SIA's diagnosis beside its
@@ -668,7 +673,7 @@ strengths (P6, P7):
 
 | shape | effect | prior |
 |---|---|---|
-| tree | θ_n | Gaussian per level per top branch (horseshoe built, not adopted: ADR-0025) |
+| tree | θ_n | Gaussian per level per top branch (a horseshoe was built, not adopted, ADR-0025, and removed 2026-10-14) |
 | ordinal (age, time) | f, h | RW2 (RW1 for short series), sum-to-zero |
 | cyclic (month, week) | season | cyclic RW2, sum-to-zero |
 | graph (places) | g_n | ICAR on the chosen graph + iid (BYM; BYM2 when its parametrisation is adopted) |
@@ -725,10 +730,11 @@ are fitted by the same solver (§6.6).
   by iterative proportional fitting and moment estimates. Quadratic convergence under a line search.
 - **Strengths: the Laplace marginal likelihood.** Newton on log τ with exact global traces and probe-estimated place
   traces, safeguarded as in mgcv (Wood 2011), per-strength step radii, noise-aware; 5–10 outers.
-- **Uncertainty: exact Laplace draws** from the factor (multi-RHS solves; leaf-place block in closed form; centrings by
-  kriging). The predictive is matched by moments.
+- **Uncertainty: the MAP's predictive** (NB with the exposure's variance matched by moments). Exact Laplace draws from the
+  factor (multi-RHS solves; leaf-place block in closed form; centrings by kriging) were built and measured (evaluation
+  2026-10-05, Laplace; 2026-10-06, SBC), nothing read them, and the code was removed on 2026-10-14.
 - **Blocks and model choice.** A block is a subtree fitted together (an ICD chapter, a SIGTAP group, an event type
-  without a tree). Rank, graph and prior choices by held-out deviance on the last years together with LAML; never
+  without a tree). Rank and graph choices by held-out deviance on the last years together with LAML; never
   in-sample deviance. A top model across blocks is not built (§12).
 - **Fit on demand.** Any block a study needs and the store lacks is fitted when the planner reaches it (§10.1).
 
@@ -760,7 +766,7 @@ The low-rank interaction is never part of a tier.
   state), each level's estimate shrunk to its parent by the between-group variance.
 - **The noise structure (N1, ADR-0029):** a field's cells are NB(μ, φ/κ), a gamma frailty times a Poisson; the
   frailties of a place's periods are joined by a Gaussian copula with ARMA(1,1) correlation c_k = ρ δ^(k−1), and across
-  places by a spatial component on the graph's heat kernel. κ by central matching of the PIT quartiles; ρ, δ from the
+  places by a spatial component on the graph's heat kernel. κ by trimmed maximum likelihood on the aggregate cells (a default is reported as one, `calibration['noise']['estimated']`); ρ, δ from the
   detrended lag moments. It is what replicate fields, multiscale nulls and the step model's correlation read.
 - **Surprise:** `z = Φ⁻¹(u)`, information weight `w = μ / (1 + μ/φ)`, flags (denominator tension, unreliable recording,
   calibration, small support). Zero cells in closed form. Subset statistics never average z; they use Σy and Σμ.
@@ -1157,7 +1163,7 @@ leads per world, the bias of the estimated effect. Leads are sized with their lo
 
 ### 11.5 The model's own checks
 
-Simulation-based calibration (Talts et al. 2018); the Laplace fit against MCMC on sampled fields and states;
+Simulation-based calibration (Talts et al. 2018; its script went with the Laplace draws, 2026-10-14); the Laplace fit against MCMC on sampled fields and states;
 held-out deviance and calibration of the forecasting tiers.
 
 ### 11.6 Method records and model cards
@@ -1213,7 +1219,7 @@ it.
 | § | the document says | the code does | why |
 |---|---|---|---|
 | 6.3 | BYM2 with a learned mixing | BYM: separate strengths for the scaled ICAR and iid parts | the two strengths form a ridge; BYM2's parametrisation measured, not yet adopted |
-| 6.3 | horseshoe on tree levels | Gaussian per level by default; horseshoe built, opt-in | held out equal to 2·10⁻⁵ per event (ADR-0025) |
+| 6.3 | horseshoe on tree levels | Gaussian per level; the horseshoe was built and removed (2026-10-14) | held out equal to 2·10⁻⁵ per event (ADR-0025) |
 | 6.2 | geography carried to a declared level | groups carry ICAR + iid; categories an iid leaf-place deviation | the category-level deviation is real (IX sd ≈ 0.47) |
 | 6.2, 6.6 | the low-rank interaction on every leaf, all scales learned | active leaves only, ψ and τ strengths fixed, annual grain, no draws, rank chosen by script | identifiability and cost; the cross-block factor needs the top model |
 | 6.6 | a top model across blocks | not built | — |

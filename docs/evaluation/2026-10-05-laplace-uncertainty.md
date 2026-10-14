@@ -1,6 +1,6 @@
 # The Laplace uncertainty layer: cost, accuracy, and what it does to calibration
 
-**Scenario.** `scripts/measure_laplace.py` (modes `ix`, `dengue`, `bp-ix19`, `bp-dengue18`, `bp-dengue14`; 32 draws, GPU), `scripts/measure_laplace_fs.py`, and the small-block checks `data/laplace_exact.py`, `pc_test.py`, `pc_var.py`, `region_phi.py` (local, gitignored). Artefacts in the worktree: `data/logs/laplace_<mode>.json`, `laplace_fs_<mode>.json`, `laplace_exact_ix_50.json`, `region_phi.json`.
+**Scenario.** `measure_laplace.py` (removed 2026-10-14 with the code it exercised) (modes `ix`, `dengue`, `bp-ix19`, `bp-dengue18`, `bp-dengue14`; 32 draws, GPU), `measure_laplace_fs.py` (removed 2026-10-14 with the code it exercised), and the small-block checks `data/laplace_exact.py`, `pc_test.py`, `pc_var.py`, `region_phi.py` (local, gitignored). Artefacts in the worktree: `data/logs/laplace_<mode>.json`, `laplace_fs_<mode>.json`, `laplace_exact_ix_50.json`, `region_phi.json`.
 **Regime.** Branch `worktree-agent-afb63cec4eed96769` after merging design-v0 (d7f4514), 2026-10-05; fits as cached in `pegasus_home/monolith` (IX SIM.DO 2010-23 knn6; contiguity for BP; dengue monthly). Posterior: NB expected information, perturbation draws, block-Jacobi CG, `Expectations(laplace=32)`.
 
 ## The draws

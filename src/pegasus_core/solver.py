@@ -25,7 +25,10 @@ models and the interaction keep the v0 Newton–CG until they are ported."""
 
 from __future__ import annotations
 
+import hashlib
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -35,6 +38,14 @@ import torch
 
 PLACE = ("s_all", "v_all", "s_grp", "v_grp")
 RIDGE = 1e-9            # relative ridge on the reduced system's diagonal: the flat directions kriging removes
+
+# The globals' centring basis (`StructuredNewton._global_layout`) is a function of the lattice (groups, leaves, ages, periods,
+# carriers, masks, labels), never of the counts, so every solver on one lattice reads one: a block's fit, its two robust
+# refits and each world of a null grid had each derived it afresh (1.1 s of a 6 s robust refit at 102 places and 11 groups;
+# 28 s a solver at 100 groups, the review of the models, 2026-10-14). Dense, tens of MB for a large lattice: the last few kept.
+_LAYOUTS: OrderedDict[str, np.ndarray] = OrderedDict()
+_LAYOUTS_KEPT = 4
+_LAYOUTS_LOCK = threading.Lock()
 
 
 def shifted_cholesky(S: np.ndarray) -> np.ndarray:
@@ -90,7 +101,6 @@ class Factors:
     dPu: np.ndarray | None = None    # [A, U]
     dR: np.ndarray | None = None     # [A, U, G]
     cell_grad: np.ndarray | None = None   # a mark model's score per non-empty cell (log-likelihood units)
-    nb_phi: float | None = None           # the counts fitted by the negative binomial likelihood: its φ
 
 
 class Arrowhead:
@@ -167,14 +177,48 @@ class StructuredNewton:
         # range per component (block-diagonal; kept dense: the f_grp and h_grp blocks fill 40 % of it, and SciPy's
         # dense-by-sparse product took 11 s per factor on IX where the dense one takes 0.3 s)
         m = self.m
-        blocks = [np.ones((1, 1))]
-        for n in names[1:]:
-            p = m.params[n].detach()
-            J = _np(torch.autograd.functional.jacobian(lambda r, n=n: m._centred(n, r).reshape(-1), p).reshape(sizes[n], sizes[n]))
-            w, v = np.linalg.eigh((J + J.T) / 2)
-            blocks.append(v[:, w > 0.5])               # orthonormal basis of range(P_n)
-        self.Cg = sp.block_diag(blocks).toarray()
+        key = self._lattice_key(names, sizes)
+        with _LAYOUTS_LOCK:
+            Cg = _LAYOUTS.get(key)
+            if Cg is not None:
+                _LAYOUTS.move_to_end(key)
+        if Cg is None:
+            blocks = [np.ones((1, 1))]
+            for n in names[1:]:
+                p = m.params[n].detach()
+                J = _np(torch.autograd.functional.jacobian(lambda r, n=n: m._centred(n, r).reshape(-1), p).reshape(sizes[n], sizes[n]))
+                w, v = np.linalg.eigh((J + J.T) / 2)
+                blocks.append(v[:, w > 0.5])               # orthonormal basis of range(P_n)
+            Cg = sp.block_diag(blocks).toarray()
+            Cg.flags.writeable = False                      # shared by every solver on the lattice
+            with _LAYOUTS_LOCK:
+                _LAYOUTS[key] = Cg
+                while len(_LAYOUTS) > _LAYOUTS_KEPT:
+                    _LAYOUTS.popitem(last=False)
+        self.Cg = Cg
         self.ng_red = self.Cg.shape[1]
+
+    def _lattice_key(self, names: list[str], sizes: dict[str, int]) -> str:
+        """Everything `Monolith._centred` reads for the globals, and nothing of the counts: the component shapes' labels and
+        centring flags, the batch sizes, the age-sex mask and the incomplete table's cells (its projector is a function of them)."""
+        m = self.m
+        h = hashlib.sha256()
+
+        def put(a) -> None:
+            a = np.ascontiguousarray(a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else a)
+            h.update(f"{a.dtype}{a.shape}".encode())
+            h.update(a.tobytes())
+
+        h.update(repr((names, [sizes[n] for n in names], self.K, self.E, self.T, self.G, self.Ko, self.monthly, m.nB)).encode())
+        for n in names[1:]:
+            c = m.components[n]
+            h.update(repr((n, c.batch, c.shape.Q.shape, bool(c.shape.centred))).encode())
+            put(m._labels[n])
+        put(m._gmask)
+        if m._fproj is not None:
+            put(m._fproj[0])
+            put(m._fproj[2])
+        return h.hexdigest()
 
     def _place_layout(self) -> None:
         """Per place: s_all, v_all, s_grp[0..K−1], v_grp[0..K−1] in x-space; in reduced coordinates the group
@@ -222,12 +266,6 @@ class StructuredNewton:
         m = self.m
         if hasattr(m, "cell_derivatives"):
             return self._mark_factors(x)
-        if getattr(m, "likelihood", "poisson") == "nb" and np.isfinite(getattr(m, "phi_fit", np.inf)):
-            # the negative binomial likelihood (`Monolith(likelihood="nb")`): its expected information φμ/(φ + μ) over
-            # every cell, streamed per leaf; the score is the same sums less φy/(φ + μ) over the non-empty cells
-            f = self.nb_factors(x, m.phi_fit)
-            f.nb_phi = float(m.phi_fit)
-            return f
         t0 = time.time()
         with torch.no_grad():
             LP = m._leaf_place(x)                                                 # [E, U]
@@ -247,7 +285,7 @@ class StructuredNewton:
                 mubar[leaves] = torch.einsum("eu,ut,utg->etg", LP[leaves], EX[k], m.N) * Fk[k][None, None, :]
             dev = {}
             lf = m.leaf_factor(x) if hasattr(m, "leaf_factor") else None
-            if lf is not None:                  # leaves with their own place-time factor: interaction, category courses
+            if lf is not None:                  # leaves with their own place-time factor: the interaction's active ones
                 act, logf = lf
                 ka = m.grp[act]
                 Xa = EX[ka] * torch.exp(logf)                                    # [A, U, T]
@@ -329,42 +367,11 @@ class StructuredNewton:
                 out[n] = val + ((c.shape.Q @ xv.T).T * c.tau).reshape(val.shape)
         return out
 
-    def _nb_gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
-        """The negative binomial score: Σ over every cell of w = φμ/(φ + μ) (the streamed sums of `nb_factors`), less
-        φy/(φ + μ) over the non-empty cells, summed over the cells each effect touches."""
-        m = self.m
-        K, T = self.K, self.T
-        grp = self.grp
-        w_t = f.dPk.sum(1)                                                  # [E, T]
-        w_g = f.mubar.sum(1)                                                # [E, G]
-        gs = np.zeros((K, self.U))
-        np.add.at(gs, grp, f.m)
-        M = {"b0": np.array([f.m.sum()]), "th_grp": np.bincount(grp, weights=f.m.sum(1), minlength=K)[None, :],
-             "th_cat": f.m.sum(1)[None, :], "f_all": w_g.sum(0)[None, :], "f_grp": np.zeros((K, self.G)),
-             "h_all": w_t.sum(0)[None, :], "h_grp": np.zeros((K, T)), "s_all": f.m.sum(0)[None, :], "s_grp": gs,
-             "v_cat": f.m.copy()}
-        np.add.at(M["f_grp"], grp, w_g)
-        np.add.at(M["h_grp"], grp, w_t)
-        M["v_all"], M["v_grp"] = M["s_all"], M["s_grp"]
-        if self.monthly:
-            agg = np.zeros((T, 12))
-            agg[np.arange(T), self.moy] = 1.0
-            M["c_all"] = (M["h_all"] @ agg)
-            M["c_grp"] = M["h_grp"] @ agg
-        M = self._by_outer(M)
-        with torch.no_grad():
-            mu = _np(torch.exp(m.eta_nnz(x)))
-        phi = f.nb_phi
-        corr = self._cell_sums(phi * m.data.y / (phi + mu))
-        return self._with_penalty(x, {n: v - corr[n] for n, v in M.items()})
-
     def gradient(self, x: dict[str, torch.Tensor], f: Factors) -> dict[str, np.ndarray]:
         """∂(−log L + penalty)/∂x for every effect (x-space, unscaled: log-likelihood units)."""
         m = self.m
         if f.cell_grad is not None:
             return self._with_penalty(x, self._cell_sums(f.cell_grad))
-        if f.nb_phi is not None:
-            return self._nb_gradient(x, f)
         WPu, Ht, Fg = self._leaf_sums(f)
         M = {"b0": np.array([f.total]), "th_grp": WPu.sum(1)[None, :], "th_cat": f.m.sum(1)[None, :],
              "f_all": Fg.sum(0)[None, :], "f_grp": Fg, "h_all": Ht.sum(0)[None, :], "h_grp": Ht,
@@ -1152,75 +1159,6 @@ class StructuredNewton:
             out[n] = xg[o:o + nn]
         return out
 
-
-    # ------------------------------------------------------------------ Laplace draws
-
-    def nb_factors(self, x: dict[str, torch.Tensor], phi: float) -> Factors:
-        """The negative binomial's expected information as cell weights, w = φμ/(φ + μ) over every cell (the
-        Laplace posterior's, `laplace.Posterior`): not factorisable over the empty cells, so each leaf's slab
-        [U, T, G] is streamed once and its sums kept as the leaf's own features (the mark models' path)."""
-        m = self.m
-        with torch.no_grad():
-            LP = m._leaf_place(x)
-            lin = m._time(x)[:, None, :] + (x["s_all"][0] + x["v_all"][0])[None, :, None] + m._grp_place(x)[:, :, None]
-            EX = torch.exp(lin)
-            Fk = m._prof(x)
-            lf = m.leaf_factor(x) if hasattr(m, "leaf_factor") else None
-            J = torch.exp(lf[1]) if lf is not None else None
-            E, U, T, G = self.E, self.U, self.T, self.G
-            mm = torch.empty((E, U), dtype=LP.dtype)
-            dPk = torch.empty((E, U, T), dtype=LP.dtype)
-            dR = torch.empty((E, U, G), dtype=LP.dtype)
-            mubar = torch.empty((E, T, G), dtype=LP.dtype)
-            pos = None
-            if J is not None:                   # each leaf's row in the factor (-1: none)
-                pos = np.full(E, -1, dtype=np.int64)
-                pos[_np(lf[0]).astype(np.int64)] = np.arange(len(lf[0]))
-            for e in range(E):
-                k = int(self.grp[e])
-                xt = EX[k] if J is None or pos[e] < 0 else EX[k] * J[int(pos[e])]
-                mu = LP[e][:, None, None] * xt[:, :, None] * m.N * Fk[k][None, None, :]
-                w = mu if not np.isfinite(phi) else mu * (phi / (phi + mu))
-                dPk[e] = w.sum(2)
-                dR[e] = w.sum(1)
-                mm[e] = dPk[e].sum(1)
-                mubar[e] = w.sum(0)
-        K = self.K
-        return Factors(np.ones((E, U)), np.zeros((K, U, T)), np.zeros((K, G)),
-                       np.bincount(self.grp, minlength=K)[:, None] * np.ones((1, U)), np.zeros((K, U, T)),
-                       np.zeros((K, U)), np.zeros((K, U, G)), _np(mm), _np(mubar), float(mm.sum()),
-                       act=np.arange(E, dtype=np.int64), dPk=_np(dPk), dPu=_np(mm), dR=_np(dR))
-
-    def draws(self, f: Factors, n: int, seed: int) -> dict[str, np.ndarray]:
-        """``n`` exact draws of the effects' displacement from N(0, H⁻¹) restricted to the centred subspace, H the
-        Hessian whose cell weights ``f`` carries (`nb_factors`, or a mark model's own `factors`):
-        - the place and global coordinates from their marginal precision (the Schur complement of the leaf-place
-          block, which the arrowhead factors as MMᵀ, M = [[L, 0], [Yᵀ, L_S]]): x = M⁻ᵀz, one multi-RHS solve;
-        - the leaf-place block given them: v = Z(D^½ z − Bx), Z the block's inverse under its centring (Var ZDZ = Z);
-        - the centrings across places by conditioning by kriging, x − V(AV)⁻¹Ax.
-        Returns effect-shaped arrays with a trailing axis of draws."""
-        from scipy.linalg import solve_triangular
-        rng = np.random.default_rng(seed)
-        vs = self._v_stats(f)
-        fac = self.factor(self.assemble(f, vs))
-        d, inv_d, s = vs[0], vs[1], vs[2]
-        z_l = rng.standard_normal((self.nl_red, n))
-        z_g = rng.standard_normal((self.ng_red, n))
-        x_g = solve_triangular(fac.Sc.T, z_g, lower=False)
-        x_lp = fac.L.lower_t(z_l - fac.Y @ (fac.Cg @ x_g))
-        x_l = np.empty_like(x_lp)
-        x_l[fac.p] = x_lp
-        x_r = np.vstack([x_l, x_g])
-        b_v = np.sqrt(d)[..., None] * rng.standard_normal((self.E, self.U, n))
-        feat = self._features(f)
-        _, _, back = _vk()
-        gptr, gleaves = self._groups()
-        dot, dth = self._B_parts(f, feat, x_r)
-        if f.act is not None:
-            b_v[f.act] -= f.LP[f.act][:, :, None] * self._active_dot(f, x_r, dth)
-        x_v = back(np.ascontiguousarray(b_v), inv_d, s, f.LP, f.Pu, self.grp, gptr, gleaves, dot, dth, np.empty_like(b_v))
-        x_v, x_r = self._krige(fac, f, vs, x_v, x_r)
-        return self._to_effects_multi(x_v, x_r)
 
 
 def fit_mean(model, iterations: int = 30, loglik_tol: float = 1e-3, log=None, solver: StructuredNewton | None = None) -> int:

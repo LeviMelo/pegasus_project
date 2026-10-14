@@ -10,7 +10,7 @@ Sources: the code (read 2026-10-10 and, for the study path, 2026-10-12), `script
 
 ## 1. What PegaSUS does today, end to end
 
-`pegasus_core` (40 modules, 22,253 lines; the package `scans` is 9 of them) reads Brazilian health events through `pegasus_data` and turns them into a register of **leads**. For an event type of a system (SIM deaths, SIH admissions, SINASC births, SINAN notifications, SIA procedures, CIHA, ...) it assembles counts by residence municipality x year x sex x age x classifier code (`gateway`, `monolith.assemble`), fits **one hierarchical negative-binomial model per block** (one ICD chapter; `monolith`, `solver`, `laplace`) with a place-year noise structure (`surprise`), turns the fit into expectations at six tiers and a calibrated cell-level surprise (`surprise`), asks every field of the block a fixed set of **questions** (excess, step, trend, cluster, share, institution, group, divergence, prospective) through all the **methods** registered for each (`questions`, `departures`, `scans/`, `multiscale`), controls error over the whole search through a ledger written before any test runs (`control`), and stores what survives as leads (`leads`). A second reading relates fields to each other (`relations`, `dependency`, `scans/maps`), a third interprets leads (triage into signal / noise / substitution / system / facility in `scans/explain` and `facility`; replication on later years and other jurisdictions in `replication`; corroboration in other record systems in `corroborate`), and a fourth presents them (`report`: Markdown report, HTML dossier, person verdicts). Persons linked across systems enter through cohort scans (`scans/cohort`) and linked-share fields. The whole is driven by `update` (a YAML plan brings fits, questions, relations, triage and the report up to date, redoing only what changed), by the `pegasus-core` CLI, by the Python `tools.Session`, and read-only by an MCP server.
+`pegasus_core` (39 modules, 22,253 lines; the package `scans` is 9 of them) reads Brazilian health events through `pegasus_data` and turns them into a register of **leads**. For an event type of a system (SIM deaths, SIH admissions, SINASC births, SINAN notifications, SIA procedures, CIHA, ...) it assembles counts by residence municipality x year x sex x age x classifier code (`gateway`, `monolith.assemble`), fits **one hierarchical negative-binomial model per block** (one ICD chapter; `monolith`, `solver`) with a place-year noise structure (`surprise`), turns the fit into expectations at six tiers and a calibrated cell-level surprise (`surprise`), asks every field of the block a fixed set of **questions** (excess, step, trend, cluster, share, institution, group, divergence, prospective) through all the **methods** registered for each (`questions`, `departures`, `scans/`, `multiscale`), controls error over the whole search through a ledger written before any test runs (`control`), and stores what survives as leads (`leads`). A second reading relates fields to each other (`relations`, `dependency`, `scans/maps`), a third interprets leads (triage into signal / noise / substitution / system / facility in `scans/explain` and `facility`; replication on later years and other jurisdictions in `replication`; corroboration in other record systems in `corroborate`), and a fourth presents them (`report`: Markdown report, HTML dossier, person verdicts). Persons linked across systems enter through cohort scans (`scans/cohort`) and linked-share fields. The whole is driven by `update` (a YAML plan brings fits, questions, relations, triage and the report up to date, redoing only what changed), by the `pegasus-core` CLI, by the Python `tools.Session`, and read-only by an MCP server.
 
 State of the store (2026-10-10): 334 stored fits (SIM.DO 149, SIH-RD 85, SINASC-DN 28, 31 SINAN diseases), a ledger of 113,069 tests in 981 families, a register of 63,078 leads (SIH-RD 43,168; SINASC-DN 11,766; SIM.DO 7,746; SINAN-SDTA 398), of which 62,745 are at replication tier R0, 333 at R1, none at R2 or R3. Section 8 says what that means.
 
@@ -27,9 +27,9 @@ gateway ---------- counts, populations, marks, shares, links, persons, context f
    v
 monolith.assemble -> BlockData (store `blockdata`) -> Monolith.fit  (solver: exact Newton on the arrowhead Hessian,
    |                                       CHOLMOD; LAML strengths)  -> robust refit -> store `monolith`
-   |                                       laplace: posterior draws          structures/graphs: precisions, place graph
+   |                                                                         structures/graphs: precisions, place graph
    v
-surprise.Expectations ---- tiers B0 B1 B2 B2s BP BPA, noise structure N1, randomised PIT, calibration  (store `surprise`, `calibration`)
+surprise.Expectations ---- tiers B0 B1 B2 B2s BP BPA, noise structure N1, randomised PIT, calibration  (store `calibration`)
    |
    v
 questions.ask  ->  methods:  departures (cell_excess, excess, step, share_excess, joint_excess, attribute)
@@ -49,7 +49,7 @@ update:  the orchestrator over all of the above for a plan (plans/*.yml), under 
 ```
 
 Layering (imports go downward; `scripts/codehealth.py` finds 0 import cycles, function-level imports counted):
-`cli`, `mcp_server` > `update`, `report`, `dependency`, `harness` > `tools` > {`replication`, `corroborate`, `questions`, `departures`, `relations`, `marks`, `multiscale`, `surveillance`, `scans/*`} > `surprise` > {`monolith`, `laplace`, `solver`, `facility`, `fields`} > {`gateway`, `graphs`, `structures`, `jobs`} > `store`, `config`. `control` and `leads` are used from every layer above `gateway`.
+`cli`, `mcp_server` > `update`, `report`, `dependency`, `harness` > `tools` > {`replication`, `corroborate`, `questions`, `departures`, `relations`, `marks`, `multiscale`, `surveillance`, `scans/*`} > `surprise` > {`monolith`, `solver`, `facility`, `fields`} > {`gateway`, `graphs`, `structures`, `jobs`} > `store`, `config`. `control` and `leads` are used from every layer above `gateway`.
 
 ---
 
@@ -67,6 +67,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `graphs` | 102 | proximity graphs over places through the gateway, stored as arrays (`graphs`) | `edges`, `graph`, `DEFAULT` ("contiguity") | config, facility, gateway, store, structures |
 | `jobs` | 116 | the machine: one heavy-job slot (OS file lock, `PEGASUS_HEAVY_SLOTS`), thread count, GPU slot, `run` of command sequences, `parallel_map` | `default_threads`, `slot`, `threads`, `run`, `parallel_map` | gateway |
 | `control` | 427 | **error control**: the append-only ledger (Parquet parts `pending` then `result`), BH/BY (weighted), Simes, Bogomolov, tree BH, LOND, replication helpers (halves, `replicates`), the confirmation reserve | `Hypothesis`, `Ledger` (`register`, `complete`, `table`, `compact`, `family`), `bh`, `optimal_weights`, `adjusted`, `simes`, `bogomolov`, `tree_bh`, `LOND`, `temporal_halves`, `spatial_halves`, `replicates`, `event_sides`, `ReservedPeriod`, `Reserve`, `check_reserved`, `replication_tier`, `KINDS` | config |
+| `mc` | 76 | **sequential Monte Carlo**: a null test's replicate worlds drawn in batches and stopped once the exceedances decide it (Besag & Clifford 1991), shared by the scans, propagation and corroboration | `Sequential`, `Draws`, `sequential_p` | numpy |
 
 ### 3.2 Data and fields
 
@@ -79,10 +80,9 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 
 | module | lines | responsibility | main public names | imports |
 |---|---|---|---|---|
-| `monolith` | 2883 | the hierarchical model of a block: `y[e,u,t,g] ~ NegBin(mu, phi)` with levels along the ICD tree, age-sex profiles, histories (RW2), BYM geography per level, optional low-rank place x time interaction (Poisson, annual only), NB-P dispersion, robust refit (trimmed likelihood, recodings moved within the block), per-category courses; mark and share models (log-normal, beta-binomial, count-valued); BP's regime extrapolation; `assemble` builds `BlockData` from the gateway A ratio field's events and exposure in one cell (`events:` population); `default_population` reads an event type's declared exposure (pegasus_data decision 0161); warm starts only within one exposure unit. | `BlockData`, `assemble`, `fit_block` (assemble, fit, store and robust-refit one block: the one fitting path, moved here from `update` on 2026-10-10), `Monolith` (`fit`, `warm_start`, `robust`, `robust_stored`, `refit`, `without`, `expected`, `expected_by_group`, `nb_loglik`, `save`, `load`), `MarkModel`, `ShareModel`, `CountModel`, `model_class`, `place_year_phi`, `extrapolate*`, `regime_history`, `heldout`, `default_population` | config, control, gateway, graphs, jobs, solver, store, structures |
-| `solver` | 1809 | the v1 solver: exact Newton on the block-arrowhead Hessian (leaf-place diagonal eliminated, place system by CHOLMOD supernodal factor, dense Schur on globals), LAML strength updates with exact traces, interaction sweeps | `StructuredNewton`, `Arrowhead`, `Supernodal`, `Factors`, `fit_mean`, `ix_sweep`, `ix_strengths` | none |
-| `laplace` | 227 | Laplace posterior of a fitted block: exact draws from N(0, H^-1) on the centred subspace, exact conditional sweeps of the nested levels (Poisson only), predictive phi | `Posterior`, `predictive_phi` | config, monolith, solver |
-| `surprise` | 1356 | **tiers and calibration.** For a field and a tier (B0 no place effects, B1 the fit, B2 + place trend, B2s + place season at monthly grain, BP prospective expectation, BPA alarm baseline) every cell gets y, mu, aggregate phi, randomised PIT, z, information weight; **N1 noise structure** (AR(1) latent over periods, gamma frailty by Gaussian copula, spatial heat-kernel root); calibration (KS by macro-region); mixture PIT for BP | `Noise`, `Surprise`, `Expectations` (`model`, `field`, `surprise`, `prospective`, `place_effects`, `posterior`), `noise_structure`, `with_noise`, `calibration`, `refit_place*`, `place_course`, `lift`, `replicate_correlated`, `field_replicate`, `randomised_pit`, `mixture_pit`, `TIERS` | config, facility, fields, gateway, jobs, laplace, monolith, store |
+| `monolith` | 2890 | the hierarchical model of a block: `y[e,u,t,g] ~ NegBin(mu, phi)` with levels along the ICD tree, age-sex profiles, histories (RW2), BYM geography per level, optional low-rank place x time interaction (Poisson, annual only), NB-P dispersion, robust refit (trimmed likelihood, recodings moved within the block); mark and share models (log-normal, beta-binomial, count-valued); BP's regime extrapolation; `assemble` builds `BlockData` from the gateway A ratio field's events and exposure in one cell (`events:` population); `default_population` reads an event type's declared exposure (pegasus_data decision 0161); warm starts only within one exposure unit. | `BlockData`, `assemble`, `fit_block` (assemble, fit, store and robust-refit one block: the one fitting path, moved here from `update` on 2026-10-10), `Monolith` (`fit`, `warm_start`, `robust`, `robust_stored`, `refit`, `without`, `expected`, `expected_by_group`, `nb_loglik`, `save`, `load`), `MarkModel`, `ShareModel`, `CountModel`, `model_class`, `place_year_phi`, `extrapolate*`, `regime_history`, `heldout`, `default_population` | config, control, gateway, graphs, jobs, solver, store, structures |
+| `solver` | 1769 | the v1 solver: exact Newton on the block-arrowhead Hessian (leaf-place diagonal eliminated, place system by CHOLMOD supernodal factor, dense Schur on globals), LAML strength updates with exact traces, interaction sweeps | `StructuredNewton`, `Arrowhead`, `Supernodal`, `Factors`, `fit_mean`, `ix_sweep`, `ix_strengths` | none |
+| `surprise` | 1403 | **tiers and calibration.** For a field and a tier (B0 no place effects, B1 the fit, B2 + place trend, B2s + place season at monthly grain, BP prospective expectation, BPA alarm baseline) every cell gets y, mu, aggregate phi, randomised PIT, z, information weight; **N1 noise structure** (AR(1) latent over periods, gamma frailty by Gaussian copula, spatial heat-kernel root); calibration (KS by macro-region); mixture PIT for BP | `Noise`, `Surprise`, `Expectations` (`model`, `field`, `surprise`, `prospective`, `place_effects`), `noise_structure`, `predictive_phi`, `relevel_b0`, `with_noise`, `calibration`, `refit_place*`, `place_course`, `lift`, `replicate_correlated`, `field_replicate`, `randomised_pit`, `mixture_pit`, `TIERS` | config, facility, fields, gateway, monolith |
 | `facility` | 416 | the institution behind an event: the facility cube (residence, facility, code3, year), supply indices and the supply term of a block, the institution lattice (a facility's events against its catchment's expectation) | `facility_cube`, `Facilities`, `Pairs`, `pairs`, `supply_indices`, `fit_supply`, `attach_supply`, `Supply`, `best_window`, `institution_lattice` | config, gateway, scans (explain), store |
 | `marks` | 280 | measures of an event type (length of stay, cost, death in hospital, ICU days) fitted with case-mix and an empirical-Bayes facility effect; triage of a mark lead as one institution's | `reader`, `spec`, `fit_chapter`, `shrink_facilities`, `facility_jumps`, `triage_lead`, `FacilityFit`, `save_record` | facility, fields, gateway, graphs, monolith, scans |
 
@@ -229,7 +229,6 @@ Counts of a classifier node (ICD-10 chapters/blocks/3-character categories, SIGT
 | `check_docs.py` | mechanical consistency of the documents (section 10) |
 | `codehealth.py` | import cycles and unreferenced definitions (runs in about a second) |
 | `bench.py` | the solver benchmark (cold and warm fits of reference blocks) |
-| `sbc.py` | simulation-based calibration of the mean fit and its Laplace posterior |
 | `throughput.py` | seconds per field and question from a plan's stamped log |
 | `profile_field.py` | profile of the question pass on one field |
 | `warm_gateway.py` | fills the gateway cache for an event type and years |
@@ -237,7 +236,7 @@ Counts of a classifier node (ICD-10 chapters/blocks/3-character categories, SIGT
 | `gate_eb.py` | the E_b gate: negative controls, delta_E, planted-latent power, known positives |
 | `location_null.py` | null worlds of a location field |
 | `measure_bp_level.py`, `bp_level_table.py` | BP's level by rolling origins and its pooled table |
-| `measure_dispersion.py`, `measure_exposure.py`, `measure_heldout.py`, `measure_laplace.py`, `measure_laplace_fs.py` | dispersion by region; POPSVS vs population account; held-out model choice; Laplace uncertainty; Fellner-Schall vs full Hessian |
+| `measure_dispersion.py`, `measure_exposure.py` | dispersion by region; POPSVS vs population account |
 | `declare_positives.py` (+ `atlas_uf.json`) | derives the documented loci of three declared lens positives from the Atlas da Violencia |
 | `mcp_demo.py` | exercises the MCP server with a real client |
 
@@ -325,7 +324,7 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
 - **MCP** is read-only on the register: no `ask`, `surprise`, `compare`, `cohort`, `records` or pegasus_data query; `list_fields(block="IX")` did not return in about 9 minutes under load (it loads a full session, 4.7 GB resident).
 - **Disparity** (`group_disparity`, null rate 0.48) and **institution_step** (1.0) raise findings in null worlds.
 - **Triage stability.** The same lead (Fernando de Noronha/PE, SINAN-SDTA cluster) is `noise` in `reports/s6_sinan_sdta.md` and `signal` in a newer report; the rule version is stored but not shown beside the label.
-- **Unbuilt combinations** (`NotImplementedError`): monthly grain for the low-rank interaction and for anything but event and code-list counts; NB mean fit with the interaction; refit of an interaction model; Laplace level sweeps for NB; Laplace draws across blocks; the prospective tier for non-counts; B2s on annual blocks; the facility supply term at monthly grain; a grouped link side with a filter or "latest" order.
+- **Unbuilt combinations** (`NotImplementedError`): monthly grain for the low-rank interaction and for anything but event and code-list counts; refit of an interaction model; the prospective tier for non-counts; B2s on annual blocks; the facility supply term at monthly grain; a grouped link side with a filter or "latest" order.
 - **Store hygiene.** `ledger_A` (10,527 parts) and `ledger_T2019` (2,248) are not compacted; fitted-block lookup depends on the exact year range of the request.
 
 **Broken** (the survey run of 2026-10-11 on the old code, `study_toxo_survey9`, 5.0 h against an estimate of 46.5 min; rerun on the fixes as `survey10`)
@@ -368,6 +367,17 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
   - two paused lanes waited forever, the pool's idle workers counting as active lanes (deep8).
 
 Fixed before the survey: persons read nothing through link runs stored before 2026-10-10, which named records by row (pegasus_data `store.load` relabels; merged).
+
+- **2026-10-14, the folder as a paper's only source** (docs/evaluation/2026-10-14-paper-ready-folder.md): every study
+  folder, at every depth, holds the whole period beside each year, rates by sex, age band and sex within band, an area's
+  reference rates (Brazil, its macro-regions), trends with their own columns (trends.parquet), every municipality
+  (places.parquet), completeness (quality.parquet), seasonality (seasons.parquet), the linkage runs (linkage.parquet) and
+  METHODS.md; the Alagoas deep study runs in 8.6 min (26.6 the day before). Stale link runs had been served as current
+  (`link_report`); a read key never saw the lake (`_lake_key`); citing a source re-keyed every count (`_declared_key`).
+  Open: a code-set item reads no measure, share or interval of its own events (a deep study read `supports` only: length
+  of stay and cost absent; measures.parquet queued); the cohort scan does not take a code set (the SIH-SIM persons of a
+  narrow topic are not scanned); the link's capture of in-hospital deaths is not a column; climate is not readable as a
+  context (pegasus_data, in progress).
 
 Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on demand, the as-of year, the field's own codes; SIM IX 0.35% mid-year, 0.20% at a year boundary; week-of-year delays remain, 0.3d); the robust refit's dispersion jump (0.2: the field-level dispersion restores calibration, no product affected).
 - **`events`** takes more than 10 minutes (not a quick readout).

@@ -2,7 +2,7 @@
 
 **Regime.** Pegasus_core `design-v0` at 1f5da4b; SIM.DO chapter IX fitted 2010–2021 under ADR-0024's defaults. Script `data/o5_absorption.py`; artefact `data/probes/o5_absorption_ix.json`; 2026-10-06.
 
-**What and why.** The v0 power curves (`harness.power_curve`, `region_power`) plant y' = y + Poisson((θ − 1)μ) into a null world and read it against the *same* μ. A departure in the data the model is fitted to is instead partly taken up by the model's own effects. So the curves measure power against a fit that never saw the signal. To measure this, each signal was planted at the leaf level into the real counts and the mean was refitted at the fit's strengths (warm start, as `scripts/sbc.py` does: 8–22 s a refit). The figure read is the share of the locus's log excess that the refit took: 1 − log(Y′/μ_refit) / log(Y′/μ_fit).
+**What and why.** The v0 power curves (`harness.power_curve`, `region_power`) plant y' = y + Poisson((θ − 1)μ) into a null world and read it against the *same* μ. A departure in the data the model is fitted to is instead partly taken up by the model's own effects. So the curves measure power against a fit that never saw the signal. To measure this, each signal was planted at the leaf level into the real counts and the mean was refitted at the fit's strengths (warm start, as `sbc.py` (removed 2026-10-14 with the code it exercised) does: 8–22 s a refit). The figure read is the share of the locus's log excess that the refit took: 1 − log(Y′/μ_refit) / log(Y′/μ_fit).
 
 The prediction was declared in the script before running: a national year is absorbed wholly, a place-year hardly at all, and a regional step to the series' end largely.
 

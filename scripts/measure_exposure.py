@@ -23,7 +23,7 @@ import time
 import numpy as np
 from scipy import stats
 
-from pegasus_core import config, graphs, laplace, monolith, surprise
+from pegasus_core import config, graphs, monolith, surprise
 
 TARGETS = {
     "ix": ("SIM.DO", "death", "IX", ["IX", "I20-I25", "I60-I69", "I10-I15"]),
@@ -118,7 +118,7 @@ def score(c: dict, common: np.ndarray | None = None) -> dict:
         return score_bp(c, common)
     y, mu, mu2, phi, macro = c["y"], c["mu"], c["mu2"], c["phi"], c["macro"]
     var = np.zeros_like(mu) if c["var"] is None else c["var"]
-    cells = laplace.predictive_phi(mu, var, mu2, phi)
+    cells = surprise.predictive_phi(mu, var, mu2, phi)
     keep = np.ones(len(c["places"]), bool) if common is None else np.isin(c["places"], common)
     seed = config.seed(c["f"].id, c["tier"], "pit", c["m"].key())
     out = {}

@@ -15,7 +15,7 @@ import sys
 import numpy as np
 from scipy import stats
 
-from pegasus_core import fields, gateway, laplace, monolith, surprise
+from pegasus_core import fields, gateway, monolith, surprise
 
 SIM_NODES = {"IX": ["IX", "I20-I25", "I60-I69", "I64", "I10-I15"], "X": ["X"], "I": ["I"], "XVIII": ["XVIII"]}
 GH_NODES, GH_WEIGHTS = np.polynomial.hermite_e.hermegauss(7)
@@ -64,7 +64,7 @@ def node_ingredients(case, leaf_names):
     li = np.array([m.data.leaves.index(c) for c in leaf_names if c in m.data.leaves])
     mui, mu2i = m.expected(li, spatial=True)
     yi = m.observed(li)
-    ci = laplace.predictive_phi(mui, np.zeros_like(mui), mu2i, m.phi)
+    ci = surprise.predictive_phi(mui, np.zeros_like(mui), mu2i, m.phi)
     extra = np.asarray(monolith.place_year_phi(yi, mui, ci, *case.levels))[:, None]
     return lf, mui, mu2i, yi, extra
 
@@ -78,7 +78,7 @@ def evaluate(case, lf, ing, y, variants):
         for w, x, shift, addv, use_extra in spec:
             mu, mu2 = case.tm.expected(lf, spatial=True, x=x)
             mu, mu2 = mu * np.exp(shift), mu2 * np.exp(2 * shift)
-            inv = 1.0 / laplace.predictive_phi(mu, np.zeros_like(mu), mu2, case.m.phi)
+            inv = 1.0 / surprise.predictive_phi(mu, np.zeros_like(mu), mu2, case.m.phi)
             if use_extra:
                 inv = inv + 1.0 / extra
             inv = inv + np.expm1(addv)

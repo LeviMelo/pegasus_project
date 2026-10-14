@@ -5,7 +5,7 @@ Regime: branch `design-v0` at eca6ff3, with the B4 trial on branch `b4-size` (22
 
 ## B4: a size term in the expectation (work plan B4, OPEN_QUESTIONS 13)
 
-`scripts/measure_heldout.py` fits on 2010–2021 and scores 2022–2023 (contiguity graph, group profile). The exposure is
+`measure_heldout.py` (removed 2026-10-14 with the code it exercised) fits on 2010–2021 and scores 2022–2023 (contiguity graph, group profile). The exposure is
 `popsvs+size:β`, POPSVS × (place population / the year's median place)^β. Runner: `data/probes/b4_heldout.sh`, log
 `data/probes/b4_heldout.log`.
 

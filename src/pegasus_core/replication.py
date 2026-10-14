@@ -142,6 +142,7 @@ class SideExpectations(surprise.Expectations):
     def __init__(self, base: surprise.Expectations, side: str):
         self.__dict__.update(base.__dict__)
         self._models = {}
+        self._built, self._built_bytes = type(base._built)(), 0       # its own surprises: the base's are of another fit
         self.side = side
 
     def model(self, block: str):

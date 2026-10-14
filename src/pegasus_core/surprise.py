@@ -6,21 +6,24 @@ gets its observed count y, its expectation μ, the aggregate dispersion
 randomised PIT u, the surprise z = Φ⁻¹(u) and the information weight
 w = μ/(1+μ/φ_agg). Nothing is averaged over z: subset statistics use Σy, Σμ.
 
-The cube is virtual: `Expectations.surprise` computes it from the fitted
-parameters on demand and caches it only when asked (scanned fields).
+The cube is virtual: `Expectations.surprise` computes it from the fitted parameters on demand and keeps what it built
+for the model's fit (a field's tier is built once, whoever asks: `Expectations.surprise`).
 """
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import functools
+import threading
+import weakref
 from dataclasses import dataclass, field
 
 import numpy as np
 import pyarrow as pa
 from scipy import optimize, special, stats
 
-from . import config, facility, fields, gateway, jobs, laplace, monolith, store
+from . import config, facility, fields, gateway, monolith
 
 TIERS = ("B0", "B1", "B2", "B2s", "BP", "BPA")
 SPATIAL = {"B0": False, "B1": True, "B2": True, "B2s": True, "BP": True, "BPA": True}
@@ -41,6 +44,9 @@ NEW_CATEGORY_ALARM = 5   # events in a year at which a category unseen by the fi
 # macro-region holds ~5,000–25,000 cells, whose sampling KS alone reaches ~0.02.
 KS_TOLERANCE = 0.03
 KS_REGION_TOLERANCE = 0.05
+
+# what one `Expectations` keeps of the cells it has built (a national field's tier is five or six arrays of 5,570 × 14, ~5 MB)
+MEMO_BYTES = 512 * 1024 ** 2
 
 # the levels of the place-year dispersion component's hierarchy below its field-wide value
 # (ARCHITECTURE §5.2): each level's estimate is shrunk to its parent's, by the between-group
@@ -149,15 +155,13 @@ class Expectations:
     """The fitted monolith of one event type, read field by field and tier by tier."""
 
     def __init__(self, dataset: str, event: str, years: range | list[int], graph: str = "contiguity",
-                 structure: str = "ICD10", source: dict | None = None, laplace: int = 0, device: str | None = None,
-                 center: str = "plugin", population: str | None = None,
-                 exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False, rank: int = 0, robust: bool = True):
+                 structure: str = "ICD10", source: dict | None = None, device: str | None = None,
+                 population: str | None = None, exposure_rho: float | None = EXPOSURE_RHO, supply: bool = False,
+                 rank: int = 0, robust: bool = True):
         """``source`` names a non-default reader (``monolith.assemble``): code-list counts
         ({"source": "code_list", "column": "CODANOMAL"}) or a mark ({"source": "mark",
-        "mark": "PESO", "bounds": (200, 7000)}). ``laplace`` is the number of posterior draws (0: the
-        MAP's predictive, NB(mu, phi)); with draws, a cell's predictive integrates mu over the Laplace
-        posterior (ARCHITECTURE 5.3, `laplace.py`), centred on the MAP's expectation (``center="plugin"``) or
-        on the posterior mean (``"posterior"``). ``population`` names the exposure (``gateway.population``:
+        "mark": "PESO", "bounds": (200, 7000)}). The predictive of a cell is the MAP's, NB(mu, phi).
+        ``population`` names the exposure (``gateway.population``:
         popsvs, account-2; None: the configured default). When it carries intervals (the account) the
         predictive's variance adds the exposure's, Var(mu) from log N ~ N(log N^, s^2) with the
         correlation ``exposure_rho`` between a place-year's cells (None: ignored). ``robust`` (the default) reads each
@@ -170,13 +174,15 @@ class Expectations:
         self.supplies: dict = {}
         self.dataset, self.event, self.years, self.graph = dataset, event, list(years), graph
         self.source = dict(source or {})
-        self.laplace, self.device, self.center = int(laplace), device, center
-        self._posteriors: dict = {}
+        self.device = device
         classifier = self.source.get("classifier") or self.source.get("column")
         self.registry = fields.Registry(dataset, event, self.source.get("structure", structure), classifier=classifier)
         self._models: dict[str, monolith.Monolith] = {}
         self._prospective: dict[tuple, tuple] = {}
         self._macro: np.ndarray | None = None
+        self._built: collections.OrderedDict[tuple, tuple] = collections.OrderedDict()   # (field id, tier) -> (models, Surprise)
+        self._built_bytes = 0
+        self._built_lock = threading.Lock()      # fields are read from threads (`jobs.parallel_map`)
 
     def model(self, block: str) -> monolith.Monolith:
         if block not in self._models:
@@ -199,13 +205,6 @@ class Expectations:
             return None
         return m.exposure_variance(leaves, spatial, self.exposure_rho, x)
 
-    def posterior(self, key, model: monolith.Monolith) -> laplace.Posterior:
-        """The Laplace posterior of a fitted block, drawn once per Expectations (``key`` names the fit)."""
-        if key not in self._posteriors:
-            self._posteriors[key] = laplace.Posterior(model)
-            self._posteriors[key].sample(self.laplace)
-        return self._posteriors[key]
-
     def field(self, node: str) -> fields.Field:
         """The field of ``node`` under this reader: its id names the reader (`fields.reader_tag`) in the classifier's
         place, dataset:event:classifier[reader]:node, so a measure, a share or a linked share of a node is not its count."""
@@ -226,7 +225,7 @@ class Expectations:
         (`monolith.regime_history`): the expectation's regime mixture takes past epidemics as normal, the alarm's
         flat level (dengue: ``level36``) does not, and with it the lens recovers the epidemics the mixture
         explains (dengue 2019–23, recall 0.81 against 0.48). Everything else (the training fit's φ_extra,
-        the Laplace and exposure variance) is shared. At the annual grain the two coincide, but for the tier's
+        the exposure variance) is shared. At the annual grain the two coincide, but for the tier's
         name. Tier BP: the years after ``train_last`` against a fit on the years up to it, the history
         extrapolated (`monolith.extrapolate_members`). Surveillance needs it: a fit over the whole period
         learns an epidemic as normal (COVID-19 in SIM: B34 deaths 2020 observed 213,152 against
@@ -235,8 +234,8 @@ class Expectations:
 
         The predictive of a cell is a mixture of NBs over the history's regimes (`mixture_pit`): the
         expectation of each member carries the place's own damped course (``course``: None, the annual
-        grain), the block's φ and the training fit's own place-year component φ_extra, with the Laplace
-        draws' and the exposure's variance when present."""
+        grain), the block's φ and the training fit's own place-year component φ_extra, with the exposure's
+        variance when present."""
         f = node if isinstance(node, fields.Field) else self.field(node)
         train = [y for y in self.years if y <= train_last]
         test = [y for y in self.years if y > train_last]
@@ -279,10 +278,6 @@ class Expectations:
             shift, cvar = place_course(model, li, T)
         mu_point, _ = tm.expected(leaves, spatial=True, x=x_point)
         rel = np.expm1(cvar) + 0.0 * mu_point                      # relative Var(mu), added to each member's 1/φ
-        if self.laplace:
-            post = self.posterior(("BP", f.block, train_last), model)
-            mom = post.moments(leaves, True, x_fn=lambda xd: (tm, monolith.extrapolate_effects(model, tm, xd, point)))
-            rel = rel + mom["var"] / np.maximum(mom["mean"], 1e-300) ** 2
         ev = self._exposure(tm, leaves, True, x_point)
         if ev is not None:
             rel = rel + ev / np.maximum(mu_point, 1e-300) ** 2
@@ -290,7 +285,7 @@ class Expectations:
         for w, x in monolith.extrapolate_members(model, tm, regime, model.effects()):
             mu, mu2 = tm.expected(leaves, spatial=True, x=x)
             mu, mu2 = mu * np.exp(shift), mu2 * np.exp(2 * shift)
-            cells = laplace.predictive_phi(mu, rel * mu ** 2, mu2, model.phi)
+            cells = predictive_phi(mu, rel * mu ** 2, mu2, model.phi)
             comps.append((w, mu, 1.0 / (1.0 / cells + 1.0 / extra)))
             mean = mean + w * mu
         y = tm.observed(leaves)
@@ -308,10 +303,11 @@ class Expectations:
         w_info = np.where(np.isinf(phi), mean, mean / (1 + mean / phi))
         # the noise structure is the training fit's (N1): estimated on the years before t0, never on the watched ones
         mu_tr, mu2_tr = model.expected(li, spatial=True)
-        phi_tr = 1.0 / (1.0 / laplace.predictive_phi(mu_tr, np.zeros_like(mu_tr), mu2_tr, model.phi)
+        phi_tr = 1.0 / (1.0 / predictive_phi(mu_tr, np.zeros_like(mu_tr), mu2_tr, model.phi)
                         + 1.0 / np.broadcast_to(np.asarray(extra, dtype=float), np.shape(extra)))
-        noise = noise_structure(model.observed(li), mu_tr, np.broadcast_to(phi_tr, mu_tr.shape))
-        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay}
+        report: dict = {}
+        noise = noise_structure(model.observed(li), mu_tr, np.broadcast_to(phi_tr, mu_tr.shape), report=report)
+        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay, **report}
         out = Surprise(f, PURPOSE_TIER[purpose], tm.data.places, tm.data.periods(), y, mean, phi, u, z, w_info, flags, cal,
                        noise=noise)
         out.extras = {"train": [int(train[0]), int(train[-1])]}
@@ -329,10 +325,7 @@ class Expectations:
         """A field whose leaves lie in several blocks (a list item, ARCHITECTURE §3.3 and §8.6): each block's part from
         its own fit, summed. The blocks are fitted independently, so the expectations and their extra-Poisson
         variances add, Σ_b Σμ²/φ_b, carried at φ = 1. The population's uncertainty is one source for every block, so
-        its standard deviations add, not its variances. B2's refit runs on the sum. Laplace draws are per block and
-        are not combined here."""
-        if self.laplace:
-            raise NotImplementedError("Laplace draws across blocks: a field across blocks is read at the MAP")
+        its standard deviations add, not its variances. B2's refit runs on the sum."""
         y = mu = mu2 = ev_sd = None
         m0 = None
         phis: dict[str, float] = {}
@@ -348,7 +341,7 @@ class Expectations:
             mb, mb2 = m.expected(leaves, spatial=SPATIAL[tier])
             first = mb
             if tier == "B0":
-                mb, mb2 = _relevel_b0(m, leaves, mb, mb2)
+                mb, mb2 = relevel_b0(m.expected(leaves, spatial=True)[0], mb, mb2)
             ex2 = mb2 / m.phi if np.isfinite(m.phi) else np.zeros_like(mb2)
             ev = self._exposure(m, leaves, SPATIAL[tier])
             sd = None if ev is None else np.sqrt(ev) * np.divide(mb, first, out=np.ones_like(mb), where=first > 0)
@@ -391,43 +384,61 @@ class Expectations:
             self._macro = gateway.regions(places, "ibge_macroregion")
         return self._macro
 
-    def surprise(self, node: str | fields.Field, tier: str = "B1", cache: bool = False) -> Surprise:
+    def surprise(self, node: str | fields.Field, tier: str = "B1") -> Surprise:
+        """The field's cells at a tier. Built once for the model's fit and kept (`MEMO_BYTES`): the products, the questions
+        and the other tiers share it, where each rebuilt the tier (B0, B1 and B2 of a field run the place-year dispersion's
+        joint search each; at 5,570 places and 10 years 32 s a call, the review of the models, 2026-10-14). B0 and B2 read B1's
+        mean (B0's level) and noise structure (`_assemble`), so they ask B1 of this same memo. The returned arrays are
+        read-only: a caller that needs to change one copies it."""
         f = node if isinstance(node, fields.Field) else self.field(node)
         if tier not in TIERS:
             raise KeyError(tier)
-        if "+" in f.block or self.registry.level.get(f.node) == "list":
-            return self._surprise_across(f, tier)
-        m = self.model(f.block)
+        across = "+" in f.block or self.registry.level.get(f.node) == "list"
+        models = tuple(self.model(b) for b in (self.registry.blocks(f.node) if across else [f.block]))
+        key = (f.id, tier)
+        with self._built_lock:
+            held = self._built.get(key)
+            if held is not None and len(held[0]) == len(models) and all(r() is m for r, m in zip(held[0], models, strict=True)):
+                self._built.move_to_end(key)
+                return held[1]
+        out = self._surprise_across(f, tier) if across else self._surprise_block(f, tier, models[0])
+        self._keep(key, models, out)
+        return out
+
+    def _keep(self, key: tuple, models: tuple, out: Surprise) -> None:
+        """Remember ``out`` for these models (held weakly: a model released by its owner takes its cells with it at the next
+        call), the least recently asked first out beyond `MEMO_BYTES`."""
+        arrays = [out.y, out.mu, out.phi, out.u, out.z, out.w, out.flags,
+                  *(v for v in out.extras.values() if isinstance(v, np.ndarray))]
+        for a in arrays:
+            a.flags.writeable = False
+        size = sum(a.nbytes for a in arrays)
+        with self._built_lock:
+            for k in [k for k, (refs, _, _) in self._built.items() if any(r() is None for r in refs)]:
+                self._built_bytes -= self._built.pop(k)[2]
+            if key in self._built:
+                self._built_bytes -= self._built.pop(key)[2]
+            self._built[key] = (tuple(weakref.ref(m) for m in models), out, size)
+            self._built_bytes += size
+            while self._built_bytes > MEMO_BYTES and len(self._built) > 1:
+                self._built_bytes -= self._built.popitem(last=False)[1][2]
+
+    def _surprise_block(self, f: fields.Field, tier: str, m: monolith.Monolith) -> Surprise:
         if tier == "B2s" and m.data.grain != "month":
             raise NotImplementedError("B2s needs a sub-annual grain; this block is annual")
-        fitted = (store.manifest("monolith", m.key()) or {}).get("written")
-        key = {**m.key(), "fitted": fitted, "field": f.id, "tier": tier,
-               "code": config.code_key("pegasus_core.surprise:Expectations.surprise")}   # the code that builds it
-        if cache:
-            hit = store.get_table("surprise", key)
-            if hit is not None:
-                return _from_table(f, tier, hit, store.manifest("surprise", key))
         leaves = np.array([m.data.leaves.index(c) for c in self.registry.leaves(f.node) if c in m.data.leaves])
         if len(leaves) == 0:
             raise LookupError(f"{f.id}: no leaf of the node is in block {f.block}")
+        macro = self.macroregions(m.data.places)
         if isinstance(m, monolith.MarkModel):
-            out = _mark_surprise(f, tier, m, leaves, self.macroregions(m.data.places))
-            if cache:
-                store.put_table("surprise", key, out.table(), {"noise": dataclasses.asdict(out.noise), "calibration": out.calibration})
-            return out
+            return _mark_surprise(f, tier, m, leaves, macro)
         mu, mu2 = m.expected(leaves, spatial=SPATIAL[tier])
         mu_first = mu
+        b1 = None if tier == "B1" else self.surprise(f, "B1")
         if tier == "B0":
-            # dropping centred log-scale place effects drops E[exp(s + v)] > 1 too: re-level B0 to
-            # the national total of each year, so B0 says how a place differs from Brazil
-            ref, _ = m.expected(leaves, spatial=True)
-            c = ref.sum(0) / np.maximum(mu.sum(0), 1e-300)
-            mu, mu2 = mu * c, mu2 * c ** 2
+            mu, mu2 = relevel_b0(b1.mu, mu, mu2)
         y = m.observed(leaves)
         extras: dict = {}
-        mom = None
-        if self.laplace:
-            mom = self.posterior(f.block, m).moments(leaves, SPATIAL[tier], relevel=(tier == "B0"))
         mu_point = mu
         if tier == "B2":
             axis = m.data.years if m.data.grain == "year" else np.arange(y.shape[1], dtype=float)
@@ -438,82 +449,39 @@ class Expectations:
             # the refit moved each cell's mean by r = mu / mu_point; the sum of squared cell means moves by r^2
             # (a B1 sum under a refit mean made the aggregate dispersion phi mu^2 / sum(mu^2) meaningless)
             mu2 = mu2 * np.divide(mu, mu_point, out=np.ones_like(mu), where=mu_point > 0) ** 2
-        var = None
-        eta_var = extras.pop("eta_var", None)
-        if mom is not None:
-            mu, mu2, var = _predictive(mom, mu, mu_point, eta_var, self.center)
-        ev = self._exposure(m, leaves, SPATIAL[tier])
-        if ev is not None:
+        extras.pop("eta_var", None)
+        var = self._exposure(m, leaves, SPATIAL[tier])
+        if var is not None:
             # the exposure's variance moves with the tier's mean (B0 re-levelled, B2 refit): by the square of the ratio
-            ev = ev * np.divide(mu, mu_first, out=np.ones_like(mu), where=mu_first > 0) ** 2
-            var = ev if var is None else var + ev
-        out = _assemble(f, tier, m, y, mu, mu2, m.phi, self.macroregions(m.data.places), var=var)
-        if tier != "B1":
-            # the noise structure is stage B's, the B1 predictive's (ADR-0029): a reference (B0 without the place
-            # effects, B2 with a refitted course per place) is measured against, never re-estimated on. B2's own
-            # residuals hide the persistence a trend must be judged against (SIH trends: 25 findings per shifted world
-            # with B2's ρ)
-            mu_b1 = m.expected(leaves, spatial=True)[0]
-            # the tier's φ came out of _assemble divided by the tier's own κ: undone here, then B1's applied
-            phi_b1 = np.broadcast_to(np.asarray(out.phi, dtype=float), mu_b1.shape) * out.calibration["noise"]["kappa"]
-            nz = noise_structure(y, mu_b1, phi_b1)
-            out.calibration["noise"] = {"kappa": nz.kappa, "rho": nz.rho}
-            out.phi, out.u, out.z, out.w, out.noise = with_noise(y, out.mu, phi_b1, nz,
-                                                                 config.seed(f.id, tier, "pit", m.key()))
+            var = var * np.divide(mu, mu_first, out=np.ones_like(mu), where=mu_first > 0) ** 2
+        out = _assemble(f, tier, m, y, mu, mu2, m.phi, macro, var=var, reference=b1)
         out.extras = extras
-        if cache:
-            store.put_table("surprise", key, out.table(), {"noise": dataclasses.asdict(out.noise), "calibration": out.calibration,
-                                                            **{k: v.tolist() for k, v in extras.items()}})
         return out
 
 
-def _relevel_b0(m: monolith.Monolith, leaves: np.ndarray, mu: np.ndarray, mu2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """B0's re-levelling to the national total of each year (see `Expectations.surprise`)."""
-    ref, _ = m.expected(leaves, spatial=True)
+def relevel_b0(ref: np.ndarray, mu: np.ndarray, mu2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """B0's expectation and Σμ² re-levelled to the total of ``ref`` (B1's mean) in each period. Dropping the centred
+    log-scale place effects drops E[exp(s + v)] > 1 too, so B0 is brought to the total of the places it is read over (the
+    area's, in an area study; Brazil's in a national one): B0 then says how a place differs from the whole."""
     c = ref.sum(0) / np.maximum(mu.sum(0), 1e-300)
     return mu * c, mu2 * c ** 2
 
 
-def _recentre(mom: dict, mu_point: np.ndarray, center: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(mean, sum mu^2, Var mu) of the draws, centred on the plug-in (the MAP's expectation, which
-    the fit's score equations tie to the observed totals) or left on the posterior mean (which sits
-    exp(Var(eta)/2) above it, and over-shoots the totals of the cells the fit has seen)."""
-    mean, var, mu2 = mom["mean"], mom["var"], mom["mu2"]
-    if center == "posterior":
-        return mean, mu2, var
-    s = np.divide(mu_point, mean, out=np.ones_like(mean), where=mean > 0)
-    return mu_point, mu2 * s ** 2, var * s ** 2
-
-
-def _predictive(mom: dict, mu_tier: np.ndarray, mu_point: np.ndarray, eta_var: np.ndarray | None,
-                center: str = "plugin") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The posterior-predictive mean, sum of mu^2 and Var(mu) of a tier from the draws' moments of the
-    B1/B0 expectation. B2 and B2s refit each place's course around the B1 expectation: the refit scales
-    the draws by r = mu_tier/mu_point and adds the place coefficients' own posterior variance
-    ``eta_var`` (independent of the draws: an approximation, additive on the log scale)."""
-    mean, mu2, var = _recentre(mom, mu_point, center)
-    if eta_var is None:
-        return mean, mu2, var
-    r = np.divide(mu_tier, mu_point, out=np.ones_like(mu_tier), where=mu_point > 0)
-    cv2 = var / np.maximum(mean, 1e-300) ** 2
-    mean = r * mean * (np.exp(eta_var / 2) if center == "posterior" else 1.0)
-    cv2_total = (1 + cv2) * np.exp(eta_var) - 1
-    return mean, r ** 2 * mu2, cv2_total * mean ** 2
-
-
 def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, mu: np.ndarray, mu2: np.ndarray,
               phi_block: float, macro: np.ndarray, flag_calibration: bool = True,
-              var: np.ndarray | None = None) -> Surprise:
+              var: np.ndarray | None = None, reference: Surprise | None = None) -> Surprise:
     """PIT and calibration with the block's phi; if miscalibrated, with the field's own phi; if
-    still miscalibrated, flagged (ARCHITECTURE 6.2). ``var`` is Var(mu) over the Laplace posterior
-    (None: the MAP's predictive)."""
+    still miscalibrated, flagged (ARCHITECTURE 6.2). ``var`` is Var(mu) from the exposure's uncertainty (None: the MAP's
+    predictive). The noise structure (N1) is estimated on this tier's predictive, unless ``reference`` (B1's surprise of the
+    same field) is given: it is stage B's, the B1 predictive's (ADR-0029), so B0 and B2, a reference measured against and
+    a refit that hides the persistence a trend must be judged against, take B1's (its κ, ρ and decay) and estimate nothing."""
     pop = m.data.N.sum(axis=2)
     seed = config.seed(f.id, tier, "pit", m.key())
-    cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
+    cells = predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
     # the field's own dispersion when the block's fails: NB-P on the posterior's cells alone, replacing the block's
     # size-free φ rather than adding to it (ADR-0032; OPEN_QUESTIONS 12: births' excess relative variance falls from
     # 0.016 in villages to 0.0027 in cities while the block's φ says 0.0037 everywhere). P = 2 is NB2
-    post = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, float("inf"))
+    post = predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, float("inf"))
     nbp: dict = {}
     extra = monolith.place_year_phi(y, mu, post, *_dispersion_levels(m.data.places, macro), power=True, report=nbp,
                                     start=cells)
@@ -542,8 +510,13 @@ def _assemble(f: fields.Field, tier: str, m: monolith.Monolith, y: np.ndarray, m
         # from the very departures the tier is meant to show
         phi_agg = cells
         u, z = randomised_pit(y, mu, phi_agg, seed)
-    noise = noise_structure(y, mu, phi_agg)
-    cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay}
+    if reference is None:
+        report: dict = {}
+        noise = noise_structure(y, mu, phi_agg, report=report)
+        cal["noise"] = {"kappa": noise.kappa, "rho": noise.rho, "decay": noise.decay, **report}
+    else:
+        cal["noise"] = {**reference.calibration["noise"], "read_from": reference.tier}
+        noise = Noise(kappa=cal["noise"]["kappa"], rho=cal["noise"]["rho"], decay=cal["noise"]["decay"])
     phi_agg, u, z, w, noise = with_noise(y, mu, phi_agg, noise, seed)
     return Surprise(f, tier, m.data.places, m.data.periods(), y, mu, phi_agg, u, z, w, flags, cal, noise=noise)
 
@@ -731,6 +704,17 @@ def aggregate_phi(mu: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:
     return np.divide(phi * mu ** 2, mu2, out=np.full(mu.shape, np.inf), where=mu2 > 0)
 
 
+def predictive_phi(mean: np.ndarray, var: np.ndarray, mu2: np.ndarray, phi: float) -> np.ndarray:
+    """The dispersion of the NB matched to a predictive's first two moments.
+
+    y | θ is a sum of independent NB(μ_i, φ) cells: Var(y | θ) = Σμ + Σμ²/φ. With a variance of the mean from the
+    exposure's uncertainty, Var(Σμ), the NB(m, φ_eff) with the same mean and variance has
+        1/φ_eff = (Σμ²/φ + Var(Σμ)) / m².
+    With none this is the aggregate dispersion φ μ̂²/Σμ̂² of `aggregate_phi`."""
+    inv = (mu2 / (phi if np.isfinite(phi) else np.inf) + var) / np.maximum(mean, 1e-150) ** 2   # 1e-300² underflows to 0
+    return np.divide(1.0, inv, out=np.full(mean.shape, np.inf), where=inv > 0)
+
+
 def _dispersion_levels(places: np.ndarray, macro: np.ndarray) -> list[np.ndarray]:
     """The grouping labels of ``DISPERSION_LEVELS``, coarse to fine, one per place."""
     labels = {"macro": np.asarray(macro).astype(str), "state": (np.asarray(places) // 10000).astype(str)}
@@ -791,7 +775,8 @@ def _detrend_projection(T: int) -> np.ndarray:
     return np.eye(T) - X @ np.linalg.solve(X.T @ X, X.T)
 
 
-def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 4) -> Noise:
+def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.2, lags: int = 4,
+                    report: dict | None = None) -> Noise:
     """ARCHITECTURE §6.1, N1 (ADR-0029): the predictive's noise structure over periods (`Noise`), by the bias-corrected
     moments of regression residuals. Each place's normal scores z (the randomised PIT under the marginal) lose its own level and
     linear trend (e = Mz, `_detrend_projection`); then E[Σ_t e_t e_{t+k}] = tr(L_k M Σ_u M), with
@@ -803,20 +788,38 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     (κ, ρ, δ) match the pooled lag 0..``lags`` sums by least squares. The places with at least ``min_expected`` events a
     period enter.
 
+    **A default is never an estimate.** Where the data cannot identify a part (fewer than 5 periods, fewer than 10 places
+    expecting ``min_expected`` events, no informative cell for κ) it takes its null value (κ = 1, ρ = 0) and ``report``
+    says so: ``estimated`` (False when any part defaulted), ``kappa_estimated``, ``correlation_estimated``, ``reason``
+    (what defaulted, and why), and for an estimated κ the standard error of log κ (``kappa_log_se``). A field reads
+    "κ = 1, ρ = 0" either way in the `Noise`; only the report tells an estimate of 1 and 0 from the default
+    (the review of the models, 2026-10-14).
+
     Why the detrending (measured 2026-10-06, `data/probes/noise_structure.json`): B1's residual covariances fall from
     +0.8σ² at lag 1 to −2.8σ² at lag 9 on stroke deaths, the signature of place-specific trends B1 does not hold.
     Those are departures from the reference, what the trend lens exists to find; fitted as noise they read as a
     persistent component or ρ → 1, and would hide the signal they are. Lags 0..2 only: a place's slower nonlinear
     wander survives the linear detrending (ρ → 0.95 on SINASC with lags to 4), and is the departure models' to judge
     against their empirical nulls (stage C), not B's noise."""
+    rep = {} if report is None else report
+    rep.update({"estimated": False, "kappa_estimated": False, "correlation_estimated": False, "reason": None})
     U, T = y.shape
     if T < 5:
+        rep["reason"] = f"{T} periods, fewer than 5: kappa 1, rho 0 assumed"
         return Noise()
     keep = mu.mean(1) >= min_expected
     if keep.sum() < 10:
+        rep["reason"] = (f"{int(keep.sum())} places expect at least {min_expected} events a period, fewer than 10: "
+                         "kappa 1, rho 0 assumed")
         return Noise()
-    # κ by central matching of the PIT quartiles (`_central_kappa`, below), ρ and δ from winsorised lag moments
-    kap = _central_kappa(y, mu, phi)
+    # κ by trimmed maximum likelihood on the aggregate cells (`_kappa`, below), ρ and δ from winsorised lag moments
+    kap, se = _kappa(y, mu, phi)
+    reasons = []
+    if kap is None:
+        kap = 1.0
+        reasons.append("kappa: no cell expecting 0.5 events with a finite dispersion to estimate it from; 1 assumed")
+    else:
+        rep["kappa_estimated"], rep["kappa_log_se"] = True, round(se, 4)
     m = mu[keep]
     ph = phi[keep] if np.ndim(phi) else np.full(m.shape, phi)
     s2 = Noise(kappa=kap).frailty_variance(ph)
@@ -826,6 +829,8 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     f_u = np.divide(m ** 2 * s2, v, out=np.zeros_like(m), where=v > 0).mean(1)   # the frailty's share of each cell's variance
     P, F = float(p_u.sum()), float(f_u.sum())
     if F <= 0:
+        rep.update({"kappa_estimated": False, "reason": "no cell has a finite dispersion: kappa 1, rho 0 assumed"})
+        rep.pop("kappa_log_se", None)
         return Noise()
     # Winsorised normal scores: the randomised PIT under the marginal (the copula's own scale), clipped at the universal
     # threshold Φ⁻¹(1 − 1/2N) over the N cells (≈ √(2 log N); Donoho & Johnstone 1994), past which a null field holds
@@ -838,6 +843,7 @@ def noise_structure(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected
     #   data/probes/noise_clip_bound.json)
     _, zs = randomised_pit(y[keep], m, ph / kap, seed=0)
     rh, dc = _lag_fit(zs, P, F, lags)
+    rep.update({"correlation_estimated": True, "estimated": not reasons, "reason": "; ".join(reasons) or None})
     return Noise(round(kap, 4), round(rh, 4), decay=round(dc, 4))
 
 
@@ -865,13 +871,8 @@ def _lag_fit(zs: np.ndarray, P: float, F: float, lags: int = 4) -> tuple[float, 
         MRM = M @ R @ M
         return P * trLM + kap * F * np.array([np.trace(MRM, offset=k) for k in range(K + 1)])
 
-    # κ by central matching (Efron 2004's empirical null, applied to the dispersion): the κ whose randomised PIT
-    # scores have the standard normal's interquartile range over the informative cells. Departures sit in the tails
-    # and cannot move the IQR, however many moderate cells an epidemic has. A moment estimate read them: measles
-    # admissions gave κ = 1000 (at the bound, with a standard error of 0.05 on the log scale: precise, and wrong),
-    # the predictive's dispersion fell to φ ≈ 0.02, and 614 admissions against 0.75 expected scored z = 5.7
-    # (2026-10-07).
-    # ρ and δ with the lag model's own frailty scale, fitted with them on lags 0..K. κ is the marginal of the residuals
+    # κ is `_kappa`'s (trimmed maximum likelihood on the aggregate cells). ρ and δ with the lag model's own frailty scale,
+    # fitted with them on lags 0..K. κ is the marginal of the residuals
     # about the fit, which absorbs part of a persistent frailty (B1's place effect), while the detrended moments are
     # corrected for that absorption (M): held at κ, the lag-1 moment could be met only by ρ at its bound (stroke null
     # worlds drawn at ρ 0.81, δ 0.58 re-estimated at 0.95, 0.12–0.22, 2026-10-07). The correlation is what is kept
@@ -882,30 +883,59 @@ def _lag_fit(zs: np.ndarray, P: float, F: float, lags: int = 4) -> tuple[float, 
     return rh, dc
 
 
-def _central_kappa(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.5, seed: int = 0) -> float:
-    """The κ (the predictive's dispersion φ/κ) whose randomised PIT scores over the cells expecting at least
-    ``min_expected`` events have the standard normal's quartiles (−0.674, 0, 0.674): the least squared distance over
-    a grid of log κ, refined around its best point. The interquartile range alone is not monotone in κ (measles
-    admissions: 1.01 at κ = 1, 0.91 at 100, 1.19 at 1000, the zeros shifting the centre) and a root search on it
-    returned its bound (2026-10-07)."""
-    keep = mu >= min_expected
-    if keep.sum() < 50:
-        return 1.0
-    yy, mm = y[keep], mu[keep]
-    pp = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)[keep]
-    target = np.array([-0.6745, 0.0, 0.6745])
+def _kappa(y: np.ndarray, mu: np.ndarray, phi: np.ndarray, min_expected: float = 0.5, trim: float = 0.005,
+           rounds: int = 3) -> tuple[float | None, float | None]:
+    """κ of the predictive NB(μ, φ/κ), and the standard error of log κ, by maximum likelihood on the aggregate cells
+    expecting at least ``min_expected`` events, trimmed as `monolith.place_year_phi` trims (Neykov, Filzmoser, Dimova &
+    Neytchev 2007): the cells beyond the predictive's ``trim`` and 1 − ``trim`` quantiles are left out and every kept cell's
+    likelihood is divided by its probability of lying between them, so the estimate stays consistent with no departure
+    present, and the bounds are redrawn at the estimate over ``rounds``. A departure sits in the tails and cannot lift κ:
+    a moment estimate read the epidemic cells (measles admissions gave κ = 1000, and 614 admissions against 0.75 expected
+    scored z = 5.7, 2026-10-07).
 
-    def gap(log_k: float) -> float:
-        _, z = randomised_pit(yy, mm, pp / np.exp(log_k), seed)
-        z = z[np.isfinite(z)]
-        return float(np.sum((np.quantile(z, [0.25, 0.5, 0.75]) - target) ** 2))
+    The likelihood weighs a cell by what it knows of κ: a cell whose μ is small against its φ is Poisson whatever κ is,
+    and adds nothing. The estimate this replaced matched the PIT's quartiles over every such cell, and at one state's
+    scale (102 places, 10 years, true κ = 1) it ran from 0.38 to 1.72 between the 10th and 90th percentiles of 60 fields,
+    since the pooled quartiles move with κ only through the cells with μ ≳ φ/10 (the review of the models, 2026-10-14).
+    Returns (None, None) when there are fewer than 10 cells with a finite φ to estimate it from: the caller defaults and
+    says so."""
+    pp = np.broadcast_to(np.asarray(phi, dtype=float), mu.shape)
+    use = (mu >= min_expected) & np.isfinite(pp) & (pp > 0)
+    if use.sum() < 10:
+        return None, None
+    yy, mm, inv = y[use], mu[use], 1.0 / pp[use]
+    lo, hi = float(np.log(0.05)), float(np.log(1e3))
 
-    grid = np.linspace(np.log(0.05), np.log(1e3), 41)
-    vals = jobs.parallel_map(gap, grid)        # independent evaluations: over the threads, the same values
-    i = int(np.argmin(vals))
-    lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
-    res = optimize.minimize_scalar(gap, bounds=(lo, hi), method="bounded", options={"xatol": 1e-3})
-    return float(np.exp(res.x if res.fun <= vals[i] else grid[i]))
+    def bounds(k: float) -> tuple[np.ndarray, np.ndarray]:
+        ph = 1.0 / np.maximum(k * inv, 1e-12)                       # the cell's φ/κ
+        p = ph / (ph + mm)
+        return stats.nbinom.ppf(trim, ph, p), stats.nbinom.ppf(1 - trim, ph, p)
+
+    def objective(sel: np.ndarray, a: np.ndarray, b: np.ndarray):
+        ys, ms, iv, aa, bb = yy[sel], mm[sel], inv[sel], a[sel], b[sel]
+
+        def nll(log_k: float) -> float:
+            ph = 1.0 / (np.exp(log_k) * iv)
+            pr = ph / (ph + ms)
+            ll = special.gammaln(ys + ph) - special.gammaln(ph) + ph * np.log(pr) + ys * np.log1p(-pr)
+            return -float(np.sum(ll - np.log(np.maximum(monolith._nb_mass(aa, bb, ph, pr), 1e-300))))
+
+        return nll
+
+    kappa, res, nll = 1.0, None, None
+    for _ in range(rounds):
+        a, b = bounds(kappa)
+        sel = (yy >= a) & (yy <= b)
+        if sel.sum() < 10:
+            break
+        nll = objective(sel, a, b)
+        res = optimize.minimize_scalar(nll, bounds=(lo, hi), method="bounded", options={"xatol": 1e-4})
+        kappa = float(np.exp(res.x))
+    if res is None:
+        return None, None
+    h = 0.1
+    info = (nll(res.x + h) - 2 * nll(res.x) + nll(res.x - h)) / h ** 2         # observed information in log κ
+    return kappa, float(1.0 / np.sqrt(max(info, 1e-9)))
 
 
 def lag_covariance(mu: np.ndarray, phi: np.ndarray, noise: Noise, k: int) -> np.ndarray:
@@ -1299,18 +1329,6 @@ def refit_place(y: np.ndarray, mu: np.ndarray, phi_agg: np.ndarray, X: np.ndarra
     return mu * np.exp(b @ X.T), b, sd, tau
 
 
-def _from_table(f: fields.Field, tier: str, t: pa.Table, meta: dict | None) -> Surprise:
-    places = np.unique(t.column("u").to_numpy())
-    years = np.unique(t.column("year").to_numpy())
-    shape = (len(places), len(years))
-    col = lambda c: t.column(c).to_numpy().reshape(shape)  # noqa: E731
-    meta = meta or {}
-    extras = {k: np.asarray(meta[k]) for k in ("alpha", "beta", "alpha_sd", "beta_sd", "tau") if k in meta}
-    return Surprise(f, tier, places, years, col("y"), col("mu"), col("phi"), col("pit"), col("z"), col("w"),
-                    col("flags"), meta.get("calibration", {}), extras,
-                    noise=Noise(**(meta.get("noise") or meta.get("calibration", {}).get("noise", {}))))
-
-
 # ---------------------------------------------------------------------- the prospective tier's predictive (§6.1)
 #
 # The prospective tier's predictive (ARCHITECTURE §6.1): what BP adds to the fitted effects.
@@ -1339,7 +1357,7 @@ def insample_extra(model: monolith.Monolith, leaves: np.ndarray, levels: list[np
 
     mu, mu2 = model.expected(leaves, spatial=True)
     y = model.observed(leaves)
-    cells = laplace.predictive_phi(mu, np.zeros_like(mu) if exposure is None else exposure, mu2, model.phi)
+    cells = predictive_phi(mu, np.zeros_like(mu) if exposure is None else exposure, mu2, model.phi)
     return np.asarray(monolith.place_year_phi(y, mu, cells, *levels))[:, None]
 
 

@@ -90,7 +90,7 @@ The survey of IX flagged 25 small places for rheumatic heart disease (I00–I02)
 
 ## Held-out graph choice, chapter IX
 
-Fit on 2010–2021, scored on 2022–23. The kNN6 and contiguity rows are from `scripts/measure_heldout.py`.
+Fit on 2010–2021, scored on 2022–23. The kNN6 and contiguity rows are from `measure_heldout.py` (removed 2026-10-14 with the code it exercised).
 
 | graph | deviance per event |
 |---|---|

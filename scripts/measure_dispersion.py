@@ -15,7 +15,7 @@ import time
 import numpy as np
 from scipy import special
 
-from pegasus_core import config, laplace, monolith, surprise
+from pegasus_core import config, monolith, surprise
 
 SIM_CHAPTERS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV", "XVI",
                 "XVII", "XVIII", "XX"]
@@ -47,21 +47,13 @@ TARGETS = {
     "lept-notif": (lambda: surprise.Expectations("SINAN-LEPT", "notification", range(2010, 2024), source=MONTHLY),
                    ["*"], ("B0", "B1", "B2", "B2s")),
 }
-# fits for the held-out check of the block's φ by macro-region: (dataset, event, block, train_last, test_last, source)
-HELDOUT = {
-    "ho-ix19": ("SIM.DO", "death", "IX", 2019, 2023, {}),
-    "ho-x19": ("SIM.DO", "death", "X", 2019, 2023, {}),
-    "ho-xviii19": ("SIM.DO", "death", "XVIII", 2019, 2023, {}),
-    "ho-dengue18": ("SINAN-DENG", "probable_case", "*", 2018, 2023, MONTHLY),
-    "ho-dengue14": ("SINAN-DENG", "probable_case", "*", 2014, 2016, MONTHLY),
-}
 cap: dict = {}
 _orig = surprise._assemble
 
 
-def _wrap(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration=True, var=None):
+def _wrap(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration=True, var=None, reference=None):
     cap[tier] = (f, m, y, mu, mu2, phi_block, macro, var)
-    return _orig(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration, var)
+    return _orig(f, tier, m, y, mu, mu2, phi_block, macro, flag_calibration, var, reference)
 
 
 surprise._assemble = _wrap
@@ -69,7 +61,7 @@ surprise._assemble = _wrap
 
 def evaluate(tier: str) -> dict:
     f, m, y, mu, mu2, phi_block, macro, var = cap[tier]
-    cells = laplace.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
+    cells = surprise.predictive_phi(mu, np.zeros_like(mu) if var is None else var, mu2, phi_block)
     seed = config.seed(f.id, tier, "pit", m.key())
     out = {"cells": int((mu > 1e-6).sum())}
     for name, levels in VARIANTS.items():
@@ -100,37 +92,10 @@ def evaluate(tier: str) -> dict:
     return out
 
 
-def heldout(name: str) -> dict:
-    """The block's φ per macro-region against one φ: NB log-likelihood (every cell, empty ones included) in
-    sample, and on the years after the fit's last, each from the fit's own φ."""
-    from pegasus_core import gateway, monolith
-
-    dataset, event, block, last, test_last, source = HELDOUT[name]
-    train = list(range(2010, last + 1))
-    test = list(range(last + 1, test_last + 1)) or [last]
-    model = monolith.Monolith.load(dataset, event, block, train, "contiguity", **source)
-    macro = gateway.regions(model.data.places, "ibge_macroregion")
-    by = model.dispersion_by(macro)
-    one = np.full(len(by), model.phi)
-    tdata = monolith.assemble(dataset, event, block, test, **source)
-    tm, x = monolith.extrapolate(model, tdata)
-    events_in, events_out = float(model.data.y.sum()), float(tdata.y.sum())
-    out = {"phi": model.phi, "phi_by_macroregion": {str(k): float(by[macro == k][0]) for k in np.unique(macro)},
-           "events_in": events_in, "events_out": events_out}
-    for label, phi in (("one", one), ("region", by)):
-        out[label] = {"in": model.nb_loglik(phi), "out": tm.nb_loglik(phi, x=x)}
-    out["gain_in_per_event"] = (out["region"]["in"] - out["one"]["in"]) / events_in
-    out["gain_out_per_event"] = (out["region"]["out"] - out["one"]["out"]) / events_out
-    return out
-
-
 def main(names: list[str]) -> None:
     for name in names:
         res: dict = {}
-        if name in HELDOUT:
-            res = heldout(name)
-            print(name, json.dumps(res), flush=True)
-        elif name in TARGETS:
+        if name in TARGETS:
             make, nodes, tiers = TARGETS[name]
             ex = make()
             for node in nodes:

@@ -569,31 +569,10 @@ def _places_key(places: pa.Array | None, year: int) -> dict:
     return {} if len(codes) == POPSVS_PLACES else {"places": hashlib.sha256(codes.tobytes()).hexdigest()[:10]}
 
 
-def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
-                 places: pa.Array | None = None, race: str | None = None, cell: bool = True,
-                 support: str | None = None, codes: tuple[str, ...] | list[str] = (), area=None) -> EventCounts:
-    """One event type's counts for one year, by residence × sex × age × the classifier's code.
-
-    The columns come from pegasus_data's roles (the subject's residence, sex and age as
-    strata). ``classifier`` defaults to the event type's primary classifier; an event type
-    without one (births, a notifiable disease) has the single code ``*``. A subject without a
-    sex stratum takes the sex its entity implies (a mother: 2), or fails. ``places`` is the
-    set of valid municipalities (the population's); a residence outside it is unallocated,
-    never guessed. Events two systems share are read through their declared link (`linked_counts`), never by a
-    system's own column. ``race`` (a race code 1-5): only the events of that race, by the subject's declared race
-    stratum (the mother's on a birth); events with no valid race are unallocated ('race unknown').
-    ``cell=False``: neither sex nor age is read, every event stands in sex 1, age 0 (a ratio field's numerator and
-    denominator, `_events_population`: a foetal death has no age, and an unknown sex is still an event).
-    ``support``: another municipality column of the event read in place of the residence (ARCHITECTURE §5.3: the
-    place of infection, the notifying municipality, the hospital's, the place of death; `fields.support_sources`);
-    a record without it is unallocated by 'municipality'.
-    ``codes``: the events whose classifier code starts with one of them are all the caller keeps (a code set); where a
-    pegasus_data extract holds them whole for the year (`pegasus_data.extract`: a dataset larger than the lake, read
-    file by file), the counts are of the extract's records, and only of those codes.
-    ``area``: only the area's residents (or the support's places) are read, filtered in the lake's scan (`_area_rows`);
-    None, Brazil. Explicit, never read from the environment: the national ratios and exposures read Brazil within an
-    area study (`declared_ratios`, `_events_population`). An area's unallocated holds its own residents' lost events.
-    """
+def _counts_plan(dataset: str, event: str, year: int, classifier: str | None, places, race: str | None, cell: bool,
+                 support: str | None, codes, area) -> tuple[dict, str | None, dict, pa.Table | None]:
+    """What `event_counts` reads and what addresses it: (key, the classifier's column, the strata, the extract's records or
+    None). Apart so that a part stored beside the counts (`age0_counts`) is addressed without reading them."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
 
@@ -624,9 +603,41 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
               if records is not None else {}),
            "data": config.data_version(), "code": config.code_key(event_counts),
            **_data_key(dataset, year), **({"race": race} if race else {}), **_area_key(area)}
+    return key, column, strata, records
+
+
+def event_counts(dataset: str, event: str, year: int, classifier: str | None = None,
+                 places: pa.Array | None = None, race: str | None = None, cell: bool = True,
+                 support: str | None = None, codes: tuple[str, ...] | list[str] = (), area=None) -> EventCounts:
+    """One event type's counts for one year, by residence × sex × age × the classifier's code.
+
+    The columns come from pegasus_data's roles (the subject's residence, sex and age as
+    strata). ``classifier`` defaults to the event type's primary classifier; an event type
+    without one (births, a notifiable disease) has the single code ``*``. A subject without a
+    sex stratum takes the sex its entity implies (a mother: 2), or fails. ``places`` is the
+    set of valid municipalities (the population's); a residence outside it is unallocated,
+    never guessed. Events two systems share are read through their declared link (`linked_counts`), never by a
+    system's own column. ``race`` (a race code 1-5): only the events of that race, by the subject's declared race
+    stratum (the mother's on a birth); events with no valid race are unallocated ('race unknown').
+    ``cell=False``: neither sex nor age is read, every event stands in sex 1, age 0 (a ratio field's numerator and
+    denominator, `_events_population`: a foetal death has no age, and an unknown sex is still an event).
+    ``support``: another municipality column of the event read in place of the residence (ARCHITECTURE §5.3: the
+    place of infection, the notifying municipality, the hospital's, the place of death; `fields.support_sources`);
+    a record without it is unallocated by 'municipality'.
+    ``codes``: the events whose classifier code starts with one of them are all the caller keeps (a code set); where a
+    pegasus_data extract holds them whole for the year (`pegasus_data.extract`: a dataset larger than the lake, read
+    file by file), the counts are of the extract's records, and only of those codes.
+    ``area``: only the area's residents (or the support's places) are read, filtered in the lake's scan (`_area_rows`);
+    None, Brazil. Explicit, never read from the environment: the national ratios and exposures read Brazil within an
+    area study (`declared_ratios`, `_events_population`). An area's unallocated holds its own residents' lost events.
+    """
+    key, column, strata, records = _counts_plan(dataset, event, year, classifier, places, race, cell, support, codes, area)
+    import pegasus_data as pg
+
     cached = store.get_table("gateway", key)
     cached_un = store.get_table("gateway", {**key, "part": "unallocated"})
     if cached is not None and cached_un is not None:
+        _age0_part(key, cached)
         return EventCounts(cached, cached_un, key)
     rows = _area_rows(strata["residence"], area)
     if records is not None and rows:
@@ -682,7 +693,35 @@ def event_counts(dataset: str, event: str, year: int, classifier: str | None = N
         unallocated = pa.concat_tables([unallocated, unplaced(dataset, event, year, column).cast(unallocated.schema)])
     store.put_table("gateway", key, counts, {"source": f"pegasus_data.count_events({dataset}, {event})", "by": by})
     store.put_table("gateway", {**key, "part": "unallocated"}, unallocated)
+    _age0_part(key, counts)
     return EventCounts(counts, unallocated, key)
+
+
+def _age0_part(key: dict, counts: pa.Table) -> None:
+    """The small part stored beside a year's counts: per code, the events and those at age 0 (summed over places and sexes),
+    which is all the exposure's choice reads (`age0_counts`). Made once, from the counts just built or the stored ones."""
+    part = {**key, "part": "age0"}
+    if (store.address("gateway", part) / "table.parquet").exists():
+        return
+    con = duckdb.connect()
+    con.register("c", counts)
+    summary = con.execute("""SELECT code, CAST(sum(y) AS BIGINT) AS events,
+            CAST(coalesce(sum(y) FILTER (WHERE age < 1), 0) AS BIGINT) AS at_age_0 FROM c GROUP BY code ORDER BY code""").fetch_arrow_table()
+    store.put_table("gateway", part, summary)
+
+
+def age0_counts(dataset: str, event: str, year: int, classifier: str | None = None,
+                codes: tuple[str, ...] | list[str] = ()) -> pa.Table:
+    """Brazil's events of one year per code and how many of them are at age 0 (code, events, at_age_0): the
+    `event_counts` table summed over places and sexes, read from the part stored beside it. Choosing an exposure decoded
+    the national counts of every year of the fit, per window and per code set (7 years of SIH 8-10 s each time, the
+    review of the models, 2026-10-14); the summary is small and made when the counts are."""
+    key = _counts_plan(dataset, event, year, classifier, None, None, True, None, codes, None)[0]
+    part = store.get_table("gateway", {**key, "part": "age0"})
+    if part is None:
+        event_counts(dataset, event, year, classifier=classifier, codes=codes)       # makes the part
+        part = store.get_table("gateway", {**key, "part": "age0"})
+    return part
 
 
 def extract_years(dataset: str, column: str, codes: list[str], years: list[int]) -> list[int]:
