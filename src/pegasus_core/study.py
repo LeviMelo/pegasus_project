@@ -2442,6 +2442,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     profile = lap.guard("context profiles", lambda: _context_profiles(decl, scope, rows, log), [], log)
     covariates = lap.guard("contexts", lambda: _context_table(decl, scope, places, names, log), [], log)
     ecological = lap.guard("ecological", lambda: _ecological(places, covariates, log), [], log) if covariates else []
+    places += lap.guard("spatial autocorrelation", lambda: _spatial_autocorrelation(places, decl.q, log), [], log)
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
@@ -3733,6 +3734,12 @@ MEASURES = {
     "smoothed_smr": "a municipality's standardised ratio (against the area's own age-sex rates) shrunk toward the area's by "
                     "empirical Bayes (Poisson-gamma, Marshall 1991): the posterior mean and its 95 % interval, what a map "
                     "of a rare event draws where a crude ratio of a small place is noise",
+    "moran_global": "global Moran's I of the municipalities' smoothed standardised ratios over the period (row-standardised "
+                    "contiguity; p one-sided from 999 permutations): whether neighbouring municipalities' ratios resemble "
+                    "each other",
+    "lisa": "a municipality's local Moran (LISA, Anselin 1995) of its smoothed standardised ratio: `value` its quadrant "
+            "(high-high, low-low, high-low, low-high) where its p from 9,999 permutations passes the study's false-discovery level "
+            "across the municipalities (q, Benjamini-Hochberg), else not significant; `estimate` the local I",
     "moran_i": "Moran's I of the ecological regression's Pearson residuals on the municipalities' contiguity (p: "
                "one-sided, 999 permutations): spatial dependence the model leaves",
 }
@@ -3793,6 +3800,7 @@ MUNICIPALITIES_VIEW = """SELECT field, label, dataset, place AS u, place_name AS
         max(high) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area_high,
         max(q) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area_q,
         max(estimate) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr,
+        max(value) FILTER (WHERE measure = 'lisa') AS lisa_cluster,
         max(low) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr_low,
         max(high) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr_high,
         max(estimate) FILTER (WHERE measure = 'model_rate') AS model_rate
@@ -4605,6 +4613,12 @@ def _link_text(it: Item) -> str:
     return f" — share paired with a {partner} record ({src['link']}" + (f": {what}" if what else "") + ")"
 
 
+def _band_order(label: str) -> float:
+    """An age band's label ("0", "1-4", "80+") as its lower edge; any other value after every band."""
+    head = label.split("-")[0].rstrip("+").strip()
+    return float(head) if head.isdigit() else float("inf")
+
+
 def _band_labels(edges) -> list[str]:
     """Each age band's label from its lower edges: "0", "1-4", ..., "80+" (one labelling for every table: the rates had
     "0-0" where the case mix had "0", 2026-10-14)."""
@@ -5100,7 +5114,10 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "the area smoothed by empirical Bayes (Poisson-gamma, Marshall 1991: the gamma prior's mean the area's ratio, "
         "its variance the ratios' spread beyond Poisson noise by the method of moments, each year and the period apart), "
         "the posterior mean with its 95 % gamma interval, so a small municipality's ratio is shrunk toward the area's "
-        "in proportion to its noise; the hierarchical model's expected events.",
+        "in proportion to its noise; the hierarchical model's expected events. Spatial autocorrelation of the smoothed "
+        "ratios: global Moran's I (999 permutations) and the local Moran (LISA, Anselin 1995; 9,999 permutations) on "
+        "row-standardised contiguity (esda); a municipality's quadrant (high-high, low-low, high-low, low-high) where its local p "
+        "passes the study's q after Benjamini-Hochberg across the municipalities.",
         "Comparison with Brazil: every directly standardised rate's ratio to Brazil's of the same year and stratum, "
         "with a 95 % interval from the two gamma variances on the log scale (Brazil includes the area, so the interval "
         "is conservative); Brazil's and each macro-region's rates by sex, by age band and by sex within each age band "
@@ -5907,6 +5924,70 @@ def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: d
     return out
 
 
+def _spatial_autocorrelation(places: list[dict], q_level: float, log) -> list[dict]:
+    """Global Moran's I and the local Moran (LISA) of each count field's municipal smoothed standardised ratios over
+    the period (`places`' smoothed_smr), on the municipalities' contiguity, row-standardised; 999 permutations (esda);
+    each municipality's quadrant where its local p passes ``q_level`` after Benjamini-Hochberg across the
+    municipalities, else not significant. A municipality without a neighbour among the study's is left out. What a
+    spatial paper reports beside its map: whether high ratios cluster, and where."""
+    import esda
+    import libpysal
+    from statsmodels.stats.multitest import multipletests
+
+    from . import graphs
+
+    by: dict[str, dict] = {}
+    for r in places:
+        if r["measure"] == "smoothed_smr" and r.get("period_kind") == "period" and r.get("estimate") is not None:
+            f = by.setdefault(r["field"], {"label": r.get("label"), "dataset": r.get("dataset"), "v": {}, "name": {}})
+            f["v"][int(r["place"])] = float(r["estimate"])
+            f["name"][int(r["place"])] = (r.get("place_name"), r.get("state"))
+    out = []
+    for fid, f in by.items():
+        us = np.array(sorted(f["v"]), dtype=np.int64)
+        if len(us) < 30:
+            continue
+        e = graphs.edges(us, "contiguity")
+        neighbours = {i: [] for i in range(len(us))}
+        for i, j in e:
+            neighbours[int(i)].append(int(j))
+            neighbours[int(j)].append(int(i))
+        keep = [i for i in range(len(us)) if neighbours[i]]
+        if len(keep) < 30:
+            continue
+        index = {old: new for new, old in enumerate(keep)}
+        w = libpysal.weights.W({index[i]: [index[j] for j in neighbours[i] if j in index] for i in keep},
+                               silence_warnings=True)
+        w.transform = "r"
+        y = np.array([f["v"][int(us[i])] for i in keep])
+        seed = config.seed(fid, "lisa") % (2**32)
+        try:
+            np.random.seed(seed)            # esda's global Moran draws its permutations from numpy's global state
+            mg = esda.Moran(y, w, permutations=999)
+            # 9,999 permutations: at 999 a local p cannot fall under 0.001, and Benjamini-Hochberg over 497 places then
+            # passes none (leptospirosis' cases in RS, 2026-10-15)
+            ml = esda.Moran_Local(y, w, permutations=9999, seed=seed)
+        except Exception as exc:  # noqa: BLE001 - a field whose autocorrelation cannot be computed is said
+            log(f"study: spatial autocorrelation {fid}: {type(exc).__name__}: {exc}")
+            continue
+        base = {"field": fid, "label": f["label"], "dataset": f["dataset"], "geography": "municipality",
+                "period_kind": "period"}
+        out.append(_estimate_row("municipalities", "moran_global", {**base, "geography": _whole()[0],
+                                 "place": _whole()[1], "model": "row-standardised contiguity, 999 permutations"},
+                                 estimate=float(mg.I), p=float(mg.p_sim), denominator=float(len(y)),
+                                 denominator_kind="municipalities"))
+        qs = multipletests(ml.p_sim, method="fdr_bh")[1]
+        quad = {1: "high-high", 2: "low-high", 3: "low-low", 4: "high-low"}
+        for k, i in enumerate(keep):
+            u = int(us[i])
+            nm, st = f["name"].get(u, (None, None))
+            out.append(_estimate_row("municipalities", "lisa", {**base, "place": u, "place_name": nm, "state": st,
+                                     "value": quad[int(ml.q[k])] if qs[k] <= q_level else "not significant",
+                                     "model": "local Moran on row-standardised contiguity, 9,999 permutations"},
+                                     estimate=float(ml.Is[k]), p=float(ml.p_sim[k]), q=float(qs[k])))
+    return out
+
+
 def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
     """The ecological association of each count field with the study's contexts, as a paper relating rates to place
     characteristics declares it: the municipalities' events over the period, negative-binomial (NB2) regression with
@@ -6629,6 +6710,11 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     # the summary's fields: the topic's own readers, not an alternative support (a place of occurrence) or a race
     whole = [r for r in nat if r.get("geography") == level and r.get("period_kind") == "period"
              and "support=" not in str(r.get("field"))]
+    moran_g = [r for r in est_ if r.get("measure") == "moran_global"]
+    lisa_n: dict[tuple, int] = {}
+    for r in est_:
+        if r.get("measure") == "lisa" and r.get("value") != "not significant":
+            lisa_n[(r["field"], r["value"])] = lisa_n.get((r["field"], r["value"]), 0) + 1
     aapc = [r for r in trend_rows if r["measure"] == "aapc"]
     cf_period = [r for r in fatality if r["measure"] == "case_fatality" and r.get("period_kind") == "period"]
     # Table 1: each primary field's events by its characteristics over the period, at the study's whole
@@ -6641,7 +6727,9 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
          for r in est_ if r.get("section") == "case mix" and r["measure"] == "proportion"
          and r.get("period_kind") == "period" and r.get("geography") == level and "support=" not in str(r["field"])),
         key=lambda r: (str(r["field"]), first.get(str(r.get("variable")), 2 if "RACA" in str(r.get("variable")) else 3),
-                       str(r.get("variable")), -(r["n"] or 0)))
+                       str(r.get("variable")),
+                       # an age band in age order ("5-9" after "1-4"), a not-recorded value last; else by count
+                       (_band_order(str(r.get("category"))) if "age band" in str(r.get("variable")) else -(r["n"] or 0))))
 
     def num(x, k=1) -> str:
         return "–" if x is None or (isinstance(x, float) and not np.isfinite(x)) else f"{x:,.{k}f}"
@@ -6697,6 +6785,12 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                                 ("denominator", "expected"), ("estimate", "smoothed ratio"), ("low", "95% from"),
                                 ("high", "to")], cap=25, where="estimates.parquet, section municipalities (view "
                                                                 "municipalities)"),
+             "".join(f"<p>{e(str(r['label']))}: global Moran's I of the smoothed ratios {num(r['estimate'], 3)} "
+                     f"(p {num(r['p'], 3)}, {num(r['denominator'], 0)} municipalities); local clusters at q {decl.q}: "
+                     + (", ".join(f"{v} {lisa_n[(r['field'], v)]}" for v in ("high-high", "low-low", "high-low",
+                                                                             "low-high") if (r['field'], v) in lisa_n)
+                        or "none") + " (estimates.parquet, measure lisa; view municipalities, lisa_cluster)</p>"
+                     for r in moran_g),
              "<h3>Case fatality</h3>"
              + (table(fatality, [("label", "field"), ("dataset", "source"), ("variable", "outcome"),
                                  ("measure", "measure"), ("first", "from"), ("last", "to"), ("numerator", "deaths"),
@@ -6910,6 +7004,19 @@ def _codes_text(it: Item) -> str:
     cond = gateway.split_event(it.event)[1]
     if cond:                     # a record condition's topic: its name and its clauses
         return f": {cond['name']} ({_condition_text(cond['clauses'])})"
+    if not codes and not it.nodes and not it.source:
+        # a notifiable agravo's own records: named by the condition its records carry (SINAN-DENG's A90), never by the
+        # event alone ("case", "notification")
+        try:
+            held = gateway.condition_codes(it.dataset)
+            labels = _tree_labels("ICD10") if held else {}
+        except Exception:  # noqa: BLE001 - an agravo pegasus_data ties to no code: its dataset's name
+            held, labels = [], {}
+        top = sorted({c[:3] for c in held})[:2]
+        # in parentheses: ": P37" is the perinatal fields' mark (`body`), and an agravo's notifications are not rated
+        # per live birth
+        return (" (" + ", ".join(f"{c} {labels[c]}" if labels.get(c) else c for c in top) + ")") if top \
+            else f" ({it.dataset})"
     if not codes:
         return ""
     try:

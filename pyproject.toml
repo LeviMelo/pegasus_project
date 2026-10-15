@@ -32,6 +32,8 @@ dependencies = [
   "rich>=13",
   "pyyaml>=6",
   "matplotlib>=3.8",      # the dossier's series figures (report.dossier)
+  "esda>=2.5",            # global and local Moran of the municipalities' smoothed ratios (study._spatial_autocorrelation)
+  "libpysal>=4.10",       # the spatial weights esda reads
 ]
 
 [project.scripts]

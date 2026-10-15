@@ -53,3 +53,13 @@ infarction (I21-I22), 2014-2023, the area's residents admitted in its hospitals.
 - The code set anywhere on the admission gives the same within 0.3 points.
 
 The folder holds every body part.
+
+**Spatial autocorrelation** of the smoothed ratios (`_spatial_autocorrelation`, esda), leptospirosis in RS:
+- global Moran's I 0.32 for the notifications and 0.23 for the cases (p 0.001);
+- local Moran clusters at q 0.05, Benjamini-Hochberg across 497 municipalities: 8 high-high and 16 low-low
+  (notifications), 4 and 11 (cases).
+
+At 999 permutations no local p fell under 0.001, so BH passed no case cluster; the local test now draws 9,999.
+
+A notifiable agravo's fields are named by their condition code ("notification (A27 Leptospirose)"), and Table 1's
+age bands run in age order.
