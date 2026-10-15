@@ -975,6 +975,19 @@ def resolve(decl: Declaration, log=print) -> Scope:
     # the declaration's own choice (`topic.only` / `topic.exclude`), before anything is priced or counted: the keys
     # were accepted and never applied, so no study could be cut down (2026-10-11)
     items = _declared_only(decl, items, excluded)
+    # a declared relation's leader is read as the topic's sources are, whatever ``only`` says (declaring the relation
+    # is asking for it): priced, fetched into the lake and counted, asked nothing. Read only by the products, it had
+    # been fetched by none, and the test could not read it (the SINASC study's Zika, 2026-10-14)
+    for h in decl.hypotheses:
+        if str(h.get("component")) == "relation" and h.get("leader"):
+            ds, _, ev = str(h["leader"]).partition(":")
+            if ds not in served:
+                excluded.append({"seed": f"relation leader {ds}", "why": "no dataset with event types by that name"})
+                continue
+            ev = ev or gateway.event_types(ds)[0]["name"]
+            if not any(i.dataset == ds and i.event == ev for i in items):
+                items.append(Item(ds, ev, ["*"], None, [], f"the leader of a declared relation "
+                                  f"({h.get('note') or h['leader']})", count_only=True))
     # the cost: years in the lake are free, the rest download; the budget is spent cheapest first, and a source
     # whose tree holds the topic but whose records hold none is not read (its tree is not its records)
     budget = decl.choice("download")
@@ -2423,6 +2436,85 @@ def _hypothesis_readers(scope: Scope):
 HYPOTHESIS_TRAIN = 3
 
 
+def _relation_hypothesis(h: dict, decl: Declaration, scope: Scope) -> list[dict]:
+    """A declared relation (``component: relation``): the ``leader`` (a dataset, its event's every notification, or
+    ``dataset:event``) precedes the topic's field by the ``lags`` window (first, last, in months at ``grain`` month, the
+    default, else years), in the ``macro``-regions (1-5: read over their states, the study's area or not: an ecological
+    relation needs many places, and one state held four supports and one wave) over the ``when`` years. One test per
+    support: the leader's
+    cumulative association with the field over that window only, against the leader's circular shifts
+    (`relations._profiles`), Holm over the supports; and the same for the ``control`` (ICD-10 codes on the field's own
+    reader, an outcome of the same recording the leader should not move). The answer is supported when a support is,
+    specific when the control's is not: Zika -> microcephaly had been one row among hundreds, and its coarse lag profile
+    was Down syndrome's too, the anomaly surveillance raised after the 2015 emergency (evaluation 2026-10-14)."""
+    from statsmodels.stats.multitest import multipletests
+
+    from . import tools
+
+    grain = str(h.get("grain") or "month")
+    lo, hi = (int(x) for x in (h.get("lags") or [1, 3]))
+    years = _when(h.get("when")) if h.get("when") else list(decl.years)
+    leader_ds, _, leader_ev = str(h["leader"]).partition(":")
+    leader_ev = leader_ev or gateway.event_types(leader_ds)[0]["name"]
+    macro = [int(m) for m in h.get("macro") or []] or None
+    window = (years[0] * 100 + 1, years[-1] * 100 + 12) if grain == "month" else (years[0], years[-1])
+    name = h.get("note") or f"{leader_ds} leads the topic by {lo}-{hi} {grain}s"
+    out = []
+    for it in (i for i in scope.items if i.status == "in" and not i.count_only and not (i.source or {}).get("population")):
+        node = _study_nodes(it, None)[0]
+        base = {"hypothesis": name, "component": "relation", "source": it.dataset, "support": "",
+                "field_reader": json.dumps(it.source or {"nodes": it.nodes}), "places": f"macro-regions {macro or 'all'}",
+                "years": f"{years[0]}-{years[-1]}"}
+        if not set(years) <= set(it.years):
+            out.append({**base, "answer": f"not testable: {it.dataset} holds {it.years[0]}-{it.years[-1]}"})
+            continue
+        control = [str(c).upper().replace(".", "") for c in (h.get("control") or {}).get("icd10") or []]
+        tests = [("topic", node, it.source)]
+        if control:
+            ctl = (dict(it.source or {}), control[0]) if (it.source or {}).get("source") == "code_list" else                 ({**(it.source or {}), "codes": control}, "*")
+            tests.append(("control", ctl[1], ctl[0]))
+        verdict = {}
+        # the declared macro-regions' states as the area of the test, the study's own area restored after
+        saved = os.environ.get("PEGASUS_AREA")
+        if macro:
+            os.environ["PEGASUS_AREA"] = ",".join(str(u) for u in range(11, 54) if u // 10 in macro)
+        try:
+            for role, node_, src in tests:
+                try:
+                    res = tools.relate([(leader_ds, leader_ev, "*"), (it.dataset, it.event, node_)], years, lags=hi,
+                                       grain=grain, window=window, macro=macro, sources=[None, src], profiles=True,
+                                       lag_window=(lo, hi))
+                except Exception as exc:  # noqa: BLE001 - a relation that cannot be read is said, never a "not supported"
+                    out.append({**base, "support": role, "answer": f"not read: {type(exc).__name__}: {exc}"})
+                    continue
+                prof = [p for p in res["profiles"] if p["leader"].startswith(leader_ds) and p["field"].startswith(it.dataset)]
+                if not prof:
+                    out.append({**base, "support": role, "answer": "not read: no support holds the pair"})
+                    continue
+                holm = multipletests([p["p"] for p in prof], method="holm")[1]
+                best = int(np.argmin(holm))
+                verdict[role] = bool(holm[best] <= decl.q and prof[best]["z"] > 0)
+                for p, ph in zip(prof, holm, strict=True):
+                    out.append({**base, "support": f"{role}: {p['support']}", "tier": f"B1 innovations, lags {lo}-{hi} {grain}s, "
+                                "the leader's circular-shift null", "effect": p["rho"], "effect_unit": "mean lag correlation",
+                                "p": p["p"], "p_holm": float(ph), "answer": None})
+                out.append({**base, "support": role, "effect": prof[best]["rho"], "effect_unit": "mean lag correlation",
+                            "p": prof[best]["p"], "p_holm": float(holm[best]),
+                            "answer": ("supported" if verdict[role] else "not supported")
+                            + f" at {prof[best]['support']} (peak lag {prof[best]['peak']})"})
+        finally:
+            if saved is None:
+                os.environ.pop("PEGASUS_AREA", None)
+            else:
+                os.environ["PEGASUS_AREA"] = saved
+        if "topic" in verdict and "control" in verdict:
+            out.append({**base, "support": "specificity", "answer":
+                        "specific: the control outcome does not follow the leader" if verdict["topic"] and not verdict["control"]
+                        else "not specific: the control outcome follows the leader too (a recording change timed with it)"
+                        if verdict["topic"] else "not supported for the topic"})
+    return out
+
+
 def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
     """The declared hypotheses (ARCHITECTURE §7.7, version 1): each tested once, at its locus, in every source of the
     scope whose years and places hold it; its own test, not a member of a discovery family. A level or transient
@@ -2443,6 +2535,9 @@ def _hypotheses(decl: Declaration, scope: Scope) -> list[dict]:
 
     out = []
     for h in decl.hypotheses:
+        if str(h.get("component")) == "relation":
+            out += _relation_hypothesis(h, decl, scope)
+            continue
         comp, places = str(h.get("component", "transient")), [int(p) for p in (h.get("where") or [])]
         years = _when(h.get("when"))
         for it, reader, support in _hypothesis_readers(scope):

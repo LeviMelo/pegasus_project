@@ -13,3 +13,5 @@ depth: standard
 nulls: quick
 hypotheses:
   - {component: transient, where: [2611606], when: 2015-08..2016-06, note: "Zika microcephaly epidemic, Recife (PE)"}
+  - {component: relation, leader: SINAN-ZIKA, lags: [6, 9], when: 2015..2017, macro: [2], control: {icd10: [Q90]},
+     note: "Zika notifications precede microcephaly births by 6-9 months (infection in the first trimester)"}

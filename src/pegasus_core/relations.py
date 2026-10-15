@@ -425,7 +425,8 @@ def _ridge_residual(Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
     return out
 
 
-def _support_rows(label: str, a: np.ndarray, names: list[str], lags: int) -> tuple[list[dict], list[dict]]:
+def _support_rows(label: str, a: np.ndarray, names: list[str], lags: int,
+                  window: tuple[int, int] | None = None) -> tuple[list[dict], list[dict]]:
     """Every pair, lag and direction at one support: the follower f at t against the leader g at t − ℓ (lag 0 once
     per pair, with the larger p of its two orders), and the lag profiles (`_profiles`)."""
     F, _, T = a.shape
@@ -450,20 +451,21 @@ def _support_rows(label: str, a: np.ndarray, names: list[str], lags: int) -> tup
                 rows.append({"support": label, "field": names[f], "leader": names[g], "lag": ell,
                              "rho": float(S[f, g, ell] / den) if den > 0 else 0.0, "z": float(z), "p": float(p),
                              "_f": f, "_g": g})
-    return rows, _profiles(label, names, S, shifts, nf, ng, lags)
+    return rows, _profiles(label, names, S, shifts, nf, ng, lags, window)
 
 
 def _profiles(label: str, names: list[str], S: np.ndarray, shifts: np.ndarray, nf: np.ndarray, ng: np.ndarray,
-              lags: int) -> list[dict]:
+              lags: int, window: tuple[int, int] | None = None) -> list[dict]:
     """The lag profile of every ordered pair at one support, as the cumulative association of the leader strictly
     preceding the follower, ℓ = 1..L (the cumulative effect of a distributed-lag term, Gasparrini et al. 2010): the
     sum of S(ℓ) over those lags, tested against the same statistic at every circular shift of the leader (`_cross`),
     so the profile is one test per pair and support where its lags are L, and the lag of its largest term (``peak``)
-    is read from the lag rows. ``rho`` is the mean of the lag correlations."""
+    is read from the lag rows. ``rho`` is the mean of the lag correlations. ``window`` (first, last lag) sums a declared
+    window only: a known relation tested once at its documented lags (a study's relation hypothesis)."""
     T = shifts.shape[2]
     if lags < 1:
         return []
-    window = np.arange(1, lags + 1)
+    window = np.arange(max(1, window[0]), window[1] + 1) if window else np.arange(1, lags + 1)
     cum = shifts[..., (np.arange(T)[:, None] + window[None, :]) % T].sum(-1)           # [F, F, τ]: Σ_ℓ S(τ + ℓ)
     var, df = _null_moments(cum[..., 2 * lags:T - 2 * lags], cum)       # windows clear of the tested one and its neighbours
     P, Z = _tail_p(cum[..., 0], var, df)
@@ -516,7 +518,8 @@ def _direct(a: np.ndarray, rows: list[dict], lags: int, q: float) -> None:
 
 
 def relation_estimate(d: Departures, spectrum, lags: int = 2, q: float = 0.05, courses: bool = True,
-                      conditional: bool = True, ledger=None, log=None, edges: tuple[float, ...] = BAND_EDGES) -> dict:
+                      conditional: bool = True, ledger=None, log=None, edges: tuple[float, ...] = BAND_EDGES,
+                      window: tuple[int, int] | None = None) -> dict:
     """The relation estimator over the innovations ``d`` (module docstring): every pair of distinct fields at every lag
     0..``lags`` (one of the two leading) in each graph band of the place graph ``spectrum`` and, with ``courses``,
     the macro-regional and national courses; the shift-null p of each (`_cross`); one BH at q over all of it; and,
@@ -547,7 +550,7 @@ def relation_estimate(d: Departures, spectrum, lags: int = 2, q: float = 0.05, c
         tid = ledger.register(control.Hypothesis(f"relation|{label}", "scan", {
             "model": "lagged cross-covariance of N1 innovations, leader circular-shift null", "fields": fields_spec,
             "lags": lags}))
-        mine, prof = _support_rows(label, a, d.fields, lags)
+        mine, prof = _support_rows(label, a, d.fields, lags, window)
         rows += mine
         profiles += prof
         arrays[label] = (a, tid)
@@ -587,7 +590,8 @@ def restrict(d: Departures, periods: tuple[int, int] | None = None, macro: list[
 
 def relation_map(surprises: list, spectrum, lags: int = 2, q: float = 0.05, courses: bool = True,
                  conditional: bool = True, ledger=None, log=None, contexts: list[Departures] | None = None,
-                 periods: tuple[int, int] | None = None, macro: list[int] | None = None) -> dict:
+                 periods: tuple[int, int] | None = None, macro: list[int] | None = None,
+                 window: tuple[int, int] | None = None) -> dict:
     """Stage D over a set of fields (ARCHITECTURE §7.5): their N1 innovations (`innovations`), with any time-varying
     ``contexts`` (`context_innovations`) entered beside them, read by `relation_estimate`. ``periods`` and ``macro``
     cut the innovations (`restrict`) to a window and to macro-regions; ``spectrum`` is then the cut places' graph, and
@@ -611,4 +615,4 @@ def relation_map(surprises: list, spectrum, lags: int = 2, q: float = 0.05, cour
     if periods is not None or macro is not None:
         d = restrict(d, periods, macro)
     return relation_estimate(d, spectrum, lags=lags, q=q, courses=courses, conditional=conditional, ledger=ledger,
-                             log=log)
+                             log=log, window=window)

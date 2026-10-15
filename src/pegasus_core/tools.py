@@ -2069,8 +2069,8 @@ def joint(fields: list[tuple[str, str, str]], years: list[int], graph: str = "co
 
 def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "contiguity", lags: int = 2,
            q: float = 0.05, grain: str = "year", window: tuple[int, int] | None = None, macro: list[int] | None = None,
-           sources: list[dict | None] | None = None, calibrated_only: bool = True, profiles: bool = False, log=None
-           ) -> list[dict] | dict:
+           sources: list[dict | None] | None = None, calibrated_only: bool = True, profiles: bool = False, log=None,
+           lag_window: tuple[int, int] | None = None) -> list[dict] | dict:
     """Do fields move together, at which spatial support and lag (ARCHITECTURE §8.1)? The relation estimator
     (`relations.relation_map`) over the B1 innovations of ``fields`` ((dataset, event, node) each, read by ``sources``
     where not the event type's own, e.g. `fields.codes_source`): every graph band, the macro-regional and the national
@@ -2080,7 +2080,8 @@ def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "c
     miscalibrated at B1 is left out and said (``calibrated_only``; invariant 8: it never enters a pair scan, its
     relations are unanswered). Every row is returned, ``reported`` marking the relations at q; the rows of one pair and
     support over the lag are its lag profile, and with ``profiles`` the result is {"rows", "profiles"}, the profile of
-    each ordered pair and support as one cumulative test over lags 1..L (`relations.relation_estimate`)."""
+    each ordered pair and support as one cumulative test over lags 1..L (`relations.relation_estimate`), or over the
+    declared ``lag_window`` (first, last) only: a known relation tested at its documented lags."""
     from . import multiscale, relations
 
     sessions: dict = {}
@@ -2104,7 +2105,7 @@ def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "c
         edges = index[edges[keep[edges].all(1)]]
         n = int(keep.sum())
     out = relations.relation_map(surps, multiscale.spectrum(edges, n), lags=lags, q=q, ledger=first.ledger,
-                                 periods=window, macro=macro, log=log)
+                                 periods=window, macro=macro, log=log, window=lag_window)
     return {"rows": out["rows"], "profiles": out["profiles"]} if profiles else out["rows"]
 
 

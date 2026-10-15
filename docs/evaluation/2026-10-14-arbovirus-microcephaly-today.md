@@ -38,8 +38,21 @@ anomaly recording, raised for every anomaly by the surveillance that followed th
 change timed with the epidemic, which a correlation at coarse supports cannot tell from the effect. The specific
 evidence is the local band: Q02 z 4.76 at lag 7, where Q90's largest is 2.5.
 
-**Verdict.** On the current code, with the specific exposure in the data, the estimator recovers Zika → microcephaly at
-the documented lag, specific against Down syndrome at the local scale. The coarse lag profiles are not specific.
+**The declared test (the same day; this corrects the verdict first written).** A study's relation hypothesis
+(`component: relation`, `study._relation_hypothesis`). Zika leads Q02 by 6-9 months over 2015-2017, the cumulative
+association over that window only, one test per support with Holm over the supports, and Down syndrome as the control.
+Artefact `data/probes/relation_hypothesis.log`.
+- Pernambuco alone (the study's area: 185 places, four supports): not supported (state course ρ 0.04, p 0.56).
+- The Northeast (`macro: [2]`, its states' own fits): **not supported**. The regional course gives ρ 0.33, p 0.029,
+  Holm 0.26. The local band that had given z 4.76 gives p 0.40. The control's course is ρ -0.20, the opposite sign.
+
+The afternoon's two reported rows came from national fits cut to the Northeast. Refitted on the Northeast's own
+states, the local signal does not reproduce: it was fragile, not a recovery.
+
+**Verdict.** No test of the system establishes Zika → microcephaly. The regional timing points the documented way (6-8
+months, p 0.03 at one support), and the control does not. The bound is the data: one wave, the exposure notified only
+from 2016, three years. That a relation's evidence moves with the area its fields were fitted on is a fragility of the
+innovations. It is recorded beside OQ 21.
 
 Two general steps follow, recorded in OPEN_QUESTIONS:
 - a known link should be tested as a declared relation hypothesis: one test of the documented window, not one row among
