@@ -89,3 +89,31 @@ from `new --records`, took 13.5 min plus products and holds all 21 parts of the 
 - 12.9 per 1,000 live births in 2014, DATASUS's own figure for the year; 12.4 over the period.
 - By region: North 15.3, Northeast 13.8, Centre-West 12.2, Southeast 11.4, South 10.0.
 - Global Moran's I 0.40 (p 0.001); 72 high-high and 176 low-low municipal clusters.
+
+**Tuberculosis in Pernambuco, 2015-2023** (standard; SINAN-TUBE, SIM, SIH, CIHA, SIA-PS and SIA-SAD), 36 min, 23 of 23
+parts:
+- notifications 65.7 per 100,000 person-years, deaths 4.1;
+- case fatality 5.4 % from the notification's closure (2,991 of 55,483), in hospital 8.8 %.
+
+It found the last defects, each fixed in general:
+- a source with no establishment column: the institution question is not defined there, and the facility triages
+  read nothing;
+- consolidated rows, where one row stands for many procedures, give no distinct persons;
+- a step needs five periods, and SIA-SAD's four-year series does not have them.
+
+**Where this leaves the system** (the author, 2026-10-15, set the toxoplasmosis win condition aside; the system is
+judged by its use for studies). Nine studies hold every part of the analytic body:
+- seven unrelated topics from `search` and `new`, in four states: leptospirosis, suicide, dengue, tuberculosis,
+  infarction, infant mortality, low birth weight;
+- national infant mortality;
+- the toxoplasmosis deep slice.
+
+No product or lane downloads past the lake or an extract. Run times:
+- a state study: 3 to 85 minutes, the longest recomputing national link runs once;
+- a national study at standard depth: about 20 minutes.
+
+Open:
+- the exhaustive national toxoplasmosis study, estimated at 47 hours by RS throughput scaled to 5,570 places (no
+  national question pass is measured yet);
+- SNGPC's month-keyed contexts, landed before pegasus_data's month fix (their yearly sums, which PegaSUS reads, are
+  whole).
