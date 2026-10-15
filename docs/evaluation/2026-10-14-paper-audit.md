@@ -49,7 +49,7 @@ length of stay (mean 7.0 to 12.2 days, median 4 to 8) are in the records by publ
 alike, and every year holds its twelve monthly files: features of the source, said, not gaps. Macro-region 2703 holding
 regions 7-10 is Alagoas's second (Arapiraca's): correct.
 
-**With pegasus_data's rounds 5 and 6** (merged 71873d6, ADR-0180, ADR-0181). GESTRISCO was coded the wrong way round:
+**With pegasus_data's rounds 5 and 6** (merged 71873d6, pegasus_data ADR-0180, pegasus_data ADR-0181). GESTRISCO was coded the wrong way round:
 SISAIH01's layout asks it of sterilisation AIHs only, 0 Sim, 1 Não, while TabWin's table binds 1 Sim; the records side
 with the layout, so its 1 on every AIH is the default fill, declared not recorded. RACA_COR's 99, INSTRU's 0 and four
 more columns' "ignored" codes are declared missing: race is recorded on 43.0 % of the AIHs (was "100 %"); SIH's race

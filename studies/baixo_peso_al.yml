@@ -1,0 +1,10 @@
+# Baixo peso ao nascer em Alagoas: a topic defined by a record condition (pegasus_data ADR-0193), per live birth.
+study: baixo_peso_al
+topic:
+  seeds:
+    records:
+      - {dataset: SINASC-DN, name: low birth weight, condition: [{role: birth.weight, op: "<", value: 2500}]}
+period: 2014-2023
+where: AL
+depth: standard
+contexts: [persons_low_income, population_urban, cnes_teams_esf, cnes_physicians_professionals]

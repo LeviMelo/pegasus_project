@@ -1,0 +1,15 @@
+# suicidio_rs: written by `pegasus-core new`; every key is described in the README and ARCHITECTURE §3.1.
+study: suicidio_rs
+topic:
+  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms
+    icd10: [X60, X61, X62, X63, X64, X65, X66, X67, X68, X69, X70, X71, X72, X73, X74, X75, X76, X77, X78, X79, X80, X81, X82, X83, X84]
+  only: [SIM-DO, SIH-RD]             # the sources read (leave out to read every source holding the codes)
+period: 2014-2023               # first-last year
+where: RS                    # BR, states (AL or 27, several as a list) or municipality codes
+depth: standard               # survey, standard, deep or exhaustive: presets of the choices below
+# related: 3                   # related codes read beside the topic's own, strongest first (0: none)
+# persons: true                # the cohort scan over linked persons (deep and exhaustive)
+# download: 10                 # gigabytes the study may download (years held in the lake are free)
+contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
+# hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
+#   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}

@@ -31,7 +31,11 @@ import pyarrow.parquet as pq
 from . import config, control, fields, gateway, leads, questions, store
 
 DEPTHS = ("survey", "standard", "deep", "exhaustive")
-SEED_SYSTEMS = ("icd10", "sinan", "terms")
+SEED_SYSTEMS = ("icd10", "sinan", "terms", "records")
+#: a records seed's keys: the dataset (and its event), the condition on pegasus_data roles (its grammar, ADR-0193 there),
+#: the topic's name, and the events it is rated per
+RECORD_KEYS = {"dataset", "event", "condition", "name", "per"}
+CONDITION_OPS = ("<", "<=", ">", ">=", "==", "in", "not in")
 #: the field kinds a study reads beyond counts (ARCHITECTURE §5.2): the declared readers pegasus_data's roles give every
 #: source (`update.System`'s keys), and ``linked``, each usable person path's linked share as a field of its own
 READERS = ("measures", "compositions", "intervals", "flows", "quality", "supports", "linked")
@@ -157,6 +161,25 @@ def load(path: str | Path) -> Declaration:
         problems.append("'topic.seeds' is required: codes in any of " + ", ".join(SEED_SYSTEMS))
     for k in sorted(set(seeds) - set(SEED_SYSTEMS)):
         problems.append(f"unknown seed system {k!r} (systems: {', '.join(SEED_SYSTEMS)})")
+    for i, r in enumerate(seeds.get("records") or []):
+        where_ = f"topic.seeds.records[{i}]"
+        if not isinstance(r, dict):
+            problems.append(f"{where_}: write {{dataset, condition: [{{role, op, value}}], name, per}}")
+            continue
+        for k in sorted(set(r) - RECORD_KEYS):
+            problems.append(f"{where_}: unknown key {k!r} (keys: {', '.join(sorted(RECORD_KEYS))})")
+        if not r.get("dataset") or not r.get("name"):
+            problems.append(f"{where_}: dataset and name are required")
+        clauses = r.get("condition")
+        if not isinstance(clauses, list) or not clauses:
+            problems.append(f"{where_}: condition is a list of clauses, e.g. [{{role: birth.weight, op: '<', "
+                            "value: 2500}]")
+            continue
+        for j, c in enumerate(clauses):
+            ops = [o for o in CONDITION_OPS if o in (c or {})] if isinstance(c, dict) else []
+            if not isinstance(c, dict) or not c.get("role") or not (c.get("op") in CONDITION_OPS or ops):
+                problems.append(f"{where_}.condition[{j}]: {{role: <pegasus_data role>, op: one of "
+                                f"{', '.join(CONDITION_OPS)}, value: ...}} or {{role, in: [codes]}}")
     period = doc.get("period", "2010-2023")
     try:
         first, last = ((int(x) for x in str(period).split("-")) if not isinstance(period, list) else
@@ -229,7 +252,8 @@ def load(path: str | Path) -> Declaration:
                             "lists them)")
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
-    return Declaration(study=str(doc["study"]), seeds={k: [str(c) for c in v] for k, v in seeds.items()}, years=years,
+    return Declaration(study=str(doc["study"]), seeds={k: ([dict(c) for c in v] if k == "records" else [str(c) for c in v])
+                                                       for k, v in seeds.items()}, years=years,
                        path=path, include=list(topic.get("include") or []), exclude=list(topic.get("exclude") or []),
                        only=list(topic.get("only") or []),
                        where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
@@ -366,6 +390,16 @@ def _field_spec(text: str) -> tuple[str, str, list[str]]:
     return ds, event, codes
 
 
+def _condition_text(clauses: list[dict]) -> str:
+    """A condition's clauses as a reader reads them: "birth.weight < 2500 and birth.delivery in [2]"."""
+    out = []
+    for c in clauses:
+        op = c.get("op") or next((o for o in CONDITION_OPS if o in c), "")
+        value = c.get("value", c.get(op))
+        out.append(f"{c['role']} {op} {value}" + (f" {c['unit']}" if c.get("unit") else ""))
+    return " and ".join(out)
+
+
 def _icd(code: str) -> str:
     return code.replace(".", "").strip().upper()
 
@@ -409,15 +443,29 @@ def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | 
     held = control.reserved(dataset)
     ys = [y for y in years if (not published or y in published) and (not held or y < min(held))]
     volume = _volumes(dataset, config.data_root())
+    states = _published_states(dataset, config.data_root())
     # read once per scope (`resolve` clears it): not across a run, whose `ensure_lake` extends the lake; per call, the
-    # deep scope priced each related code in every served dataset by a fresh read
+    # deep scope priced each related code in every served dataset by a fresh read. A year is the lake's when it holds
+    # every state the year publishes
     if dataset not in _LAKE:
-        _LAKE[dataset] = frozenset(pg.lake_coverage(dataset, root=config.data_root()))
+        cov = pg.lake_coverage(dataset, root=config.data_root())
+        _LAKE[dataset] = frozenset(y for y, v in cov.items() if int(v.get("ufs") or 0) >= states.get(int(y), 1))
     lake = _LAKE[dataset]
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
 
 
 _LAKE: dict[str, frozenset[int]] = {}
+
+
+@functools.cache
+def _published_states(dataset: str, root: str) -> dict[int, int]:
+    """The states each year of ``dataset`` publishes files for (the catalog's, `pg.explore`), once per process."""
+    import pegasus_data as pg
+
+    try:
+        return {int(r["year"]): int(r.get("ufs") or 1) for r in pg.explore(dataset, root=root).rows}
+    except Exception:  # noqa: BLE001 - a dataset the catalog does not describe: one partition is the year
+        return {}
 
 
 @functools.cache
@@ -920,6 +968,27 @@ def resolve(decl: Declaration, log=print) -> Scope:
             continue
         for et in gateway.event_types(ds):
             items.append(Item(ds, et["name"], ["*"], None, [], f"seed sinan:{code} (the agravo's own notifications)"))
+    for r in decl.seeds.get("records", []):
+        ds = str(r["dataset"])
+        if ds not in served:
+            excluded.append({"seed": f"records:{r['name']}", "why": f"no dataset {ds} with event types"})
+            continue
+        types = gateway.event_types(ds)
+        base = str(r.get("event") or types[0]["name"])
+        if base not in {e["name"] for e in types}:
+            excluded.append({"seed": f"records:{r['name']}", "why": f"{ds} has no event type {base} "
+                             f"({', '.join(e['name'] for e in types)})"})
+            continue
+        # a subset of births is a share of births (low birth weight per live birth); anything else per its residents
+        # unless the seed names the events it is rated per (an infant death per live birth)
+        kind = next(e for e in types if e["name"] == base).get("kind")
+        per = r.get("per") or (f"{ds}:{base}" if kind == "birth" else None)
+        if per and ":" not in str(per):
+            per_types = gateway.event_types(str(per))
+            per = f"{per}:{per_types[0]['name']}" if per_types else per
+        event = gateway.condition_event(base, list(r["condition"]), str(r["name"]), per)
+        items.append(Item(ds, event, ["*"], None, [], f"seed records: {r['name']} ({ds} {base} where "
+                          f"{_condition_text(r['condition'])}" + (f"; per {per}" if per else "") + ")"))
     tree = {r["code"]: r for r in gateway.code_tree("ICD10").to_pylist()}
     nodes, codes = [], []
     for raw in decl.seeds.get("icd10", []):
@@ -953,6 +1022,17 @@ def resolve(decl: Declaration, log=print) -> Scope:
                     items.append(Item(ds, et["name"], ["*"], None, [], f"its primary classifier ({prim['column']}) "
                                       f"holds {', '.join(held)}, read as a field of its own (not inside its chapter)",
                                       source={"codes": held}))
+                    # and anywhere on its records (every diagnosis of an admission, every line of a certificate): the
+                    # multiple-cause reading, and the only one of a code the source records beside the primary (SIH
+                    # writes self-harm's X60-X84 as a secondary diagnosis of the injury: 7 primary records in ten
+                    # years of Rio Grande do Sul, the suicide study read none, 2026-10-15)
+                    for d in fields.declared_mentions(ds)[:1]:
+                        src = fields.mentions_source(ds, d.column)
+                        # one field, the code set anywhere on the record (each record once), not a field per code
+                        items.append(Item(ds, et["name"], ["*"], None, [],
+                                          f"{', '.join(held)} anywhere on its records "
+                                          f"({src['classifier'].split(':', 1)[1]}): the multiple-cause reading",
+                                          source={**src, "codes": held}))
                 elif held:
                     mentions = [d.column for d in fields.declared_mentions(ds)] or None
                     items.append(Item(ds, et["name"], sorted({reg.chapter(n) for n in held}), held, [],
@@ -1066,6 +1146,18 @@ def resolve(decl: Declaration, log=print) -> Scope:
             it.status = "none"
             excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} "
                              f"but its records hold none in {held[0]}-{held[-1]}, the years the lake holds"})
+    if not decl.choice("readers"):
+        # a survey reads the topic's primary codes; its codes anywhere on the records only where the primary reading
+        # is too sparse for any question (a code a source records beside the primary one)
+        primary = {(i.dataset, i.event) for i in items if i.status == "in" and (i.source or {}).get("codes")
+                   and not i.reason.startswith("related")}
+        for it in items:
+            if (it.status == "in" and (it.source or {}).get("source") == "code_list" and "multiple-cause" in it.reason
+                    and (it.dataset, it.event) in primary):
+                it.status = "none"
+                excluded.append({"seed": f"{it.dataset}:{it.event}:{(it.source or {}).get('classifier')}",
+                                 "why": "a survey reads the topic's primary codes; anywhere on the records at standard "
+                                        "depth or with readers declared"})
     items = [i for i in items if i.status != "none"]
     for it in items:
         # a code set's field is the codes' events only, a ratio's the numerator per denominator event: the declared
@@ -1075,6 +1167,12 @@ def resolve(decl: Declaration, log=print) -> Scope:
         it.questions = decl.choice("questions")
         # a code list's field is a code set too (its categories on the list): read at its other places as one is
         coded = bool(it.source) and ("codes" in it.source or it.source.get("source") == "code_list")             and not ({"population", "support"} & set(it.source))
+        # a record condition's topic is one field as a code set is (its records' characteristics are the case mix's,
+        # read by the products): as a whole type, every composition of SINASC had been a field of its own, 142 of
+        # them for low birth weight in one state (2026-10-15)
+        if gateway.split_event(it.event)[1] is not None and not it.source:
+            it.readers = {"supports": "all"} if "supports" in chosen and not it.count_only else {}
+            continue
         if coded and "supports" in chosen and not it.count_only:
             it.readers = {"supports": "all"}     # the code set at its other places
     # a dataset read as nested events (SINAN's notification, every row; its case, the rows its classification
@@ -1591,6 +1689,17 @@ def _related_fields(decl: Declaration, related: list[dict], served: set[str], to
 # ---------------------------------------------------------------------- the run
 
 
+def nothing_read(scope: Scope) -> str:
+    """Why a scope reads no source, and what to change: the download budget an item needs, or what a seed named."""
+    need = [i.download_gb for i in scope.items if i.status == "deferred" and i.download_gb]
+    if need:
+        return (f"nothing is read: every source is deferred past the download budget of {scope.budget_gb:g} GB; "
+                f"`download: {np.ceil(min(need) + 0.5):.0f}` reads the first ({min(need):.1f} GB), years in the lake "
+                "are free")
+    why = "; ".join(f"{x['seed']}: {x['why']}" for x in scope.excluded[:5])
+    return f"nothing is read: no source holds the topic's codes in the study's years and place ({why})"
+
+
 def folder_of(decl: Declaration) -> Path:
     return decl.path.parent / decl.study
 
@@ -1627,6 +1736,9 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
     estimate = scope.to_dict()["estimated_minutes"]            # made before running (acceptance item 10), kept as made
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
+    if not read:
+        # an empty folder is never written as a study (dengue in Goiás deferred every item past its budget, 2026-10-15)
+        raise DeclarationError(f"{decl.path}: {nothing_read(scope)}")
     t = time.time()
     read = _probe(scope, read, log)
     prepared = _prepare_store(decl, read, log)
@@ -2254,6 +2366,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                         it, s, f, label, skip={y for (ds, y) in partial if ds == it.dataset}), [], log)
                     measures += lap.guard(f"measures {f.id}", lambda it=it, f=f, label=label: _measures(it, f, label, log),
                                           [], log)
+                    if decl.choice("persons"):
+                        measures += lap.guard(f"follow-up {f.id}", lambda it=it, f=f, label=label: _followup(
+                            it, f, label, log), [], log)
                     code_rows += lap.guard(f"codes {f.id}", lambda it=it, f=f, label=label: _codes(it, f, label), [], log)
                     try:                   # B0 beside B1: a finding's O/E is against its own tier's expectation
                         mu0 = s.surprise(node, "B0").mu
@@ -3163,7 +3278,7 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
     # the exposure the block was fitted on: person-years, or other events (a declared ratio, or the event type's
     # declared denominator: live births), reported per 1,000 of them
     ratio = str(d.population).startswith("events:")
-    per, scale = ((f"1,000 {d.population[len('events:'):].replace(';', ' + ')} events", 1e3) if ratio
+    per, scale = ((f"1,000 {_exposure_text(d.population)}", 1e3) if ratio
                   else ("100,000 person-years", 1e5))
     if support and not ratio:
         # events at the place they occurred or were cared for, over that place's residents: an occurrence ratio, not a
@@ -3176,7 +3291,7 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
     period = f"{int(np.asarray(d.years)[0])}-{int(np.asarray(d.years)[-1])}"
     # what the denominator is (estimates' ``denominator_kind``): person-years of residents, another field's events, or
     # the residents of the place an event occurred at
-    kind = (d.population[len("events:"):].replace(";", " + ") + " events" if ratio else
+    kind = (_exposure_text(d.population) if ratio else
             "person-years of the place's residents (events where they occurred: not a risk)" if support else
             "person-years")
 
@@ -3254,7 +3369,7 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
                     cells_ = cells if isinstance(cells, slice) else np.asarray(cells)
                     out += row("reference", unit, t, np.atleast_1d(yr0[cells_]), np.atleast_1d(nr0[cells_]),
                                group=name, std_g=std_of.get(name))
-    if not ratio and _birth_related(it, d):
+    if (not ratio or births_field) and _birth_related(it, d):
         # a perinatal or pregnancy field's rate is per live births, the convention of infant and maternal mortality
         # (RIPSA C.1, C.3): congenital toxoplasmosis' deaths had been given per 100,000 person-years of everyone
         # (2026-10-12); the person-year rows stay, the model's own exposure
@@ -3266,7 +3381,7 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
                     "stratum": None, **_period(int(np.asarray(d.years)[t]) if t is not None else None,
                                                None if t is not None else period)}
             # the count is the person-year rows' already, but for a births field, which has none
-            return _rated(base, float(yy.sum()), float(bb.sum()), "1,000 SINASC-DN:birth events", 1e3, "live births",
+            return _rated(base, float(yy.sum()), float(bb.sum()), "1,000 live births", 1e3, "live births",
                           cells=(yy.sum(keepdims=True), bb.sum(keepdims=True)), count=births_field)
         for t in [*range(T), None]:
             out += per_births(*_whole(), t, np.ones(U, bool))
@@ -3282,7 +3397,7 @@ def _descriptive(it: Item, s, f, label: str, refs: list | None = None, support: 
                 base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": "reference", "place": unit,
                         "stratum": None, **_period(int(np.asarray(d.years)[t]) if t is not None else None,
                                                    None if t is not None else period)}
-                out += _rated(base, ev_, bb, "1,000 SINASC-DN:birth events", 1e3, "live births", count=births_field)
+                out += _rated(base, ev_, bb, "1,000 live births", 1e3, "live births", count=births_field)
     _ratio_to_brazil(out)
     return out
 
@@ -3581,6 +3696,11 @@ MEASURES = {
                               "2,000 draws of its coefficients)",
     "case_fatality_trend": "the odds of death from the event multiplied per year, adjusted for age band and sex "
                            "(binomial regression, Wald interval)",
+    "mortality_after": "the persons dead of any cause within `variable`'s days of their first admission with the "
+                       "topic's codes in the period, over those followed that long: a record linkage to the death "
+                       "certificates (pegasus_data's cohort link), its false-match rate at that horizon and its verdict "
+                       "in `model`, the deaths less the link's coincidences (its shifted-date control) in `note`; exact "
+                       "interval, linkage error not in it",
     "expected": "events expected (`model`), no interval",
     "model_rate": "the hierarchical model's expected events per `per` person-years (tier B1)",
     "persons": "distinct persons among the events, by the source's registry identifier of its subject (the CNS): each "
@@ -4185,6 +4305,91 @@ def _case_fatality(it: Item, f, label: str, classifier: str | None, area, log) -
     return out
 
 
+#: the follow-up horizons a study reports, in days after the first admission
+FOLLOWUP_DAYS = (30, 365)
+
+
+def _followup(it: Item, f, label: str, log) -> list[dict]:
+    """Mortality after the first admission with the topic's codes (`FOLLOWUP_DAYS`), from pegasus_data's cohort link
+    (`linked_deaths`: each person's first admission of the period to a death certificate of any cause, its false-match
+    rate and verdict by horizon). Over the period and by the year of the first admission, the persons dead within the
+    horizon over those followed that long, with exact intervals; a horizon whose link is not viable is said, never
+    estimated. The area's states' files are read (SIH's are cut by the hospital's state) and the area's residents
+    kept: a resident admitted in another state is not followed, which the note says."""
+    import pegasus_data as pg
+    import pyarrow.compute as pc
+    from pegasus_data.linkage.followup import cohort_link
+    from scipy.stats import beta
+
+    src = it.source or {}
+    codes = list(fields.codes_of(src, it.nodes))
+    if not codes or it.count_only or src.get("population") or src.get("support"):
+        return []
+    ds = gateway.data_code(it.dataset)
+    try:
+        cohort_link(ds)                  # the source has a declared cohort link, or no follow-up
+    except LookupError:
+        return []
+    area = config.study_area()
+    states = sorted({int(u) if int(u) < 100 else int(u) // 10000 for u in area}) if area else None
+    strata = gateway._strata(it.dataset, gateway.split_event(it.event)[0])
+    residence = next((r["role"] for r in gateway.roles(it.dataset) if r["column"] == strata.get("residence")), None)
+    try:
+        fu = pg.linked_deaths(ds, codes, years=list(it.years), geography=[str(x) for x in states] if states else "BR",
+                              match="any" if src.get("source") == "code_list" else "principal",
+                              roles=[residence] if residence else [], root=config.data_root())
+    except Exception as exc:  # noqa: BLE001 - a follow-up that cannot be linked is said; the case fatality stands
+        log(f"study: follow-up {it.dataset} {codes}: {type(exc).__name__}: {exc}")
+        return []
+    t = fu.table
+    keep = None
+    if area and residence and residence in t.column_names:
+        u = pc.cast(pc.utf8_slice_codeunits(pc.cast(t.column(residence), pa.string()), 0, 6), pa.int64())
+        keep = pa.array(config.in_area(np.nan_to_num(u.to_numpy(zero_copy_only=False).astype(float), nan=0)
+                                       .astype(np.int64)))
+    origin_year = pc.year(t.column("origin")).to_numpy(zero_copy_only=False)
+    period = f"{min(it.years)}-{max(it.years)}"
+    q = fu.quality
+    base = {"field": f.id, "label": label, "dataset": it.dataset, "geography": _whole()[0], "place": _whole()[1],
+            "value_label": "death of any cause", "denominator_kind": "persons followed",
+            "unit": "proportion"}
+    out = []
+    for d in FOLLOWUP_DAYS:
+        try:
+            flags = fu.died_within(d)
+        except Exception as exc:  # noqa: BLE001 - a horizon the link does not support (not viable, past its window)
+            log(f"study: follow-up {it.dataset} {d} days: {type(exc).__name__}: {exc}")
+            continue
+        h = fu.horizon(d)
+        died = pc.fill_null(flags, False).to_numpy(zero_copy_only=False)
+        followed = pc.is_valid(flags).to_numpy(zero_copy_only=False)
+        if keep is not None:
+            mine = keep.to_numpy(zero_copy_only=False)
+            died, followed = died & mine, followed & mine
+        whole = fu.mortality(d)
+        share_false = (whole["died"] - whole["died_corrected"]) / whole["died"] \
+            if whole.get("died_corrected") is not None and whole["died"] else None
+        model = (f"record linkage to the death certificates ({q['link']}); false-match rate at {h['days']} days "
+                 f"{h['chance_percent']} %; verdict {h['verdict']}")
+        for y in [*sorted({int(v) for v in origin_year[followed]}), None]:
+            sel = followed if y is None else followed & (origin_year == y)
+            n, k = int(sel.sum()), int((died & sel).sum())
+            if not n:
+                continue
+            lo = float(beta.ppf(0.025, k, n - k + 1)) if k > 0 else 0.0
+            hi = float(beta.ppf(0.975, k + 1, n - k)) if k < n else 1.0
+            note = (f"{k * (1 - share_false):.0f} deaths less the link's coincidences ({k * (1 - share_false) / n:.1%})"
+                    if share_false is not None else None)
+            if area and y is None:
+                note = (note + "; " if note else "") + "the area's residents admitted in its own states' hospitals"
+            out.append(_estimate_row("case fatality", "mortality_after",
+                                     {**base, "variable": f"death within {d} days of the first admission",
+                                      **_period(y, None if y is not None else period), "note": note, "model": model},
+                                     estimate=k / n, low=lo, high=hi, interval="Clopper-Pearson (linkage error not in "
+                                     "it)", numerator=k, denominator=n))
+    return out
+
+
 def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
     """The age at the event of the field's events in the area, from its own records (`gateway.mark_values`: the age and
     sex columns of the topic's records, filtered in the lake), per year and over the period, for everyone and by sex:
@@ -4498,14 +4703,14 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
     np.add.at(y, (d.u[sel], d.t[sel], d.g[sel]), d.y[sel])
     N = d.N.astype(float)
     ratio = str(d.population).startswith("events:")
-    per, scale = ((f"1,000 {d.population[len('events:'):].replace(';', ' + ')} events", 1e3) if ratio
+    per, scale = ((f"1,000 {_exposure_text(d.population)}", 1e3) if ratio
                   else ("100,000 person-years", 1e5))
     if _births_field(it):
         # a birth prevalence by municipality: its live births as the one cell (a birth has no sex or age of its own),
         # the area's and Brazil's rates per live birth as the expectations (the audit could map no prevalence)
         y, N = y.sum(2, keepdims=True), _births(d)[:, :, None]
         G = 1
-        per, scale, ratio = "1,000 SINASC-DN:birth events", 1e3, True
+        per, scale, ratio = "1,000 live births", 1e3, True
         refs = [(k, yb.sum(1, keepdims=True), _reference_births([int(x) for x in np.asarray(d.years)], [k])[k][:, None])
                 for k, yb, _ in refs or [] if k == "BR"]
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -4565,7 +4770,7 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
              if ok_.sum() > 1 else 0.0)
         prior.append((m * m / v, m / v) if m > 0 and v > 0 else None)
     period = f"{int(years[0])}-{int(years[-1])}"
-    kind = ("live births" if _births_field(it) else d.population[len("events:"):].replace(";", " + ") + " events"
+    kind = ("live births" if _births_field(it) else _exposure_text(d.population)
             if ratio else "person-years")
     exact = "exact Poisson, expectation fixed"
     out = []
@@ -4904,7 +5109,12 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "intervals, the records with no outcome recorded counted in the denominator and said; deaths from another "
         "cause apart. Adjusted for age and sex by a binomial regression on year, age band and sex (adjacent bands "
         "merged until each holds a death and a survivor), each year at the period's case mix (marginal "
-        "standardisation, interval from 2,000 draws of the coefficients), and its trend as the odds ratio per year.",
+        "standardisation, interval from 2,000 draws of the coefficients), and its trend as the odds ratio per year. "
+        "Where persons are read and pegasus_data declares a cohort link for the source, mortality after the first "
+        "admission with the topic's codes in the period: each person's first admission linked to a death certificate of "
+        "any cause (deterministic passes on birth date, sex and residence), the persons dead within 30 days and within a "
+        "year over those followed that long, with exact intervals, each horizon's false-match rate from the link's "
+        "shifted-date control and its verdict; a horizon whose link is not viable is not estimated.",
         "Associated causes (multiple-cause analysis, where a source carries every certificate line or diagnosis): each "
         "ICD-10 category named beside the topic on its own records, its share with a Clopper-Pearson interval and its "
         "ratio to the records of the same sex and ten-year age band without the topic.",
@@ -5001,12 +5211,15 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
             *([("Record linkage", linked)] if linked else []),
             *([("Ecological analysis", [
                 "Each count field's events over the period in each municipality regressed on the declared contexts "
-                "(estimates.parquet, associations): negative binomial (NB2), offset the log of the events expected at "
+                "(estimates.parquet, associations): negative binomial (NB2; its dispersion estimated once, by maximum "
+                "likelihood on the field's null model, every regression a GLM at it), offset the log of the events expected at "
                 "the area's own age-sex rates, so a coefficient multiplies the standardised ratio; each context "
-                "standardised across the municipalities (a ratio per standard deviation, the SD in `note`), alone and "
-                "then all together on the municipalities holding every one (a variance inflation over 5 named in "
-                "`model`); a context is modelled where nine municipalities in ten hold its value. Wald intervals robust "
-                "to clustering by health region (sandwich; heteroskedasticity-robust under ten regions). Moran's I of "
+                "standardised across the municipalities (a ratio per standard deviation, the SD in `note`), each alone "
+                "(with its Benjamini-Hochberg q across the field's contexts) and then together, the contexts left after "
+                "dropping, one at a time, the one of largest variance inflation until none exceeds 5 (those dropped "
+                "named in `model`); a context is modelled where nine municipalities in ten hold its value. Wald intervals robust "
+                "to clustering by health region (sandwich; heteroskedasticity-robust under ten regions, or where the joint "
+                "model has as many parameters as regions); an estimate without a finite interval is not written. Moran's I of "
                 "the joint model's Pearson residuals on the municipalities' contiguity, its one-sided p from 999 "
                 "permutations, says the spatial dependence the model leaves. The associations are between places "
                 "(ecological), never effects on persons."])] if decl.contexts else []),
@@ -5038,10 +5251,17 @@ def _methods_markdown(decl: Declaration, scope: Scope, desc: list[dict], linkage
     return "\n".join(lines)
 
 
+def _exposure_text(population: str) -> str:
+    """A denominator of other events as a reader names it: "live births" for SINASC's births, else each event type's
+    name ("SIM-DOFET:death events")."""
+    named = {BIRTHS[len("events:"):]: "live births"}
+    return " + ".join(named.get(p, f"{p} events") for p in str(population)[len("events:"):].split(";"))
+
+
 def _births_field(it: Item) -> bool:
     """Whether the field's events are live births themselves (SINASC's: a newborn's anomaly), not deaths or admissions
     around birth: its rates are per live births only, its strata the mother's."""
-    return f"events:{it.dataset}:{it.event}" == BIRTHS
+    return f"events:{it.dataset}:{gateway.split_event(it.event)[0]}" == BIRTHS
 
 
 def _birth_related(it: Item, d) -> bool:
@@ -5738,21 +5958,40 @@ def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
         base = {"field": fid, "label": f["label"], "dataset": f["dataset"], "geography": "municipality",
                 "period_kind": "period"}
 
-        def fit(names: list[str], usable=usable, y=y, off=off, groups=groups):
+        # the field's dispersion once, from its null model (the expected events alone): every regression of it is
+        # then a negative-binomial GLM at that dispersion, fitted by IRLS. A maximum-likelihood fit of the
+        # dispersion in each of sixty regressions had failed to converge on wide designs and its Newton fallback
+        # held the suicide study's products for half an hour (2026-10-15)
+        try:
+            null = sm.NegativeBinomial(y, np.ones((len(y), 1)), offset=off, loglike_method="nb2").fit(disp=0,
+                                                                                                    maxiter=200)
+            alpha = float(null.params[-1])
+        except Exception:  # noqa: BLE001 - the moments' estimate where the null's likelihood will not fit
+            alpha = float("nan")
+        if not np.isfinite(alpha) or alpha <= 0:
+            mu0 = np.exp(off) * y.sum() / np.exp(off).sum()
+            alpha = max(float(((y - mu0) ** 2 - mu0).sum() / (mu0 ** 2).sum()), 1e-8)
+        family_ = f"negative binomial (dispersion {alpha:.3g}, from the field's null model)"
+
+        def fit(names: list[str], usable=usable, y=y, off=off, groups=groups, robust_only=False, alpha=alpha,
+                family_=family_):
             Z = np.column_stack([(usable[n] - np.nanmean(usable[n])) / np.nanstd(usable[n]) for n in names])
             ok = np.isfinite(Z).all(1)
             X = sm.add_constant(Z[ok], has_constant="add")
-            model = sm.NegativeBinomial(y[ok], X, offset=off[ok], loglike_method="nb2")
             g = groups[ok]
-            cov = ({"cov_type": "cluster", "cov_kwds": {"groups": g}} if len(np.unique(g)) >= 10
-                   else {"cov_type": "HC1"})
-            res = model.fit(disp=0, maxiter=200, **cov)
-            return res, ok, cov["cov_type"]
+            # cluster-robust where there are ten regions and more of them than parameters
+            cov = ({"cov_type": "cluster", "cov_kwds": {"groups": g}}
+                   if len(np.unique(g)) >= max(10, len(names) + 2) and not robust_only else {"cov_type": "HC1"})
+            res = sm.GLM(y[ok], X, family=sm.families.NegativeBinomial(alpha=alpha), offset=off[ok]).fit(**cov)
+            return res, ok, cov["cov_type"], family_
 
-        def rows(res, names, ok, kind, cov_type, base=base, usable=usable) -> list[dict]:
+        def rows(res, names, ok, kind, cov_type, base=base, usable=usable, fid=fid) -> list[dict]:
             got = []
             for k, name in enumerate(names, start=1):
                 b, se, p = float(res.params[k]), float(res.bse[k]), float(res.pvalues[k])
+                if not (np.isfinite(b) and np.isfinite(se) and se > 0 and np.isfinite(np.exp(b + 1.96 * se))):
+                    log(f"study: ecological {fid} {name} ({kind}): no finite interval, not written")
+                    continue
                 got.append(_estimate_row(
                     "associations", "association", {**base, "variable": name, "value_label": about[name]["label"],
                                                     "note": f"1 SD = {np.nanstd(usable[name]):.4g} "
@@ -5761,33 +6000,62 @@ def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
                     interval=f"Wald, {'cluster-robust by health region' if cov_type == 'cluster' else 'HC1'}", p=p,
                     denominator=float(ok.sum()), denominator_kind="municipalities", model=kind))
             return got
+        alone = []
         for name in usable:
             try:
-                res, ok, ct = fit([name])
+                res, ok, ct, fam = fit([name])
             except Exception as exc:  # noqa: BLE001 - a context that cannot be fitted alone is said, the others go on
                 log(f"study: ecological {fid} {name}: {type(exc).__name__}: {exc}")
                 continue
-            out += rows(res, [name], ok, "negative binomial, offset the expected events: alone", ct)
+            alone += rows(res, [name], ok, f"{fam}, offset the expected events: alone", ct)
+        # each context alone is one test among the field's contexts: its Benjamini-Hochberg q across them
+        if alone:
+            from statsmodels.stats.multitest import multipletests
+
+            for r_, q_ in zip(alone, multipletests([r_["p"] for r_ in alone], method="fdr_bh")[1], strict=True):
+                r_["q"] = float(q_)
+        out += alone
+        # the joint model's contexts: none redundant (dropped one at a time by the largest variance inflation until
+        # none exceeds 5, the usual rule), and fewer parameters than the clusters a robust covariance is taken over
         names = list(usable)
+        complete = np.isfinite(np.column_stack([usable[n] for n in names])).all(1)
+        dropped: list[str] = []
+        if len(names) > 1:
+            # first the contexts that are combinations of others (a temperature, its monthly maximum and minimum):
+            # a rank-revealing QR keeps an independent set; a pseudo-inverse's inflations had looked finite on a
+            # singular design and the joint fit had no interval (leptospirosis in RS, 2026-10-15)
+            from scipy.linalg import qr
+
+            Z = np.column_stack([usable[n] for n in names])[complete]
+            Zs = (Z - Z.mean(0)) / np.where(Z.std(0) > 0, Z.std(0), 1.0)
+            _, R, piv = qr(Zs, mode="economic", pivoting=True)
+            rank = int((np.abs(np.diag(R)) > 1e-6 * np.abs(R[0, 0])).sum())
+            dropped += [names[i] for i in sorted(piv[rank:])]
+            names = [names[i] for i in sorted(piv[:rank])]
+        while len(names) > 1:
+            Z = np.column_stack([usable[n] for n in names])[complete]
+            Zs = (Z - Z.mean(0)) / np.where(Z.std(0) > 0, Z.std(0), 1.0)
+            try:
+                vif = np.diag(np.linalg.inv(np.corrcoef(Zs, rowvar=False)))
+            except np.linalg.LinAlgError:
+                vif = np.full(len(names), np.inf)
+            worst = int(np.argmax(np.where(np.isfinite(vif), vif, np.inf)))
+            if np.isfinite(vif[worst]) and vif[worst] <= 5:
+                break
+            dropped.append(names.pop(worst))
+        clusters = len(np.unique(groups[complete]))
         if len(names) > 1 and len(us) > len(names) + 10:
             try:
-                res, ok, ct = fit(names)
+                res, ok, ct, fam = fit(names, robust_only=len(names) + 2 > clusters)
             except Exception as exc:  # noqa: BLE001 - the joint model that cannot be fitted is said
                 log(f"study: ecological {fid} joint: {type(exc).__name__}: {exc}")
                 continue
-            Z = np.column_stack([usable[n] for n in names])[ok]
-            Zs = (Z - Z.mean(0)) / Z.std(0)
-            vif = np.diag(np.linalg.pinv(np.corrcoef(Zs, rowvar=False)))
-            kind = (f"negative binomial, offset the expected events: with the {len(names) - 1} other contexts"
-                    + (f"; variance inflation over 5 for {', '.join(n for n, v in zip(names, vif, strict=True) if v > 5)}"
-                       if (vif > 5).any() else ""))
+            kind = (f"{fam}, offset the expected events: with the {len(names) - 1} other contexts"
+                    + (f"; left out of it as combinations of the others or for a variance inflation over 5: "
+                       f"{', '.join(dropped)}" if dropped else ""))
             out += rows(res, names, ok, kind, ct)
             # spatial dependence the joint model leaves: Moran's I of its Pearson residuals on contiguity
-            mu = res.predict(sm.add_constant(np.column_stack([(usable[n] - np.nanmean(usable[n])) / np.nanstd(usable[n])
-                                                              for n in names])[ok], has_constant="add"),
-                             offset=off[ok])
-            alpha = float(res.params[-1]) if len(res.params) > len(names) + 1 else 0.0
-            r = (y[ok] - mu) / np.sqrt(mu + alpha * mu ** 2)
+            r = np.asarray(res.resid_pearson)
             e = graphs.edges(us[ok], "contiguity")
             if len(e):
                 def moran(v: np.ndarray, e=e) -> float:
@@ -6348,7 +6616,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
     level, unit = _whole()
     est_ = estimates or []
     fatality = [r for r in est_ if r.get("section") == "case fatality" and not r.get("stratum")
-                and r["measure"] in ("case_fatality", "case_fatality_adjusted", "case_fatality_trend")]
+                and r["measure"] in ("case_fatality", "case_fatality_adjusted", "case_fatality_trend", "mortality_after")]
     ecological = [r for r in est_ if r.get("section") == "associations" and r["measure"] == "association"
                   and "with the" in str(r.get("model"))] or \
         [r for r in est_ if r.get("section") == "associations" and r["measure"] == "association"]
@@ -6361,6 +6629,17 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              and "support=" not in str(r.get("field"))]
     aapc = [r for r in trend_rows if r["measure"] == "aapc"]
     cf_period = [r for r in fatality if r["measure"] == "case_fatality" and r.get("period_kind") == "period"]
+    # Table 1: each primary field's events by its characteristics over the period, at the study's whole
+    first = {"sex": 0, "age band": 1, "mother's age band": 1}
+    table1 = sorted(
+        ({**r, "characteristic": r.get("variable_label") or r.get("variable"), "category": r.get("value_label") or
+          r.get("value"), "n": r.get("numerator"), "pct": 100 * r["estimate"],
+          "pct_low": None if r.get("low") is None else 100 * r["low"],
+          "pct_high": None if r.get("high") is None else 100 * r["high"]}
+         for r in est_ if r.get("section") == "case mix" and r["measure"] == "proportion"
+         and r.get("period_kind") == "period" and r.get("geography") == level and "support=" not in str(r["field"])),
+        key=lambda r: (str(r["field"]), first.get(str(r.get("variable")), 2 if "RACA" in str(r.get("variable")) else 3),
+                       str(r.get("variable")), -(r["n"] or 0)))
 
     def num(x, k=1) -> str:
         return "–" if x is None or (isinstance(x, float) and not np.isfinite(x)) else f"{x:,.{k}f}"
@@ -6403,6 +6682,13 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                        ("low", "95% from"), ("high", "to"), ("p", "p")], cap=40,
                       where="estimates.parquet, section trends (by sex and age band too)") if trends else "<p>No series long enough.</p>"),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
+             "<h3>Table 1. Characteristics of the events</h3><p>Each field's events over the period by the "
+             "characteristics its records carry: n, % and the exact (Clopper-Pearson) interval; a value not recorded "
+             "is its own category.</p>"
+             + (table(table1, [("label", "field"), ("characteristic", "characteristic"), ("category", "category"),
+                               ("n", "n"), ("pct", "%"), ("pct_low", "95% from"), ("pct_high", "to")], cap=150,
+                      where="estimates.parquet, section case mix (by year and region too)")
+                if table1 else "<p>No characteristic is recorded on the topic's events.</p>"),
              "<h3>Municipalities</h3><p>The municipalities whose smoothed standardised ratio (empirical Bayes, against "
              "the area's own age-sex rates) lies above 1 over the period, the lower bound first.</p>"
              + table(smoothed, [("label", "field"), ("place_name", "municipality"), ("numerator", "events"),
@@ -6619,6 +6905,9 @@ def _codes_text(it: Item) -> str:
     """A code set's codes as the field's name carries them (": B58 Toxoplasmose"): stories listed B58's and P37.1's
     admissions both as "hospitalisation" (2026-10-12)."""
     codes = (it.source or {}).get("codes") or []
+    cond = gateway.split_event(it.event)[1]
+    if cond:                     # a record condition's topic: its name and its clauses
+        return f": {cond['name']} ({_condition_text(cond['clauses'])})"
     if not codes:
         return ""
     try:
@@ -7113,7 +7402,7 @@ def body(folder: str | Path) -> list[dict]:
         part("descriptive: geography", not wrong, f"the whole at level {whole}" + (f"; also {wrong}" if wrong else ""))
         cased = sorted({x["dataset"] for x in read if x.get("event") == "case"})
         uncased = sorted({x["dataset"] for x in read if not x.get("source") and any(
-            e.get("status") for e in gateway.event_types(x["dataset"]))} - set(cased))
+            e.get("status") and e.get("kind") == "case" for e in gateway.event_types(x["dataset"]))} - set(cased))
         rated_cases = {d for d in cased if (desc["field"].astype(str).str.startswith(f"{d}:case:")).any()}
         part("descriptive: case definition", not uncased and rated_cases == set(cased),
              f"confirmed-case rates for {sorted(rated_cases) or 'no source'}"
@@ -7138,9 +7427,12 @@ def body(folder: str | Path) -> list[dict]:
         with_e = f[f["expected"].fillna(0) > 0] if "expected" in f else f.iloc[:0]
         intervals = (with_e["ratio_low"].notna().mean() if "ratio_low" in with_e and len(with_e) else
                      (1.0 if not len(with_e) else 0.0))
-        part("findings", len(f) == 0 or (named > 0.95 and classed > 0.9 and intervals > 0.99),
-             f"{len(f)} findings, {classed:.0%} with a recording class, {named:.0%} with named places, {intervals:.0%} "
-             "of those with an expectation with an O/E and its interval" + ("" if len(f) else " (none at q: said in the report)"))
+        # a recording class where the declaration triages its answers (a survey does not: said, not required)
+        triaged = decl.choice("triage")
+        part("findings", len(f) == 0 or (named > 0.95 and (classed > 0.9 or not triaged) and intervals > 0.99),
+             f"{len(f)} findings, {classed:.0%} with a recording class" + ("" if triaged else " (triage: false)")
+             + f", {named:.0%} with named places, {intervals:.0%} of those with an expectation with an O/E and its "
+             "interval" + ("" if len(f) else " (none at q: said in the report)"))
     g = section("case mix")
     if g is not None and len(g):
         g = g[g["measure"] == "proportion"]
@@ -7357,10 +7649,20 @@ def audit(folder: str | Path) -> list[dict]:
         (f"stories {share('story'):.0%}", share("story") > 0),
         ("institutional findings with CNES facts", any(f.get("institution_facts") for f in findings)),
     ])
-    files = ["findings", "descriptive", "relations", "persons", "capture", "groups"]
+    # the folder's own tables as it writes them (estimates.parquet replaced descriptive and groups, 2026-10-14), and
+    # the analytic body a paper is written from (`body`: every part met)
+    files = ["findings", "estimates", "relations", "persons", "capture"]
+    try:
+        parts = body(folder) if (folder / "study.yml").exists() else []
+    except (DeclarationError, OSError, KeyError) as exc:   # a folder whose declaration no longer loads: said
+        parts = [{"part": "the declaration", "status": "missing", "evidence": f"{type(exc).__name__}: {exc}"[:200]}]
+    gaps = [r["part"] for r in parts if r["status"] != "met"]
     item(7, "products", [(f"{f}.parquet", (folder / f"{f}.parquet").exists()) for f in files] + [
         ("figures", any((folder / "figures").glob("*.png")) if (folder / "figures").exists() else False),
-        ("report.html", (folder / "report.html").exists()), ("provenance.json", bool(prov))])
+        ("report.html", (folder / "report.html").exists()), ("METHODS.md", (folder / "METHODS.md").exists()),
+        ("README.md (the codebook)", (folder / "README.md").exists()), ("provenance.json", bool(prov)),
+        (f"the analytic body: {len(parts) - len(gaps)} of {len(parts)} parts met"
+         + (f" (missing: {', '.join(gaps)})" if gaps else ""), bool(parts) and not gaps)])
     size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) / 2**20
     item(8, "storage", [(f"the folder holds {size:.1f} MB", size < 200), ("study.duckdb views", (folder / "study.duckdb").exists())])
     def places_of(f):
@@ -7386,6 +7688,121 @@ def audit(folder: str | Path) -> list[dict]:
     item(10, "cost", [(f"{minutes:.0f} min against an estimate of {est} made before running",
                        bool(prov) and est is not None and minutes <= float(est))])
     return out
+
+
+def search(query: str, limit: int = 40) -> dict[str, list[dict]]:
+    """What a study of ``query`` would seed on: the ICD-10 codes whose label holds it (pegasus_data `label_matches`,
+    accents and case ignored; categories first), the SINAN agravos whose records carry one of those codes as their
+    condition (pegasus_data `condition_codes`: the agravo's own ICD-10 code, not its name matched), and the declared
+    context fields whose name or label holds it (`gateway.declared_fields`). The first step from a question to a
+    declaration (`new`): a person picks the codes, nothing is chosen for them."""
+    import unicodedata
+
+    import pegasus_data as pg
+
+    def plain(x: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", str(x).lower()) if unicodedata.category(c) != "Mn")
+
+    terms = [t for t in str(query).split(",") if t.strip()]
+    codes = pg.label_matches([t.strip() for t in terms])
+    codes = sorted(codes, key=lambda r: (r["level"] != "chapter", r["level"] != "block", r["level"] != "category",
+                                         r["code"]))
+    cats = {r["code"] for r in codes if r["level"] in ("category", "subcategory")}
+    t = pg.condition_codes(root=config.data_root())
+    agravos: dict[str, set] = {}
+    for d, c in zip(t.column("dataset").to_pylist(), t.column("code").to_pylist(), strict=True):
+        c = str(c or "").replace(".", "").upper()
+        if c and any(c.startswith(x[:3]) and (len(x) == 3 or c.startswith(x)) for x in cats):
+            agravos.setdefault(str(d), set()).add(c)
+    sinan = [{"sinan": d.split("-", 1)[-1].split("_", 1)[-1], "dataset": d, "codes": sorted(cs)}
+             for d, cs in sorted(agravos.items()) if d.upper().startswith("SINAN")]
+    words = [plain(x.strip()) for x in terms]
+    contexts = []
+    for name, spec in sorted(gateway.declared_fields().items()):
+        text = plain(f"{name} {spec.get('label') or ''} {spec.get('description') or ''}")
+        if any(w in text for w in words):
+            contexts.append({"context": name, "label": spec.get("label") or spec.get("description") or ""})
+    # the typed roles a term names, every served dataset's (what a record condition is written on)
+    roles_ = {}
+    for ds in sorted(gateway.event_datasets()):
+        for r in gateway.roles(ds):
+            text = plain(f"{r['role']} {r.get('name') or ''}")
+            if r.get("kind") in ("number", "category", "date") and any(w in text for w in words):
+                roles_.setdefault((ds, r["role"]), {"dataset": ds, "role": r["role"], "name": r.get("name") or "",
+                                                    "kind": r["kind"], "column": r["column"]})
+    return {"icd10": codes[:limit], "sinan": sinan, "contexts": contexts[:limit], "roles": list(roles_.values())[:limit]}
+
+
+def parse_records(text: str, name: str, per: str | None = None) -> dict:
+    """A records seed from one line: "DATASET[:event]: role op value [and role op value ...]" (ops <, <=, >, >=, ==;
+    "role in a,b" for codes); numbers are read as numbers, codes as filed."""
+    head, _, body = str(text).partition(": ")
+    if not body:
+        raise DeclarationError(f"--records {text!r}: write DATASET: role op value [and role op value]")
+    ds, _, event = head.strip().partition(":")
+    clauses = []
+    for part in body.split(" and "):
+        words = part.strip().split(None, 2)
+        if len(words) == 3 and words[1] == "in":
+            clauses.append({"role": words[0], "in": [w.strip() for w in words[2].split(",")]})
+            continue
+        if len(words) != 3 or words[1] not in ("<", "<=", ">", ">=", "=="):
+            raise DeclarationError(f"--records clause {part!r}: role op value, op one of < <= > >= ==, or role in a,b")
+        value = words[2]
+        if value.lstrip("-").replace(".", "", 1).isdigit():     # a number; anything else a code as filed
+            value = float(value) if "." in value else int(value)
+        clauses.append({"role": words[0], "op": words[1], "value": value})
+    return {"dataset": ds.strip(), **({"event": event.strip()} if event.strip() else {}), "name": name,
+            "condition": clauses, **({"per": per} if per else {})}
+
+
+def new(name: str, icd10: list[str] | None = None, sinan: list[str] | None = None, terms: list[str] | None = None,
+        where: str = "BR", period: str = "2014-2023", depth: str = "standard", only: list[str] | None = None,
+        contexts: list[str] | None = None, folder: str | Path = "studies", records: list[dict] | None = None) -> Path:
+    """A study declaration written from its choices (ARCHITECTURE §3.1), every key commented with what it does and
+    what to change, validated by `load` before it is kept: the step after `search`. A declaration whose problems
+    `load` reports is not written."""
+    if not (icd10 or sinan or terms or records):
+        raise DeclarationError("a study needs seeds: --icd10 codes, --sinan agravos, --terms, or --records a condition "
+                               "(`pegasus-core search`)")
+    path = Path(folder) / f"{name}.yml"
+    if path.exists():
+        raise DeclarationError(f"{path} exists: choose another name, or edit it")
+    seeds = {k: v for k, v in (("icd10", icd10), ("sinan", sinan), ("terms", terms)) if v}
+    import json as json_
+
+    def record_line(r: dict) -> str:
+        return "      - " + json_.dumps(r, ensure_ascii=False)
+
+    def flow(xs) -> str:
+        return "[" + ", ".join(str(x) for x in xs) + "]"
+    lines = [f"# {name}: written by `pegasus-core new`; every key is described in the README and ARCHITECTURE §3.1.",
+             f"study: {name}",
+             "topic:",
+             "  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms",
+             *(f"    {k}: {flow(v)}" for k, v in seeds.items()),
+             *(["    records:", *(record_line(r) for r in records)] if records else []),
+             *([f"  only: {flow(only)}             # the sources read (leave out to read every source holding the codes)"]
+               if only else []),
+             f"period: {period}               # first-last year",
+             f"where: {where}                    # BR, states (AL or 27, several as a list) or municipality codes",
+             f"depth: {depth}               # survey, standard, deep or exhaustive: presets of the choices below",
+             "# related: 3                   # related codes read beside the topic's own, strongest first (0: none)",
+             "# persons: true                # the cohort scan over linked persons (deep and exhaustive)",
+             "# download: 10                 # gigabytes the study may download (years held in the lake are free)",
+             (f"contexts: {flow(contexts)}" if contexts else
+              "contexts: auto                 # municipal contexts related to the rates (auto: every declared one)"),
+             "# hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags",
+             "#   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}",
+             ""]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        load(path)
+    except DeclarationError:
+        path.unlink()
+        raise
+    return path
 
 
 def export(folder: str | Path, to: str | Path, tables: list[str] | None = None, fmt: str = "parquet") -> Path:

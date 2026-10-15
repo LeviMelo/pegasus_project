@@ -1,0 +1,10 @@
+# Mortalidade infantil em Alagoas: deaths under one year of age per live birth (the infant mortality rate).
+study: mortalidade_infantil_al
+topic:
+  seeds:
+    records:
+      - {dataset: SIM-DO, name: infant death, per: SINASC-DN, condition: [{role: deceased.age_years, op: "<", value: 1}]}
+period: 2014-2023
+where: AL
+depth: standard
+contexts: [persons_low_income, population_urban, cnes_teams_esf, cnes_physicians_professionals]

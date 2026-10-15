@@ -245,6 +245,9 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     kind = (None if "quality" in basis(source) and not qn.quality else
             session.surprise(node, kw.get("tier", "B1")).extras.get("kind", "count"))
     why = {m.id: r for m in qn.methods if (r := not_read(qn, m, kind, source))}
+    if question == "share" and node == "*" and not source.get("codes") and source.get("source") != "code_list":
+        # every event of its type: its share of them is one
+        why.update({m.id: "the field is every event of its type: its share of them is one" for m in qn.methods})
     methods = [m for m in qn.methods if m.id not in why]
     k = max(len(methods), 1)
     answers: list[Answer] = []

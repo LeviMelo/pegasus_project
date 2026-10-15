@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import hashlib
+import json
 import os
 import warnings
 from dataclasses import dataclass
@@ -576,7 +577,7 @@ def _counts_plan(dataset: str, event: str, year: int, classifier: str | None, pl
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
     import pegasus_data as pg
 
-    spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    spec = event_type(dataset, event)
     primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
     column = classifier or (primary[0] if primary else None)
     if (published := published_years(dataset)) and int(year) not in published:
@@ -593,7 +594,7 @@ def _counts_plan(dataset: str, event: str, year: int, classifier: str | None, pl
             raise ValueError("a race group is a stratum: cell=False reads none")
         strata = {**strata, "age": None, "sex": None, "implied_sex": 1, "implied_age": 0}
     records = None
-    if codes and column:
+    if codes and column and split_event(event)[1] is None:    # an extract holds the codes' records, unconditioned
         try:
             records, made = pg.extract_table(dataset, column, list(codes), [int(year)], root=config.data_root())
         except LookupError:
@@ -664,9 +665,11 @@ def _event_tables(dataset: str, event: str, year: int, race: str | None, support
         by = by + [strata["race"]]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        raw = pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
+        base, cond = split_event(event)
+        raw = pg.count_events(dataset, base, period=year, geography="BR", by=by, root=config.data_root(),
                               allow_partial=False, max_download=max_download(), records=records,
-                              **({"rows": rows} if rows and records is None else {}))
+                              **({"rows": rows} if rows and records is None else {}),
+                              **({"condition": cond["clauses"]} if cond else {}))
     con = duckdb.connect()
     con.register("r", raw)
     valid = places if places is not None else valid_places(year)
@@ -690,6 +693,14 @@ def _event_tables(dataset: str, event: str, year: int, race: str | None, support
             GROUP BY ALL ORDER BY code, u, sex, age""").fetch_arrow_table()
     unallocated = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, {reason} AS reason, code,
             CAST(sum(y) AS INTEGER) AS y FROM e WHERE ({reason}) IS NOT NULL AND y > 0{race_mine} GROUP BY ALL""").fetch_arrow_table()
+    if "unknown" in raw.column_names:
+        # a record whose condition cannot be read (a birth of no recorded weight for low birth weight): the field's
+        # possibly, never knowably; said as its own reason, by code
+        unknown = con.execute(f"""SELECT CAST({year} AS SMALLINT) AS year, 'condition not recorded' AS reason,
+                {code} AS code, CAST(sum(unknown) AS INTEGER) AS y FROM r WHERE unknown > 0 GROUP BY ALL
+                HAVING sum(unknown) > 0""").fetch_arrow_table()
+        if unknown.num_rows:
+            unallocated = pa.concat_tables([unallocated, unknown.cast(unallocated.schema)])
     if "unquantified" in raw.column_names:
         # a weight grid's rows with neither grid nor total: groups whose people were not counted, never zero people;
         # the reason names its unit (rows, not events)
@@ -783,8 +794,8 @@ def _declared_key(dataset: str, event: str) -> dict:
     from pegasus_data.semantics import event_types as data_events
 
     try:
-        spec = next((e for e in pg.event_types(dataset) if e["name"] == event), None)
-    except KeyError:
+        spec = event_type(dataset, event)
+    except (KeyError, StopIteration):
         spec = None
     try:
         strata = _strata(dataset, event)
@@ -811,9 +822,8 @@ def _declared_key(dataset: str, event: str) -> dict:
 def _per_record(dataset: str, event: str, what: str) -> None:
     """Refuse a weighted event where the computation is per record: a weighted row is many events (SIA PA's
     consolidated BPA, up to 95,404 procedures on a row), and its mark (PA_VALAPR) or its link belongs to the row."""
-    import pegasus_data as pg
 
-    spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    spec = event_type(dataset, event)
     if spec.get("weight") or spec.get("grid"):
         raise ValueError(f"{dataset} {event}: a row stands for {spec['weight'] or 'a grid of'} events; {what} is per record")
 
@@ -864,13 +874,13 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     reading (the select, the flag retry, the duplicates, the status, the weight), shown equal to this on eight real reads
     (2026-10-14)."""
     control.check_reserved(dataset, [year])      # the confirmation reserve: read by claims only
-    import pegasus_data as pg
     from pegasus_data.semantics.event_types import event_type as data_event_type
     from pegasus_data.semantics.event_types import read_events
 
-    spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+    spec = event_type(dataset, event)
     if spec.get("grid"):
         raise ValueError(f"{dataset} {event}: a row is a grid of events by sex and age band, not a record of one")
+    base, cond = split_event(event)
     # ``rows`` ({column: code prefixes}): only those records, filtered in the lake's scan (pegasus_data `query(rows=)`)
     kwargs = {"root": config.data_root(), "max_download": max_download(), **({"provenance": "all"} if identity else {}),
               **({"rows": rows} if rows else {})}
@@ -882,8 +892,9 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
             return t.append_column("_rid", record_ids(t))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        table = read_events(dataset, data_event_type(dataset, event), columns, consolidate=False, period=year,
-                            geography="BR", prepare=prepare, **kwargs)
+        table = read_events(dataset, data_event_type(dataset, base), columns, consolidate=False, period=year,
+                            geography="BR", prepare=prepare, **kwargs,
+                            **({"condition": cond["clauses"]} if cond else {}))
     status = (spec.get("status") or {}).get("column")
     keep = dict.fromkeys([*columns, *([status] if status else []), *(["_rid"] if identity else []), "__w"])
     return table.select([c for c in keep if c in table.column_names])
@@ -1035,9 +1046,8 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
         strata = {**strata, "residence": support, "place": support}
     spec_class = classifier
     if spec_class is None:
-        import pegasus_data as pg
 
-        spec = next(e for e in pg.event_types(dataset) if e["name"] == event)
+        spec = event_type(dataset, event)
         primary = [c["column"] for c in spec.get("classifiers", []) if c["role"] == "primary"]
         spec_class = primary[0] if primary else None
     when = _when(dataset)
@@ -1616,14 +1626,17 @@ def _cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds
 
 def code_list_counts(dataset: str, event: str, year: int, column: str | list[str],
                      places: pa.Array | None = None, classifier: str | None = None, area=None,
-                     support: str | None = None) -> EventCounts:
+                     support: str | None = None, codes: tuple[str, ...] | list[str] = ()) -> EventCounts:
     """Events per (u, year, sex, age, ICD category) for a column that holds several codes
     concatenated (SINASC's CODANOMAL: "Q02Q690"), or several columns read together (the lines of a
     death certificate: every cause it mentions): an event counts once under each distinct
     category it carries. Events carrying none are the complement, not counted here. ``classifier`` names the field's
     family (a declared group's role) and reads nothing. ``support``: the events at another place they are recorded at
     (a birth's place of occurrence), as `event_counts` reads it; the support reader of a code list had raised (the SINASC
-    study's hypothesis at the place of birth, 2026-10-14)."""
+    study's hypothesis at the place of birth, 2026-10-14). ``codes``: a code set read anywhere on the record, each record
+    once under the first of its codes the set holds (the full code, matched by prefix), a record holding none not read:
+    a sum over the categories would count twice a record holding two of the set's codes (self-harm's X60-X84 on an
+    admission's diagnoses, the suicide study, 2026-10-15)."""
     columns = [column] if isinstance(column, str) else list(column)
     strata = _strata(dataset, event)
     if support:
@@ -1633,11 +1646,18 @@ def code_list_counts(dataset: str, event: str, year: int, column: str | list[str
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     categories = _categories_sql(columns)
     key = _reader_key("code_list_counts", code_list_counts, dataset, event, year, places=places, area=area,
-                      column=column, **({"support": support} if support else {}))
+                      column=column, **({"support": support} if support else {}),
+                      **({"codes": sorted(str(c) for c in codes)} if codes else {}))
+    if codes:
+        full = f"list_distinct(regexp_extract_all(upper({text}), '[A-Z][0-9]{{2}}[0-9X]?'))"
+        match = " OR ".join(f"starts_with(x, '{str(c).replace('.', '').upper()}')" for c in codes)
+        categories = f"list_slice(list_filter({full}, x -> {match}), 1, 1)"
 
     def compute() -> dict[str, pa.Table]:
         con = _cells(dataset, event, year, columns, strata, area=area, places=places,
                      select=f"{categories} AS codes", where=f"trim({text}) <> ''")
+        if codes:                                     # a record holding none of the set's codes is not the field's
+            con.execute("DELETE FROM e WHERE len(codes) = 0")
         reason = _reason(("len(codes) = 0", "code"))
         counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST({year} AS SMALLINT) AS year,
                 CAST(sex AS TINYINT) AS sex, age, code, CAST(sum(wt) AS INTEGER) AS y
@@ -1705,7 +1725,8 @@ def _strata(dataset: str, event: str | None = None, year: int | None = None) -> 
                   key=lambda r: (r.get("last_year") or 9999, r.get("first_year") or 0))
     by_prop = {r["property"]: r for r in rows}
     specs = pg.event_types(dataset) if _has_events(dataset) else []
-    spec = next((e for e in specs if e["name"] == event), None) if event else next((e for e in specs if e.get("grid")), None)
+    spec = (next((e for e in specs if e["name"] == split_event(event)[0]), None) if event
+            else next((e for e in specs if e.get("grid")), None))
     grid = (spec or {}).get("grid")
 
     def place(entity: str | None) -> dict:
@@ -2018,10 +2039,18 @@ def context_field(name: str, years: list[int] | None = None) -> pa.Table:
         raw = pg.load_field(name, years=years, settings=settings)
     con = duckdb.connect()
     con.register("r", raw)
-    table = con.execute("""SELECT CAST(left(CAST(municipality AS VARCHAR), 6) AS INTEGER) AS u,
-            CAST(year AS SMALLINT) AS year, CAST(value AS DOUBLE) AS value,
-            CAST(status AS VARCHAR) AS status, CAST(unit AS VARCHAR) AS unit FROM r ORDER BY u, year""").fetch_arrow_table()
-    store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name})"})
+    # one row a place-year: a field of several rows a year (its months) summed where its law is a sum, else averaged,
+    # over the rows of a usable status; a place-year with none keeps its status (a month-grain field had entered a
+    # year as one of its months, 2026-10-15)
+    agg = "sum" if (declared_fields().get(name) or {}).get("law") == "sum" else "avg"
+    ok = "status IN ('value', 'zero', 'ok')"
+    table = con.execute(f"""SELECT CAST(left(CAST(municipality AS VARCHAR), 6) AS INTEGER) AS u,
+            CAST(year AS SMALLINT) AS year,
+            CAST({agg}(CAST(value AS DOUBLE)) FILTER (WHERE {ok}) AS DOUBLE) AS value,
+            CAST(CASE WHEN bool_or({ok}) THEN 'value' ELSE min(CAST(status AS VARCHAR)) END AS VARCHAR) AS status,
+            CAST(min(CAST(unit AS VARCHAR)) AS VARCHAR) AS unit
+        FROM r GROUP BY 1, 2 ORDER BY u, year""").fetch_arrow_table()
+    store.put_table("gateway", key, table, {"source": f"pegasus_data.load_field({name}), {agg} over a place-year's rows"})
     return table
 
 
@@ -2256,11 +2285,35 @@ def roles(dataset: str) -> list[dict]:
     return pg.roles(dataset)
 
 
+def condition_event(event: str, clauses: list[dict], name: str, per: str | None = None) -> str:
+    """``event`` restricted to the records whose roles satisfy ``clauses`` (pegasus_data's condition grammar, ADR-0193:
+    low birth weight, infant deaths, caesarean births): an event type of its own, named ``name``, its denominator events
+    ``per`` (``DATASET:event``, read whole: a low birth weight per live birth) where declared. Carried in the event's
+    name, so every reader reads it and every key holds it; `split_event` reads it back."""
+    body = {"name": name, "clauses": clauses, **({"per": per} if per else {})}
+    return f"{event}|{json.dumps(body, sort_keys=True, separators=(',', ':'), ensure_ascii=False)}"
+
+
+def split_event(event: str | None) -> tuple[str | None, dict | None]:
+    """An event's base name and its condition ({name, clauses, per}), None for an event type as declared."""
+    if event and "|" in event:
+        base, body = event.split("|", 1)
+        return base, json.loads(body)
+    return event, None
+
+
 def event_type(dataset: str, event: str) -> dict:
-    """pegasus_data's declaration of one event type (its classifiers and marks)."""
+    """pegasus_data's declaration of one event type (its classifiers and marks); a conditioned event's is its base
+    type's, with the condition and, where declared, its denominator events as the type's exposure."""
     import pegasus_data as pg
 
-    return next(e for e in pg.event_types(dataset) if e["name"] == event)
+    base, cond = split_event(event)
+    spec = next(e for e in pg.event_types(dataset) if e["name"] == base)
+    if cond is None:
+        return spec
+    return {**spec, "condition": cond,
+            **({"exposure": {"events": [cond["per"]], "evidence": f"the study's declaration: {cond['name']} per "
+                                                                  f"{cond['per']}"}} if cond.get("per") else {})}
 
 
 def raw_event_counts(dataset: str, event: str, year: int, by: list[str]):
@@ -2270,8 +2323,10 @@ def raw_event_counts(dataset: str, event: str, year: int, by: list[str]):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return pg.count_events(dataset, event, period=year, geography="BR", by=by, root=config.data_root(),
-                               allow_partial=False, max_download=max_download())
+        base, cond = split_event(event)
+        return pg.count_events(dataset, base, period=year, geography="BR", by=by, root=config.data_root(),
+                               allow_partial=False, max_download=max_download(),
+                               **({"condition": cond["clauses"]} if cond else {}))
 
 
 def raw_field(name: str, years: list[int]):

@@ -1,0 +1,16 @@
+# lepto_rs_check: written by `pegasus-core new`; every key is described in the README and ARCHITECTURE §3.1.
+study: lepto_rs_check
+topic:
+  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms
+    icd10: [A27]
+    sinan: [LEPT]
+  only: [SINAN-LEPT]             # the sources read (leave out to read every source holding the codes)
+period: 2019-2023               # first-last year
+where: RS                    # BR, states (AL or 27, several as a list) or municipality codes
+depth: survey               # survey, standard, deep or exhaustive: presets of the choices below
+# related: 3                   # related codes read beside the topic's own, strongest first (0: none)
+# persons: true                # the cohort scan over linked persons (deep and exhaustive)
+# download: 10                 # gigabytes the study may download (years held in the lake are free)
+contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
+# hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
+#   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}

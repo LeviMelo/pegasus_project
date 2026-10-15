@@ -28,7 +28,7 @@ DECISIONS = ROOT / "docs" / "decisions"
 EVALUATION = ROOT / "docs" / "evaluation"
 PACKAGE = ROOT / "src" / "pegasus_core"
 
-ADR_REF = re.compile(r"ADR-(\d{4})")
+ADR_REF = re.compile(r"(?<!pegasus_data )ADR-(\d{4})")   # "pegasus_data ADR-NNNN" is the sibling's own
 OQ_REF = re.compile(r"\bOQ-(\d{1,3})\b")
 SCRIPT_REF = re.compile(r"scripts/([A-Za-z0-9_/]+\.py)")
 LINK = re.compile(r"\]\((docs/[^)#\s]+\.md)\)")

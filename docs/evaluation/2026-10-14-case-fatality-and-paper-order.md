@@ -1,6 +1,6 @@
 # Case fatality, and the folder in a paper's order (2026-10-14)
 
-**Case fatality** (`study._case_fatality`): read from the outcome codes pegasus_data now declares fatal (ADR-0191 there,
+**Case fatality** (`study._case_fatality`): read from the outcome codes pegasus_data now declares fatal (pegasus_data ADR-0191 there,
 73 columns). It is computed on the cases; a notification's is read on its confirmed cases. Output: crude by year, sex
 and age band (Clopper-Pearson), adjusted for age and sex (binomial regression, marginal standardisation to the
 period's case mix), and the adjusted odds ratio per year. Alagoas, infarction admissions (I21-I22, SIH MORTE),

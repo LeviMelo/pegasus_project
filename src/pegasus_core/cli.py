@@ -9,7 +9,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(help="PegaSUS: one model of Brazil's health events, read for leads.", no_args_is_help=True)
+app = typer.Typer(help="PegaSUS: epidemiological studies of Brazil's health data from one declaration. "
+                       "A study: search -> new -> scope -> study -> audit -> export. The other commands are the "
+                       "model's own tools.", no_args_is_help=True)
+STUDIES = "Studies"
 console = Console()
 
 Years = typer.Option("2010-2023", help="first-last year of the fitted monolith")
@@ -549,7 +552,66 @@ def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_clai
 
 
 
-@app.command("scope")
+@app.command("search", rich_help_panel=STUDIES)
+def search_command(query: str = typer.Argument(..., help="a term, or several separated by commas (infarto, "
+                                                         "leptospir)")) -> None:
+    """What a study of QUERY would seed on: ICD-10 codes by label, the SINAN agravos holding them, matching contexts."""
+    from . import study
+
+    found = study.search(query)
+    t = Table("ICD-10", "level", "label")
+    for r in found["icd10"]:
+        t.add_row(r["code"], r["level"], r["label"])
+    console.print(t)
+    if found["sinan"]:
+        t = Table("SINAN agravo (--sinan)", "dataset", "its ICD-10 codes")
+        for r in found["sinan"]:
+            t.add_row(r["sinan"], r["dataset"], ", ".join(r["codes"]))
+        console.print(t)
+    if found["contexts"]:
+        t = Table("context (--contexts)", "label")
+        for r in found["contexts"]:
+            t.add_row(r["context"], str(r["label"])[:90])
+        console.print(t)
+    if found["roles"]:
+        t = Table("dataset", "role (--records DATASET: role op value)", "kind", "label")
+        for r in found["roles"]:
+            t.add_row(r["dataset"], r["role"], r["kind"], str(r["name"])[:70])
+        console.print(t)
+    console.print("next: pegasus-core new NAME --icd10 CODES [--sinan AGRAVOS] --where UF --period FIRST-LAST")
+
+
+def _list(text: str | None) -> list[str] | None:
+    return [x.strip() for x in text.split(",") if x.strip()] if text else None
+
+
+@app.command("new", rich_help_panel=STUDIES)
+def new_command(name: str = typer.Argument(..., help="the study's name (its file and folder)"),
+                icd10: str = typer.Option(None, help="ICD-10 codes, comma-separated (I21,I22)"),
+                sinan: str = typer.Option(None, help="SINAN agravos, comma-separated (LEPT)"),
+                terms: str = typer.Option(None, help="label terms, comma-separated"),
+                where: str = typer.Option("BR", help="BR, a state (AL) or states/municipalities comma-separated"),
+                period: str = typer.Option("2014-2023", help="first-last year"),
+                depth: str = typer.Option("standard", help="survey, standard, deep or exhaustive"),
+                only: str = typer.Option(None, help="the sources read, comma-separated (SIM-DO,SIH-RD)"),
+                contexts: str = typer.Option(None, help="context fields, comma-separated (default: auto)"),
+                records: str = typer.Option(None, help="a record condition: 'SINASC-DN: birth.weight < 2500' "
+                                                       "(clauses joined by ' and ')"),
+                name_: str = typer.Option(None, "--name", help="the condition topic's name (low birth weight)"),
+                per: str = typer.Option(None, help="the events a condition topic is rated per (SINASC-DN)"),
+                folder: str = typer.Option("studies", help="where the declaration is written")) -> None:
+    """Write a study declaration from its choices, validated and commented (the step after search)."""
+    from . import study
+
+    places = _list(where) or ["BR"]
+    seeds = [study.parse_records(records, name_ or name, per)] if records else None
+    path = study.new(name, _list(icd10), _list(sinan), _list(terms), places[0] if len(places) == 1 else places,
+                     period, depth, _list(only), _list(contexts), folder, seeds)
+    console.print(f"written {path}\nnext: pegasus-core scope {path}   (what it reads, and the minutes)\n"
+                  f"      pegasus-core study {path}   (the folder lands in {Path(folder) / name})")
+
+
+@app.command("scope", rich_help_panel=STUDIES)
 def scope_command(declaration: str) -> None:
     """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
     download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes
@@ -559,7 +621,8 @@ def scope_command(declaration: str) -> None:
     from . import study
 
     decl = study.load(declaration)
-    scope = study.resolve(decl).to_dict()
+    resolved = study.resolve(decl)
+    scope = resolved.to_dict()
     out = study.folder_of(decl)
     out.mkdir(parents=True, exist_ok=True)
     # written, not printed: the console wraps long lines and the printed YAML did not parse (2026-10-12)
@@ -572,9 +635,11 @@ def scope_command(declaration: str) -> None:
     console.print_json(json.dumps(scope["minutes_by_choice"], ensure_ascii=False))
     console.print(f"{len(scope['read'])} read, {len(scope['deferred'])} deferred, {len(scope['not_read'])} not read; "
                   f"estimated {scope['estimated_minutes']} min; written to {out / 'scope.yml'}")
+    if not scope["read"]:
+        console.print(f"[bold red]{study.nothing_read(resolved)}[/bold red]")
 
 
-@app.command("study")
+@app.command("study", rich_help_panel=STUDIES)
 def study_command(declaration: str,
                   products_only: bool = typer.Option(False, help="the products alone, from the fits and answers the "
                                                                  "store holds (the lanes not run)")) -> None:
@@ -587,18 +652,23 @@ def study_command(declaration: str,
     console.print(f"study folder: {out}")
 
 
-@app.command("audit")
+@app.command("audit", rich_help_panel=STUDIES)
 def audit_command(folder: str) -> None:
-    """A study folder against the win condition's acceptance items 1-10: each met, partial or not met, with evidence."""
+    """A study folder's analytic body (each part a paper needs: met or missing, with evidence), then the win
+    condition's acceptance items 1-10."""
     from . import study
 
+    t = Table("part", "status", "evidence")
+    for r in study.body(folder):
+        t.add_row(r["part"], r["status"], r["evidence"])
+    console.print(t)
     t = Table("item", "what", "status", "evidence", "missing")
     for r in study.audit(folder):
         t.add_row(str(r["item"]), r["what"], r["status"], r["evidence"], r["missing"])
     console.print(t)
 
 
-@app.command("export")
+@app.command("export", rich_help_panel=STUDIES)
 def export_command(folder: str, to: str = typer.Option(..., help="the directory to write"),
                    tables: str = typer.Option(None, help="comma-separated views of study.duckdb; default all"),
                    fmt: str = typer.Option("parquet", "--format", help="parquet or csv")) -> None:

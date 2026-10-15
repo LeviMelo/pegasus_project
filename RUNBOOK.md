@@ -11,8 +11,9 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | install, editable | `PYTHONUTF8=1 $PY -m pip install -e . --no-deps` | the environment already holds the dependencies and pegasus_data |
 | check the GPU | `$PY -c "import torch; print(torch.cuda.is_available())"` | expects `True` (RTX 4050, CUDA 12.1) |
 | lint | `$PY -m ruff check src scripts` | |
+| a study from a question | `pegasus-core search TERM`; `pegasus-core new NAME --icd10 .. [--sinan ..] --where UF --period A-B --depth D`; `scope`, `study`, `audit`, `export` | `search`: ICD-10 codes by label, the SINAN agravos carrying them, contexts; `new` writes a validated, commented declaration in `studies/`; a scope that reads nothing says why and `study` refuses it |
 | the gate | `$PY scripts/prelaunch.py --slices [NAME ...]` | the fast tests, then every slice of `studies/slices/` within twice its estimate, each checked against the analytic body (`study.body`); before any national run |
-| a study's body and acceptance | `pegasus-core audit FOLDER`; `study.body(FOLDER)` | the win condition's items 1-10; the analytic body |
+| a study's body and acceptance | `pegasus-core audit FOLDER`; `study.body(FOLDER)` | the analytic body a paper needs (each part met or missing), then the win condition's items 1-10 |
 | a study's products again | `pegasus-core study DECL --products-only` | from the fits and answers the store holds, the lanes not run: a change to the products measured in minutes (Alagoas: 5 min against 25) |
 | documents consistent | `$PY scripts/check_docs.py` | ADRs, evaluation index, open questions, modules named in ARCHITECTURE, CLAUDE.md = AGENTS.md |
 | pegasus_data reachable | `$PY -c "import pegasus_data, pegasus_core; print(pegasus_data.__file__)"` | |
