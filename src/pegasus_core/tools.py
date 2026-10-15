@@ -1074,7 +1074,11 @@ class Session:
             # itself, its facilities wait for the facility support (BACKLOG 2.6)
             share = self.source.get("indicator") and not self.source.get("quality")
             missing = self._share_missing(block, d) if share else None
-            cube = self._share_facilities(d) if share else None
+            try:
+                cube = self._share_facilities(d) if share else None
+            except LookupError:
+                cube = None           # a source that records no establishment: the share is triaged without one
+
             batch = self._ledger_open("triage", [(x, {"rules": explain.rules()}) for x in group])
             for x in group:
                 node = x.fields[0].split(":")[-1]
