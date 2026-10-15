@@ -2296,7 +2296,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     continue
                 # a share's name is COLUMN=value: named as the source labels it ("Critério de Confirmação: Laboratorial (1)")
                 shown = _group_text(it, [name]) if name and "=" in name and " " not in name else name
-                label = (f.label or node) + _codes_text(it) + (f" — {shown}" if shown else "") + _link_text(it)
+                label = (gateway.split_event(f.label)[0] if f.label else node) + _codes_text(it) + (f" — {shown}" if shown else "") + _link_text(it)
                 # the field's observed and expected per municipality and period, into the folder's one table keyed
                 # by field: a file per field named by dataset and reader had given the SIM-DO counts, their
                 # CAUSABAS_O field and their linked share one name, the last written kept (the paper audit, 2026-10-14)
@@ -6858,7 +6858,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                     [("pair", "fields"), ("support", "scale"), ("lag", "lag"), ("rho", "ρ"), ("direct", "direct"),
                      ("p", "p"), ("years", "years")], cap=25) if relations else "<p>No pair of fields shares four years.</p>"),
              "<h2>6. Scope</h2>", "<ul>" + "".join(
-                 f"<li><b>{e(i.dataset)}</b> ({e(i.event)}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
+                 f"<li><b>{e(i.dataset)}</b> ({e(gateway.split_event(i.event)[0])}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",
              "<h3>Deferred</h3><ul>" + "".join(f"<li>{e(i.dataset)}: {e(i.note)}</li>"
                                                for i in scope.items if i.status != "in") + "</ul>",

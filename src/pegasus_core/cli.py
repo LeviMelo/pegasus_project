@@ -629,7 +629,10 @@ def scope_command(declaration: str) -> None:
     (out / "scope.yml").write_text(yaml.safe_dump(scope, sort_keys=False, allow_unicode=True), encoding="utf-8")
     t = Table("read", "dataset", "event", "years", "minutes", "why")
     for i in scope["read"]:
-        t.add_row("", i["dataset"], i["event"], f"{i['years'][0]}-{i['years'][-1]}" if i["years"] else "",
+        from . import gateway
+
+        base, cond = gateway.split_event(i["event"])
+        t.add_row("", i["dataset"], base + (f" ({cond['name']})" if cond else ""), f"{i['years'][0]}-{i['years'][-1]}" if i["years"] else "",
                   f"{(i['est_seconds'] or 0) / 60:.1f}", i["reason"][:90])
     console.print(t)
     console.print_json(json.dumps(scope["minutes_by_choice"], ensure_ascii=False))
