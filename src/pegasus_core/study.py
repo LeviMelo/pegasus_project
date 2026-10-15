@@ -449,7 +449,8 @@ def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | 
     # every state the year publishes
     if dataset not in _LAKE:
         cov = pg.lake_coverage(dataset, root=config.data_root())
-        _LAKE[dataset] = frozenset(y for y, v in cov.items() if int(v.get("ufs") or 0) >= states.get(int(y), 1))
+        _LAKE[dataset] = frozenset(y for y, v in cov.items() if "BR" in (v.get("uf_codes") or [])
+                                   or int(v.get("ufs") or 0) >= states.get(int(y), 1))
     lake = _LAKE[dataset]
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
 
@@ -463,7 +464,8 @@ def _published_states(dataset: str, root: str) -> dict[int, int]:
     import pegasus_data as pg
 
     try:
-        return {int(r["year"]): int(r.get("ufs") or 1) for r in pg.explore(dataset, root=root).rows}
+        return {int(r["year"]): int(r.get("ufs") or 1) for r in pg.explore(dataset, root=root).rows
+                if r.get("year") is not None}
     except Exception:  # noqa: BLE001 - a dataset the catalog does not describe: one partition is the year
         return {}
 
@@ -4371,7 +4373,7 @@ def _followup(it: Item, f, label: str, log) -> list[dict]:
             if whole.get("died_corrected") is not None and whole["died"] else None
         model = (f"record linkage to the death certificates ({q['link']}); false-match rate at {h['days']} days "
                  f"{h['chance_percent']} %; verdict {h['verdict']}")
-        for y in [*sorted({int(v) for v in origin_year[followed]}), None]:
+        for y in [*sorted({int(v) for v in origin_year[followed]} & {int(x) for x in it.years}), None]:
             sel = followed if y is None else followed & (origin_year == y)
             n, k = int(sel.sum()), int((died & sel).sum())
             if not n:

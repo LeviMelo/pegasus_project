@@ -44,3 +44,12 @@ Each ran on the working tree over `1c75315`, with the real stores and the adopti
 Its SIH fields failed because the shared lake held SIH for only 4 states while the catalog recorded all 27 (pegasus_data
 2026-10-15, lake catalog drift). A year is now free only when every state it publishes is in the lake; the SIH lake is
 being rebuilt.
+
+**Mortality after admission** (pegasus_data's cohort link `sih_admissions_to_sim`, ADR-0194 there): Alagoas,
+infarction (I21-I22), 2014-2023, the area's residents admitted in its hospitals.
+- 30 days: 18.1 % (17.2-19.0), 1,363 of 7,526; 17.7 % less the link's coincidences.
+- One year: 29.4 % (28.3-30.4); 24.9 % less the coincidences.
+- In hospital, from SIH's own flag: 16.1 %.
+- The code set anywhere on the admission gives the same within 0.3 points.
+
+The folder holds every body part.

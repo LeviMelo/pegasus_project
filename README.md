@@ -34,6 +34,9 @@ pegasus-core audit studies/infarto_al           # each part a paper needs: met, 
 pegasus-core export studies/infarto_al --to D:/paper --format csv
 ```
 
+A topic defined by a record condition is written the same way: `search peso` lists the roles a condition can name,
+and `new baixo_peso_al --records "SINASC-DN: birth.weight < 2500" --name "low birth weight" --where AL` writes it.
+
 `study --products-only` rewrites the folder from what the store already holds, in minutes. Use it after changing a
 choice that touches only the products.
 

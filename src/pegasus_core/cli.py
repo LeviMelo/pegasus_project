@@ -650,6 +650,17 @@ def study_command(declaration: str,
     with jobs.slot(f"study {decl.study}"):
         out = study.run(decl, log=console.print, products_only=products_only)
     console.print(f"study folder: {out}")
+    try:
+        parts = study.body(out)
+    except Exception as exc:  # noqa: BLE001 - the folder stands; its check is said, never a failed run
+        console.print(f"the folder's check could not run: {type(exc).__name__}: {exc}")
+        return
+    missing = [r for r in parts if r["status"] != "met"]
+    console.print(f"{len(parts) - len(missing)} of {len(parts)} parts of the analytic body met"
+                  + ("" if not missing else ":"))
+    for r in missing:
+        console.print(f"  missing {r['part']}: {r['evidence']}")
+    console.print(f"read {out / 'report.html'} and {out / 'METHODS.md'}; `pegasus-core audit {out}` for the whole check")
 
 
 @app.command("audit", rich_help_panel=STUDIES)
