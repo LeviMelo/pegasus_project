@@ -3434,6 +3434,9 @@ def _distinct_persons(it: Item, s, f, label: str, places: list[dict]) -> list[di
     over the period, the persons once. ``places`` (the municipalities' estimates) give each municipality's residents."""
     if gateway.person_identifier(it.dataset, it.event) is None:
         return []
+    et = gateway.event_type(it.dataset, it.event) or {}
+    if et.get("weight") or et.get("grid"):
+        return []                    # a consolidated row stands for many events and names no one (SIA-PS's BPA)
     d = s.expectations.model(f.block).data
     if d.n is not None or str(d.population).startswith("events:"):
         return []

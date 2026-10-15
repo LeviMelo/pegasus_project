@@ -326,6 +326,8 @@ def attribute(y: np.ndarray, mu: np.ndarray, cov: np.ndarray, window: tuple | No
     window (yellow fever 2017–18 and measles 2018 read as steps 2013–23 by the multiscale step, 2026-10-07): the shape
     tells a lasting change from a passing one. The residual is taken as Gaussian, an approximation for small counts."""
     T = len(y)
+    if T == 0:                    # a window holding no period of the series: no course to read
+        return {"shape": "none", "effects": [], "critical": None}
     if critical is None:
         critical = float(np.clip(3 + 0.0025 * (T - 50), 3.0, 4.0))
     r = y - mu
