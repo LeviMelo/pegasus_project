@@ -83,3 +83,9 @@ serology is read from an extract of its codes. The institution question read the
 With these, the toxoplasmosis deep slice (RS 2014-2023, eight sources, linked shares, persons) holds all 27 parts of the
 analytic body from a products run that may not download. Its first gate run went over its cap (58 min against 28.9) on
 the one-time recomputation of the stale link runs, priced from older and faster runs.
+
+**A national study at standard depth.** Infant mortality, Brazil 2014-2023 (deceased.age_years < 1 per live birth),
+from `new --records`, took 13.5 min plus products and holds all 21 parts of the analytic body.
+- 12.9 per 1,000 live births in 2014, DATASUS's own figure for the year; 12.4 over the period.
+- By region: North 15.3, Northeast 13.8, Centre-West 12.2, Southeast 11.4, South 10.0.
+- Global Moran's I 0.40 (p 0.001); 72 high-high and 176 low-low municipal clusters.

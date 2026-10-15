@@ -255,6 +255,10 @@ class Session:
         # year holds (SIA-PA's serology is read from an extract of its codes; the cube had queried 4.5 GB a year)
         from . import questions as qs
 
+        try:
+            gateway.facility_column(self.dataset)
+        except LookupError as exc:          # a source that records no establishment
+            raise qs.NotDefined(str(exc)) from exc
         missing = sorted({int(y) for y in su.years} - set(gateway.lake_whole_years(self.dataset)))
         if missing:
             raise qs.NotDefined(f"{self.dataset}: an establishment's whole activity needs every record of the type, "
@@ -1206,8 +1210,14 @@ class Session:
                 window = x.locus.get("years") or [self.years[0], self.years[-1]]
 
                 def run(x=x, node=node, places=places, window=window, model=model):
-                    res = marks.triage_lead(model, self.source, list(self.years), places, window,
-                                            self.source.get("facility_effects"), names, codes=list(reg.leaves(node)))
+                    try:
+                        res = marks.triage_lead(model, self.source, list(self.years), places, window,
+                                                self.source.get("facility_effects"), names, codes=list(reg.leaves(node)))
+                    except LookupError as exc:
+                        # a source that records no establishment (SINAN-TUBE): this rule cannot read the lead, which is
+                        # no failure of the lane (the tuberculosis study's notifications, 2026-10-15)
+                        run.verdict = explain.Triage(explain.SIGNAL, f"not read by the facility rule: {exc}", {})
+                        return {"tested": False, "reason": f"{run.verdict.cls}: {run.verdict.reason}"}
                     if res["admissions"] < explain.FAC_CATCH:
                         # too few admissions for the facilities to say anything: not noise (the location's own test
                         # weighed its count), only unread by this rule
