@@ -1603,6 +1603,7 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
     import yaml
 
     t0 = time.time()
+    _CASE_FATALITY_DONE.clear()
     # the study's area for this process and its lanes (`config.study_area`): every block is the area's
     if decl.where not in (None, "BR"):
         os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
@@ -2271,16 +2272,20 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     try:
                         d = s.expectations.model(f.block).data
                         expo = dict(zip(np.asarray(d.places).tolist(), d.N.sum(axis=(1, 2)).tolist(), strict=True))
+                        smooth = {int(r["place"]): r["estimate"] for r in mine if r["measure"] == "smoothed_smr"
+                                  and r.get("period_kind") == "period"}
                         figs.append(_map_figure(out, sv, f, label, it, [r for r in rows if r["field"] == f.id], expo,
-                                                str(d.population)))
+                                                str(d.population), smooth))
                         if figs[-1]:
                             figure_rows.append({"file": f"figures/{Path(figs[-1]).name}", "kind": "map", "field": f.id,
                                                 "label": label, "dataset": it.dataset,
-                                                "shows": "left: each state's crude rate over the period; right: each "
+                                                "shows": "left: the crude rate over the period by state (by health "
+                                                         "region in a one-state study); middle: each municipality's "
+                                                         "standardised ratio against the area's own age-sex rates, "
+                                                         "smoothed by empirical Bayes (estimates.parquet, "
+                                                         "municipalities, smoothed_smr); right, exploratory: each "
                                                          "municipality's standardised departure from tier B1 (observed "
-                                                         "minus expected over its sd), the findings' places outlined; "
-                                                         "a rate map is drawn from estimates.parquet (municipalities) and "
-                                                         "municipalities.geojson"})
+                                                         "minus expected over its sd), the findings' places outlined"})
                     except Exception as exc:  # noqa: BLE001 - a map that cannot be drawn is a note; the tables stand
                         log(f"study: {it.dataset} {node} map: {type(exc).__name__}: {exc}")
                     lap("fields: tables, figures, maps")
@@ -2389,7 +2394,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap("tables")
 
     lap.guard("report", lambda: _report(decl, scope, out, rows, desc, [f for f in figs if f], hyp, rel, persons,
-                                        captured, quality, trends, linkage, assoc), None, log)
+                                        captured, quality, trends, linkage, assoc, est), None, log)
     lap("report")
     lap.guard("methods", lambda: (out / "METHODS.md").write_text(_methods_markdown(decl, scope, desc, linkage),
                                                                 encoding="utf-8"), None, log)
@@ -3003,7 +3008,12 @@ def _apc(rows: list[dict]) -> list[dict]:
                 if logr is not None else None
             if jp is None:
                 continue
-            common = {**base, "model": model}
+            # the standardised series is its own variable and unit (per 100,000): it had carried the crude series'
+            # name, an AAPC of the standardised rate labelled "crude rate" (2026-10-14)
+            std_ = model == "joinpoint: standardised rate"
+            common = {**base, "model": model, **({"variable": "directly standardised rate per 100,000 person-years"}
+                                                  if std_ else {})}
+            unit_ = "per 100,000 person-years" if std_ else unit
             for i, sg in enumerate(jp["segments"]):
                 seg = {**common, "segment": str(i + 1)}
                 a = _apc_interval(sg["b"], sg["se"], jp["df"])
@@ -3013,7 +3023,7 @@ def _apc(rows: list[dict]) -> list[dict]:
                                          p=a["p"], numerator=events))
                 for fit, yr in ((sg["fit_first"], sg["first"]), (sg["fit_last"], sg["last"])):
                     out.append(_estimate_row("trends", "fitted_rate", {**seg, "period_kind": "year", "first": int(yr),
-                                                                        "last": int(yr), "unit": unit},
+                                                                        "last": int(yr), "unit": unit_},
                                              estimate=scale * fit))
             aapc = {**common, "segment": "AAPC", "period_kind": "period", "first": int(t[0]), "last": int(t[-1])}
             a = _apc_interval(jp["aapc"][0], jp["aapc"][1], jp["df"])
@@ -3562,6 +3572,15 @@ MEASURES = {
     "smr": "observed over expected events at `comparator`'s rates (indirect standardisation), exact Poisson interval "
            "with the expectation fixed; p two-sided exact, q Benjamini-Hochberg over the municipalities",
     "proportion": "numerator over denominator, exact (Clopper-Pearson) interval",
+    "case_fatality": "the topic's records whose outcome is death from the event (the codes pegasus_data declares fatal "
+                     "on the outcome column, `variable`) over all its records, as the Ministry of Health's letalidade "
+                     "and TabNet's in-hospital mortality define it; exact (Clopper-Pearson) interval; the records whose "
+                     "outcome is not recorded in `note`",
+    "case_fatality_adjusted": "a year's case fatality at the period's own case mix of age band and sex (marginal "
+                              "standardisation of a binomial regression on year, age band and sex; interval from "
+                              "2,000 draws of its coefficients)",
+    "case_fatality_trend": "the odds of death from the event multiplied per year, adjusted for age band and sex "
+                           "(binomial regression, Wald interval)",
     "expected": "events expected (`model`), no interval",
     "model_rate": "the hierarchical model's expected events per `per` person-years (tier B1)",
     "persons": "distinct persons among the events, by the source's registry identifier of its subject (the CNS): each "
@@ -3907,7 +3926,7 @@ def _measures(it: Item, f, label: str, log) -> list[dict]:
                           "hi": float("inf"), "missing": []})
     area = tuple(sorted(config.study_area())) if config.study_area() else None
     if not specs:
-        return _ages(it, f, label, classifier, area)
+        return _ages(it, f, label, classifier, area) + _case_fatality(it, f, label, classifier, area, log)
     columns = tuple(dict.fromkeys(c for sp in specs for c in (sp["measure"], sp["anchor"]) if c))
     vals: dict[tuple[str, int], np.ndarray] = {}
     counts: dict[tuple[str, int], tuple[int, int, int]] = {}
@@ -3941,7 +3960,7 @@ def _measures(it: Item, f, label: str, log) -> list[dict]:
             vals[(sp["measure"], int(y))] = v
             counts[(sp["measure"], int(y))] = (int(r[0]), int(r[1]), int(r[0]) - int(r[1]) - len(v))
         con.close()
-    out = _ages(it, f, label, classifier, area)
+    out = _ages(it, f, label, classifier, area) + _case_fatality(it, f, label, classifier, area, log)
     period = f"{min(it.years)}-{max(it.years)}"
     for sp in specs:
         years = sorted(y for (m, y) in vals if m == sp["measure"])
@@ -3996,6 +4015,174 @@ def _median_ci(v: np.ndarray) -> tuple[float, float] | None:
     lo = int(binom.ppf(0.025, n, 0.5))
     hi = int(binom.isf(0.025, n, 0.5))
     return float(a[max(lo - 1, 0)]), float(a[min(hi, n - 1)])
+
+
+#: the case fatalities a run has written, by (dataset, event read, codes, area, years): a notification's and its confirmed
+#: cases' items read the same cases, written once
+_CASE_FATALITY_DONE: set = set()
+
+
+def _case_fatality(it: Item, f, label: str, classifier: str | None, area, log) -> list[dict]:
+    """The topic's case fatality from its own records' outcome: every column whose role pegasus_data declares ``fatal``
+    codes for (SIH's death flag, SINAN's evolution: the codes of death from the event; ``fatal_other`` those of death
+    from another cause) read on the field's events in the area (`gateway.mark_values`), with their age and sex. Per
+    year and over the period: deaths from the event over all records (the Ministry of Health's letalidade, TabNet's
+    in-hospital mortality), by sex and by age band, with exact intervals; the share dead of other causes; the records
+    not recorded said. Then adjusted: a binomial regression of death on year, age band and sex (bands merged upward
+    until each holds a death and a survivor, the partition from the data), each year's case fatality at the period's
+    case mix (marginal standardisation, interval from 2,000 coefficient draws), and the adjusted odds ratio per year.
+    A paper on admissions or notifications reports how many died; the folder had held it only as one value of a case
+    mix's column, unadjusted (2026-10-14). Its denominator is the cases: a notification's case fatality is read on
+    the source's confirmed cases (the event whose status confirms one), every leptospirosis death being a confirmed
+    case's (11 % of them, against 2 % of the notifications, pegasus_data 2026-10-14); a run writes each once."""
+    import duckdb
+    import pandas as pd
+    import statsmodels.api as sm
+    from scipy.stats import beta
+
+    cols = [r for r in gateway.roles(it.dataset) if r.get("fatal")]
+    if not cols:
+        return []
+    event = it.event
+    if not (gateway.event_type(it.dataset, event) or {}).get("status"):
+        confirmed = [e["name"] for e in gateway.event_types(it.dataset) if e.get("status") and e.get("kind") == "case"]
+        event = confirmed[0] if confirmed else event
+    on = "" if event == it.event else f", on the {event}s (confirmed) of its notifications"
+    key = (it.dataset, event, tuple(sorted(fields.codes_of(it.source or {}, it.nodes))), area, tuple(it.years))
+    if key in _CASE_FATALITY_DONE:
+        return []
+    _CASE_FATALITY_DONE.add(key)
+    out = []
+    period = f"{min(it.years)}-{max(it.years)}"
+    edges = [int(x) for x in gateway.age_edges(dataset=it.dataset, event=it.event)]
+    bands = _band_labels(edges)
+    codes = fields.codes_of(it.source or {}, it.nodes)
+
+    def cp(k: float, n: float) -> tuple[float, float]:
+        return (float(beta.ppf(0.025, k, n - k + 1)) if k > 0 else 0.0,
+                float(beta.ppf(0.975, k + 1, n - k)) if k < n else 1.0)
+
+    def inlist(raw: str, vals: list[str]) -> str:
+        return "(" + raw + " IN (" + ", ".join("'" + v.replace("'", "''") + "'" for v in vals) + "))" if vals else "FALSE"
+    for role in cols:
+        col = role["column"]
+        fatal, other = [str(c) for c in role["fatal"]], [str(c) for c in role.get("fatal_other") or []]
+        missing = [str(c) for c in role.get("missing") or []]
+        frames = []
+        for y in it.years:
+            try:
+                strata = gateway._strata(it.dataset, event, int(y))
+                use = tuple(c for c in (col, strata.get("age"), strata.get("sex")) if c)
+                t = gateway.mark_values(it.dataset, event, int(y), use, classifier if codes else None, codes, area)
+            except Exception as exc:  # noqa: BLE001 - a year that cannot be read is said, the others described
+                log(f"study: case fatality {it.dataset} {col} {y}: {type(exc).__name__}: {exc}")
+                continue
+            if col not in t.column_names:
+                continue
+            raw = 'trim(CAST("' + col + '" AS VARCHAR))'
+            age = "NULL"
+            if strata.get("age") and strata["age"] in t.column_names:
+                x = 'trim(CAST("' + strata["age"] + '" AS VARCHAR))'
+                am = [str(c) for c in strata.get("age_missing") or ()]
+                age = (f"CASE WHEN {inlist(x, am)} THEN NULL ELSE floor(TRY_CAST({x} AS DOUBLE)) END" if am
+                       else f"floor(TRY_CAST({x} AS DOUBLE))")
+            sex = gateway._sex_sql(strata, it.dataset, t) if strata.get("sex") in t.column_names else "NULL"
+            con = duckdb.connect()
+            con.register("r", t)
+            frames.append(con.execute(f"""SELECT {int(y)} AS year,
+                    CASE WHEN {inlist(raw, fatal)} THEN 1 WHEN {inlist(raw, other)} THEN 2
+                         WHEN {raw} IS NULL OR {raw} = '' OR {inlist(raw, missing)} THEN 9 ELSE 0 END AS o,
+                    {age} AS age, {sex} AS sex FROM r""").df())
+            con.close()
+        if not frames:
+            continue
+        d = pd.concat(frames, ignore_index=True)
+        d["band"] = np.searchsorted(edges, d["age"].astype(float).fillna(-1).to_numpy(), side="right") - 1
+        base = {"field": f.id, "label": label, "dataset": it.dataset, "variable": col,
+                "variable_label": (role.get("name") or col) + on, "geography": _whole()[0], "place": _whole()[1]}
+
+        def crude(sel, extra: dict, y, d=d, base=base, other=other) -> None:
+            g = d[sel]
+            n, k, k2, nr = len(g), int((g["o"] == 1).sum()), int((g["o"] == 2).sum()), int((g["o"] == 9).sum())
+            if n == 0:
+                return
+            row = {**base, **extra, **_period(y, None if y is not None else period),
+                   "note": f"{nr} of {n} records with the outcome not recorded" if nr else None}
+            lo, hi = cp(k, n)
+            out.append(_estimate_row("case fatality", "case_fatality", {**row, "value_label": "death from the event"},
+                                     estimate=k / n, low=lo, high=hi, interval="Clopper-Pearson", numerator=k,
+                                     denominator=n, denominator_kind="records", unit="proportion"))
+            if other:
+                lo, hi = cp(k2, n)
+                out.append(_estimate_row("case fatality", "proportion", {**row, "value_label": "death from another cause"},
+                                         estimate=k2 / n, low=lo, high=hi, interval="Clopper-Pearson", numerator=k2,
+                                         denominator=n, denominator_kind="records", unit="proportion"))
+        for y in [*sorted(d["year"].unique()), None]:
+            sel = d["year"] == y if y is not None else pd.Series(True, index=d.index)
+            crude(sel, {}, None if y is None else int(y))
+            if y is None:
+                for sx, nm in ((1, "male"), (2, "female")):
+                    crude(sel & (d["sex"] == sx), {"stratum": f"sex: {nm}"}, None)
+                for b in sorted(d.loc[d["band"] >= 0, "band"].unique()):
+                    crude(sel & (d["band"] == b), {"stratum": f"age band: {bands[int(b)]}"}, None)
+        # adjusted: the records with an outcome, an age and a sex; bands merged upward until each has both outcomes
+        m = d[(d["o"] != 9) & (d["band"] >= 0) & d["sex"].isin([1, 2])].copy()
+        m["dead"] = (m["o"] == 1).astype(float)
+        years_ = sorted(int(v) for v in m["year"].unique())
+        if len(years_) < 2 or m["dead"].sum() < 10:
+            continue
+        merged: dict[int, int] = {}
+        cur: list[int] = []
+        for b in sorted(int(v) for v in m["band"].unique()):
+            cur.append(b)
+            g = m[m["band"].isin(cur)]
+            if 0 < g["dead"].sum() < len(g):
+                merged.update(dict.fromkeys(cur, cur[0]))
+                cur = []
+        last = max(merged.values()) if merged else (cur[0] if cur else 0)
+        merged.update(dict.fromkeys(cur, last))        # the oldest bands without both outcomes join the last group
+        m["grp"] = m["band"].map(merged)
+        groups = sorted(m["grp"].unique())
+        cells = m.groupby(["year", "grp", "sex"]).agg(n=("dead", "size"), k=("dead", "sum")).reset_index()
+
+        def design(c, trend: bool, years_=years_, groups=groups) -> np.ndarray:
+            parts = [np.ones(len(c))]
+            parts += ([c["year"].to_numpy(float) - years_[0]] if trend
+                      else [(c["year"] == yy).to_numpy(float) for yy in years_[1:]])
+            parts += [(c["grp"] == gg).to_numpy(float) for gg in groups[1:]]
+            parts.append((c["sex"] == 2).to_numpy(float))
+            return np.column_stack(parts)
+        try:
+            y2 = np.column_stack([cells["k"], cells["n"] - cells["k"]]).astype(float)
+            fit = sm.GLM(y2, design(cells, False), family=sm.families.Binomial()).fit()
+            trend = sm.GLM(y2, design(cells, True), family=sm.families.Binomial()).fit()
+        except Exception as exc:  # noqa: BLE001 - an unfittable adjustment is said; the crude rows stand
+            log(f"study: case fatality {it.dataset} {col}: adjustment: {type(exc).__name__}: {exc}")
+            continue
+        mix = m.groupby(["grp", "sex"]).size().reset_index(name="w")
+        w = (mix["w"] / mix["w"].sum()).to_numpy()
+        rng = np.random.default_rng(config.seed(f.id, col, "case fatality"))
+        draws = rng.multivariate_normal(np.asarray(fit.params), np.asarray(fit.cov_params()), size=2000)
+        note = (f"{len(m)} records with an outcome, an age and a sex; age bands merged to {len(groups)} groups; "
+                "standard: the period's case mix")
+        model = "binomial regression on year, age band and sex; marginal standardisation"
+        for yy in years_:
+            X = design(mix.assign(year=yy), False)
+            p_hat = float((w / (1 + np.exp(-X @ np.asarray(fit.params)))).sum())
+            sims = (w[None] / (1 + np.exp(-draws @ X.T))).sum(1)
+            out.append(_estimate_row("case fatality", "case_fatality_adjusted",
+                                     {**base, **_period(yy, None), "value_label": "death from the event", "note": note},
+                                     estimate=p_hat, low=float(np.percentile(sims, 2.5)),
+                                     high=float(np.percentile(sims, 97.5)), interval="2,000 coefficient draws",
+                                     unit="proportion", model=model))
+        b, se = float(trend.params[1]), float(trend.bse[1])
+        out.append(_estimate_row("case fatality", "case_fatality_trend",
+                                 {**base, **_period(None, period), "value_label": "death from the event", "note": note},
+                                 estimate=float(np.exp(b)), low=float(np.exp(b - 1.96 * se)),
+                                 high=float(np.exp(b + 1.96 * se)), p=float(trend.pvalues[1]), interval="Wald",
+                                 unit="odds ratio per year", model="binomial regression on year (linear), age band "
+                                 "and sex"))
+    return out
 
 
 def _ages(it: Item, f, label: str, classifier: str | None, area) -> list[dict]:
@@ -4711,6 +4898,13 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "with a 95 % interval from the two gamma variances on the log scale (Brazil includes the area, so the interval "
         "is conservative); Brazil's and each macro-region's rates by sex, by age band and by sex within each age band "
         "(estimates.parquet, rates, geography reference); the standard's weights in standard.parquet.",
+        "Case fatality (estimates.parquet, case fatality; where a source's outcome column has the codes of death "
+        "declared, pegasus_data roles `fatal`): the topic's records whose outcome is death from the event over all its "
+        "records (letalidade; in-hospital mortality for admissions), by year, sex and age band, with Clopper-Pearson "
+        "intervals, the records with no outcome recorded counted in the denominator and said; deaths from another "
+        "cause apart. Adjusted for age and sex by a binomial regression on year, age band and sex (adjacent bands "
+        "merged until each holds a death and a survivor), each year at the period's case mix (marginal "
+        "standardisation, interval from 2,000 draws of the coefficients), and its trend as the odds ratio per year.",
         "Associated causes (multiple-cause analysis, where a source carries every certificate line or diagnosis): each "
         "ICD-10 category named beside the topic on its own records, its share with a Clopper-Pearson interval and its "
         "ratio to the records of the same sex and ten-year age band without the topic.",
@@ -4804,8 +4998,6 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
     return [("Design and population", design),
             ("Sources and case definition", sources),
             ("Descriptive measures", measures),
-            ("Models and questions",
-             models + [f"Fields read at depth {decl.depth}: counts" + "".join(f", {r}" for r in readers) + "."]),
             *([("Record linkage", linked)] if linked else []),
             *([("Ecological analysis", [
                 "Each count field's events over the period in each municipality regressed on the declared contexts "
@@ -4818,6 +5010,11 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
                 "the joint model's Pearson residuals on the municipalities' contiguity, its one-sided p from 999 "
                 "permutations, says the spatial dependence the model leaves. The associations are between places "
                 "(ecological), never effects on persons."])] if decl.contexts else []),
+            ("Exploratory signal detection (hypothesis-generating)",
+             ["The scans below suggest where and when to look; they confirm nothing. A hypothesis they raise is tested "
+              "by declaring it in the study (its own test, its own error control), and is reported as the study's "
+              "result only then.", *models,
+              f"Fields read at depth {decl.depth}: counts" + "".join(f", {r}" for r in readers) + "."]),
             ("What the sources say of themselves", notes or ["No source of this study declares notes."]),
             ("Reproducibility",
              [f"PegaSUS code {config.code_version()}, data {config.data_version()} (pegasus_data), written "
@@ -5999,10 +6196,13 @@ def _rate_figure(out: Path, field_id: str, desc: list[dict], trends: list[dict])
                      "scale; every point a row of estimates.parquet (rates)"}
 
 
-def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict, population: str = "") -> str | None:
-    """Two maps of the field over the study's years: each state's rate (events per exposure: per 100,000 person-years,
-    or per denominator event for a ratio) and each municipality's standardised departure from B1, the places
-    of the field's findings outlined (pegasus_data's IBGE meshes, `pg.mesh`)."""
+def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], expo: dict, population: str = "",
+                smooth: dict | None = None) -> str | None:
+    """Three maps of the field over the study's years: each state's rate (events per exposure: per 100,000 person-years,
+    or per denominator event for a ratio; by health region in a one-state study); each municipality's smoothed
+    standardised ratio (``smooth``: the empirical-Bayes ratio against the area's own age-sex rates, the map a paper
+    draws); and, exploratory, each municipality's standardised departure from B1, the places of the field's findings
+    outlined (pegasus_data's IBGE meshes, `pg.mesh`)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -6053,12 +6253,22 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
     figs = out / "figures"
     figs.mkdir(exist_ok=True)
     name = _figure_name(it, f, "map")
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.6), dpi=110)
+    fig, (a1, a3, a2) = plt.subplots(1, 3, figsize=(15, 4.6), dpi=110)
+    munis["smoothed"] = munis["u"].map(smooth or {})
+    if munis["smoothed"].notna().any():
+        hi_ = float(np.nanpercentile(munis["smoothed"], 98))
+        munis.plot(column="smoothed", ax=a3, cmap="RdBu_r", norm=mcolors.TwoSlopeNorm(1.0, min(0.99, float(
+            np.nanmin(munis["smoothed"]))), max(1.01, hi_)), legend=True, missing_kwds={"color": "#eee"},
+                   legend_kwds={"shrink": 0.6, "label": "standardised ratio (empirical Bayes)"})
+        states.boundary.plot(ax=a3, color="#555", linewidth=0.3)
+    a3.set_title("standardised ratio against the area, smoothed", fontsize=9)
     rated.plot(column="rate", ax=a1, cmap="YlOrRd", legend=True, missing_kwds={"color": "#eee"},
                legend_kwds={"shrink": 0.6, "label": "per 1,000 denominator events" if ratio else "per 100,000"})
     if one_state:
         states.boundary.plot(ax=a1, color="#555", linewidth=0.3)
-    a1.set_title(f"{label}: rate by {level}, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
+    # the field's label over the figure: in the first panel's title it ran across the second (2026-10-14)
+    fig.suptitle(label if len(label) <= 140 else label[:137] + "...", fontsize=10)
+    a1.set_title(f"crude rate by {level}, {sv.years[0]}–{sv.years[-1]}", fontsize=9)
     munis.plot(column="z", ax=a2, cmap="RdBu_r", norm=mcolors.TwoSlopeNorm(0.0, -4.0, 4.0), legend=True,
                missing_kwds={"color": "#eee"}, legend_kwds={"shrink": 0.6, "label": "(observed − expected) / sd",
                                                             "extend": "both"})
@@ -6066,8 +6276,8 @@ def _map_figure(out: Path, sv, f, label: str, it: Item, findings: list[dict], ex
     if len(outlined):
         outlined.boundary.plot(ax=a2, color="black", linewidth=0.6)
     states.boundary.plot(ax=a2, color="#555", linewidth=0.3)
-    a2.set_title(f"departure from expected (B1) by municipality; {len(outlined)} with findings outlined", fontsize=9)
-    for ax in (a1, a2):
+    a2.set_title(f"exploratory: departure from B1; {len(outlined)} with findings outlined", fontsize=9)
+    for ax in (a1, a2, a3):
         ax.set_axis_off()
     fig.tight_layout()
     fig.savefig(figs / name)
@@ -6082,8 +6292,12 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
             hyp: list[dict] | None = None, relations: list[dict] | None = None, persons: list[dict] | None = None,
             captured: list[dict] | None = None, completeness: list[dict] | None = None,
             trends: list[dict] | None = None, linkage: list[dict] | None = None,
-            associated: list[dict] | None = None) -> None:
-    """`report.html`: the study as a person reads it (ARCHITECTURE §3.5), from the folder's own tables."""
+            associated: list[dict] | None = None, estimates: list[dict] | None = None) -> None:
+    """`report.html`: the study's results in a paper's order (ARCHITECTURE §3.5), from the folder's own tables: the
+    summary of what was estimated; descriptive epidemiology (rates, trends, places, case fatality); analytic results
+    (ecological associations, declared hypotheses, persons); data quality; then the exploratory signals, labelled
+    hypothesis-generating (they suggest where to look, they confirm nothing); scope, methods, provenance. It had
+    opened on the scans' findings, the study read as a dossier of signals (the author, 2026-10-14)."""
     from pegasus_data.linkage.engine import CAUTION, VIABLE
 
     e = html.escape
@@ -6132,26 +6346,50 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              and (r.get("numerator") or 0) >= cooccur.MIN_BOTH]
     sources = sorted({i.dataset for i in read})
     level, unit = _whole()
+    est_ = estimates or []
+    fatality = [r for r in est_ if r.get("section") == "case fatality" and not r.get("stratum")
+                and r["measure"] in ("case_fatality", "case_fatality_adjusted", "case_fatality_trend")]
+    ecological = [r for r in est_ if r.get("section") == "associations" and r["measure"] == "association"
+                  and "with the" in str(r.get("model"))] or \
+        [r for r in est_ if r.get("section") == "associations" and r["measure"] == "association"]
+    moran = [r for r in est_ if r.get("section") == "associations" and r["measure"] == "moran_i"]
+    smoothed = sorted((r for r in est_ if r.get("section") == "municipalities" and r["measure"] == "smoothed_smr"
+                       and r.get("period_kind") == "period" and (r.get("low") or 0) > 1),
+                      key=lambda r: -(r.get("low") or 0))
+    # the summary's fields: the topic's own readers, not an alternative support (a place of occurrence) or a race
+    whole = [r for r in nat if r.get("geography") == level and r.get("period_kind") == "period"
+             and "support=" not in str(r.get("field"))]
+    aapc = [r for r in trend_rows if r["measure"] == "aapc"]
+    cf_period = [r for r in fatality if r["measure"] == "case_fatality" and r.get("period_kind") == "period"]
+
+    def num(x, k=1) -> str:
+        return "–" if x is None or (isinstance(x, float) and not np.isfinite(x)) else f"{x:,.{k}f}"
+    summary = (
+        [f"<li>{e(r['label'])} ({e(r['dataset'])}), {r['first']}–{r['last']}: {num(r.get('events'), 0)} events, "
+         f"{num(r.get('crude_rate'), 2)} {e(str(r.get('unit') or ''))} (95 % {num(r.get('crude_low'), 2)}–"
+         f"{num(r.get('crude_high'), 2)})"
+         + (f"; age-sex standardised {num(r.get('standardised_rate'), 2)} per 100,000" if r.get('standardised_rate')
+            is not None else "") + "</li>" for r in whole]
+        + [f"<li>{e(r['label'])}: {e(str(r.get('variable') or ''))}, average annual percent change "
+           f"{num(r['estimate'], 1)} % (95 % {num(r['low'], 1)} to {num(r['high'], 1)}), {r['first']}–{r['last']}</li>"
+           for r in aapc if r.get("place") == unit and r.get("value") is None and "support=" not in str(r["field"])]
+        + [f"<li>{e(r['label'])}: case fatality {num(100 * r['estimate'], 1)} % (95 % {num(100 * r['low'], 1)}–"
+           f"{num(100 * r['high'], 1)}), {num(r['numerator'], 0)} of {num(r['denominator'], 0)}</li>" for r in cf_period]
+        + [f"<li>{len(smoothed)} municipalities whose smoothed standardised ratio lies above 1 (95 % interval)</li>"]
+        + ([f"<li>{len([r for r in ecological if r.get('p') is not None and r['p'] < decl.q])} ecological "
+            f"associations with p below {decl.q} (of {len(ecological)} in the joint models)</li>"] if ecological else []))
     parts = [f"<h1>{e(decl.study)}</h1>",
              f"<p class=meta>{e(_area_text())} · depth {e(decl.depth)} · period "
              f"{decl.years[0]}–{decl.years[-1]} · q {decl.q} · written {time.strftime('%Y-%m-%d %H:%M')}</p>",
              "<h2>1. Summary</h2>",
+             f"<p>{len(sources)} sources read ({e(', '.join(sources))}) in {len(read)} fields.</p>",
+             "<ul>" + "".join(summary) + "</ul>",
              # the counts as they are: sources are datasets (fields are items), and a noise finding (an exact interval
              # holding 1) is no recording explanation (731 of Alagoas's 751 "explained" findings were noise; the
              # review of the study, 2026-10-14)
-             f"<p>{len(sources)} sources read ({e(', '.join(sources))}) in {len(read)} fields, {len(rows)} findings: "
-             f"{len(signal)} unexplained by recording (signal), {len(other)} with a recording, denominator or system "
-             f"explanation, {len(noise)} within chance (their exact interval holds 1), in {len(stories)} stories "
-             "(findings sharing a place and overlapping years, across fields and sources).</p>",
-             "".join(_story_html(k, st, e) for k, st in enumerate(stories[:15], 1)),
-             (f"<p class=more>{len(stories) - 15} more stories in findings.parquet (column story)</p>"
-              if len(stories) > 15 else ""),
-             "<h3>Every signal finding</h3>",
-             table(rank, [("label", "field"), ("dataset", "source"), ("component", "component"),
-                          ("place_names", "places"), ("groups", "group"), ("first_year", "from"), ("last_year", "to"),
-                          ("effect", "effect"), ("effect_unit", "unit"), ("q", "q"), ("replication", "replication"),
-                          ("corroborated", "corroborated"), ("related", "related fields there (O/E, 95%)"),
-                          ("context", "context (national percentile)")], cap=20),
+             f"<p>Exploratory signal detection (section 5, hypothesis-generating): {len(rows)} findings, {len(signal)} "
+             f"unexplained by recording, {len(other)} with a recording, denominator or system explanation, {len(noise)} "
+             f"within chance, in {len(stories)} stories.</p>",
              "<h2>2. Descriptive epidemiology</h2>",
              table(nat, [("label", "field"), ("dataset", "source"), ("place", "where"), ("first", "from"),
                          ("last", "to"), ("events", "events"), ("crude_rate", "rate"), ("crude_low", "95% from"),
@@ -6165,17 +6403,46 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                        ("low", "95% from"), ("high", "to"), ("p", "p")], cap=40,
                       where="estimates.parquet, section trends (by sex and age band too)") if trends else "<p>No series long enough.</p>"),
              "".join(f"<img src='{e(f)}' alt=''>" for f in figs),
-             "<h2>3. Institutional findings</h2><p>Departures concentrated in one establishment: often real (a referral "
-             "centre, a new service, a screening programme), read with the establishment's registration.</p>",
-             table(institutional, [("label", "field"), ("dataset", "source"), ("component", "component"),
-                                   ("first_year", "from"), ("last_year", "to"), ("effect", "effect"), ("q", "q"),
-                                   ("institution_facts", "establishment (CNES)"),
-                                   ("institution_volume", "its whole activity")], cap=30),
-             "<h2>3a. Data quality</h2><p>Places and periods where a column's blank or 'ignored' share departs from its "
-             "expectation: where the records of this topic are least complete, and where a recording practice changed.</p>",
-             table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
-                             ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
-                             ("q", "q")], cap=30) if quality else "<p>No quality departure at this depth.</p>",
+             "<h3>Municipalities</h3><p>The municipalities whose smoothed standardised ratio (empirical Bayes, against "
+             "the area's own age-sex rates) lies above 1 over the period, the lower bound first.</p>"
+             + table(smoothed, [("label", "field"), ("place_name", "municipality"), ("numerator", "events"),
+                                ("denominator", "expected"), ("estimate", "smoothed ratio"), ("low", "95% from"),
+                                ("high", "to")], cap=25, where="estimates.parquet, section municipalities (view "
+                                                                "municipalities)"),
+             "<h3>Case fatality</h3>"
+             + (table(fatality, [("label", "field"), ("dataset", "source"), ("variable", "outcome"),
+                                 ("measure", "measure"), ("first", "from"), ("last", "to"), ("numerator", "deaths"),
+                                 ("denominator", "records"), ("estimate", "estimate"), ("low", "95% from"),
+                                 ("high", "to"), ("p", "p"), ("note", "note")], cap=60,
+                      where="estimates.parquet, section case fatality (by sex and age band too)")
+                if fatality else "<p>No source read declares the fatal codes of its outcome.</p>"),
+             "<h2>3. Analytic results</h2>",
+             "<h3>Ecological associations</h3><p>Each field's standardised ratio across the municipalities against "
+             "the contexts, per standard deviation, all contexts together (negative binomial, offset the expected "
+             "events, intervals robust to clustering by health region): associations between places, never effects "
+             "on persons.</p>"
+             + (table(ecological, [("label", "field"), ("variable", "context"), ("note", "per"), ("estimate", "ratio"),
+                                   ("low", "95% from"), ("high", "to"), ("p", "p"), ("denominator", "municipalities")],
+                      cap=60, where="estimates.parquet, section associations (each context alone too)")
+                + "".join(f"<p>{e(r['label'])}: Moran's I of the residuals {num(r['estimate'], 3)} (p {num(r['p'], 3)})"
+                          "</p>" for r in moran)
+                if ecological else "<p>No context declared, or none held by nine municipalities in ten.</p>"),
+             "<h3>Declared hypotheses</h3>",
+             table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("support", "place"),
+                               ("field_reader", "field"), ("years", "years"), ("observed", "observed"),
+                               ("expected", "expected"), ("effect", "effect"), ("low", "95 % low"),
+                               ("high", "95 % high"), ("p", "p"), ("p_holm", "p (Holm, over its sources)"),
+                               ("answer", "answer")], cap=60) if decl.hypotheses else "<p>None declared.</p>",
+             "<h3>Persons</h3><p>The cohort scan over linked persons (ARCHITECTURE §7.8): each attribute of the "
+             "persons of a source against each outcome they reach, on their own record or through the viable links "
+             "of any route, adjusted for age, sex and place; linkage uncertainty by plausible link sets.</p>"
+             + (table(sorted([r for r in persons if r.get("q") is not None], key=lambda r: r["q"]),
+                      [("cohort", "persons"), ("year", "year"), ("outcome", "outcome"), ("attribute", "attribute"),
+                       ("level", "level"), ("reference", "against"), ("rr", "RR"), ("low", "95 % from"), ("high", "to"),
+                       ("q", "q")], cap=40)
+                + "".join(f"<p>{e(r['cohort'])} {r.get('year') or ''}: {e(r['note'])}</p>" for r in persons if r.get("note"))
+                if persons else f"<p>{'Not read (persons: false).' if not decl.choice('persons') else 'No source read holds persons on a usable link.'}</p>"),
+             "<h2>4. Data quality</h2>",
              "<h3>Completeness of the records</h3>"
              + (table(completeness, [("dataset", "source"), ("label", "field"), ("first", "from"), ("last", "to"),
                                      ("variable", "indicator"), ("numerator", "events"), ("denominator", "of"),
@@ -6190,25 +6457,41 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                   "not a birth date, for the link to match) raises the estimate, and lists that record the same "
                   "persons more often than chance lower it.</p>"
                 if any(r.get("patterns") for r in captured or []) else f"<p>{e(_capture_note(scope))}</p>"),
-             "<h2>3b. Findings with a recording, denominator or system explanation</h2>",
+             "<h3>Where the recording departs</h3><p>Places and periods where a column's blank or 'ignored' share "
+             "departs from its expectation: where the records of this topic are least complete, and where a recording "
+             "practice changed.</p>",
+             table(quality, [("label", "column"), ("dataset", "source"), ("component", "component"),
+                             ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
+                             ("q", "q")], cap=30) if quality else "<p>No quality departure at this depth.</p>",
+             "<h2>5. Exploratory signal detection (hypothesis-generating)</h2><p>Departures of the observed events from "
+             "a hierarchical model's expectation, searched over places, periods, groups and establishments under "
+             "false-discovery control. They point at where to look; none is a confirmed excess or a causal claim, and "
+             "a hypothesis they suggest is tested by declaring it (section 3).</p>",
+             "".join(_story_html(k, st, e) for k, st in enumerate(stories[:15], 1)),
+             (f"<p class=more>{len(stories) - 15} more stories in findings.parquet (column story)</p>"
+              if len(stories) > 15 else ""),
+             "<h3>Every signal finding</h3>",
+             table(rank, [("label", "field"), ("dataset", "source"), ("component", "component"),
+                          ("place_names", "places"), ("groups", "group"), ("first_year", "from"), ("last_year", "to"),
+                          ("effect", "effect"), ("effect_unit", "unit"), ("q", "q"), ("replication", "replication"),
+                          ("corroborated", "corroborated"), ("related", "related fields there (O/E, 95%)"),
+                          ("context", "context (national percentile)")], cap=20),
+             "<h3>Institutional findings</h3><p>Departures concentrated in one establishment: often real (a referral "
+             "centre, a new service, a screening programme), read with the establishment's registration.</p>",
+             table(institutional, [("label", "field"), ("dataset", "source"), ("component", "component"),
+                                   ("first_year", "from"), ("last_year", "to"), ("effect", "effect"), ("q", "q"),
+                                   ("institution_facts", "establishment (CNES)"),
+                                   ("institution_volume", "its whole activity")], cap=30),
+             "<h3>Findings with a recording, denominator or system explanation</h3>",
              table(other, [("label", "field"), ("dataset", "source"), ("component", "component"),
                            ("place_names", "places"), ("first_year", "from"), ("last_year", "to"), ("effect", "effect"),
                            ("class", "class"), ("class_reason", "why")], cap=30),
-             "<h2>3c. Relations among the study's fields</h2><p>Fields whose departures move together, at which spatial "
+             "<h3>Relations among the study's fields</h3><p>Fields whose departures move together, at which spatial "
              "scale and lag (the joint model over graph bands; a relation is statistical, never causal by itself).</p>",
              (table(sorted([r for r in (relations or []) if r.get("reported")], key=lambda r: r.get("p", 1)),
                     [("pair", "fields"), ("support", "scale"), ("lag", "lag"), ("rho", "ρ"), ("direct", "direct"),
                      ("p", "p"), ("years", "years")], cap=25) if relations else "<p>No pair of fields shares four years.</p>"),
-             "<h2>3d. Persons</h2><p>The cohort scan over linked persons (ARCHITECTURE §7.8): each attribute of the "
-             "persons of a source against each outcome they reach, on their own record or through the viable links "
-             "of any route, adjusted for age, sex and place; linkage uncertainty by plausible link sets.</p>"
-             + (table(sorted([r for r in persons if r.get("q") is not None], key=lambda r: r["q"]),
-                      [("cohort", "persons"), ("year", "year"), ("outcome", "outcome"), ("attribute", "attribute"),
-                       ("level", "level"), ("reference", "against"), ("rr", "RR"), ("low", "95 % from"), ("high", "to"),
-                       ("q", "q")], cap=40)
-                + "".join(f"<p>{e(r['cohort'])} {r.get('year') or ''}: {e(r['note'])}</p>" for r in persons if r.get("note"))
-                if persons else f"<p>{'Not read (persons: false).' if not decl.choice('persons') else 'No source read holds persons on a usable link.'}</p>"),
-             "<h2>4. Scope</h2>", "<ul>" + "".join(
+             "<h2>6. Scope</h2>", "<ul>" + "".join(
                  f"<li><b>{e(i.dataset)}</b> ({e(i.event)}), {i.years[0]}–{i.years[-1]}: {e(i.reason)}"
                  + (f" — {e(i.note)}" if i.note else "") + "</li>" for i in read) + "</ul>",
              "<h3>Deferred</h3><ul>" + "".join(f"<li>{e(i.dataset)}: {e(i.note)}</li>"
@@ -6239,14 +6522,8 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                 if scope.medicines else "<p>No treatment is declared for the topic's codes.</p>"),
              "<h3>Named by a seed and not read</h3><ul>" + "".join(
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
-             "<h2>5. Hypotheses</h2>",
-             table(hyp or [], [("hypothesis", "hypothesis"), ("source", "source"), ("support", "place"), ("field_reader", "field"),
-                               ("years", "years"), ("observed", "observed"), ("expected", "expected"),
-                               ("effect", "effect"), ("low", "95 % low"), ("high", "95 % high"), ("p", "p"),
-                               ("p_holm", "p (Holm, over its sources)"),
-                               ("answer", "answer")], cap=60) if decl.hypotheses else "<p>None declared.</p>",
-             "<h2>6. Methods and limitations</h2>", _limitations(decl, scope, desc, linkage),
-             "<h2>7. Provenance</h2><p>provenance.json; every table of the folder is a table of study.duckdb, which "
+             "<h2>7. Methods and limitations</h2>", _limitations(decl, scope, desc, linkage),
+             "<h2>8. Provenance</h2><p>provenance.json; every table of the folder is a table of study.duckdb, which "
              "opens on any machine. <code>pegasus-core export</code> copies the folder (and writes CSV on request).</p>"]
     css = ("body{font-family:system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}"
            "table{border-collapse:collapse;font-size:13px;margin:.5em 0}td,th{border-bottom:1px solid #ddd;"
@@ -6660,8 +6937,9 @@ COLUMNS = {
     "institution_volume": "each establishment's events of every code the year before the finding and in its last",
     # estimates.parquet: one schema for every descriptive number (MEASURES; docs/plans/study-estimates.md)
     "estimates.parquet:section": "the part of the analysis: rates, municipalities, seasonality, codes, case mix, "
-                                 "completeness, measures, trends, associated causes, contexts, associations (the "
-                                 "ecological regression of the municipalities' events on the contexts)",
+                                 "completeness, measures, case fatality, trends, associated causes, contexts, "
+                                 "associations (the ecological regression of the municipalities' events on the "
+                                 "contexts)",
     "estimates.parquet:measure": "what the estimate is: one of the measures defined below the tables",
     "estimates.parquet:model": "the model behind the estimate: a trend's (crude or age-sex adjusted log-linear, "
                                "joinpoint of the crude or standardised rate), a season's method, the hierarchical tier",
@@ -6907,6 +7185,21 @@ def body(folder: str | Path) -> list[dict]:
     tr = tr[tr["measure"].isin(["apc", "aapc"])] if tr is not None else None
     part("trends", tr is not None and ((len(tr) > 0 and tr["low"].notna().all()) or len(decl.years) < 3),
          f"{0 if tr is None else len(tr)} annual percent changes with intervals (crude and age-sex adjusted)")
+    # where the topic's own records were described (`_measures`: not a whole type nationally), and the source's outcome
+    # declares its fatal codes
+    fatal = set()
+    me_ = section("measures")
+    for ds in counted & (set() if me_ is None else set(me_["dataset"])):
+        try:
+            if any(r.get("fatal") for r in gateway.roles(ds)):
+                fatal.add(ds)
+        except Exception:  # noqa: BLE001 - a dataset pegasus_data cannot describe declares no outcome
+            pass
+    if fatal:
+        cf = section("case fatality")
+        got = set() if cf is None else set(cf[cf["measure"] == "case_fatality"]["dataset"])
+        part("case fatality", fatal <= got, f"case fatality for {sorted(got)}"
+             + (f"; none for {sorted(fatal - got)}, whose outcome declares its fatal codes" if fatal - got else ""))
     me = section("measures")
     if any(x.get("dataset") for x in read):
         part("measures", me is not None, f"{0 if me is None else len(me)} measure rows (the topic's own quantities)")
