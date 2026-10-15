@@ -63,3 +63,12 @@ At 999 permutations no local p fell under 0.001, so BH passed no case cluster; t
 
 A notifiable agravo's fields are named by their condition code ("notification (A27 Leptospirose)"), and Table 1's
 age bands run in age order.
+
+**The gate's toxoplasmosis slice** (RS, deep) failed one lane on the rebuilt lake. SIA-PA has no lake; its
+serology is read from an extract of its codes. The institution question read the facility cube of the whole type,
+4.5 GB a year, and a lane may not download. Changes:
+- `_records` now reads a code set from the extract that holds it, cut to the area in Arrow;
+- a question whose quantity is undefined for a field raises `questions.NotDefined` and is recorded as not read:
+  - the share of all events where there is no all-event total (a SIGTAP code set);
+  - an establishment's whole activity where the lake does not hold the type whole;
+- one rule (`gateway.lake_whole_years`) decides a whole lake year for the scope and the readers.

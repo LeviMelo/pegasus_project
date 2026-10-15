@@ -251,6 +251,14 @@ class Session:
         (`facility.institution_lattice`), read on the B1 expectation without the supply term. Annual grain; SIH-RD, whose
         events all name a facility (SIM-DO's CODESTAB is empty for a death at home)."""
         su = self.surprise(node, "B1")                 # the survey's memo: built once for all of a field's questions
+        # the establishments' whole activity is the comparison: every record of the type, which only a whole lake
+        # year holds (SIA-PA's serology is read from an extract of its codes; the cube had queried 4.5 GB a year)
+        from . import questions as qs
+
+        missing = sorted({int(y) for y in su.years} - set(gateway.lake_whole_years(self.dataset)))
+        if missing:
+            raise qs.NotDefined(f"{self.dataset}: an establishment's whole activity needs every record of the type, "
+                                f"which the lake does not hold for {missing}")
         codes = list(self.expectations.registry.leaves(node))
         p = facility.pairs(self.dataset, self.event, [int(y) for y in su.years], codes)
         return facility.institution_lattice(p, su.places, np.asarray(su.years), su.mu)
@@ -591,7 +599,7 @@ class Session:
                 self.dataset, self.event, self.years, self.graph, source={k: v for k, v in self.source.items() if k != "codes"})
             base._prepare_grid()
             if base._total is None:
-                raise ValueError(f"{self.dataset}: no all-event count to take a share of (one block, no tree)")
+                raise qs.NotDefined(f"{self.dataset}: no all-event count to take a share of (one block, no tree)")
             rows = monolith.positions(base._grid_places, s.places)
             have = rows >= 0
             total = np.zeros(s.y.shape)

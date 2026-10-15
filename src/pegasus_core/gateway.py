@@ -890,14 +890,60 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
 
         def prepare(t: pa.Table) -> pa.Table:        # made from the record's fields, before the rule compares them
             return t.append_column("_rid", record_ids(t))
+    # a code set an extract holds whole for the year (`pegasus_data.extract`: a dataset larger than the lake, SIA-PA)
+    # is read from the extract's records, the other row filters (the area's residence) applied in Arrow: a composition
+    # or an establishment read of SIA-PA's serology had queried every RS file of the year, 4.5 GB, and a lane forbidden
+    # to download failed (the toxoplasmosis slice, 2026-10-15)
+    records = _extract_records(dataset, year, rows) if rows and not cond else None
+    if records is not None:
+        kwargs = {k: v for k, v in kwargs.items() if k not in ("rows",)}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         table = read_events(dataset, data_event_type(dataset, base), columns, consolidate=False, period=year,
                             geography="BR", prepare=prepare, **kwargs,
+                            **({"records": records} if records is not None else {}),
                             **({"condition": cond["clauses"]} if cond else {}))
     status = (spec.get("status") or {}).get("column")
     keep = dict.fromkeys([*columns, *([status] if status else []), *(["_rid"] if identity else []), "__w"])
     return table.select([c for c in keep if c in table.column_names])
+
+
+def lake_whole_years(dataset: str) -> frozenset[int]:
+    """The years pegasus_data's lake holds whole for ``dataset``: its national partition (SIM and SINASC are built from
+    the national file), or every state the year publishes (SIH). One rule for the scope's price of a year and for a
+    reader that needs every record of a type (an establishment's whole activity)."""
+    import pegasus_data as pg
+
+    try:
+        published = {int(r["year"]): int(r.get("ufs") or 1) for r in pg.explore(dataset, root=config.data_root()).rows
+                     if r.get("year") is not None}
+    except Exception:  # noqa: BLE001 - a dataset the catalog does not describe: one partition is its year
+        published = {}
+    cov = pg.lake_coverage(dataset, root=config.data_root())
+    return frozenset(int(y) for y, v in cov.items() if "BR" in (v.get("uf_codes") or [])
+                     or int(v.get("ufs") or 0) >= published.get(int(y), 1))
+
+
+def _extract_records(dataset: str, year: int, rows: dict[str, list[str]]) -> pa.Table | None:
+    """The year's records of an extract that holds one of ``rows``' code filters whole, cut by the other filters (code
+    prefixes, as the lake's scan cuts them), or None where no extract holds them: the lake is read then."""
+    import pegasus_data as pg
+
+    for column, codes in rows.items():
+        try:
+            table, _ = pg.extract_table(dataset, column, list(codes), [int(year)], root=config.data_root())
+        except (LookupError, OSError, ValueError):
+            continue
+        for other, prefixes in rows.items():
+            if other == column or other not in table.column_names:
+                continue
+            text = pc.cast(table.column(other), pa.string())
+            hit = pc.starts_with(text, str(prefixes[0]))
+            for p_ in prefixes[1:]:
+                hit = pc.or_(hit, pc.starts_with(text, str(p_)))
+            table = table.filter(pc.fill_null(hit, False))
+        return table
+    return None
 
 
 #: the properties of the date a record enters its system (SINAN's data entry, SIM's and SINASC's registration, SIH's

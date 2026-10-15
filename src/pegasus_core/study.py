@@ -437,37 +437,21 @@ def _cost(dataset: str, years: list[int]) -> tuple[list[int], dict[int, float | 
     claim reads it; the years after it too are left out, since the fits read years by position, a trend and an AR(1)
     over consecutive years, and would take 2023 to 2025 for one step), and the gigabytes each would download: 0 when
     in the lake, None when the catalog does not size it (never read as free)."""
-    import pegasus_data as pg
 
     published = gateway.published_years(dataset)
     held = control.reserved(dataset)
     ys = [y for y in years if (not published or y in published) and (not held or y < min(held))]
     volume = _volumes(dataset, config.data_root())
-    states = _published_states(dataset, config.data_root())
     # read once per scope (`resolve` clears it): not across a run, whose `ensure_lake` extends the lake; per call, the
     # deep scope priced each related code in every served dataset by a fresh read. A year is the lake's when it holds
-    # every state the year publishes
+    # it whole (`gateway.lake_whole_years`)
     if dataset not in _LAKE:
-        cov = pg.lake_coverage(dataset, root=config.data_root())
-        _LAKE[dataset] = frozenset(y for y, v in cov.items() if "BR" in (v.get("uf_codes") or [])
-                                   or int(v.get("ufs") or 0) >= states.get(int(y), 1))
+        _LAKE[dataset] = gateway.lake_whole_years(dataset)
     lake = _LAKE[dataset]
     return ys, {y: (0.0 if y in lake else volume.get(y)) for y in ys}
 
 
 _LAKE: dict[str, frozenset[int]] = {}
-
-
-@functools.cache
-def _published_states(dataset: str, root: str) -> dict[int, int]:
-    """The states each year of ``dataset`` publishes files for (the catalog's, `pg.explore`), once per process."""
-    import pegasus_data as pg
-
-    try:
-        return {int(r["year"]): int(r.get("ufs") or 1) for r in pg.explore(dataset, root=root).rows
-                if r.get("year") is not None}
-    except Exception:  # noqa: BLE001 - a dataset the catalog does not describe: one partition is the year
-        return {}
 
 
 @functools.cache

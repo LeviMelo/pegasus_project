@@ -224,6 +224,11 @@ def basis(source: dict | None) -> set[str]:
             *(["quality"] if src.get("quality") else [])}
 
 
+class NotDefined(ValueError):
+    """A method whose quantity is undefined for this field (a share of all events where the source has no all-event
+    total: a SIGTAP code set, one block and no tree): said as not read, never counted as a failed pair."""
+
+
 def not_read(qn: Question, m: Method, kind: str | None, source: dict | None) -> str | None:
     """Why ``m`` does not read this reader (None: it does). One rule for the survey, the harness and the lens: a method
     reads its declared kinds and bases, a quality field is asked only the questions declared for it. Asked anyway, a
@@ -257,6 +262,9 @@ def _ask(session, question: str, node: str, q: float = 0.05, **kw) -> list[Answe
     for m in methods:
         try:
             found = session.scan(node, m.lens or m.id, q=q / k, **dict(m.settings), **kw)
+        except NotDefined as exc:      # the method does not apply to this field: not read, no failure
+            why[m.id] = str(exc)
+            continue
         except Exception as exc:  # noqa: BLE001 - one method's failure is reported, the question still answered
             failed[m.id] = f"{type(exc).__name__}: {exc}"
             continue
