@@ -4831,7 +4831,9 @@ def _geometry(out: Path, places: list[dict]) -> None:
     keyed by ``u`` as estimates.parquet's municipalities (``place``): a map drawn from the tables needs no other file (the audit could not draw one)."""
     import pegasus_data as pg
 
-    us = sorted({int(r["place"]) for r in places if r.get("place") is not None})
+    # the municipalities' own rows: a whole's row (the global Moran's, place "BR" or a state) is no municipality
+    us = sorted({int(r["place"]) for r in places if r.get("geography") == "municipality"
+                 and str(r.get("place") or "").isdigit()})
     if not us:
         return
     munis = pg.mesh("municipality", quality=MESH_QUALITY, root=config.data_root())
@@ -5008,7 +5010,7 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
     now = int(time.strftime("%Y"))
     read = [i for i in scope.items if i.status == "in" and i.years]
     area = _area_text()
-    standards = sorted({str(r["standard"]) for r in desc if r.get("standard")})
+    standards = sorted({str(r["standard"]).split(": its ages")[0] for r in desc if r.get("standard")})
     pers = sorted({str(r["unit"])[len("per "):] for r in desc if r["measure"] == "crude_rate" and r.get("unit")})
     design = [f"Population-based descriptive and ecological study of {area}, {decl.years[0]}-{decl.years[-1]}, on "
               "Brazil's national health information systems (DATASUS), read from the public files of each year (each "
@@ -5061,8 +5063,8 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "Crude rates with exact Poisson 95 % intervals (Garwood), the denominator fixed; per year, over the whole period, "
         "for the whole and for each region, state and (an area) health macro-region and health region.",
         f"Direct standardisation by sex and age band to {'; '.join(standards) or 'the study population'}, with the gamma "
-        "interval of Fay & Feuer (1997); rates by sex, by age band and by sex within each age band, with exact "
-        "intervals.",
+        "interval of Fay & Feuer (1997), each sex's rate to the same standard's ages with both sexes pooled (so the "
+        "sexes compare); rates by sex, by age band and by sex within each age band, with exact intervals.",
         "Annual percent change of each series, crude and age-sex adjusted: a Poisson log-linear model of the counts on "
         "the year, each sex-age cell its own level in the adjusted model, person-years as offset; the variance widened "
         "by the year-level Pearson dispersion (quasi-Poisson, in `dispersion`) and the interval read on Student's t "
@@ -5867,7 +5869,9 @@ def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: d
     `gateway.context_value`) per municipality of the study's places, each year and over the period: the covariates an
     ecological model of the rates reads beside estimates.parquet's municipalities. A context without a value for a place-year is an empty
     value, never zero."""
-    us = sorted({int(r["place"]) for r in places if r.get("place") is not None})
+    # the municipalities' own rows: a whole's row (the global Moran's, place "BR" or a state) is no municipality
+    us = sorted({int(r["place"]) for r in places if r.get("geography") == "municipality"
+                 and str(r.get("place") or "").isdigit()})
     if not us or not scope.contexts:
         return []
     arr = np.asarray(us, dtype=np.int64)
@@ -5996,7 +6000,7 @@ def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
         return []
     fields_: dict[str, dict] = {}
     for r in places:
-        if r.get("period_kind") != "period":
+        if r.get("period_kind") != "period" or r.get("geography") != "municipality":
             continue
         fid, u = r["field"], int(r["place"])
         f = fields_.setdefault(fid, {"label": r.get("label"), "dataset": r.get("dataset"), "y": {}, "e": {}, "region": {}})

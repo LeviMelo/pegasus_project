@@ -27,7 +27,7 @@ Each ran on the working tree over `1c75315`, with the real stores and the adopti
 - 4.8 % (95 % 3.9-5.9), 90 of 1,878, with 184 outcomes not recorded;
 - adjusted odds ratio 1.11 a year (p 0.11).
 
-**Record conditions** (pegasus_data ADR-0193; here `topic.seeds.records`, the condition in the event's name).
+**Record conditions** (pegasus_data pegasus_data ADR-0193; here `topic.seeds.records`, the condition in the event's name).
 - Infant deaths in Alagoas, 2014-2023 (deceased.age_years < 1, per live birth): 13.5 per 1,000 live births (13.2-13.9),
   15.3 in 2014 and 13.6 in 2023. The deaths of unknown age are a completeness row.
 - Low birth weight in Alagoas: 38,473 births over the period. The case mix:
@@ -45,7 +45,7 @@ Its SIH fields failed because the shared lake held SIH for only 4 states while t
 2026-10-15, lake catalog drift). A year is now free only when every state it publishes is in the lake; the SIH lake is
 being rebuilt.
 
-**Mortality after admission** (pegasus_data's cohort link `sih_admissions_to_sim`, ADR-0194 there): Alagoas,
+**Mortality after admission** (pegasus_data's cohort link `sih_admissions_to_sim`, pegasus_data ADR-0194): Alagoas,
 infarction (I21-I22), 2014-2023, the area's residents admitted in its hospitals.
 - 30 days: 18.1 % (17.2-19.0), 1,363 of 7,526; 17.7 % less the link's coincidences.
 - One year: 29.4 % (28.3-30.4); 24.9 % less the coincidences.
@@ -72,3 +72,14 @@ serology is read from an extract of its codes. The institution question read the
   - the share of all events where there is no all-event total (a SIGTAP code set);
   - an establishment's whole activity where the lake does not hold the type whole;
 - one rule (`gateway.lake_whole_years`) decides a whole lake year for the scope and the readers.
+
+**After the lake's rebuild**, three more paths read past the lake or the extract, and each is fixed in general:
+- A linked share's own link was missing from the links its plan reads. Its stale runs (sim_maternal_deaths_to_
+  admission, nine years) were neither priced nor computed before the lanes.
+- Seasonality read a code set's whole type by month; `monthly_counts(codes=)` now filters where the records are held.
+- The institution question needs an establishment's whole activity. Where the lake does not hold the type whole (SIA-PA)
+  it is not defined and is said so.
+
+With these, the toxoplasmosis deep slice (RS 2014-2023, eight sources, linked shares, persons) holds all 27 parts of the
+analytic body from a products run that may not download. Its first gate run went over its cap (58 min against 28.9) on
+the one-time recomputation of the stale link runs, priced from older and faster runs.
