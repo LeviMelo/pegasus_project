@@ -243,6 +243,12 @@ def excess(s: surprise.Surprise, ledger: control.Ledger, spectrum, q: float = 0.
     from .scans import lenses
 
     rr = lenses.RATE_RATIO if rate_ratio is None else rate_ratio
+    if shape in ("step", "trend") and s.y.shape[1] < 5:
+        # a change needs three periods before it and two after (`multiscale.contrasts`): a four-year series has no
+        # start to test, which is no failure (SIA-SAD's tuberculosis, 2015-2018)
+        from .questions import NotDefined
+
+        raise NotDefined(f"a {shape} needs five periods, the series has {s.y.shape[1]}")
     family = f"excess:{shape}|{s.tier}|{s.field.block}"
     test = ledger.register(control.Hypothesis(family, "departure", {"model": "multiscale graph peaks (STEM)",
                                                                     "field": s.field.id, "tier": s.tier}))
