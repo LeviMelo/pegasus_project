@@ -322,6 +322,11 @@ def plan_links(plan: Plan) -> list[tuple[str, str]]:
 
     out = []
     for s in plan.systems:
+        # a linked share's own link (its counts are the pairs of that link): its stale runs had not been scheduled,
+        # and the lane, which computes none, failed on the first year (the toxoplasmosis slice's maternal deaths,
+        # 2026-10-15)
+        if (s.source or {}).get("source") == "linked" and (s.source or {}).get("link"):
+            out.append((s.source["link"], s.source.get("side", "left")))
         for c in _links(s):
             src = fields.link_source(s.dataset, s.event, c)
             out.append((src["link"], src["side"]))
