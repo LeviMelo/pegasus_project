@@ -59,3 +59,17 @@ Two general steps follow, recorded in OPEN_QUESTIONS:
   hundreds;
 - the outcome's recording should be controlled: a sibling anomaly as a second outcome, or the share of births with any
   anomaly recorded.
+
+**The declared test as a distributed lag (later the same day).** B1's dependence on the fitted area has a cause: B1
+learns a region's wave as its course. The declared test now reads the outcome against its tier BPA (trained to 2014,
+the wave not learned) and the leader as observed incidence, one distributed lag over the declared lags, with its p from
+the leader's circular shifts (`tools.lagged_effect`). Data: Northeast, 154 immediate regions, 2015-01..2019-12, 41
+shifts (`data/probes/relation_hypothesis2.log`).
+- Topic: RR 1.20 (model 95 % CI 1.14-1.26) per unit of log incidence; shift p 0.79.
+- Control (Q90): RR 1.02 (0.98-1.06); shift p 0.81. Not supported.
+
+The association is real and is not the timing. Shifted to the wrong months, the leader predicts microcephaly as well,
+because the outcome stayed above its pre-2015 expectation through 2019: the anomaly surveillance after the emergency
+outlasted the wave. This ecological design cannot separate Zika's lagged effect from that recording change. The link
+is established by cohort and case-control studies, which hold the exposure of each pregnancy; notifications and births
+do not.

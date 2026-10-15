@@ -2438,26 +2438,22 @@ HYPOTHESIS_TRAIN = 3
 
 def _relation_hypothesis(h: dict, decl: Declaration, scope: Scope) -> list[dict]:
     """A declared relation (``component: relation``): the ``leader`` (a dataset, its event's every notification, or
-    ``dataset:event``) precedes the topic's field by the ``lags`` window (first, last, in months at ``grain`` month, the
-    default, else years), in the ``macro``-regions (1-5: read over their states, the study's area or not: an ecological
-    relation needs many places, and one state held four supports and one wave) over the ``when`` years. One test per
-    support: the leader's
-    cumulative association with the field over that window only, against the leader's circular shifts
-    (`relations._profiles`), Holm over the supports; and the same for the ``control`` (ICD-10 codes on the field's own
-    reader, an outcome of the same recording the leader should not move). The answer is supported when a support is,
-    specific when the control's is not: Zika -> microcephaly had been one row among hundreds, and its coarse lag profile
-    was Down syndrome's too, the anomaly surveillance raised after the 2015 emergency (evaluation 2026-10-14)."""
-    from statsmodels.stats.multitest import multipletests
-
+    ``dataset:event``) precedes the topic's field by the ``lags`` window (first, last, in months), in the
+    ``macro``-regions (1-5: read over their states, the study's area or not: an ecological relation needs many places)
+    over the ``when`` years, the topic's expectation trained up to ``train_last`` (the year before ``when`` unless
+    declared). One test (`tools.lagged_effect`: a distributed lag against tier BPA, p from the leader's circular
+    shifts), and the same for the ``control`` (ICD-10 codes on the field's own reader, an outcome of the same recording
+    the leader should not move); the answer is specific when the control's is not. Zika -> microcephaly had been one row
+    among hundreds; on B1 innovations its evidence moved with the area the fields were fitted on (B1 learns a region's
+    wave as its course), and its coarse lag profile was Down syndrome's too (evaluation 2026-10-14)."""
     from . import tools
 
-    grain = str(h.get("grain") or "month")
+    grain = "month"
     lo, hi = (int(x) for x in (h.get("lags") or [1, 3]))
     years = _when(h.get("when")) if h.get("when") else list(decl.years)
     leader_ds, _, leader_ev = str(h["leader"]).partition(":")
     leader_ev = leader_ev or gateway.event_types(leader_ds)[0]["name"]
     macro = [int(m) for m in h.get("macro") or []] or None
-    window = (years[0] * 100 + 1, years[-1] * 100 + 12) if grain == "month" else (years[0], years[-1])
     name = h.get("note") or f"{leader_ds} leads the topic by {lo}-{hi} {grain}s"
     out = []
     for it in (i for i in scope.items if i.status == "in" and not i.count_only and not (i.source or {}).get("population")):
@@ -2474,6 +2470,7 @@ def _relation_hypothesis(h: dict, decl: Declaration, scope: Scope) -> list[dict]
             ctl = (dict(it.source or {}), control[0]) if (it.source or {}).get("source") == "code_list" else                 ({**(it.source or {}), "codes": control}, "*")
             tests.append(("control", ctl[1], ctl[0]))
         verdict = {}
+        train_last = int(h.get("train_last") or years[0] - 1)
         # the declared macro-regions' states as the area of the test, the study's own area restored after
         saved = os.environ.get("PEGASUS_AREA")
         if macro:
@@ -2481,27 +2478,18 @@ def _relation_hypothesis(h: dict, decl: Declaration, scope: Scope) -> list[dict]
         try:
             for role, node_, src in tests:
                 try:
-                    res = tools.relate([(leader_ds, leader_ev, "*"), (it.dataset, it.event, node_)], years, lags=hi,
-                                       grain=grain, window=window, macro=macro, sources=[None, src], profiles=True,
-                                       lag_window=(lo, hi))
-                except Exception as exc:  # noqa: BLE001 - a relation that cannot be read is said, never a "not supported"
+                    res = tools.lagged_effect((leader_ds, leader_ev, "*"), (it.dataset, it.event, node_),
+                                              sorted({*it.years, *years}), train_last, (lo, hi), sources=[None, src])
+                except Exception as exc:  # noqa: BLE001 - a relation that cannot be read is said, never "not supported"
                     out.append({**base, "support": role, "answer": f"not read: {type(exc).__name__}: {exc}"})
                     continue
-                prof = [p for p in res["profiles"] if p["leader"].startswith(leader_ds) and p["field"].startswith(it.dataset)]
-                if not prof:
-                    out.append({**base, "support": role, "answer": "not read: no support holds the pair"})
-                    continue
-                holm = multipletests([p["p"] for p in prof], method="holm")[1]
-                best = int(np.argmin(holm))
-                verdict[role] = bool(holm[best] <= decl.q and prof[best]["z"] > 0)
-                for p, ph in zip(prof, holm, strict=True):
-                    out.append({**base, "support": f"{role}: {p['support']}", "tier": f"B1 innovations, lags {lo}-{hi} {grain}s, "
-                                "the leader's circular-shift null", "effect": p["rho"], "effect_unit": "mean lag correlation",
-                                "p": p["p"], "p_holm": float(ph), "answer": None})
-                out.append({**base, "support": role, "effect": prof[best]["rho"], "effect_unit": "mean lag correlation",
-                            "p": prof[best]["p"], "p_holm": float(holm[best]),
-                            "answer": ("supported" if verdict[role] else "not supported")
-                            + f" at {prof[best]['support']} (peak lag {prof[best]['peak']})"})
+                verdict[role] = bool(res["p"] <= decl.q and res["effect"] > 0)
+                out.append({**base, "support": role, "tier": f"BPA trained to {train_last}; distributed lag over "
+                            f"{res['units']} immediate regions, {res['months'][0]}-{res['months'][1]}; p from "
+                            f"{res['shifts']} circular shifts of the leader", "effect": res["rr"],
+                            "effect_unit": f"rate ratio per unit of log incidence, lags {lo}-{hi} {grain}s",
+                            "low": res["low"], "high": res["high"], "p": res["p"],
+                            "answer": "supported" if verdict[role] else "not supported"})
         finally:
             if saved is None:
                 os.environ.pop("PEGASUS_AREA", None)

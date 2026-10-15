@@ -78,6 +78,13 @@ class LagCurve:
     band: float
     deviance_gain: float
     cells: int
+    cov: np.ndarray | None = None          # β's covariance: a window's cumulative effect and its standard error
+
+    def over(self, lo: int, hi: int) -> tuple[float, float]:
+        """The cumulative effect Σβ over lags lo..hi and its standard error."""
+        one = np.zeros(len(self.beta))
+        one[lo:hi + 1] = 1.0
+        return float(one @ self.beta), float(np.sqrt(one @ self.cov @ one)) if self.cov is not None else float("nan")
 
     def summary(self) -> dict:
         return {"lags": self.lags.tolist(), "beta": np.round(self.beta, 5).tolist(), "se": np.round(self.se, 5).tolist(),
@@ -171,7 +178,7 @@ def distributed_lag(y: np.ndarray, mu: np.ndarray, x: np.ndarray, max_lag: int, 
     band = float(np.quantile(np.abs(draws).max(1), 0.95))
     window = [int(ell) for ell in range(n) if abs(b[ell]) > band * se[ell]]
     return LagCurve(np.arange(n), b, se, cum, cum_se, float(np.exp(res.x)), window, band, gain,
-                    int(sel.sum()))
+                    int(sel.sum()), cov)
 
 
 

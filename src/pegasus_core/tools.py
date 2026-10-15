@@ -2109,6 +2109,67 @@ def relate(fields: list[tuple[str, str, str]], years: list[int], graph: str = "c
     return {"rows": out["rows"], "profiles": out["profiles"]} if profiles else out["rows"]
 
 
+def lagged_effect(leader: tuple[str, str, str], follower: tuple[str, str, str], years: list[int], train_last: int,
+                  lags: tuple[int, int], graph: str = "contiguity", sources: list[dict | None] | None = None,
+                  scale: str = "ibge_immediate_region", log=None) -> dict:
+    """A declared relation's effect and its test (a study's relation hypothesis): the follower's monthly counts against
+    its expectation trained on the years up to ``train_last`` (tier BPA: an epidemic of the window is not learned as
+    normal, as B1 learns a region's wave as its course), on the leader's observed incidence over the years after it,
+    at lags ``lags`` (first, last) of a distributed lag (`relations.distributed_lag`), both summed to ``scale`` over
+    the study's area (`config.study_area`). The window's cumulative effect is a rate ratio per unit of log incidence,
+    its p one-sided from the leader's circular shifts in time: the leader's own structure kept and its timing broken,
+    the null a single wave's autocorrelation calls for, which a model interval ignores. Returns the effect, its model
+    interval, the shift p and the number of shifts, the lag curve, and the units and months read."""
+    from . import relations
+
+    lo, hi = lags
+    (lds, lev, lnode), (fds, fev, fnode) = leader, follower
+    lsrc, fsrc = sources or (None, None)
+    later = [y for y in years if y > train_last]
+    sf = Session(fds, fev, years, graph, source={**(fsrc or {}), "grain": "month"})
+    sv = sf.expectations.prospective(fnode, train_last, purpose="alarm")
+    sl = Session(lds, lev, later, graph, source={**(lsrc or {}), "grain": "month"})
+    lv = sl.surprise(lnode, "B1")
+    ld = sl.expectations.model(sl.expectations.field(lnode).block).data
+    # one lattice: the places and months both hold
+    fp, lp = np.asarray(sv.places, dtype=np.int64), np.asarray(lv.places, dtype=np.int64)
+    fy, ly = np.asarray(sv.years, dtype=np.int64), np.asarray(lv.years, dtype=np.int64)
+    places, periods = np.intersect1d(fp, lp), np.intersect1d(fy, ly)
+    if len(periods) <= 2 * hi + 2:
+        raise ValueError(f"{len(periods)} months leave too few shifts for lags up to {hi}")
+    fi, li = np.searchsorted(fp, places), np.searchsorted(lp, places)
+    fj, lj = np.searchsorted(fy, periods), np.searchsorted(ly, periods)
+    Y = np.asarray(sv.y, dtype=float)[np.ix_(fi, fj)]
+    M = np.asarray(sv.mu, dtype=float)[np.ix_(fi, fj)]
+    cases = np.asarray(lv.y, dtype=float)[np.ix_(li, lj)]
+    N = ld.N.astype(float).sum(2)
+    N = N[np.ix_(np.searchsorted(np.asarray(ld.places, dtype=np.int64), places),
+                 np.searchsorted(np.asarray(ld.periods(), dtype=np.int64), periods))]
+    unit = np.asarray(gateway.regions(places, scale)) if scale != "municipality" else places.astype(str)
+    codes, uid = np.unique(unit, return_inverse=True)
+
+    def agg(a: np.ndarray) -> np.ndarray:
+        out = np.zeros((len(codes), a.shape[1]))
+        np.add.at(out, uid, a)
+        return out
+    Y, M, C, R_ = agg(Y), agg(M), agg(cases), agg(N)
+    X = np.log1p(np.divide(1e5 * C, R_, out=np.zeros_like(C), where=R_ > 0))   # per 100,000 residents' months
+    phi = float(sf.expectations.model(sf.expectations.field(fnode).block).phi)
+    curve = relations.distributed_lag(Y, M, X, hi, phi=phi)
+    effect, se = curve.over(lo, hi)
+    null = []
+    for tau in range(hi + 1, X.shape[1] - hi):
+        null.append(relations.distributed_lag(Y, M, np.roll(X, tau, axis=1), hi, phi=phi).over(lo, hi)[0])
+    null = np.asarray(null)
+    p = float((1 + (null >= effect).sum()) / (1 + len(null)))
+    if log:
+        log(f"lagged effect {lds} -> {fds}:{fnode}: {effect:+.3f} over lags {lo}-{hi}, shift p {p:.3f} "
+            f"({len(null)} shifts), {len(codes)} units, {len(periods)} months")
+    return {"effect": effect, "rr": float(np.exp(effect)), "low": float(np.exp(effect - 1.96 * se)),
+            "high": float(np.exp(effect + 1.96 * se)), "p": p, "shifts": len(null), "units": len(codes),
+            "months": [int(periods[0]), int(periods[-1])], "curve": curve.summary()}
+
+
 def compare(x: tuple[str, str, str], y: tuple[str, str, str], years: list[int], graph: str = "contiguity",
             lags: int = 2, q: float = 0.05, grain: str = "year", sources: list[dict | None] | None = None) -> list[dict]:
     """Do two fields move together, at which spatial support and lag? `relate` of the two (the CLI's ``compare``, a
