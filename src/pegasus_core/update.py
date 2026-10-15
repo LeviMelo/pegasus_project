@@ -53,6 +53,7 @@ class System:
     quality: list[str] | str | None = None       # "all", or columns: each one's blank or "ignored" share (`fields.quality_sources`)
     supports: list[str] | str | None = None      # "all", or place columns: the counts at another support (`fields.support_sources`)
     extract: bool = False                        # its code set is read from a pegasus_data extract, not the lake (`study`)
+    fields: list | None = None                   # its readers as a study's scope listed them (`study._estimate`): read as is
 
 
 #: the plan's other keys: served systems read only as corroborating sources; the dependency map's contexts; stage E's
@@ -259,6 +260,8 @@ def system_readers(sys_: System, plan: Plan, blocks: list[str], out: dict | None
     share per value), person-level links, intervals, mentions, care flows, other classifiers and code columns. `run`
     fits and asks each; a study writes each one's products (`study`), so both read one list."""
     out = {} if out is None else out
+    if sys_.fields is not None:             # listed once at a study's scope: the lane fits what scope.yml showed
+        return [(name, source, list(blocks_)) for name, source, blocks_ in sys_.fields]
     readers = [(column, fields.measure_source(sys_.dataset, sys_.event, column)) for column in _measures(sys_, plan, out)]
     readers += [(f"{column}={value}", source) for column in _declared(sys_, "composition", sys_.compositions, plan, out)
                 for value, source in fields.share_sources(sys_.dataset, sys_.event, column, plan.years[-1])]

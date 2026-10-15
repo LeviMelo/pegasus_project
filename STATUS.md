@@ -320,13 +320,21 @@ method, every rate its denominator and scale, every period explicit; views `rate
 emits through `_estimate_row`, and the trends, ratios, figures, report and methods read the estimates; `pegasus-core study
 --products-only` rewrites the products from the store); one declaration of what a reader's
 cells are (`questions.basis`/`not_read`: a method's kinds and bases, a question's quality flag), which the survey, the
-harness and the share lens apply alike. Not done, in order: studies of other sources
-(SINASC microcephaly in Pernambuco, SIA dialysis in Alagoas) audited as the AMI one was; then per area: query (one
-catalog snapshot, the planner's read plan, render by vintage window), linkage (one role-table service, one placebo and
-verdict, run fingerprints, entities as components), semantics (a curation epoch, typing in declarations, event reading
-in one function), statistics (one error-control layer), study (one field list, one step-key constructor, per-item
-replication once), intake (one transport), models (block assembly and dispersion out of monolith.py, one
-keying function for its stored objects).
+harness and the share lens apply alike; studies of SINASC (microcephaly, Pernambuco) and SIA (dialysis, Alagoas)
+audited blind as the AMI one was, and what they found fixed in general:
+- code lists read whole by every reader (`gateway._code_sql`);
+- a births field per live births;
+- partial monthly years;
+- the classifier's own completeness;
+- distinct persons where a source identifies its subject;
+- the gateway reading events through pegasus_data's `read_events`.
+pegasus_data's four structure rounds merged: the query's read plan (ADR-0185), one placebo and verdict
+(ADR-0186), a curation epoch with typed places (ADR-0187), one transport (ADR-0188). Its linkage round re-keyed every
+link run, which are being recomputed. Not done, in order: a third blind audit of the Alagoas folder on the final
+schema; study (the field list computed once at resolve and shown in scope.yml, one step-key constructor, per-item
+replication once); statistics (one error-control layer); models (block assembly and dispersion out of monolith.py, one
+keying function for its stored objects); gateway.py split by job; intake's leftovers (CNES and INMET readers, SIGTAP
+on ftplib).
 
 
 Measured 2026-10-10 in the capability assessment (machine shared with the overnight SIM job) and by reading the code. "Works" means ran and produced plausible output when exercised.

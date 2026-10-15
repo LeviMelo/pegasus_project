@@ -266,6 +266,9 @@ class Item:
     denominator: tuple | None = None     # a ratio's denominator dataset and lag (its exposure is in ``source``)
     est_seconds: float | None = None     # the run's predicted wall clock for this item (`_estimate`)
     fields: int = 1                      # the fields its run fits and asks: its counts and each reader (`_estimate`)
+    #: those readers, (name, reader, blocks), listed once at the scope (`_estimate`): what scope.yml shows before a run,
+    #: what its lane fits and asks and what its products read (each had listed them again, `update.system_readers`)
+    field_list: list | None = None
     extract: bool = False                # its codes read from an extract of the dataset, file by file (`_extract_or_lake`)
     confirm_last: int | None = None      # stage E's later years: its leads selected on the years up to it, tested after
     questions: list[str] | None = None   # the declaration's questions (None: every question)
@@ -575,7 +578,9 @@ def _estimate(decl: Declaration, items: list[Item]) -> None:
             share, n = 0.0, 1                       # a second coding: counted and described, asked nothing
         else:
             try:
-                n = 1 + len(update.system_readers(_plan(it).systems[0], _plan(it), list(it.blocks)))
+                plan = _plan(it)
+                it.field_list = [list(x) for x in update.system_readers(plan.systems[0], plan, list(it.blocks))]
+                n = 1 + len(it.field_list)
             except Exception:  # noqa: BLE001 - a reader list that cannot be built here is built (and fails) in the run
                 n = 1
         fit = 0.0
@@ -2075,7 +2080,7 @@ def _plan(it: Item, others: list | None = None):
 
     return update.Plan(years=it.years, systems=[update.System(it.dataset, it.event, it.blocks, nodes=it.nodes,
                                                               mentions=it.mentions, source=it.source, extract=it.extract,
-                                                              **it.readers)],
+                                                              fields=it.field_list, **it.readers)],
                        relations=False, triage=it.triage, report=None, questions=it.questions, q=it.q,
                        # the held-out later years read prospectively as well: their events against fits on the years
                        # before (BPA for an outbreak), so an event of the later years is discovered, not only replicated;
@@ -2224,7 +2229,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                     mine = lap.guard(f"places {f.id}", lambda it=it, s=s, f=f, label=label, sv=sv, refs=refs: _places(
                         it, s, f, label, sv, names, refs), [], log)
                     places += mine
-                    held = lap.guard(f"persons {f.id}", lambda it=it, s=s, f=f, label=label, mine=mine: _persons(
+                    held = lap.guard(f"persons {f.id}", lambda it=it, s=s, f=f, label=label, mine=mine: _distinct_persons(
                         it, s, f, label, mine), [], log)
                     _mark_years(held, it, partial)
                     places += [r for r in held if r["section"] == "municipalities"]
@@ -3222,7 +3227,7 @@ def _reference_births(years: list[int], units: list[str]) -> dict[str, np.ndarra
     return out
 
 
-def _persons(it: Item, s, f, label: str, places: list[dict]) -> list[dict]:
+def _distinct_persons(it: Item, s, f, label: str, places: list[dict]) -> list[dict]:
     """A field's distinct persons where its source identifies its subject (`gateway.person_identifier`): each year, for
     the whole, each unit below it and each municipality, the persons and their rate per 100,000 residents (the treated
     prevalence: dialysis is a prevalent cohort, read as authorisations it had no patient, the SIA audit, 2026-10-14);
