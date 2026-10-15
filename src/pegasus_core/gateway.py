@@ -930,6 +930,8 @@ def _extract_records(dataset: str, year: int, rows: dict[str, list[str]]) -> pa.
     import pegasus_data as pg
 
     for column, codes in rows.items():
+        if not column or not codes:
+            continue
         try:
             table, _ = pg.extract_table(dataset, column, list(codes), [int(year)], root=config.data_root())
         except (LookupError, OSError, ValueError):
@@ -1075,7 +1077,7 @@ def _counted(key: dict, compute, meta: dict) -> EventCounts:
 
 def monthly_counts(dataset: str, event: str, year: int, classifier: str | None = None,
                    places: pa.Array | None = None, code_list: bool = False, support: str | None = None,
-                   area=None) -> EventCounts:
+                   area=None, codes: tuple[str, ...] | list[str] = ()) -> EventCounts:
     """Events of one publication year by (u, year, month of the event's date, sex, age, code).
     The month and year come from the event's date (`_when`), so a file's events may fall in the
     year before it (onset in December, notified in January); a missing or unparsable date is
@@ -1099,13 +1101,17 @@ def monthly_counts(dataset: str, event: str, year: int, classifier: str | None =
     when = _when(dataset)
     key = _reader_key("monthly_counts", monthly_counts, dataset, event, year, places=places, area=area,
                       classifier=spec_class, when=when, dates=3, **({"code_list": True} if code_list else {}),
-                      **({"support": support} if support else {}))
+                      **({"support": support} if support else {}),
+                      **({"codes": sorted(str(c) for c in codes)} if codes else {}))
 
     def compute() -> dict[str, pa.Table]:
         # ``code_list``: the classifier column holds a code list (a tuple of one column)
         reading = tuple(_code_cols(spec_class)) if code_list else spec_class
+        # ``codes``: only a code set's records, filtered where they are read (an extract that holds them, or the lake's
+        # scan): SIA-PA's serology by month had read every procedure of the state, 4.5 GB a year (2026-10-15)
         con = _cells(dataset, event, year, [when, *_code_cols(spec_class)], strata, area=area, places=places,
-                     select=f"{_code_sql(reading)} AS code, {_date_sql(when)} AS d")
+                     select=f"{_code_sql(reading)} AS code, {_date_sql(when)} AS d",
+                     rows=_code_rows(spec_class if not code_list else None, codes) or None)
         reason = _reason(("code IS NULL OR code = ''", "code"), ("d IS NULL", "date"))
         counts = con.execute(f"""SELECT CAST(u AS INTEGER) AS u, CAST(year(d) AS SMALLINT) AS year,
                 CAST(month(d) AS TINYINT) AS month, CAST(sex AS TINYINT) AS sex, age, code,

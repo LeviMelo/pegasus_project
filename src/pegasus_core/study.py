@@ -4468,9 +4468,9 @@ def _seasons(it: Item, s, f, label: str, skip: set | frozenset = frozenset()) ->
         return []
     ev = np.zeros((len(years), 12))
     for y in years:
-        c = gateway.monthly_counts(it.dataset, it.event, y, classifier=fields.classifier_of(it.dataset, it.event, src,
-                                                                                            primary=False),
-                                   area=area).counts
+        cls = fields.classifier_of(it.dataset, it.event, src, primary=False)
+        c = gateway.monthly_counts(it.dataset, it.event, y, classifier=cls, area=area,
+                                   codes=tuple(subset) if subset and not isinstance(cls, (list, tuple)) else ()).counts
         if subset:
             hit = pc.starts_with(c.column("code"), subset[0])
             for x in subset[1:]:
