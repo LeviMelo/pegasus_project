@@ -2319,6 +2319,7 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
                    out / "capture.parquet")
     profile = lap.guard("context profiles", lambda: _context_profiles(decl, scope, rows, log), [], log)
     covariates = lap.guard("contexts", lambda: _context_table(decl, scope, places, names, log), [], log)
+    ecological = lap.guard("ecological", lambda: _ecological(places, covariates, log), [], log) if covariates else []
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
                    out / "context_profile.parquet")
@@ -2354,7 +2355,8 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     lap.guard("geometry", lambda: _geometry(out, places), None, log)
     # every descriptive number as one schema (MEASURES): ten tables, each with its own columns, had grown one audit at a
     # time (docs/plans/study-estimates.md)
-    est = [*desc, *trends, *places, *seasons, *code_rows, *groups, *quality, *measures, *assoc, *covariates]
+    est = [*desc, *trends, *places, *seasons, *code_rows, *groups, *quality, *measures, *assoc, *covariates,
+           *ecological]
     pq.write_table(_estimates_table(est), out / "estimates.parquet")
     lap("places and quality")
     hyp = lap.guard("hypotheses", lambda: _hypotheses(decl, scope), [], log)
@@ -3583,6 +3585,15 @@ MEASURES = {
     "lift": "the records with a code among those with the topic over those of the same sex and ten-year band without "
             "it (associated causes), with p and Benjamini-Hochberg q",
     "context": "a context's value in a municipality (`unit` over `denominator_kind`), the year it was read from in `note`",
+    "association": "a field's standardised ratio multiplied per standard deviation of a context across the municipalities "
+                   "(`note`: the SD), from the ecological regression (`model`: alone, or with the other contexts): "
+                   "negative binomial, offset the events expected at the area's own age-sex rates, Wald interval "
+                   "robust to clustering by health region; an association between places, never an individual effect",
+    "smoothed_smr": "a municipality's standardised ratio (against the area's own age-sex rates) shrunk toward the area's by "
+                    "empirical Bayes (Poisson-gamma, Marshall 1991): the posterior mean and its 95 % interval, what a map "
+                    "of a rare event draws where a crude ratio of a small place is noise",
+    "moran_i": "Moran's I of the ecological regression's Pearson residuals on the municipalities' contiguity (p: "
+               "one-sided, 999 permutations): spatial dependence the model leaves",
 }
 
 
@@ -3640,6 +3651,9 @@ MUNICIPALITIES_VIEW = """SELECT field, label, dataset, place AS u, place_name AS
         max(low) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area_low,
         max(high) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area_high,
         max(q) FILTER (WHERE measure = 'smr' AND comparator LIKE 'the area%') AS smr_area_q,
+        max(estimate) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr,
+        max(low) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr_low,
+        max(high) FILTER (WHERE measure = 'smoothed_smr') AS smoothed_smr_high,
         max(estimate) FILTER (WHERE measure = 'model_rate') AS model_rate
     FROM estimates WHERE section = 'municipalities' GROUP BY ALL"""
 
@@ -4282,6 +4296,7 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
     so a municipality compares with the nation and not only with its own area (whose ratio is 1 by construction); each
     period ratio's exact two-sided p and Benjamini-Hochberg q over the municipalities (the audit, 2026-10-14)."""
     from scipy.stats import chi2, poisson
+    from scipy.stats import gamma as gamma_
     from statsmodels.stats.multitest import multipletests
 
     from . import monolith
@@ -4352,6 +4367,16 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
             out_[i] = float(v)
         return out_
     q_int, q_br = bh(p_int), bh(p_br)
+    # each period's empirical-Bayes prior for the municipalities' ratios (Marshall 1991): the gamma whose mean is the
+    # area's ratio and whose variance is the ratios' spread beyond Poisson noise, a small place's ratio shrunk toward it
+    prior = []
+    for k in range(T + 1):
+        o_, e_ = ev[:, k].astype(float), ex[:, k].astype(float)
+        ok_ = e_ > 0
+        m = float(o_[ok_].sum() / e_[ok_].sum()) if ok_.any() and e_[ok_].sum() > 0 else 0.0
+        v = (float((e_[ok_] * (o_[ok_] / e_[ok_] - m) ** 2).sum() / e_[ok_].sum() - m / e_[ok_].mean())
+             if ok_.sum() > 1 else 0.0)
+        prior.append((m * m / v, m / v) if m > 0 and v > 0 else None)
     period = f"{int(years[0])}-{int(years[-1])}"
     kind = ("live births" if _births_field(it) else d.population[len("events:"):].replace(";", " + ") + " events"
             if ratio else "person-years")
@@ -4386,6 +4411,14 @@ def _places(it: Item, s, f, label: str, sv, names: dict, refs: list | None = Non
                                                  high=hi_ / e_, interval=exact, p=p_ if k == T else None,
                                                  q=q_ if k == T else None, numerator=o, denominator=e_,
                                                  denominator_kind="expected events", comparator=comparator))
+                if prior[k] is not None and e > 0:
+                    a_, b_ = prior[k][0] + o, prior[k][1] + e
+                    out.append(_estimate_row("municipalities", "smoothed_smr", base, estimate=a_ / b_,
+                                             low=float(gamma_.ppf(0.025, a_, scale=1 / b_)),
+                                             high=float(gamma_.ppf(0.975, a_, scale=1 / b_)),
+                                             interval="gamma posterior (empirical Bayes)", numerator=o, denominator=e,
+                                             denominator_kind="expected events", comparator=own_,
+                                             model="empirical Bayes, Poisson-gamma (Marshall 1991)"))
                 if np.isfinite(m):
                     out.append(_estimate_row("municipalities", "expected", base, estimate=m,
                                              model="hierarchical, tier B1"))
@@ -4669,8 +4702,11 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
         "Municipalities (estimates.parquet, municipalities; boundaries in municipalities.geojson, IBGE's mesh of intermediate quality): crude rates; the "
         "standardised ratio against the area's own age-sex rates of each year (indirect standardisation, 1 for the "
         "area by construction) and against Brazil's, each with its exact interval, the expectation fixed, and over the "
-        "period its exact two-sided p and Benjamini-Hochberg q across the municipalities; the hierarchical model's "
-        "expected events.",
+        "period its exact two-sided p and Benjamini-Hochberg q across the municipalities; for maps, the ratio against "
+        "the area smoothed by empirical Bayes (Poisson-gamma, Marshall 1991: the gamma prior's mean the area's ratio, "
+        "its variance the ratios' spread beyond Poisson noise by the method of moments, each year and the period apart), "
+        "the posterior mean with its 95 % gamma interval, so a small municipality's ratio is shrunk toward the area's "
+        "in proportion to its noise; the hierarchical model's expected events.",
         "Comparison with Brazil: every directly standardised rate's ratio to Brazil's of the same year and stratum, "
         "with a 95 % interval from the two gamma variances on the log scale (Brazil includes the area, so the interval "
         "is conservative); Brazil's and each macro-region's rates by sex, by age band and by sex within each age band "
@@ -4771,6 +4807,17 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
             ("Models and questions",
              models + [f"Fields read at depth {decl.depth}: counts" + "".join(f", {r}" for r in readers) + "."]),
             *([("Record linkage", linked)] if linked else []),
+            *([("Ecological analysis", [
+                "Each count field's events over the period in each municipality regressed on the declared contexts "
+                "(estimates.parquet, associations): negative binomial (NB2), offset the log of the events expected at "
+                "the area's own age-sex rates, so a coefficient multiplies the standardised ratio; each context "
+                "standardised across the municipalities (a ratio per standard deviation, the SD in `note`), alone and "
+                "then all together on the municipalities holding every one (a variance inflation over 5 named in "
+                "`model`); a context is modelled where nine municipalities in ten hold its value. Wald intervals robust "
+                "to clustering by health region (sandwich; heteroskedasticity-robust under ten regions). Moran's I of "
+                "the joint model's Pearson residuals on the municipalities' contiguity, its one-sided p from 999 "
+                "permutations, says the spatial dependence the model leaves. The associations are between places "
+                "(ecological), never effects on persons."])] if decl.contexts else []),
             ("What the sources say of themselves", notes or ["No source of this study declares notes."]),
             ("Reproducibility",
              [f"PegaSUS code {config.code_version()}, data {config.data_version()} (pegasus_data), written "
@@ -5438,6 +5485,123 @@ def _context_table(decl: Declaration, scope: Scope, places: list[dict], names: d
                     estimate=float(val) if np.isfinite(val) else None))
     for name_, why in left:
         log(f"study: context {name_} left out: {why}")
+    return out
+
+
+def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
+    """The ecological association of each count field with the study's contexts, as a paper relating rates to place
+    characteristics declares it: the municipalities' events over the period, negative-binomial (NB2) regression with
+    the events expected at the area's own age-sex rates as offset (the coefficients act on the standardised ratio), each
+    context standardised across the municipalities (a ratio per standard deviation); each context alone, then all
+    those with values in nine places of ten together (complete cases, a variance inflation over 5 said); Wald intervals
+    robust to clustering by health region (sandwich; heteroskedasticity-robust under ten regions); Moran's I of the
+    full model's Pearson residuals on contiguity with its permutation p. Associations between places, never effects on
+    persons (the ecological fallacy). The contexts had been collected per municipality and related to nothing (three
+    paper audits, 2026-10-14)."""
+    import statsmodels.api as sm
+
+    from . import graphs
+
+    ctx: dict[str, dict[int, float]] = {}
+    about: dict[str, dict] = {}
+    for r in contexts:
+        if r.get("period_kind") == "period" and r.get("estimate") is not None and r.get("place") is not None:
+            ctx.setdefault(r["variable"], {})[int(r["place"])] = float(r["estimate"])
+            about.setdefault(r["variable"], {"unit": r.get("unit"), "label": r.get("value_label")})
+    if not ctx:
+        return []
+    fields_: dict[str, dict] = {}
+    for r in places:
+        if r.get("period_kind") != "period":
+            continue
+        fid, u = r["field"], int(r["place"])
+        f = fields_.setdefault(fid, {"label": r.get("label"), "dataset": r.get("dataset"), "y": {}, "e": {}, "region": {}})
+        if r["measure"] == "count":
+            f["y"][u] = float(r["estimate"])
+            f["region"][u] = r.get("health_region") or r.get("state")
+        elif r["measure"] == "smr" and str(r.get("comparator", "")).startswith("the area"):
+            f["e"][u] = float(r["denominator"])
+    out = []
+    for fid, f in fields_.items():
+        us = np.array(sorted(u for u in f["y"] if f["e"].get(u, 0) > 0), dtype=np.int64)
+        if len(us) < 20:
+            log(f"study: ecological {fid}: {len(us)} municipalities with an expectation, fewer than 20: not modelled")
+            continue
+        y = np.array([f["y"][u] for u in us])
+        off = np.log(np.array([f["e"][u] for u in us]))
+        groups = np.unique([str(f["region"].get(u)) for u in us], return_inverse=True)[1]
+        usable = {}
+        for name, vals in ctx.items():
+            v = np.array([vals.get(int(u), np.nan) for u in us])
+            ok = np.isfinite(v)
+            if ok.mean() >= 0.9 and np.nanstd(v) > 0:
+                usable[name] = v
+        if not usable:
+            continue
+        base = {"field": fid, "label": f["label"], "dataset": f["dataset"], "geography": "municipality",
+                "period_kind": "period"}
+
+        def fit(names: list[str], usable=usable, y=y, off=off, groups=groups):
+            Z = np.column_stack([(usable[n] - np.nanmean(usable[n])) / np.nanstd(usable[n]) for n in names])
+            ok = np.isfinite(Z).all(1)
+            X = sm.add_constant(Z[ok], has_constant="add")
+            model = sm.NegativeBinomial(y[ok], X, offset=off[ok], loglike_method="nb2")
+            g = groups[ok]
+            cov = ({"cov_type": "cluster", "cov_kwds": {"groups": g}} if len(np.unique(g)) >= 10
+                   else {"cov_type": "HC1"})
+            res = model.fit(disp=0, maxiter=200, **cov)
+            return res, ok, cov["cov_type"]
+
+        def rows(res, names, ok, kind, cov_type, base=base, usable=usable) -> list[dict]:
+            got = []
+            for k, name in enumerate(names, start=1):
+                b, se, p = float(res.params[k]), float(res.bse[k]), float(res.pvalues[k])
+                got.append(_estimate_row(
+                    "associations", "association", {**base, "variable": name, "value_label": about[name]["label"],
+                                                    "note": f"1 SD = {np.nanstd(usable[name]):.4g} "
+                                                            f"{about[name]['unit'] or ''}".strip()},
+                    estimate=float(np.exp(b)), low=float(np.exp(b - 1.96 * se)), high=float(np.exp(b + 1.96 * se)),
+                    interval=f"Wald, {'cluster-robust by health region' if cov_type == 'cluster' else 'HC1'}", p=p,
+                    denominator=float(ok.sum()), denominator_kind="municipalities", model=kind))
+            return got
+        for name in usable:
+            try:
+                res, ok, ct = fit([name])
+            except Exception as exc:  # noqa: BLE001 - a context that cannot be fitted alone is said, the others go on
+                log(f"study: ecological {fid} {name}: {type(exc).__name__}: {exc}")
+                continue
+            out += rows(res, [name], ok, "negative binomial, offset the expected events: alone", ct)
+        names = list(usable)
+        if len(names) > 1 and len(us) > len(names) + 10:
+            try:
+                res, ok, ct = fit(names)
+            except Exception as exc:  # noqa: BLE001 - the joint model that cannot be fitted is said
+                log(f"study: ecological {fid} joint: {type(exc).__name__}: {exc}")
+                continue
+            Z = np.column_stack([usable[n] for n in names])[ok]
+            Zs = (Z - Z.mean(0)) / Z.std(0)
+            vif = np.diag(np.linalg.pinv(np.corrcoef(Zs, rowvar=False)))
+            kind = (f"negative binomial, offset the expected events: with the {len(names) - 1} other contexts"
+                    + (f"; variance inflation over 5 for {', '.join(n for n, v in zip(names, vif, strict=True) if v > 5)}"
+                       if (vif > 5).any() else ""))
+            out += rows(res, names, ok, kind, ct)
+            # spatial dependence the joint model leaves: Moran's I of its Pearson residuals on contiguity
+            mu = res.predict(sm.add_constant(np.column_stack([(usable[n] - np.nanmean(usable[n])) / np.nanstd(usable[n])
+                                                              for n in names])[ok], has_constant="add"),
+                             offset=off[ok])
+            alpha = float(res.params[-1]) if len(res.params) > len(names) + 1 else 0.0
+            r = (y[ok] - mu) / np.sqrt(mu + alpha * mu ** 2)
+            e = graphs.edges(us[ok], "contiguity")
+            if len(e):
+                def moran(v: np.ndarray, e=e) -> float:
+                    v = v - v.mean()
+                    return float(len(v) / (2 * len(e)) * 2 * (v[e[:, 0]] * v[e[:, 1]]).sum() / (v @ v))
+                obs = moran(r)
+                rng = np.random.default_rng(config.seed(fid, "moran"))
+                null = np.array([moran(rng.permutation(r)) for _ in range(999)])
+                out.append(_estimate_row("associations", "moran_i", {**base, "model": kind},
+                                         estimate=obs, p=float((1 + (null >= obs).sum()) / 1000),
+                                         denominator=float(ok.sum()), denominator_kind="municipalities"))
     return out
 
 
@@ -6496,7 +6660,8 @@ COLUMNS = {
     "institution_volume": "each establishment's events of every code the year before the finding and in its last",
     # estimates.parquet: one schema for every descriptive number (MEASURES; docs/plans/study-estimates.md)
     "estimates.parquet:section": "the part of the analysis: rates, municipalities, seasonality, codes, case mix, "
-                                 "completeness, measures, trends, associated causes, contexts",
+                                 "completeness, measures, trends, associated causes, contexts, associations (the "
+                                 "ecological regression of the municipalities' events on the contexts)",
     "estimates.parquet:measure": "what the estimate is: one of the measures defined below the tables",
     "estimates.parquet:model": "the model behind the estimate: a trend's (crude or age-sex adjusted log-linear, "
                                "joinpoint of the crude or standardised rate), a season's method, the hierarchical tier",
@@ -6750,9 +6915,17 @@ def body(folder: str | Path) -> list[dict]:
          f"{0 if se is None else len(se)} month rows (seasonal index with intervals, the test of uniformity)")
     pl = section("municipalities")
     part("places", pl is not None and (pl["measure"] == "crude_rate").any() and (pl["measure"] == "smr").any()
-         and pl[pl["measure"] == "crude_rate"]["low"].notna().any(),
-         f"{0 if pl is None else len(pl)} municipality estimates (rates, standardised ratios, model expectations with "
-         f"intervals) for {0 if pl is None or 'field' not in pl else pl['field'].nunique()} count fields")
+         and pl[pl["measure"] == "crude_rate"]["low"].notna().any() and (pl["measure"] == "smoothed_smr").any(),
+         f"{0 if pl is None else len(pl)} municipality estimates (rates, standardised ratios, their empirical-Bayes "
+         f"smoothing, model expectations with intervals) for "
+         f"{0 if pl is None or 'field' not in pl else pl['field'].nunique()} count fields")
+    cx = section("contexts")
+    if cx is not None and len(cx) > 0:
+        ec = section("associations")
+        part("associations", ec is not None and (ec["measure"] == "association").any()
+             and ec[ec["measure"] == "association"]["low"].notna().all(),
+             f"{0 if ec is None else int((ec['measure'] == 'association').sum())} ecological associations of the "
+             f"fields with {cx['variable'].nunique()} contexts, with intervals")
     qa = section("completeness")
     placed = set() if qa is None or "variable" not in qa else set(
         qa[qa["variable"].astype(str).str.startswith("events placed")]["dataset"])
