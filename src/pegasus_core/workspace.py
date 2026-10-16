@@ -570,11 +570,13 @@ def save_declaration(name: str, text: str) -> dict:
 def new_study(name: str, icd10: list[str] | None = None, sinan: list[str] | None = None,
               terms: list[str] | None = None, where: str | list[str] = "BR", period: str = "2014-2023",
               depth: str = "standard", only: list[str] | None = None, contexts: list[str] | None = None,
-              records: list[dict] | None = None) -> dict:
-    """A new study's declaration, written in the workspace and validated (`study.new`)."""
+              records: list[dict] | None = None, scratch: bool = False) -> dict:
+    """A new study's declaration, written in the workspace and validated (`study.new`); ``scratch`` keeps it in
+    ``studies/scratch/``, a quick look kept as a study of its own until `promote` makes it one of the workspace's."""
     from . import study
 
-    study.new(name, icd10, sinan, terms, where, period, depth, only, contexts, studies_dir(), records)
+    study.new(name, icd10, sinan, terms, where, period, depth, only, contexts,
+              scratch_dir() if scratch else studies_dir(), records)
     return declaration(name)
 
 
@@ -674,3 +676,55 @@ def methods() -> dict:
     from . import tools
 
     return tools.method_status()
+
+
+# ------------------------------------------------------------------------------------ comparison and scratch studies
+
+
+def compare(names: list[str], table: str, where: list[dict] | None = None, columns: list[str] | None = None,
+            order: list[str] | None = None, limit: int = 5000, offset: int = 0) -> dict:
+    """One query of a table run over several studies' folders, the rows of each led by its study's name: studies,
+    places, periods or case definitions side by side. A column one of them lacks is refused, naming the study."""
+    if len(names) < 2:
+        raise ValueError("a comparison takes two studies or more")
+    out_cols, found, totals = None, [], {}
+    for name in names:
+        try:
+            part = rows(name, table, where, order, columns, limit=limit + offset, offset=0)
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from exc
+        if out_cols is None:
+            out_cols = part["columns"]
+        elif part["columns"] != out_cols:
+            missing = sorted(set(out_cols) ^ set(part["columns"]))
+            raise ValueError(f"{name}'s {table} differs in its columns ({', '.join(missing)}): choose the columns")
+        totals[name] = part["total"]
+        found += [[name, *r] for r in part["rows"]]
+    return {"table": table, "studies": names, "columns": ["study", *out_cols], "totals": totals,
+            "total": sum(totals.values()), "rows": found[offset: offset + limit], "limit": limit, "offset": offset}
+
+
+def scratch_dir() -> Path:
+    path = studies_dir() / "scratch"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def promote(name: str) -> dict:
+    """A scratch study (``studies/scratch/``) made a study of the workspace: its declaration and its folder moved to
+    ``studies/``, as they are. A study of that name already there is refused."""
+    import shutil
+
+    path = find(name)
+    if path.parent != scratch_dir().resolve():
+        raise ValueError(f"{name} is not a scratch study ({path})")
+    target = studies_dir().resolve() / path.name
+    if target.exists() or (studies_dir() / path.stem).exists():
+        raise ValueError(f"studies/{path.name} or its folder exists: rename the scratch study first")
+    if any(r.get("declaration") == str(path) for r in jobs.active()):
+        raise RuntimeError(f"{name} is being run: promote it when its run ends")
+    folder = path.parent / _summary_name(path)
+    shutil.move(str(path), str(target))
+    if folder.exists():
+        shutil.move(str(folder), str(studies_dir() / folder.name))
+    return study_detail(target.stem)

@@ -651,12 +651,18 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
                                                        "(clauses joined by ' and ')"),
                 name_: str = typer.Option(None, "--name", help="the condition topic's name (low birth weight)"),
                 per: str = typer.Option(None, help="the events a condition topic is rated per (SINASC-DN)"),
-                folder: str = typer.Option("studies", help="where the declaration is written")) -> None:
+                folder: str = typer.Option("studies", help="where the declaration is written"),
+                scratch: bool = typer.Option(False, help="a quick look, kept in studies/scratch/ until promoted")
+                ) -> None:
     """Write a study declaration from its choices, validated and commented (the step after search)."""
     from . import study
 
     places = _list(where) or ["BR"]
     seeds = [study.parse_records(records, name_ or name, per)] if records else None
+    if scratch:
+        from . import workspace
+
+        folder = str(workspace.scratch_dir())
     path = study.new(name, _list(icd10), _list(sinan), _list(terms), places[0] if len(places) == 1 else places,
                      period, depth, _list(only), _list(contexts), folder, seeds)
     console.print(f"written {path}\nnext: pegasus study scope {name}   (what it reads, and the minutes)\n"
@@ -856,6 +862,46 @@ def study_set(name: str = typer.Argument(..., help="the study's name"),
     d = workspace.save_declaration(name, text)
     if not _emit_json(d):
         console.print(f"{key} set; {d['path']} written")
+
+
+@study_app.command("promote")
+def study_promote(name: str = typer.Argument(..., help="a scratch study's name")) -> None:
+    """Make a scratch study one of the workspace's: its declaration and folder moved from studies/scratch/."""
+    from . import workspace
+
+    d = workspace.promote(name)
+    if not _emit_json(d):
+        console.print(f"{d['name']} promoted: {d['declaration']}")
+
+
+@study_app.command("compare")
+def study_compare(names: list[str] = typer.Argument(..., help="two studies or more"),
+                  table: str = typer.Option(..., help="a table every study holds (rates, municipalities, ...)"),
+                  where: list[str] = typer.Option(None, help="a filter 'column op value'; repeat for more"),
+                  order: str = typer.Option(None), columns: str = typer.Option(None),
+                  limit: int = typer.Option(200), offset: int = typer.Option(0),
+                  csv: str = typer.Option(None, help="write the rows to this CSV file")) -> None:
+    """One table's query over several studies, side by side, each row led by its study."""
+    from . import workspace
+
+    out = workspace.compare(names, table, where=[_filter(w) for w in where or []], columns=_list(columns),
+                            order=_list(order), limit=limit, offset=offset)
+    if csv:
+        import csv as csv_mod
+
+        with open(csv, "w", newline="", encoding="utf-8") as fh:
+            wr = csv_mod.writer(fh)
+            wr.writerow(out["columns"])
+            wr.writerows(out["rows"])
+        console.print(f"{len(out['rows'])} rows written to {csv}")
+        return
+    if _emit_json(out):
+        return
+    t = Table(*out["columns"])
+    for r in out["rows"]:
+        t.add_row(*["" if v is None else str(v) for v in r])
+    console.print(t)
+    console.print(", ".join(f"{k}: {v:,} rows" for k, v in out["totals"].items()))
 
 
 @study_app.command("tables")
