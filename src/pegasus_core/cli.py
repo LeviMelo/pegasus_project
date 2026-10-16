@@ -322,15 +322,29 @@ def relation(dataset: str, event: str, node: str, exposure: list[str], years: st
 
 
 @explore_app.command("leads")
-def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
-    """The lead register, best rank first."""
-    from . import leads as register
+def leads(limit: int = 30, offset: int = 0,
+          cls: str = typer.Option(None, "--class", help="triage class: signal, noise, substitution, system"),
+          tier: str = typer.Option(None), place: int = typer.Option(None, help="a municipality code"),
+          code: str = typer.Option(None, help="an ICD-10 node: leads on it or under it"),
+          estimand: str = typer.Option(None), min_replication: str = typer.Option(None, help="R0..R3"),
+          status: str = typer.Option(None), direction: str = typer.Option(None), year: int = typer.Option(None),
+          min_effect: float = typer.Option(None), max_q: float = typer.Option(None)) -> None:
+    """The lead register, best rank first (evidence x effect x replication), filtered: hypothesis-generating."""
+    from . import workspace
 
-    t = Table("rank", "id", "kind", "estimand", "calibrated", "field", "locus", "effect", "q", "R")
-    for x in [x for x in register.Register().current() if kind is None or x.kind == kind][:limit]:
-        t.add_row(f"{x.rank:.2f}", x.id, x.kind, x.estimand, str(x.method.get("calibrated", "")), x.fields[0].split(":")[-1],
-                  json.dumps(x.locus)[:50], f"{x.effect:.3g}", f"{x.q:.2g}", x.replication)
+    out = workspace.leads({"cls": cls, "tier": tier, "place": place, "code": code, "estimand": estimand,
+                           "min_replication": min_replication, "status": status, "direction": direction,
+                           "year": year, "min_effect": min_effect, "max_q": max_q}, limit, offset)
+    if _emit_json(out):
+        return
+    t = Table("rank", "id", "estimand", "tier", "field", "places", "years", "effect", "q", "R", "triage", "status")
+    for r in out["rows"]:
+        t.add_row(f"{r['rank']:.2f}", r["id"], r["estimand"], str(r["tier"]), r["node"],
+                  ",".join(map(str, r["places"][:3])) + ("..." if r["n_places"] > 3 else ""), str(r["years"] or ""),
+                  f"{r['effect']:.3g}" if r["effect"] is not None else "", f"{r['q']:.2g}" if r["q"] is not None
+                  else "", r["replication"], str(r["triage"] or ""), str(r["status"] or ""))
     console.print(t)
+    console.print(f"{out['matched']:,} of {out['register']:,} leads")
 
 
 @explore_app.command("events")
@@ -519,13 +533,18 @@ def report(out: str = typer.Option("reports/leads.md", help="the Markdown file w
 
 
 @explore_app.command("stories")
-def stories(limit: int = 25) -> None:
+def stories(limit: int = 25, cls: str = typer.Option(None, "--class", help="keep leads of this triage class"),
+            place: int = typer.Option(None, help="that place's story")) -> None:
     """Leads grouped into stories (by place or subset), best first."""
-    from . import leads as register
+    from . import workspace
 
+    out = workspace.stories(cls, place, limit)
+    if _emit_json(out):
+        return
     t = Table("rank", "story", "fields", "leads", "flags")
-    for st in register.stories(register.Register().current())[:limit]:
-        t.add_row(f"{st.rank:.1f}", st.key, ", ".join(st.fields)[:60], str(len(st.leads)), "; ".join(st.flags)[:50])
+    for st in out["stories"]:
+        t.add_row(f"{st['rank']:.1f}", st["key"], ", ".join(st["fields"])[:60], str(st["n_leads"]),
+                  "; ".join(st["flags"])[:50])
     console.print(t)
 
 
@@ -536,6 +555,11 @@ def ledger(family: str = typer.Option(None)) -> None:
 
     from . import control
 
+    if STATE["json"] and family is None:
+        from . import workspace
+
+        _emit_json(workspace.ledger())
+        return
     rows = control.Ledger().table().to_pylist()
     counts = Counter(r["family"] for r in rows if r["kind"] == "pending" and (family is None or r["family"] == family))
     t = Table("family", "tests")
@@ -1261,22 +1285,18 @@ def explore_blocks(dataset: str = typer.Argument(None), event: str = typer.Argum
 def explore_lead(lead_id: str) -> None:
     """One lead in full: its lens's statistics and null, its triage with evidence, each replication, its siblings and
     its story."""
-    from . import leads, tools
+    from . import workspace
 
-    register = leads.Register().current()
-    x = next((y for y in register if y.id == lead_id), None)
-    if x is None:
-        raise typer.BadParameter(f"no lead {lead_id!r} in the register (`pegasus explore leads` lists ids)")
-    console.print_json(json.dumps({**tools.explain_lead(x, register), "tier": x.tier}, default=str))
+    console.print_json(json.dumps(workspace.lead(lead_id), default=str))
 
 
 @explore_app.command("methods")
 def explore_methods() -> None:
     """Every method's measured record (ARCHITECTURE §10.5): the documented events it found, its findings in null
     worlds."""
-    from . import tools
+    from . import workspace
 
-    console.print_json(json.dumps(tools.method_status(), default=str))
+    console.print_json(json.dumps(workspace.methods(), default=str))
 
 
 @explore_app.command("confirm")

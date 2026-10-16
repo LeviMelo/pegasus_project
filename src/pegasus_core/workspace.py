@@ -594,3 +594,83 @@ def price(name: str) -> dict:
     decl = study.load(path)
     return jobs.submit("scope", f"scope {decl.study}", declaration=str(path), study=decl.study,
                        folder=str(study.folder_of(decl)))
+
+
+# ----------------------------------------------------------------------------- exploration (hypothesis-generating)
+
+
+_REGISTER: dict[str, tuple] = {}
+
+
+def _register() -> list:
+    """The lead register, read once per state of its part files (27 s for 169,805 leads, 2026-10-15)."""
+    from . import leads
+
+    reg = leads.Register()
+    names = tuple(sorted(p.name for p in reg.path.glob("part-*.parquet")))
+    kept = _REGISTER.get("leads")
+    if kept is None or kept[0] != names:
+        _REGISTER["leads"] = (names, reg.current())
+    return _REGISTER["leads"][1]
+
+
+#: the filters of the lead register (`tools.find_leads`)
+LEAD_FILTERS = ("cls", "tier", "place", "code", "estimand", "min_replication", "status", "direction", "year",
+                "min_effect", "max_q")
+
+
+def leads(filters: dict | None = None, limit: int = 100, offset: int = 0) -> dict:
+    """The lead register, best rank first (evidence x effect x replication), filtered (`LEAD_FILTERS`): leads are
+    hypothesis-generating, never findings of a study."""
+    from . import tools
+
+    filters = {k: v for k, v in (filters or {}).items() if v not in (None, "")}
+    unknown = set(filters) - set(LEAD_FILTERS)
+    if unknown:
+        raise ValueError(f"lead filters {sorted(unknown)}: one of {', '.join(LEAD_FILTERS)}")
+    register = _register()
+    hits = tools.find_leads(register, **filters)
+    return {"register": len(register), "matched": len(hits), "limit": limit, "offset": offset,
+            "rows": [tools.lead_row(x) for x in hits[offset: offset + limit]]}
+
+
+def lead(lead_id: str) -> dict:
+    """One lead in full: its lens's statistics and null, its triage with evidence, each replication, its siblings and
+    its story."""
+    from . import tools
+
+    register = _register()
+    x = next((y for y in register if y.id == lead_id), None)
+    if x is None:
+        raise LookupError(f"no lead {lead_id!r} in the register")
+    return {**tools.explain_lead(x, register), "tier": x.tier}
+
+
+def stories(cls: str | None = None, place: int | None = None, limit: int = 30) -> dict:
+    """The leads grouped by place or subset, best story first; ``place`` keeps that place's."""
+    from . import leads as leads_mod
+    from . import tools
+
+    register = _register()
+    if cls:
+        register = tools.find_leads(register, cls=cls)
+    found = leads_mod.stories(register)
+    if place is not None:
+        found = [s for s in found if place in s.places]
+    return {"matched": len(found), "stories": [
+        {"key": s.key, "places": s.places[:20], "rank": s.rank, "fields": s.fields, "flags": s.flags,
+         "n_leads": len(s.leads), "leads": [tools.lead_row(m) for m in s.leads[:8]]} for s in found[:limit]]}
+
+
+def ledger() -> dict:
+    """The ledger, the denominator of every error rate: tests by family and actor, and the confirmation reserve."""
+    from . import tools
+
+    return tools.ledger_status()
+
+
+def methods() -> dict:
+    """Every method's measured record: the documented events it found, its findings in null worlds."""
+    from . import tools
+
+    return tools.method_status()
