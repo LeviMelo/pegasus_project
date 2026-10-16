@@ -117,11 +117,33 @@ def expect(gb: float) -> None:
         _write_json(f, h)
 
 
+def _admissible(need: float) -> tuple[bool, dict]:
+    """Whether a heavy job needing ``need`` GB may start now, and why not: every heavy slot held, the machine's
+    available memory under the floor pegasus_data's admission keeps (``PEGASUS_HEAVY_MIN_FREE_GB``, default 4), or too
+    little room beside what the running jobs still expect (`room_gb`)."""
+    import psutil
+
+    floor = float(str(os.environ.get("PEGASUS_HEAVY_MIN_FREE_GB", "4")).replace(",", "."))
+    available = psutil.virtual_memory().available / _GIB
+    others = [h for h in holders() if h["pid"] != os.getpid()]
+    room = room_gb()
+    state = {"need_gb": round(need, 2), "room_gb": round(room, 2), "available_gb": round(available, 2),
+             "floor_gb": floor, "slots": HEAVY_SLOTS, "held": len(others)}
+    if len(others) >= HEAVY_SLOTS:
+        return False, {**state, "reason": f"every heavy slot is held ({len(others)} of {HEAVY_SLOTS})"}
+    if available < floor:
+        return False, {**state, "reason": f"{available:.1f} GB available, under the {floor:.0f} GB the machine keeps free"}
+    if room < need:
+        return False, {**state, "reason": f"{room:.1f} GB of room beside the running jobs, {need:.1f} GB needed"}
+    return True, state
+
+
 @contextmanager
 def slot(label: str, gpu: bool = False, need_gb: float | None = None) -> Iterator[None]:
-    """Hold the machine's heavy slot (and the GPU slot with ``gpu``) while the block runs: waits for a slot, for free
-    memory (pegasus_data's admission: ``PEGASUS_HEAVY_MIN_FREE_GB``, default 4) and for ``need_gb`` of room among the
-    jobs running (`room_gb`; default `DEFAULT_NEED_GB`), at most ``PEGASUS_HEAVY_WAIT`` seconds for the room."""
+    """Hold the machine's heavy slot (and the GPU slot with ``gpu``) while the block runs. It waits, saying why in
+    ``admission`` events (`_admissible`), until a slot is free, the machine's available memory is over its floor and
+    there is ``need_gb`` of room among the jobs running (default `DEFAULT_NEED_GB`), at most ``PEGASUS_HEAVY_WAIT``
+    seconds; then it takes the slot (pegasus_data's admission, the OS lock) and holds it while the block runs."""
     import psutil
 
     from . import gateway
@@ -131,6 +153,21 @@ def slot(label: str, gpu: bool = False, need_gb: float | None = None) -> Iterato
         return
     need = float(need_gb or DEFAULT_NEED_GB)
     queued = time.time()
+    wait = float(os.environ.get("PEGASUS_HEAVY_WAIT", "86400"))
+    said, told = 0.0, 0.0
+    # the wait is said before the slot is taken: inside pegasus_data's admission a run waited on its memory floor and
+    # the window showed it queued with no reason (2026-10-15)
+    while time.time() - queued < wait:
+        ok, why = _admissible(need)
+        if ok:
+            break
+        if time.time() - told > 30:
+            emit("admission", waited_s=round(time.time() - queued, 1), **why)
+            told = time.time()
+        if time.time() - said > 300:
+            print(f"[jobs] {label}: waiting: {why['reason']}", flush=True)
+            said = time.time()
+        time.sleep(5)
     with ExitStack() as stack:
         if gpu:
             stack.enter_context(gateway.machine_slot("pegasus_gpu_slots", 1, label))
@@ -140,17 +177,6 @@ def slot(label: str, gpu: bool = False, need_gb: float | None = None) -> Iterato
                         "need_gb": round(need, 2), "expect_gb": round(need, 2), "run": os.environ.get("PEGASUS_RUN_ID"),
                         "since": time.time()})
         stack.callback(lambda: f.unlink(missing_ok=True))
-        wait = float(os.environ.get("PEGASUS_HEAVY_WAIT", "86400"))
-        said, told = 0.0, 0.0
-        while (free := room_gb()) < need and time.time() - queued < wait:
-            if time.time() - said > 300:
-                print(f"[jobs] {label}: {free:.1f} GB of room for {need:.1f} GB; waiting", flush=True)
-                said = time.time()
-            if time.time() - told > 30:
-                emit("admission", need_gb=round(need, 2), room_gb=round(free, 2),
-                     waited_s=round(time.time() - queued, 1))
-                told = time.time()
-            time.sleep(5)
         print(f"[jobs] admitted after {time.time() - queued:.0f}s with {room_gb():.1f} GB of room: {label}", flush=True)
         emit("run", state="running", waited_s=round(time.time() - queued, 1), need_gb=round(need, 2))
         if os.environ.get("PEGASUS_RUN_PID") == str(os.getpid()):       # the run's own process: its record says so
