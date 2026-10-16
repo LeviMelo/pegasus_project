@@ -17,6 +17,10 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | a study's products again | `pegasus study run NAME --products-only` | from the fits and answers the store holds, the lanes not run: a change to the products measured in minutes (Alagoas: 5 min against 25) |
 | the window | `pegasus ui` (or `$PY -m pegasus_app`; `--serve` for a browser tab) | `../pegasus_app`: runs, studies and their outputs over the same functions as the command line |
 | an outside assistant's context | `pegasus context [STUDY] [--out FILE]` | the rules, the commands, the declaration, the studies, one study's scope, body and tables; paste it into the assistant |
+| a study's tables | `pegasus study tables NAME`; `pegasus study table NAME TABLE --where "first >= 2019" --order -events --columns label,place,events [--csv FILE]` | the views of its study.duckdb, filtered and ordered as the window's table browser shows them |
+| a plot or map for a paper | `pegasus plot new NAME ID --table rates --mark line --x first:o --y crude_rate:q --where ...`; `--map --color smoothed_smr:q` for the municipal boundaries; `pegasus plot render NAME ID --out f.pdf --format pdf`; `plot data` for its rows | a Vega-Lite file in `<folder>/plots/`, the window's editor opens it; an empty query is refused |
+| what DATASUS holds | `pegasus data datasets [--system SIH] [--readable]`; `pegasus data show SIM-DO` | the catalog's 165 datasets; a dataset's years in the catalog and the lake, the reserve, event types, roles, links |
+| records as filed | `pegasus data records SINASC-DN 2022 --rows CODMUNRES=27 --where "birth.weight < 1000"` | from the lake only, each value with its label; identifiers hidden unless `--reveal`; the reserve refused |
 | the machine | `pegasus machine` | memory, disks, the heavy slots and their holders |
 | the workspace's settings | `workspace.yml` (`env`) | the store, the data root, the adoption window, for every command and run; a variable already set wins |
 | documents consistent | `$PY scripts/check_docs.py` | ADRs, evaluation index, open questions, modules named in ARCHITECTURE, CLAUDE.md = AGENTS.md |

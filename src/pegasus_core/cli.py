@@ -17,16 +17,19 @@ app = typer.Typer(name="pegasus", help="PegaSUS: epidemiological studies of Braz
                   "declaration. A study: `study search` -> `study new` -> `study scope` -> `study run` -> `study "
                   "audit`; `run` follows and stops runs; `data` shows what DATASUS holds; `explore` is the "
                   "hypothesis-generating machinery; `context` prints what an outside assistant needs.",
-                  no_args_is_help=True)
+                  no_args_is_help=True, pretty_exceptions_enable=False)
 study_app = typer.Typer(help="Studies: design, price, run, check and export them.", no_args_is_help=True)
 run_app = typer.Typer(help="Runs: every heavy job, detached, admitted by memory; follow, list and stop them.",
                       no_args_is_help=True)
 data_app = typer.Typer(help="The data: datasets, their columns and what reads them.", no_args_is_help=True)
+plot_app = typer.Typer(help="Plots and maps of a study's tables: Vega-Lite files in its folder, rendered for a paper.",
+                       no_args_is_help=True)
 store_app = typer.Typer(help="The engine's store: plans, link runs, keys and caches.", no_args_is_help=True)
 explore_app = typer.Typer(help="Exploration (hypothesis-generating): fits, scans, leads, stories, the ledger.",
                           no_args_is_help=True)
 app.add_typer(study_app, name="study")
 app.add_typer(run_app, name="run")
+app.add_typer(plot_app, name="plot")
 app.add_typer(data_app, name="data")
 app.add_typer(store_app, name="store")
 app.add_typer(explore_app, name="explore")
@@ -856,6 +859,207 @@ def study_table(name: str = typer.Argument(..., help="the study's name or its de
     console.print(f"rows {offset + 1}-{offset + len(out['rows'])} of {out['total']:,}")
 
 
+@data_app.command("datasets")
+def data_datasets(system: str = typer.Option(None, help="one system (SIM, SIH, SINAN, ...)"),
+                  readable: bool = typer.Option(False, help="only datasets with event types a study reads"),
+                  refresh: bool = typer.Option(False, help="list the catalog again, not from its kept listing")) -> None:
+    """What DATASUS publishes, by system: files, gigabytes, years, states, and the event types a study reads."""
+    from . import workspace
+
+    d = workspace.datasets(refresh)
+    rows = [r for r in d["datasets"] if (not system or r["system"].upper() == system.upper())
+            and (not readable or r["event_types"])]
+    if _emit_json({**d, "datasets": rows}):
+        return
+    t = Table("system", "dataset", "name", "years", "files", "GB", "event types")
+    for r in rows:
+        t.add_row(r["system"], r["code"], str(r["name"] or ""), str(r["years"] or ""), f"{r['files'] or 0:,}",
+                  f"{r['gigabytes'] or 0:,.1f}", ", ".join(r["event_types"]))
+    console.print(t)
+    console.print(f"{len(rows)} datasets (catalog crawled {d['as_of']})")
+
+
+@data_app.command("show")
+def data_show(dataset: str = typer.Argument(..., help="a dataset: SIM-DO, SIH-RD, SINAN-DENG, ...")) -> None:
+    """One dataset: its years in the catalog and the lake, the reserve, its event types, its columns' roles (meaning,
+    kind, codelists, valid years, not-recorded codes) and its links."""
+    from . import workspace
+
+    d = workspace.dataset(dataset)
+    if _emit_json(d):
+        return
+    console.print(f"[bold]{d['code']}[/bold] {d['name']} ({d['system']}): {d['years']}, {d['files']:,} files, "
+                  f"{d['gigabytes']:,.1f} GB")
+    console.print(f"lake, whole years: {', '.join(map(str, d['whole_years'])) or 'none'}; "
+                  f"reserved: {', '.join(map(str, d['reserved_years'])) or 'none'}")
+    for e in d["event_types"]:
+        console.print(f"event type {e['name']} ({e['kind']}): {e['grain']}")
+    t = Table("column", "role", "kind", "model", "name", "years", "not recorded")
+    for r in d["roles"]:
+        t.add_row(r["column"], str(r["role"]), str(r["kind"]), str(r["model"]), str(r["name"] or ""),
+                  f"{r['first_year'] or ''}-{r['last_year'] or ''}", ", ".join(r["missing"] or []))
+    console.print(t)
+    for link in d["links"]:
+        console.print(f"link {link['link']}: {link['left']} -> {link['right']}")
+
+
+@data_app.command("records")
+def data_records(dataset: str = typer.Argument(...), year: int = typer.Argument(...),
+                 partition: str = typer.Option(None, help="BR or a state the lake holds for the year"),
+                 rows: list[str] = typer.Option(None, help="COLUMN=PREFIX[,PREFIX]: records whose column starts with "
+                                                           "a prefix (CODMUNRES=27); repeat for more"),
+                 where: list[str] = typer.Option(None, help="a condition on a role 'role op value' (birth.weight < "
+                                                            "2500); repeat for more"),
+                 limit: int = typer.Option(20), offset: int = typer.Option(0),
+                 reveal: bool = typer.Option(False, help="show the identifier columns, hidden by default"),
+                 csv: str = typer.Option(None, help="write the page to this CSV file")) -> None:
+    """Records as filed, each value with its label, from the lake only (nothing is downloaded); identifier columns are
+    hidden unless --reveal; the confirmation reserve's years are refused."""
+    from . import workspace
+
+    filters = {}
+    for r in rows or []:
+        col, _, prefixes = r.partition("=")
+        filters[col.strip()] = [x.strip() for x in prefixes.split(",") if x.strip()]
+    condition = [{"role": f["column"], "op": f["op"], "value": f["value"]} for f in map(_role_filter, where or [])]
+    out = workspace.records(dataset, year, partition, filters or None, condition or None, limit, offset, reveal)
+    if csv:
+        import csv as csv_mod
+
+        with open(csv, "w", newline="", encoding="utf-8") as fh:
+            w = csv_mod.writer(fh)
+            w.writerow(out["columns"])
+            w.writerows(out["rows"])
+        console.print(f"{len(out['rows'])} of {out['total']:,} records written to {csv}")
+        return
+    if _emit_json(out):
+        return
+    for i, r in enumerate(out["rows"]):
+        console.rule(f"record {offset + i + 1} of {out['total']:,}")
+        for c, v in zip(out["columns"], r, strict=True):
+            if v is not None:
+                console.print(f"{c}: {v}", highlight=False, markup=False)
+    if out["hidden"]:
+        console.print(f"hidden (identifiers; --reveal shows them): {', '.join(out['hidden'])}")
+
+
+def _role_filter(text: str) -> dict:
+    """``"role op value"`` for a condition on roles: the role may hold dots (birth.weight)."""
+    import re
+
+    m = re.match(r"^\s*([\w.]+)\s*(!=|<=|>=|==|=|<|>|\bnot in\b|\bin\b)\s*(.*)$", text, re.IGNORECASE)
+    if not m:
+        raise typer.BadParameter(f"{text!r}: write 'role op value', e.g. 'birth.weight < 2500'")
+    raw = m.group(3).strip()
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = raw
+    op = {"=": "==", "in": "in", "not in": "not in"}.get(m.group(2).lower(), m.group(2))
+    return {"column": m.group(1), "op": op, "value": value}
+
+
+@plot_app.command("list")
+def plot_list(name: str = typer.Argument(..., help="the study's name")) -> None:
+    """A study's plots."""
+    from . import plots
+
+    rows = plots.plots(name)
+    if _emit_json(rows):
+        return
+    t = Table("plot", "title", "table", "mark", "map", "modified")
+    for r in rows:
+        t.add_row(r["id"], str(r.get("title") or r.get("error") or ""), str(r.get("table", "")),
+                  str(r.get("mark", "")), "yes" if r.get("map") else "", str(r.get("modified", "")))
+    console.print(t)
+
+
+@plot_app.command("new")
+def plot_new(name: str = typer.Argument(..., help="the study's name"),
+             plot_id: str = typer.Argument(..., help="the plot's id (its file name)"),
+             table: str = typer.Option(..., help="a table of `study tables`"),
+             mark: str = typer.Option("line", help="point, line, bar, area, rect, tick, boxplot (a map: --map)"),
+             x: str = typer.Option(None, help="field:type (q, n, o, t), agg(field):type, or count()"),
+             y: str = typer.Option(None), color: str = typer.Option(None), size: str = typer.Option(None),
+             shape: str = typer.Option(None), column: str = typer.Option(None), row: str = typer.Option(None),
+             tooltip: str = typer.Option(None, help="encodings, comma-separated"),
+             where: list[str] = typer.Option(None, help="a filter 'column op value'; repeat for more"),
+             title: str = typer.Option(None),
+             map_: bool = typer.Option(False, "--map", help="a map: the folder's municipal boundaries, coloured by "
+                                                           "--color"),
+             geometry: str = typer.Option("municipalities.geojson", help="the boundaries file of the folder (--map)"),
+             key: str = typer.Option("u", help="the column joining rows to the boundaries (--map)")) -> None:
+    """Write a plot from a table, a mark and its encodings, checked against the study; the window's editor opens it."""
+    from . import plots
+
+    spec = plots.build(table, mark, {"x": x, "y": y, "color": color, "size": size, "shape": shape, "column": column,
+                                     "row": row, "tooltip": tooltip}, [_filter(w) for w in where or []], title,
+                       geometry if map_ else None, key)
+    row_ = plots.save(name, plot_id, spec)
+    if not _emit_json(row_):
+        console.print(f"written {plot_id}: `pegasus plot render {name} {plot_id} --out {plot_id}.png`")
+
+
+@plot_app.command("save")
+def plot_save(name: str = typer.Argument(..., help="the study's name"), plot_id: str = typer.Argument(...),
+              spec: str = typer.Option(..., help="a Vega-Lite file whose usermeta.pegasus names its table")) -> None:
+    """Write a plot from a Vega-Lite file edited by hand, checked against the study."""
+    from . import plots
+
+    row_ = plots.save(name, plot_id, json.loads(Path(spec).read_text(encoding="utf-8")))
+    if not _emit_json(row_):
+        console.print(f"written {plot_id}")
+
+
+@plot_app.command("show")
+def plot_show(name: str = typer.Argument(...), plot_id: str = typer.Argument(...)) -> None:
+    """A plot's Vega-Lite specification, as stored."""
+    from . import plots
+
+    sys.stdout.write(json.dumps(plots.get(name, plot_id), indent=1, ensure_ascii=False) + "\n")
+
+
+@plot_app.command("render")
+def plot_render(name: str = typer.Argument(...), plot_id: str = typer.Argument(...),
+                out: str = typer.Option(..., help="the file written; its format from --format"),
+                fmt: str = typer.Option("png", "--format", help="png, svg or pdf"),
+                scale: float = typer.Option(2.0, help="pixels per unit for png")) -> None:
+    """Draw a plot headless (vl-convert) to PNG, SVG or PDF."""
+    from . import plots
+
+    data = plots.render(name, plots.get(name, plot_id), fmt, scale)
+    Path(out).write_bytes(data)
+    if not _emit_json({"out": out, "bytes": len(data)}):
+        console.print(f"written {out} ({len(data):,} bytes)")
+
+
+@plot_app.command("data")
+def plot_data(name: str = typer.Argument(...), plot_id: str = typer.Argument(...),
+              out: str = typer.Option(..., help="the CSV file written")) -> None:
+    """The rows a plot draws, as CSV: what a paper's figure is made of."""
+    import csv as csv_mod
+
+    from . import plots
+
+    d = plots.data(name, plots.get(name, plot_id))
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv_mod.writer(fh)
+        w.writerow(d["columns"])
+        w.writerows(d["rows"])
+    if not _emit_json({"out": out, "rows": len(d["rows"])}):
+        console.print(f"{len(d['rows']):,} rows written to {out}")
+
+
+@plot_app.command("delete")
+def plot_delete(name: str = typer.Argument(...), plot_id: str = typer.Argument(...)) -> None:
+    """Delete a plot's file."""
+    from . import plots
+
+    plots.delete(name, plot_id)
+    if not _emit_json({"deleted": plot_id}):
+        console.print(f"deleted {plot_id}")
+
+
 @run_app.command("list")
 def run_list(limit: int = typer.Option(30, help="the newest runs shown"),
              study: str = typer.Option(None, help="one study's runs")) -> None:
@@ -1080,8 +1284,16 @@ def explore_confirm(node: str = typer.Argument(..., help="the field: an ICD-10 n
 
 def main() -> None:
     """The console entry point. Click expands wildcards in arguments on Windows, which turned the root field ``*``
-    into the folder's file names; the arguments are passed as typed."""
-    app(windows_expand_args=False)
+    into the folder's file names; the arguments are passed as typed. A refusal the engine states (a bad name, filter
+    or query; a study already running) is printed as its sentence, not a traceback."""
+    try:
+        app(windows_expand_args=False, standalone_mode=True)
+    except (ValueError, LookupError, FileNotFoundError, PermissionError, RuntimeError) as exc:
+        if STATE["json"]:
+            sys.stdout.write(json.dumps({"error": type(exc).__name__, "detail": str(exc)}, ensure_ascii=False) + "\n")
+        else:
+            console.print(f"[bold red]{type(exc).__name__}:[/bold red] {exc}", highlight=False)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

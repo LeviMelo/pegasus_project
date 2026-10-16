@@ -1127,8 +1127,9 @@ A person designs, runs and judges every study; nothing in PegaSUS calls an AI (A
 - **The workspace** is a directory: `studies/` (declarations and their folders), `runs/` (each run's record, log and
   typed events), `workspace.yml` (the engine's environment for it). Files on disk are the truth.
 - **A run** is a detached process in the register (`jobs.submit`), followed, stopped and listed from anywhere.
-- **`pegasus`**, nouns and verbs with `--json`: `study` (search, new, scope, run, audit, export, list, show), `run`,
-  `data`, `store`, `explore` (the hypothesis-generating machinery), `machine`, `context` (what an assistant the person
+- **`pegasus`**, nouns and verbs with `--json`: `study` (search, new, scope, run, audit, export, list, show,
+  tables, table), `run`, `plot` (Vega-Lite files in the folder, rendered for a paper), `data` (the catalog, a
+  dataset's anatomy, its records with identifiers hidden), `store`, `explore` (the hypothesis-generating machinery), `machine`, `context` (what an assistant the person
   consults outside PegaSUS needs), `ui`.
 - **The window** (`../pegasus_app`) is a local service and a web-rendered desktop window over the same functions
   (`workspace`, `jobs`): runs, studies, results, plots, the declaration, the data, exploration, comparison. It computes

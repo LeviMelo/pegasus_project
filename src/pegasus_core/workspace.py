@@ -317,6 +317,10 @@ def rows(name: str, table: str, where: list[dict] | None = None, order: list[str
                 params.append(w["value"])
         sql_where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         keys = [f"{col(o.lstrip('-'))} {'DESC' if o.startswith('-') else 'ASC'}" for o in order or []]
+        if keys:
+            # ties broken by every other column, so a page never repeats or skips a row of tied values
+            named = {o.lstrip("-") for o in order or []}
+            keys += [f'"{c}" ASC NULLS LAST' for c in cols if c not in named]
         sql_order = f" ORDER BY {', '.join(keys)}" if keys else ""
         keep = ", ".join(col(c) for c in columns) if columns else "*"
         total = con.execute(f'SELECT count(*) FROM "{table}"{sql_where}', params).fetchone()[0]
@@ -325,3 +329,126 @@ def rows(name: str, table: str, where: list[dict] | None = None, order: list[str
         names = [d[0] for d in cur.description]
         data = [list(r) for r in cur.fetchall()]
     return {"table": table, "columns": names, "rows": data, "total": total, "limit": limit, "offset": offset}
+
+
+# -------------------------------------------------------------------------------------------------------- the data
+
+
+def datasets(refresh: bool = False) -> dict:
+    """What DATASUS publishes, as pegasus_data's catalog lists it: its systems and their datasets (files, gigabytes,
+    years, states), each with the event types a study can read of it. Kept in ``PEGASUS_HOME/workspace/datasets.json``
+    for the catalog's crawl: listing the 24 systems' datasets takes seconds."""
+    import pegasus_data as pg
+
+    from . import gateway
+
+    root = config.data_root()
+    top = pg.explore(root=root)
+    cache = config.home() / "workspace" / "datasets.json"
+    stamp = {"as_of": str(top.as_of), "data_version": config.data_version()}
+    if cache.exists() and not refresh:
+        try:
+            kept = json.loads(cache.read_text(encoding="utf-8"))
+            if {k: kept.get(k) for k in stamp} == stamp:
+                return kept
+        except ValueError:
+            pass
+    readable: dict[str, list[str]] = {}
+    for ds in gateway.event_datasets():
+        readable[gateway.dataset_key(ds)] = [e["name"] for e in gateway.event_types(ds)]
+    rows = []
+    for s in top.rows:
+        for r in pg.explore(s["system"], root=root).rows:
+            key = gateway.dataset_key(r["dataset"])
+            rows.append({"system": s["system"], "dataset": r["dataset"], "code": key, "name": r.get("name"),
+                         "files": r.get("files"), "gigabytes": r.get("gigabytes"), "years": r.get("years"),
+                         "ufs": r.get("ufs"), "event_types": readable.get(key, [])})
+    out = {**stamp, "systems": [{k: s.get(k) for k in ("system", "name", "files", "gigabytes", "datasets", "years")}
+                                for s in top.rows], "datasets": rows}
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    jobs._write_json(cache, out)
+    return out
+
+
+def dataset(code: str) -> dict:
+    """One dataset's anatomy: what the catalog lists by year, what the lake holds (whole years, partitions, rows), the
+    confirmation reserve's years, its event types, its columns' roles (meaning, kind, codelists, the years each is
+    valid, the codes that mean not recorded) and the links it is a side of."""
+    import pegasus_data as pg
+
+    from . import control, gateway
+
+    root = config.data_root()
+    key = gateway.dataset_key(code)
+    listed = next((d for d in datasets()["datasets"] if d["code"] == key), None)
+    if listed is None:
+        raise LookupError(f"no dataset {code!r} in the catalog (`pegasus data datasets`)")
+    lake = {int(y): v for y, v in pg.lake_coverage(key, root=root).items()}
+    try:
+        whole = sorted(gateway.lake_whole_years(key))
+    except Exception:  # noqa: BLE001 - a dataset with no lake rule holds no whole year
+        whole = []
+    try:
+        events = gateway.event_types(key)
+    except Exception:  # noqa: BLE001 - a dataset with no event types: none to read
+        events = []
+    try:
+        roles = pg.roles(key)
+    except Exception:  # noqa: BLE001 - a dataset whose columns pegasus_data has not declared
+        roles = []
+    links = [{"link": name, "left": s.left.dataset, "right": s.right.dataset, "description": s.description}
+             for name, s in gateway.link_specs().items()
+             if key in (gateway.dataset_key(s.left.dataset), gateway.dataset_key(s.right.dataset))]
+    keep = ("column", "role", "entity", "property", "kind", "model", "name", "codelists", "first_year", "last_year",
+            "missing", "unit", "measure", "note", "derived", "reviewed")
+    return {**listed, "published": pg.explore(key, root=root).rows,
+            "lake": [{"year": y, **lake[y]} for y in sorted(lake)],
+            "whole_years": whole, "reserved_years": control.reserved(key),
+            "event_types": [{k: e.get(k) for k in ("name", "kind", "grain", "classifiers", "marks", "status", "note")}
+                            for e in events],
+            "roles": [{k: r.get(k) for k in keep} for r in roles], "links": links}
+
+
+#: role kinds hidden in the record viewer until revealed (author, 2026-10-15)
+HIDDEN_KINDS = ("identifier",)
+_RECORDS: dict[tuple, object] = {}
+
+
+def records(code: str, year: int, partition: str | None = None, rows_filter: dict[str, list[str]] | None = None,
+            condition: list[dict] | None = None, limit: int = 200, offset: int = 0, reveal: bool = False) -> dict:
+    """Records of a dataset as filed, each value with its label (pegasus_data `query`, from the lake only: nothing is
+    downloaded). ``partition`` is a partition the lake holds for the year (BR for a national file, else a state; the
+    first held by default); ``rows_filter`` keeps records whose columns start with given codes (residence 27...),
+    ``condition`` is a condition on roles. Columns whose role is an identifier (`HIDDEN_KINDS`) are left out unless
+    ``reveal``. The confirmation reserve's years are refused."""
+    import warnings
+
+    import pegasus_data as pg
+
+    from . import control, gateway
+
+    key = gateway.dataset_key(code)
+    control.check_reserved(key, [year])
+    held = {int(y): v for y, v in pg.lake_coverage(key, root=config.data_root()).items()}.get(int(year))
+    if not held:
+        raise LookupError(f"{key} {year} is not in the lake: a study that reads it builds it (`pegasus study run`)")
+    parts = held.get("uf_codes") or []
+    partition = partition or ("BR" if "BR" in parts else (parts[0] if parts else "BR"))
+    if parts and partition not in parts:
+        raise LookupError(f"{key} {year}: the lake holds {', '.join(parts)}, not {partition}")
+    ask = (key, int(year), partition, json.dumps(rows_filter, sort_keys=True), json.dumps(condition, sort_keys=True))
+    table = _RECORDS.get(ask)
+    if table is None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            table = pg.query(key, period=int(year), geography=partition, max_download=0, root=config.data_root(),
+                             rows=rows_filter or None, condition=condition or None)
+        _RECORDS.clear()                         # one read kept: a person pages one at a time
+        _RECORDS[ask] = table
+    hidden_cols = {r["column"] for r in pg.roles(key) if r.get("kind") in HIDDEN_KINDS}
+    hidden = [c for c in table.column_names if c in hidden_cols or any(c.endswith(f"({h})") for h in hidden_cols)]
+    shown = [c for c in table.column_names if reveal or c not in hidden]
+    page = table.select(shown).slice(int(offset), int(limit))
+    return {"dataset": key, "year": int(year), "partition": partition, "partitions": parts, "total": table.num_rows,
+            "columns": shown, "rows": [list(r.values()) for r in page.to_pylist()], "hidden": [] if reveal else hidden,
+            "limit": limit, "offset": offset}
