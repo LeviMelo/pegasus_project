@@ -511,7 +511,7 @@ def _study_target(meta: dict) -> dict:
     from . import study
 
     decl = study.load(meta["declaration"])
-    need = meta.get("need_gb") or study.need_gb(decl)
+    need = meta.get("need_gb") or study.need_gb(decl, bool(meta["options"].get("products_only")))
     _update(meta["id"], need_gb=round(need, 2), folder=str(study.folder_of(decl)))
     with slot(f"study {decl.study}", need_gb=need):
         out = study.run(decl, log=lambda line: print(f"[{time.strftime('%H:%M:%S')}] {line}", flush=True),

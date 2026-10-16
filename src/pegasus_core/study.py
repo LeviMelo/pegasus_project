@@ -2124,10 +2124,18 @@ def _peak_gb() -> float:
 MAIN_GB = float(os.environ.get("PEGASUS_STUDY_MAIN_GB", "2"))
 
 
-def need_gb(decl: Declaration) -> float:
+def need_gb(decl: Declaration, products_only: bool = False) -> float:
     """The memory a study needs to make progress, what its run is admitted with (`jobs.slot`): its own process and its
     largest lane, measured in its folder's last provenance, else `LANE_DEFAULT_GB`. Its other lanes start as the
-    machine's room allows (`_run_items`), so a study admitted beside another runs fewer lanes at once, not none."""
+    machine's room allows (`_run_items`), so a study admitted beside another runs fewer lanes at once, not none. A run of
+    the products alone runs no lane: the peak its last such run measured (the run register), else its own process and
+    a gigabyte; it had asked a lane's 8 GB and waited on memory it would not use (2026-10-15)."""
+    from . import jobs
+
+    if products_only:
+        peaks = [float(r["peak_gb"]) for r in jobs.runs(study=decl.study)
+                 if r.get("state") == "done" and (r.get("options") or {}).get("products_only") and r.get("peak_gb")]
+        return max(peaks[0] if peaks else 0.0, MAIN_GB + 1.0)
     try:
         steps = json.loads((folder_of(decl) / "provenance.json").read_text(encoding="utf-8")).get("steps") or {}
         peaks = [float(v["peak_gb"]) for v in steps.values() if isinstance(v, dict) and v.get("peak_gb")]
