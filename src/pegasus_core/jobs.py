@@ -301,7 +301,7 @@ def submit(kind: str, label: str, *, declaration: str | None = None, commands: l
     ``commands`` one after another (`run`). Returns the run's record, state ``queued``."""
     if kind not in _TARGETS:
         raise ValueError(f"unknown run kind {kind!r}: one of {sorted(_TARGETS)}")
-    if kind == "study":
+    if kind in ("study", "scope"):
         if not declaration or not Path(declaration).exists():
             raise FileNotFoundError(f"no declaration {declaration}")
         declaration = str(Path(declaration).resolve())
@@ -519,7 +519,25 @@ def _commands_target(meta: dict) -> dict:
     return {"exit": 0}
 
 
-_TARGETS = {"study": _study_target, "commands": _commands_target}
+def _scope_target(meta: dict) -> dict:
+    """A declaration priced (`workspace.scope`): light, so no heavy slot; its scope written to the folder."""
+    from . import workspace
+
+    _update(meta["id"], state="running", started=_now())
+    emit("run", state="running")
+    emit("phase", phase="scope", status="start")
+    t = time.time()
+    scope = workspace.scope(meta["declaration"])
+    emit("phase", phase="scope", status="end", seconds=round(time.time() - t, 1),
+         estimate_s=round((scope.get("estimated_minutes") or 0) * 60, 1))
+    print(f"{len(scope['read'])} read, {len(scope['deferred'])} deferred, {len(scope['not_read'])} not read; "
+          f"estimated {scope['estimated_minutes']} min; written to {scope['written']}", flush=True)
+    return {"estimated_minutes": scope["estimated_minutes"], "read": len(scope["read"]),
+            "deferred": len(scope["deferred"]), "not_read": len(scope["not_read"]), "written": scope["written"],
+            "nothing_read": scope["nothing_read"]}
+
+
+_TARGETS = {"study": _study_target, "commands": _commands_target, "scope": _scope_target}
 
 
 def execute(run_id: str) -> int:

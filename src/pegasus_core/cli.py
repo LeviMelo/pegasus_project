@@ -642,8 +642,8 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
 @study_app.command("scope")
 def scope_command(name: str = typer.Argument(..., help="the study's name or its declaration's path")) -> None:
     """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
-    download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes
-    ``scope.yml`` in the study's folder and shows what each choice costs."""
+    download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes the
+    priced scope beside the declaration (``NAME.scope.yml``) and shows what each choice costs."""
     from . import gateway, workspace
 
     scope = workspace.scope(name)
@@ -797,6 +797,41 @@ def study_show(name: str = typer.Argument(..., help="the study's name or its dec
     for r in d["runs"][:10]:
         t.add_row(r["id"], r["state"], r["created"], str(r["ended"] or "-"), str(r["peak_gb"] or "-"))
     console.print(t)
+
+
+@study_app.command("check")
+def study_check(name: str = typer.Argument(..., help="the study's name or a declaration file")) -> None:
+    """A declaration's problems (none: it can run) and the value each choice takes after its depth."""
+    from . import workspace
+
+    path = Path(name) if Path(name).suffix in (".yml", ".yaml") else workspace.find(name)
+    out = workspace.check(path.read_text(encoding="utf-8"))
+    if _emit_json(out):
+        return
+    for problem in out["problems"]:
+        console.print(f"[red]problem[/red] {problem}", highlight=False)
+    if out["effective"]:
+        for k, v in out["effective"].items():
+            console.print(f"{k}: {json.dumps(v)}", highlight=False)
+    raise typer.Exit(1 if out["problems"] else 0)
+
+
+@study_app.command("set")
+def study_set(name: str = typer.Argument(..., help="the study's name"),
+              key: str = typer.Argument(..., help="a declaration key: depth, related, topic.seeds.icd10, ..."),
+              value: str = typer.Argument(None, help="its value as YAML ([I21, I22], 3, true); none removes the key")
+              ) -> None:
+    """Set one key of a study's declaration, its comments and order kept, and write it once it has no problem: what
+    the window's form does."""
+    import yaml
+
+    from . import workspace
+
+    path = workspace.find(name)
+    text = workspace.set_key(path.read_text(encoding="utf-8"), key, None if value is None else yaml.safe_load(value))
+    d = workspace.save_declaration(name, text)
+    if not _emit_json(d):
+        console.print(f"{key} set; {d['path']} written")
 
 
 @study_app.command("tables")

@@ -115,6 +115,67 @@ class Declaration:
 #: floor is about 1/(R + 1); quick halves the excess question's 40 worlds' resolution twice over)
 NULLS = {"quick": 0.25, "standard": 1.0, "precise": 4.0}
 
+#: every key of a declaration, described once: its path, its form (what a value looks like), its choices, its default
+#: or whether its depth presets it (`PRESETS`), and what it does. `new`'s comments, the window's form and `pegasus
+#: context` read it; `load` checks the values. A key `load` accepts and this list misses fails at import.
+DECLARATION = [
+    {"key": "study", "form": "name", "required": True, "help": "the study's name: its file and its folder"},
+    {"key": "topic.seeds.icd10", "form": "codes", "help": "ICD-10 codes at any level (I21, B58, O98.6)"},
+    {"key": "topic.seeds.sinan", "form": "codes", "help": "SINAN agravos (LEPT, TOXG): `pegasus study search`"},
+    {"key": "topic.seeds.terms", "form": "words",
+     "help": "terms matched against every code system's labels (the weakest evidence)"},
+    {"key": "topic.seeds.records", "form": "conditions",
+     "help": "conditions on records' typed fields: {dataset, name, condition: [{role, op, value}], per}"},
+    {"key": "topic.only", "form": "datasets", "default": [],
+     "help": "the datasets or systems read (empty: every source holding the topic)"},
+    {"key": "topic.include", "form": "datasets", "default": [],
+     "help": "fields, datasets or codes forced in (one not built is refused, never ignored)"},
+    {"key": "topic.exclude", "form": "datasets", "default": [], "help": "datasets or systems left out"},
+    {"key": "period", "form": "years", "default": "2014-2023",
+     "help": "first-last year, clipped to each source's validity"},
+    {"key": "where", "form": "places", "default": "BR",
+     "help": "BR, states (AL or 27, several as a list) or municipality codes: every fit is the area's"},
+    {"key": "grain", "form": "choices", "choices": ["year", "month", "week"], "default": ["year"],
+     "help": "the periods the fields are read at"},
+    {"key": "depth", "form": "choice", "choices": list(DEPTHS), "default": "survey",
+     "help": "survey, standard, deep or exhaustive: presets of the choices marked by depth"},
+    {"key": "q", "form": "number", "default": 0.05, "help": "the study's false-discovery rate"},
+    {"key": "contexts", "form": "contexts", "default": "auto",
+     "help": "municipal contexts related to the rates (auto: every declared one)"},
+    {"key": "hypotheses", "form": "list", "default": [],
+     "help": "declared tests, each answered with its own error control: {component: transient, where, when, note} "
+             "or {component: relation, leader, lags, when, macro, control}"},
+    {"key": "ratios", "form": "list", "default": [],
+     "help": "ratio fields: {numerator, denominator: DATASET[:event][:codes], lag in years}"},
+    {"key": "readers", "form": "choices", "choices": list(READERS), "preset": True,
+     "help": "the field kinds read beyond counts"},
+    {"key": "related", "form": "count", "preset": True,
+     "help": "related codes read beside the topic's own, strongest first (0, a number, or the codes)"},
+    {"key": "relations", "form": "choices", "choices": list(RELATIONS), "preset": True,
+     "help": "relations read: among the study's fields, with every context, the data-space screen"},
+    {"key": "chapters", "form": "flag", "preset": True,
+     "help": "the topic's codes read inside their fitted chapters, or as code sets of their own"},
+    {"key": "questions", "form": "questions", "preset": True,
+     "help": "the questions asked of every field (none named: all of them)"},
+    {"key": "related_questions", "form": "questions", "preset": True,
+     "help": "the questions asked of the related codes' fields (they are read to relate them to the topic)"},
+    {"key": "persons", "form": "flag", "preset": True,
+     "help": "the cohort scan over linked persons, and capture-recapture"},
+    {"key": "replicate", "form": "flag", "preset": True,
+     "help": "leads selected on the earlier years and tested once on the later ones"},
+    {"key": "download", "form": "number", "unit": "GB", "preset": True,
+     "help": "gigabytes the study may download (years held in the lake are free)"},
+    {"key": "nulls", "form": "choice", "choices": list(NULLS), "preset": True,
+     "help": "the replicate null worlds of every Monte Carlo test (quick x0.25, standard x1, precise x4)"},
+    {"key": "draws", "form": "count", "preset": True,
+     "help": "plausible link sets the persons step averages linkage uncertainty over"},
+    {"key": "triage", "form": "flag", "preset": True,
+     "help": "every answer triaged (substitution, recording, noise, signal) and corroborated"},
+]
+_described = {d["key"].split(".")[0] for d in DECLARATION}
+_seeds = {d["key"].rsplit(".", 1)[1] for d in DECLARATION if d["key"].startswith("topic.seeds.")}
+assert _described == KEYS and _seeds == set(SEED_SYSTEMS), (KEYS ^ _described, set(SEED_SYSTEMS) ^ _seeds)
+
 
 def _area(where) -> list[int] | None:
     """A declaration's ``where`` as the codes `config.study_area` reads: None for Brazil ("BR"); else a list of states

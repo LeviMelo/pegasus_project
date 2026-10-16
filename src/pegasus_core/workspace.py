@@ -24,9 +24,10 @@ def studies_dir() -> Path:
 
 def declarations() -> list[Path]:
     """Every study declaration in the workspace: ``studies/*.yml`` and one level of grouping (``studies/slices/``); a
-    study folder's own copy (``study.yml``, ``scope.yml``) is not a declaration."""
+    study folder's own copy (``study.yml``, ``scope.yml``) and a priced scope (``<name>.scope.yml``) are not."""
     grouped = [p for p in studies_dir().glob("*/*.yml") if not (p.parent / "study.yml").exists()]
-    return sorted([*studies_dir().glob("*.yml"), *grouped],
+    found = [p for p in [*studies_dir().glob("*.yml"), *grouped] if not p.name.endswith(".scope.yml")]
+    return sorted(found,
                   key=lambda p: (len(p.relative_to(studies_dir()).parts), p.name))
 
 
@@ -133,19 +134,21 @@ def study_detail(name: str) -> dict:
 
 def scope(name: str) -> dict:
     """What a study's declaration resolves to (`study.resolve`): the sources it reads and why, their years and minutes,
-    what is deferred or not read and why, what each choice costs; written to ``scope.yml`` in its folder."""
+    what is deferred or not read and why, what each choice costs; written beside the declaration
+    (``<name>.scope.yml``). A study's folder is written by its runs alone: a pricing written into it had replaced the
+    scope its finished report was made from."""
     import yaml
 
     from . import study
 
-    decl = study.load(find(name))
+    path = find(name)
+    decl = study.load(path)
     resolved = study.resolve(decl)
     out = resolved.to_dict()
-    folder = study.folder_of(decl)
-    folder.mkdir(parents=True, exist_ok=True)
+    target = path.with_name(f"{path.stem}.scope.yml")
     # written, not printed: the console wraps long lines and the printed YAML did not parse (2026-10-12)
-    (folder / "scope.yml").write_text(yaml.safe_dump(out, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return {**out, "written": str(folder / "scope.yml"),
+    target.write_text(yaml.safe_dump(out, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return {**out, "written": str(target),
             "nothing_read": None if out["read"] else study.nothing_read(resolved)}
 
 
@@ -452,3 +455,142 @@ def records(code: str, year: int, partition: str | None = None, rows_filter: dic
     return {"dataset": key, "year": int(year), "partition": partition, "partitions": parts, "total": table.num_rows,
             "columns": shown, "rows": [list(r.values()) for r in page.to_pylist()], "hidden": [] if reveal else hidden,
             "limit": limit, "offset": offset}
+
+
+# ------------------------------------------------------------------------------------------------- the declaration
+
+
+def _problems(text: str) -> tuple[list[str], dict | None]:
+    """A draft declaration's problems as `study.load` reports them, and its effective choices (each preset key's value
+    after its depth), from a file of its own so nothing in the workspace changes."""
+    import tempfile
+
+    from . import study
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "draft.yml"
+        path.write_text(text, encoding="utf-8")
+        try:
+            decl = study.load(path)
+        except study.DeclarationError as exc:
+            lines = [ln.strip("- ").strip().replace(str(path), "the declaration") for ln in str(exc).splitlines()]
+            lines = [ln.removeprefix("the declaration: ") for ln in lines if ln and not ln.endswith(":")]
+            return lines, None
+        except Exception as exc:  # noqa: BLE001 - YAML that does not parse is a problem of the draft, said as such
+            return [f"{type(exc).__name__}: {exc}"], None
+    effective = {d["key"]: decl.choice(d["key"]) for d in study.DECLARATION if d.get("preset")}
+    return [], effective
+
+
+def declaration(name: str) -> dict:
+    """A study's declaration as the window's form edits it: its text (the file, comments and all), the keys it sets,
+    its problems, the value each choice takes after its depth, and the description of every key
+    (`study.DECLARATION`), the depths' presets and the questions."""
+    import yaml
+
+    from . import questions, study
+
+    path = find(name)
+    text = path.read_text(encoding="utf-8")
+    problems, effective = _problems(text)
+    try:
+        doc = yaml.safe_load(text) or {}
+    except ValueError:
+        doc = None
+    return {"name": _summary_name(path), "path": str(path), "text": text, "doc": doc, "problems": problems,
+            "effective": effective, "keys": study.DECLARATION, "presets": study.PRESETS,
+            "questions": [{"id": q.id, "estimand": q.estimand} for q in questions.QUESTIONS.values()]}
+
+
+def check(text: str) -> dict:
+    """A draft's problems and effective choices, nothing written."""
+    problems, effective = _problems(text)
+    return {"problems": problems, "effective": effective}
+
+
+def set_key(text: str, key: str, value) -> str:
+    """The draft with one key set (``topic.seeds.icd10``), its comments and order kept (ruamel.yaml's round trip);
+    ``value`` None removes the key. What the window's form does to the file the person also edits by hand."""
+    import io
+
+    from ruamel.yaml import YAML
+
+    from . import study
+
+    if key not in {d["key"] for d in study.DECLARATION}:
+        raise ValueError(f"{key!r} is not a declaration key: {', '.join(d['key'] for d in study.DECLARATION)}")
+    y = YAML()
+    y.preserve_quotes = True
+    y.width = 120
+    doc = y.load(text) or {}
+    *parents, last = key.split(".")
+    node = doc
+    for p in parents:
+        if node.get(p) is None:
+            if value is None:
+                return text
+            node[p] = {}
+        node = node[p]
+    if value is None:
+        node.pop(last, None)
+    else:
+        node[last] = _flow(value)
+    out = io.StringIO()
+    y.dump(doc, out)
+    return out.getvalue()
+
+
+def _flow(value):
+    """A list or mapping written inline (``[I21, I22]``, ``{dataset: SINASC-DN, ...}``), as declarations are."""
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    if isinstance(value, list):
+        seq = CommentedSeq([_flow(v) for v in value])
+        seq.fa.set_flow_style()
+        return seq
+    if isinstance(value, dict):
+        m = CommentedMap({k: _flow(v) for k, v in value.items()})
+        m.fa.set_flow_style()
+        return m
+    return value
+
+
+def save_declaration(name: str, text: str) -> dict:
+    """Write a study's declaration once it has no problem; returns its detail as `declaration` gives it."""
+    problems, _ = _problems(text)
+    if problems:
+        raise ValueError("the declaration has problems, not written: " + "; ".join(problems))
+    path = find(name)
+    tmp = path.with_suffix(".yml.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+    return declaration(name)
+
+
+def new_study(name: str, icd10: list[str] | None = None, sinan: list[str] | None = None,
+              terms: list[str] | None = None, where: str | list[str] = "BR", period: str = "2014-2023",
+              depth: str = "standard", only: list[str] | None = None, contexts: list[str] | None = None,
+              records: list[dict] | None = None) -> dict:
+    """A new study's declaration, written in the workspace and validated (`study.new`)."""
+    from . import study
+
+    study.new(name, icd10, sinan, terms, where, period, depth, only, contexts, studies_dir(), records)
+    return declaration(name)
+
+
+def search(query: str) -> dict:
+    """What a study of ``query`` would seed on (`study.search`): ICD-10 codes, SINAN agravos, contexts, roles."""
+    from . import study
+
+    return study.search(query)
+
+
+def price(name: str) -> dict:
+    """Price a study's declaration as a run (`jobs.submit`): its scope is resolved in seconds to minutes, beside the
+    window, and written to its folder's ``scope.yml``."""
+    from . import study
+
+    path = find(name)
+    decl = study.load(path)
+    return jobs.submit("scope", f"scope {decl.study}", declaration=str(path), study=decl.study,
+                       folder=str(study.folder_of(decl)))

@@ -23,7 +23,9 @@ __keyless__ = True
 
 #: rows a plot may hold: a plot of more is a query to narrow (a municipality-year table of Brazil is 55,700 rows)
 MAX_ROWS = 200_000
-SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
+#: the Vega-Lite the files are written for and drawn with (vl-convert; the window draws with the same)
+VL_VERSION = "6.4"
+SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
 FORMATS = ("png", "svg", "pdf")
 TYPES = {"q": "quantitative", "n": "nominal", "o": "ordinal", "t": "temporal"}
 
@@ -180,11 +182,13 @@ def render(name: str, spec: dict, fmt: str = "png", scale: float = 2.0) -> bytes
     if fmt not in FORMATS:
         raise ValueError(f"format {fmt!r}: one of {', '.join(FORMATS)}")
     full = resolve(name, spec)
+    # no data from any URL: the rows are the folder's, and the instrument reaches no other server
+    common = {"vl_version": VL_VERSION, "allowed_base_urls": []}
     if fmt == "png":
-        return vlc.vegalite_to_png(full, scale=scale)
+        return vlc.vegalite_to_png(full, scale=scale, **common)
     if fmt == "svg":
-        return vlc.vegalite_to_svg(full).encode("utf-8")
-    return vlc.vegalite_to_pdf(full)
+        return vlc.vegalite_to_svg(full, **common).encode("utf-8")
+    return vlc.vegalite_to_pdf(full, **common)
 
 
 def _encoding(text: str) -> dict:

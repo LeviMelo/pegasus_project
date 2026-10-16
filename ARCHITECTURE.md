@@ -283,7 +283,8 @@ its own four sources and nine years at deep depth: the debugging loop, minutes n
 
 ### 3.2 Scope
 
-`pegasus-core scope <declaration>` resolves the declaration (§4) in seconds and writes `scope.yml`, a readable list of
+`pegasus study scope NAME` resolves the declaration (§4) in seconds to minutes and writes `NAME.scope.yml` beside it
+(a run writes its own `scope.yml` into the folder, which only runs write), a readable list of
 everything the study would cover, each item with **the reason it was included** and its **expected cost** at the chosen
 depth (§10.3):
 - the datasets and the codes in each, with record counts;

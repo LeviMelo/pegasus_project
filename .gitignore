@@ -13,3 +13,5 @@ studies/*/
 !studies/slices/
 studies/slices/*/
 runs/
+# a declaration priced by `pegasus study scope` (beside it, never in its folder)
+studies/**/*.scope.yml
