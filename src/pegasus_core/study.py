@@ -1765,17 +1765,13 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
         os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)
     else:
         os.environ.pop("PEGASUS_AREA", None)
-    out = folder_of(decl)
-    out.mkdir(parents=True, exist_ok=True)
-    # this run's products only: an earlier run's report, provenance, README and figures had stood beside a killed run's
-    # new tables, and `body` read the old "every step ran" (the review of the study, 2026-10-14); a table the code no
-    # longer writes had stayed in the folder and in study.duckdb (the ten estimates.parquet replaced, 2026-10-14)
-    for old in ("report.html", "provenance.json", "README.md", "METHODS.md", "municipalities.geojson",
-                *(p.name for p in out.glob("*.parquet")), *(p.name for p in out.glob("study.*.duckdb.tmp"))):
-        (out / old).unlink(missing_ok=True)
-    for old in ("figures", "expectations"):
-        if (out / old).exists():
-            shutil.rmtree(out / old, ignore_errors=True)
+    # the run writes a folder of its own and puts it in place whole at its end (`_put_in_place`): deleting the old
+    # products first had left a stopped run's folder with three files (mortalidade_infantil_al, 2026-10-15), and an
+    # earlier run's products left beside a killed run's new tables had been read as this run's (2026-10-14)
+    final = folder_of(decl)
+    out = final.with_name(final.name + ".partial")
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
     shutil.copyfile(decl.path, out / "study.yml")
     from . import jobs
 
@@ -1824,8 +1820,51 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
             "products_gaps": dict(products.gaps)}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str), encoding="utf-8")
     os.environ.pop("PEGASUS_MAX_DOWNLOAD", None)
-    log(f"study {decl.study}: written to {out} in {time.time() - t0:.0f} s")
-    return out
+    _put_in_place(out, final)
+    log(f"study {decl.study}: written to {final} in {time.time() - t0:.0f} s")
+    return final
+
+
+#: what a run writes in a study's folder; anything else there is the person's (their plots) and stays with it
+PRODUCTS = ("*.parquet", "report.html", "provenance.json", "README.md", "METHODS.md", "municipalities.geojson",
+            "study.duckdb", "study.*.duckdb.tmp", "scope.yml", "study.yml", "figures", "expectations", "body.json")
+
+
+def _put_in_place(new: Path, final: Path) -> None:
+    """A run's whole folder put where the study's folder is: the person's files of the old one (`PRODUCTS` are not)
+    moved into it, the old one replaced. A folder held open (Windows) is retried for a minute, then its products are
+    replaced one by one; a file that cannot be is an error, and the new folder stays beside the old."""
+    import fnmatch
+
+    if final.exists():
+        for entry in list(final.iterdir()):
+            if not any(fnmatch.fnmatch(entry.name, pat) for pat in PRODUCTS) and not (new / entry.name).exists():
+                shutil.move(str(entry), str(new / entry.name))
+        old = final.with_name(final.name + ".old")
+        shutil.rmtree(old, ignore_errors=True)
+        for _ in range(30):
+            try:
+                os.replace(final, old)
+                break
+            except OSError:
+                time.sleep(2)
+        else:
+            # the folder is held open (a reader in the window): its products replaced one by one, the old ones the
+            # run no longer writes removed; a file that cannot be replaced raises, the new folder kept beside it
+            for entry in list(final.iterdir()):
+                if any(fnmatch.fnmatch(entry.name, pat) for pat in PRODUCTS):
+                    if entry.is_dir():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+            for entry in list(new.iterdir()):
+                os.replace(entry, final / entry.name)
+            new.rmdir()
+            return
+        os.replace(new, final)
+        shutil.rmtree(old, ignore_errors=True)
+    else:
+        os.replace(new, final)
 
 
 def held_codes(it: Item) -> str:
