@@ -26,19 +26,42 @@ It reads every source through **[pegasus_data](../pegasus_data)**:
 ## A study in six commands
 
 ```bash
-pegasus-core search infarto                     # ICD-10 codes by label, the SINAN agravos holding them, contexts
-pegasus-core new infarto_al --icd10 I21,I22 --where AL --period 2014-2023 --depth standard
-pegasus-core scope studies/infarto_al.yml       # what it reads, why, and the minutes behind each choice
-pegasus-core study studies/infarto_al.yml       # run it: the folder lands in studies/infarto_al/
-pegasus-core audit studies/infarto_al           # each part a paper needs: met, or missing and why
-pegasus-core export studies/infarto_al --to D:/paper --format csv
+pegasus study search infarto                  # ICD-10 codes by label, the SINAN agravos holding them, contexts
+pegasus study new infarto_al --icd10 I21,I22 --where AL --period 2014-2023 --depth standard
+pegasus study scope infarto_al                 # what it reads, why, and the minutes behind each choice
+pegasus study run infarto_al                   # run it: the folder lands in studies/infarto_al/
+pegasus study audit studies/infarto_al        # each part a paper needs: met, or missing and why
+pegasus study export studies/infarto_al --to D:/paper --format csv
 ```
 
 A topic defined by a record condition is written the same way: `search peso` lists the roles a condition can name,
 and `new baixo_peso_al --records "SINASC-DN: birth.weight < 2500" --name "low birth weight" --where AL` writes it.
 
-`study --products-only` rewrites the folder from what the store already holds, in minutes. Use it after changing a
+`study run --products-only` rewrites the folder from what the store already holds, in minutes. Use it after changing a
 choice that touches only the products.
+
+## Runs, the window, and an assistant
+
+- **A run is detached.** `study run` starts it and follows its log; Ctrl+C leaves it running.
+- **The runs:**
+  - `pegasus run list` lists them;
+  - `run show ID` shows phases, lanes, items, products;
+  - `run log ID -f` follows the log;
+  - `run stop ID` ends it.
+- **Several runs at once.** Studies may run together. Each waits until the machine's memory, beside what the others
+  still need, holds it.
+- **The window.** `pegasus ui` opens the desktop window ([pegasus_app](../pegasus_app)) over the same studies and
+  runs. Everything it does is one of these commands.
+- **Machine-readable output.** `--json` before any noun prints JSON.
+- **An assistant outside PegaSUS.** `pegasus context [STUDY] --out context.md` writes what an assistant you consult
+  needs to read this workspace and propose commands:
+  - PegaSUS's rules;
+  - every command;
+  - the declaration's keys;
+  - the studies;
+  - one study's scope, body and tables.
+
+  PegaSUS never calls an assistant itself.
 
 ## The declaration
 

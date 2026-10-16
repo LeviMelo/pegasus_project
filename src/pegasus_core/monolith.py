@@ -220,7 +220,7 @@ def _age0_share(dataset: str, event: str, block: str, years: tuple, data: str, s
 
 def fit_block(dataset: str, event: str, block: str, years: list[int], graph: str = "contiguity",
               device: str | None = None, source: dict | None = None, warm: str | None = "auto", log=print):
-    """Assemble one block, fit its model and store it: the one fitting path (`pegasus-core fit`, `update`, and a reading
+    """Assemble one block, fit its model and store it: the one fitting path (`pegasus explore fit`, `update`, and a reading
     that finds no stored fit, `load_or_fit`).
     ``source`` chooses a non-default reader (`monolith.assemble`'s arguments; `monolith.model_class` picks the model);
     ``warm`` starts from the best related stored fit ("auto") or from nothing (None)."""

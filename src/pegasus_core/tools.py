@@ -1343,7 +1343,7 @@ class Session:
         """[U, T] the expected events of the whole event type (stage B1), on the evidence grid: a share's denominator.
         One fit of the all-events field (block ``*``), not a sum over every chapter's fit (twenty robust fits on
         SIH-RD, hours, and 13 GB held at once, 2026-10-07). The fit is an object of the state, made by `update` (or
-        `pegasus-core fit DATASET EVENT '*'`), never inside a reading: missing, it raises."""
+        `pegasus explore fit DATASET EVENT '*'`), never inside a reading: missing, it raises."""
         if getattr(self, "_mu_total", None) is None and self.expectations.registry.classifier != "*":
             self._prepare_grid()
             try:
@@ -1823,7 +1823,7 @@ def kinds_of(x: leads.Lead) -> set[str]:
     return kinds
 
 
-# ---- reading the stores, for the tools over MCP (`mcp_server`) -------------------------------------------
+# ---- reading the stores, for the `explore` commands -------------------------------------------
 
 
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own

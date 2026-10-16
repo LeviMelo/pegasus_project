@@ -145,7 +145,7 @@ $PY scripts/check_docs.py
 - **Homes.**
   - PegaSUS writes only under `PEGASUS_HOME` (default `pegasus_home/`, gitignored).
   - It reads pegasus_data's home through pegasus_data, never directly.
-- **Long runs detach.** The Bash tool caps background work at ten minutes, so start longer jobs with PowerShell `Start-Process` running `pegasus-core update`, `fit` or `run` (§4), logging beside them. Check that the process started, and watch it with a filter that catches failure as well as success.
+- **Long runs are registered runs.** `pegasus study run NAME --no-wait` or `pegasus run start -- COMMAND ...` starts a detached run (`jobs`, ADR-0038): it outlives the shell, is admitted by memory, and is read with `pegasus run show|log|list` and ended with `run stop`. Check that it started, and watch it with a filter that catches failure as well as success.
 
 ---
 
@@ -167,7 +167,7 @@ $PY scripts/check_docs.py
 - **Never lose a question** (author, 2026-10-06). A method is retired only when its successor answers every question it answered (retrospective and prospective, every support, every shape), measured on the grid. Until then both run, and the docs say "takes over question X", never "replaces" or "drops". A method that answers wrongly is fixed or kept with its record; a question is never withdrawn because a method for it failed.
 - **Carry the whole request.** Each instruction is done, or reported as not done with the reason.
 - **Never idle on a wait; work fronts in parallel** (author, 2026-10-03, repeated 2026-10-06). While a fit, a scan or an agent runs, advance a task that does not depend on it: other code, documentation of finished work, analysis of results at hand. Launching a job and then waiting on it is the failure this rule names.
-  - **Parallel is my work, not the heavy jobs.** Heavy computations run one at a time under the machine's job slot (`jobs`: `pegasus-core update`, `fit`, `run`), within RAM: six concurrent fits paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
+  - **Parallel is my work, not the heavy jobs.** Heavy computations run under the machine's heavy slots (`jobs`: `pegasus study run`, `store update`, `explore fit`, `run start`), each admitted by the memory the others leave it (ADR-0038): six concurrent fits had paged the machine at 50,000 pages/s and every one of them crawled (2026-10-06).
   - Launch detached, check it started, set a watcher that catches completion and failure, then turn to the next front at once.
 - **Subagents** (author, 2026-10-07): none for development; core work stays in the main session. Read-only audits and surveys only, on Sonnet, few (one to three at once), each with one bounded deliverable written to a file, no polling in the brief.
 - **Keep pegasus_data and pegasus_view working.**

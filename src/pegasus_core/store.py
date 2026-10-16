@@ -51,7 +51,7 @@ _IDENTITIES: dict[str, dict[str, list[str]]] = {}
 
 
 def _equivalent() -> frozenset[str]:
-    """The code-key values of an open adoption window (``PEGASUS_ADOPT`` names a JSON list, `pegasus-core keys`), or
+    """The code-key values of an open adoption window (``PEGASUS_ADOPT`` names a JSON list, `pegasus store keys`), or
     none."""
     if not _EQUIVALENT:
         path = os.environ.get("PEGASUS_ADOPT")
@@ -281,7 +281,7 @@ def migrate(mapping: dict[str, str], dry_run: bool = True, log=print) -> dict[st
 
 def unreachable(window: frozenset[str] | set[str], remove: bool = False, log=print) -> dict[str, list[int]]:
     """The entries no code computes a key for any more: a code value of the key outside ``window`` (the values of
-    the code running and of an adoption window, `pegasus-core keys window`), so neither a read nor an adoption reaches
+    the code running and of an adoption window, `pegasus store keys window`), so neither a read nor an adoption reaches
     them. Removed with ``remove``. An entry whose key holds no code value is never one (its key does not say which code
     made it). Counts and bytes per kind: under the broad rule nearly every edit re-keyed nearly every artefact, and
     182,828 entries (33.9 GB) had piled up so (2026-10-14)."""

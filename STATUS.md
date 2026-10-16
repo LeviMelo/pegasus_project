@@ -2,7 +2,7 @@
 
 **2026-10-12.** Branch `scope-v2` (454 commits since 2026-09-30; 127 since 2026-10-10), `pegasus_core` 44 modules and 27,607 lines. This file is the map of the codebase as it is: what each module does, what it keeps on disk, how it is driven, what works and what does not. The theory and the plan are in `ARCHITECTURE.md`; the ordered work is in `BACKLOG.md`; decisions, measurements and open questions are in their own files. This file is rewritten, never appended, and holds no plan.
 
-**Where the work stands (2026-10-13).** The study is driven by its declaration (`where`, `period`, `topic.only`/`exclude`, `related` as a count or named codes, `contexts`, `relations`, `download`, ARCHITECTURE §3.3), priced per field and per lane by `pegasus-core scope`. `study.body` checks every folder for the analytic body and for what each row must carry not to mislead (ARCHITECTURE §3.4): case definitions, live-birth denominators, the allocated share, provisional years, O/E against each finding's own tier, race as standardised ratios, prospective series and hypotheses (in months where written in months), a codebook. Two reviews on 2026-10-13 found and fixed wrong numbers (every rare code set had been read collapsed; SIA's residence series a recording change; B1 drawn as expected) and pegasus_data's capture population (evaluation 2026-10-13-review-of-the-slices). The five slices are the gate (`scripts/prelaunch.py --slices`); the national reference study (`studies/toxoplasmosis.yml`: the held lake, eight sources, H32, fourteen contexts, exhaustive otherwise) runs after them within the hour. Since 2026-10-14 the folder is a paper's results in a paper's order (report.html and METHODS.md: descriptive, analytic, data quality, then the exploratory signals labelled hypothesis-generating): one estimates.parquet, empirical-Bayes smoothed municipal ratios, case fatality, an ecological regression of the municipalities' events on the contexts, declared relation hypotheses (`component: relation`). Since 2026-10-15 a study starts from a question: `pegasus-core search` (ICD-10 codes by label, the SINAN agravos carrying them, contexts, typed roles) and `new` (a validated, commented declaration). A topic may be a record condition on roles (`topic.seeds.records`: low birth weight, infant deaths per live birth), carried in the field's event name so that every reader and key holds it. Codes are read anywhere on a record as well (the multiple-cause field), and mortality after admission is read through pegasus_data's cohort link (30 days, one year). The municipalities' smoothed ratios carry their spatial autocorrelation (global Moran, LISA clusters at q). pegasus_data's SIH lake was rebuilt nationally (2010-2025) after its catalog was found to list 448 deleted partitions; a year is priced free only when the lake holds it whole. On 2026-10-15 the author set aside the toxoplasmosis win condition as the finish line; the system is judged by its use for academic studies: a topic of codes, an agravo or a record condition yields a folder with every part of the analytic body (checked by `study.body`), state studies in minutes to an hour, a national standard study in about twenty minutes (infant mortality, Brazil 2014-2023: 12.4 per 1,000 live births, 21 of 21 parts). Nine studies of seven unrelated topics in four states and nationally hold every part (evaluation 2026-10-15-breadth-and-conditions). Open: the exhaustive national toxoplasmosis study (its estimate, 47 h, extrapolates RS throughput; no national question pass is measured), SNGPC's month-keyed contexts awaiting a re-land in pegasus_data. Open: capture's total under imperfect linkage (OPEN_QUESTIONS 18), the persons' years (`PERSON_YEARS`), the screen's universe (20). `tests/fast` (59). Sections 1–7 below are the map as read on 2026-10-10 and are partly stale on module sizes; section 8 is current.
+**Where the work stands (2026-10-13).** The study is driven by its declaration (`where`, `period`, `topic.only`/`exclude`, `related` as a count or named codes, `contexts`, `relations`, `download`, ARCHITECTURE §3.3), priced per field and per lane by `pegasus study scope`. `study.body` checks every folder for the analytic body and for what each row must carry not to mislead (ARCHITECTURE §3.4): case definitions, live-birth denominators, the allocated share, provisional years, O/E against each finding's own tier, race as standardised ratios, prospective series and hypotheses (in months where written in months), a codebook. Two reviews on 2026-10-13 found and fixed wrong numbers (every rare code set had been read collapsed; SIA's residence series a recording change; B1 drawn as expected) and pegasus_data's capture population (evaluation 2026-10-13-review-of-the-slices). The five slices are the gate (`scripts/prelaunch.py --slices`); the national reference study (`studies/toxoplasmosis.yml`: the held lake, eight sources, H32, fourteen contexts, exhaustive otherwise) runs after them within the hour. Since 2026-10-14 the folder is a paper's results in a paper's order (report.html and METHODS.md: descriptive, analytic, data quality, then the exploratory signals labelled hypothesis-generating): one estimates.parquet, empirical-Bayes smoothed municipal ratios, case fatality, an ecological regression of the municipalities' events on the contexts, declared relation hypotheses (`component: relation`). Since 2026-10-15 a study starts from a question: `pegasus search` (ICD-10 codes by label, the SINAN agravos carrying them, contexts, typed roles) and `new` (a validated, commented declaration). A topic may be a record condition on roles (`topic.seeds.records`: low birth weight, infant deaths per live birth), carried in the field's event name so that every reader and key holds it. Codes are read anywhere on a record as well (the multiple-cause field), and mortality after admission is read through pegasus_data's cohort link (30 days, one year). The municipalities' smoothed ratios carry their spatial autocorrelation (global Moran, LISA clusters at q). pegasus_data's SIH lake was rebuilt nationally (2010-2025) after its catalog was found to list 448 deleted partitions; a year is priced free only when the lake holds it whole. On 2026-10-15 the author set aside the toxoplasmosis win condition as the finish line; the system is judged by its use for academic studies: a topic of codes, an agravo or a record condition yields a folder with every part of the analytic body (checked by `study.body`), state studies in minutes to an hour, a national standard study in about twenty minutes (infant mortality, Brazil 2014-2023: 12.4 per 1,000 live births, 21 of 21 parts). Nine studies of seven unrelated topics in four states and nationally hold every part (evaluation 2026-10-15-breadth-and-conditions). Open: the exhaustive national toxoplasmosis study (its estimate, 47 h, extrapolates RS throughput; no national question pass is measured), SNGPC's month-keyed contexts awaiting a re-land in pegasus_data. Open: capture's total under imperfect linkage (OPEN_QUESTIONS 18), the persons' years (`PERSON_YEARS`), the screen's universe (20). `tests/fast` (59). Sections 1–7 below are the map as read on 2026-10-10 and are partly stale on module sizes; section 8 is current.
 
 Sources: the code (read 2026-10-10 and, for the study path, 2026-10-12), `scripts/codehealth.py`, `scripts/check_docs.py`, the stores in `pegasus_home/`, the live capability assessment `data/assessment/2026-10-10-capability-assessment.md`, and the study runs of 2026-10-11/12 (`EVALUATION.md`).
 
@@ -43,13 +43,13 @@ leads.Register (Parquet parts) -- Lead(kind, estimand, tier, fields, locus, effe
    |                                       corroborate (other systems)  ->  verdicts, replication tier
    +--> stage D:  relations.relation_map (N1 innovations, the one relation estimator over graph bands and courses, circular-shift null)  /  dependency (between-place map, scans.maps, scans.pairs)
    +--> persons:  scans.cohort on gateway.persons / linked_counts
-   +--> use:  report.report / report.dossier / report.record_verdict ; tools.find_leads / explain_lead ; mcp_server ; cli
+   +--> use:  report.report / report.dossier / report.record_verdict ; tools.find_leads / explain_lead ; cli ; cli
 harness: planted worlds, null worlds, known positives -> store `harness` -> questions.method_records -> every lead's method record
 update:  the orchestrator over all of the above for a plan (plans/*.yml), under jobs (one heavy-job slot, thread count, GPU slot)
 ```
 
 Layering (imports go downward; `scripts/codehealth.py` finds 0 import cycles, function-level imports counted):
-`cli`, `mcp_server` > `update`, `report`, `dependency`, `harness` > `tools` > {`replication`, `corroborate`, `questions`, `departures`, `relations`, `marks`, `multiscale`, `surveillance`, `scans/*`} > `surprise` > {`monolith`, `solver`, `facility`, `fields`} > {`gateway`, `graphs`, `structures`, `jobs`} > `store`, `config`. `control` and `leads` are used from every layer above `gateway`.
+`cli` > `workspace` > `update`, `report`, `dependency`, `harness` > `tools` > {`replication`, `corroborate`, `questions`, `departures`, `relations`, `marks`, `multiscale`, `surveillance`, `scans/*`} > `surprise` > {`monolith`, `solver`, `facility`, `fields`} > {`gateway`, `graphs`, `structures`, `jobs`} > `store`, `config`. `control` and `leads` are used from every layer above `gateway`.
 
 ---
 
@@ -65,7 +65,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `store` | 145 | content-addressed artefacts `pegasus_home/<kind>/<sha256[:20] of key>/` = `table.parquet` (zstd) or `arrays.npz` + `manifest.json` (key, code and data versions, written time); `gc` evicts caches | `address`, `put_table`, `get_table`, `put_arrays`, `get_arrays`, `manifest`, `manifests`, `gc`, `CACHE_KINDS` (`gateway`, `blockdata`) | config |
 | `structures` | 120 | precision structures of effects (iid, RW, ICAR, kNN) | `Shape`, `iid`, `random_walk`, `icar`, `knn_graph`, `centre` | none |
 | `graphs` | 102 | proximity graphs over places through the gateway, stored as arrays (`graphs`) | `edges`, `graph`, `DEFAULT` ("contiguity") | config, facility, gateway, store, structures |
-| `jobs` | 116 | the machine: one heavy-job slot (OS file lock, `PEGASUS_HEAVY_SLOTS`), thread count, GPU slot, `run` of command sequences, `parallel_map` | `default_threads`, `slot`, `threads`, `run`, `parallel_map` | gateway |
+| `jobs` | 579 | **the machine and the runs** (ADR-0038): heavy slots admitted by memory (`slot`, `room_gb`, `expect`, `holders`), thread counts, the GPU slot; the run register (`submit` a detached process, `execute`, `get`, `runs`, `stop`, `wait`, `log_tail`), typed events (`emit`, `events`), `machine` | `slot`, `room_gb`, `submit`, `execute`, `stop`, `emit`, `events`, `machine`, `run`, `threads` | config, gateway, study |
 | `control` | 427 | **error control**: the append-only ledger (Parquet parts `pending` then `result`), BH/BY (weighted), Simes, Bogomolov, tree BH, LOND, replication helpers (halves, `replicates`), the confirmation reserve | `Hypothesis`, `Ledger` (`register`, `complete`, `table`, `compact`, `family`), `bh`, `optimal_weights`, `adjusted`, `simes`, `bogomolov`, `tree_bh`, `LOND`, `temporal_halves`, `spatial_halves`, `replicates`, `event_sides`, `ReservedPeriod`, `Reserve`, `check_reserved`, `replication_tier`, `KINDS` | config |
 | `mc` | 76 | **sequential Monte Carlo**: a null test's replicate worlds drawn in batches and stopped once the exceedances decide it (Besag & Clifford 1991), shared by the scans, propagation and corroboration | `Sequential`, `Draws`, `sequential_p` | numpy |
 
@@ -124,8 +124,8 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `capture` | 100 | **capture fields** (ARCHITECTURE §5.2, §6.4): `multiple_systems` fits every log-linear model with main effects and pairwise dependences over k linked systems' inclusion patterns, averages N̂ by Akaike weight (Buckland's unconditional variance), and gives each system's completeness | `multiple_systems`, `Estimate` | statsmodels |
 | `study` | 965 | **studies (ARCHITECTURE §3).** `load` validates a declaration (with `ratios:`); `resolve` gives its scope: SINAN agravos named, every event type whose primary ICD-10 classifier holds the seeds' nodes, subcategory seeds as code sets, declared ratios, and (scope v2) the concept index's other ICD classifiers, SINAN agravos by `ID_AGRAVO` and label-named SIGTAP procedures as code sets; each source's years, download cost against the depth's budget, cheapest first, and its records, a source with none dropped; the depth's readers (`DEPTH_READERS`). `run` drives `update` per item and writes the folder: `findings.parquet`, `descriptive.parquet` (counts and rates with exact intervals per exposure; intervals as the records' median and p90; shares with Clopper–Pearson), `groups.parquet` (each composition and race, observed and expected), `hypotheses.parquet`, expectation tables viewed from `study.duckdb`, series and map figures, `report.html`; `export` materialises a folder | `Declaration`, `load`, `resolve`, `Scope`, `Item`, `run`, `export`, `DOWNLOAD_BUDGET_GB`, `DEPTH_READERS` | config, fields, gateway, leads, store, tools, update |
 | `report` | 265 | stage F: the register as a Markdown report with named places, an HTML dossier (series figures with matplotlib, codes table, replication rows, verdict slot), a person's verdict written back to the register (a confirmed lead becomes a documented event; an `artefact` verdict annotates, never removes) | `report`, `write`, `dossier`, `record_verdict` | config, gateway, graphs, leads, replication, tools |
-| `cli` | 532 | `pegasus-core` (typer): 32 commands (section 6.1); heavy ones run under `jobs.slot` | `app`, `main` | control, dependency, fields, gateway, harness, jobs, leads, mcp_server, monolith, questions, replication, report, store, tools, update |
-| `mcp_server` | 362 | PegaSUS over MCP (stdio, optional extra `mcp`): 9 tools and 2 resource families (section 6.2) | `list_blocks`, `list_fields`, `get_expectation`, `search_leads`, `explain_lead`, `place_story`, `method_status`, `ledger_status`, `confirm_claim`, `architecture_map`, `architecture_section`, `evaluation_index`, `evaluation_entry`, `main` | config, control, graphs, leads, replication, store, tools |
+| `cli` | 1028 | `pegasus` (typer), nouns and verbs with `--json` (section 6.1): `study`, `run`, `data`, `store`, `explore`, `machine`, `context`, `ui` | `app`, `main` | control, dependency, fields, gateway, harness, jobs, leads, monolith, questions, replication, report, store, study, tools, update, workspace |
+| `workspace` | 242 | **the read models the command line and the window share** (ADR-0038): `studies`, `study_detail`, `scope`, `start_study`, `body` (cached in the folder's `body.json`), `context` (the bundle for an outside assistant) | `studies`, `study_detail`, `scope`, `start_study`, `context` | config, jobs, study |
 
 `__init__` (12 lines) only carries the package docstring.
 
@@ -148,7 +148,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | `PEGASUS_THREADS`, `PEGASUS_HEAVY_SLOTS`, `PEGASUS_SLOT_HELD` | `jobs` | thread count; number of heavy-job slots (1); set in a child of a job that holds the slot |
 | `PEGASUS_HEAVY_MIN_FREE_GB`, `PEGASUS_HEAVY_WAIT`, `PEGASUS_MIN_FREE_GB`, `PEGASUS_ADMISSION_WAIT`, `PEGASUS_DECODE_SLOTS`, `PEGASUS_DECODE_SLOT_DIR` | `gateway`, `jobs` | pegasus_data's decode admission, set around heavy reads (`machine_slot`) |
 | `PEGASUS_COMPUTE_LINKS` | `gateway` | `1`: a link run missing from the store is computed instead of raising `LinkNotStored` |
-| `PEGASUS_MCP_LEDGER` | `mcp_server` | ledger directory of the MCP server |
+| `PEGASUS_WORKSPACE` | `config.workspace` | the studies and runs directory (default the repository); its `workspace.yml` `env` sets the others for every command and run |
 | `PEGASUS_LAML_TOL`, `PEGASUS_OUTER_TOL_FRAC`, `PEGASUS_SCORING_PROBES` | `monolith` | solver tolerances and probes (benchmarks) |
 
 ### 4.2 The store, kind by kind (`pegasus_home/<kind>/`)
@@ -172,9 +172,9 @@ Entries are `manifest.json` + `table.parquet` or `arrays.npz`; the address hashe
 | `harness` | 122 dirs | `harness.record`, `harness.grid` | `questions.method_records`, `tools.method_status` | grid / gate_lenses / gate / gate_eb / event_record / depmap results |
 | `tools` | 6 | `tools` | `tools` | expected totals, evidence grids |
 | `update` | 24 | `update._mark` | `update._done` | step-completion markers (questions, fit, triage, lake, prospective, disparity) |
-| `ledger/` | 101 parts | `control.Ledger` | `control`, `tools`, `mcp_server` | the main ledger: Parquet part files (`pending`, `result` rows); compacted at the end of `update` |
+| `ledger/` | 101 parts | `control.Ledger` | `control`, `tools`, `cli` | the main ledger: Parquet part files (`pending`, `result` rows); compacted at the end of `update` |
 | `ledger_A/`, `ledger_T<last>[<reader tag>]/` | 10,527 and 2,248 parts | `Session.side("A")`, `Session.train(last)` | same | selecting sessions' own ledgers (side A; training years); **not compacted** |
-| `leads/`, `leads_A/`, `leads_T<last>/` | 126, 2, 6 parts | `leads.Register` | `leads`, `report`, `tools`, `mcp_server` | the register; a lead's later states are new rows of the same id |
+| `leads/`, `leads_A/`, `leads_T<last>/` | 126, 2, 6 parts | `leads.Register` | `leads`, `report`, `tools`, `cli` | the register; a lead's later states are new rows of the same id |
 | `triage_block/` | 41 | nothing in `src/` (the writer was removed) | nothing | legacy |
 | `_archive/`, `monolith_centring1_2026-10-06/`, `readout_sim_agg.parquet`, `vital_account_2022.npz`, `cohort_infant_2021*.json` | | superseded registers and `data/` scripts | nothing | legacy / script output; unreferenced by the package |
 
@@ -238,46 +238,28 @@ Counts of a classifier node (ICD-10 chapters/blocks/3-character categories, SIGT
 | `measure_bp_level.py`, `bp_level_table.py` | BP's level by rolling origins and its pooled table |
 | `measure_dispersion.py`, `measure_exposure.py` | dispersion by region; POPSVS vs population account |
 | `declare_positives.py` (+ `atlas_uf.json`) | derives the documented loci of three declared lens positives from the Atlas da Violencia |
-| `mcp_demo.py` | exercises the MCP server with a real client |
 
 ---
 
 ## 6. Interfaces
 
-### 6.1 CLI (`python -m pegasus_core.cli`, entry `pegasus-core`; 32 commands)
+### 6.1 The `pegasus` command (`python -m pegasus_core.cli`; ADR-0038)
 
-| command | what it does |
+`--json` before the noun prints JSON. The window (`../pegasus_app`) calls the same functions.
+
+| noun | verbs |
 |---|---|
-| `fit DATASET EVENT BLOCKS... [--years --graph --device --source --cold]` | fit blocks (and their robust refit) and store them, under the job slot |
-| `update PLAN [--force]` | bring fits, questions, relations, triage, report up to a plan (hours; takes the job slot and the GPU slot) |
-| `links PLAN` | compute the stored link runs a plan reads (`update`'s first step alone) |
-| `run [--gpu] [--log f]... -- cmd :: cmd` | run heavy commands one after another under the job slot |
-| `coverage [DATASET]` | every column pegasus_data declares and what reads it, or why nothing does |
-| `fields DATASET EVENT BLOCK` | the admissible fields of a fitted block |
-| `surprise DATASET EVENT NODE [--tier]` | a field's calibration and most surprising cells |
-| `scan DATASET EVENT NODE LENS` | one v0 lens on one field (ledgered) |
-| `ask DATASET EVENT QUESTION NODE` | one question of one field through every method |
-| `survey DATASET EVENT` | the scheduled pass: every field x every question |
-| `triage DATASET EVENT [--stale]` | classify open leads and replicate them |
-| `relations DATASET:EVENT:BLOCK,...` | stage D across systems |
-| `relation DATASET EVENT NODE EXPOSURE...` | distributed-lag effect (rate ratio) of an exposure on a field |
-| `compare X Y [--lags --grain --window --macro]`, `joint FIELDS...` | the relation estimator on two fields (support, lag, partial); where several fields depart together (locus) |
-| `map [--years --negatives --plan]` | the dependency map of a plan's systems and contexts |
-| `cohort DATASET EVENT ROLE YEAR --outcome D:ROLE...` | cohort scan on linked persons |
-| `disparity DATASET EVENT NODE` | race disparities of a field by indirect standardisation |
-| `alarms DATASET EVENT NODE AS_OF` | place-weeks above the alarm baseline (see section 8: broken) |
-| `grid DATASET EVENT NODE` | the planted-signal grid on one field (refitted worlds) |
-| `events` | every method of every question against the documented positives (over 10 minutes) |
-| `leads [--limit --kind]`, `stories`, `ledger [--family]` | read the register, the stories, the ledger |
-| `report [--out --limit]`, `dossier [--out --limit]` | Markdown report with named places; HTML dossier |
-| `verdict LEAD_ID confirmed\|artefact\|unknown [--note]` | record a person's verdict on a lead |
-| `split-fit`, `split-survey`, `temporal-survey DATASET EVENT LAST` | replication machinery: sides A/E; selection on years up to LAST then test on later years |
-| `mcp [--allow-confirm]` | serve the tools over MCP on stdio |
-| `gc [--budget-gb]` | evict least-recently-read cache entries (`gateway`, `blockdata`) |
+| `study` | `list`, `show NAME`, `search QUERY`, `new NAME`, `scope NAME`, `run NAME [--products-only] [--no-wait]`, `audit FOLDER`, `export FOLDER` |
+| `run` | `start [--gpu] [--log f]... -- cmd :: cmd`, `list`, `show ID`, `log ID [-f]`, `events ID`, `stop ID`, `wait ID` |
+| `data` | `coverage [DATASET]` |
+| `store` | `update PLAN [--force]`, `links PLAN`, `keys ACTION PATH`, `gc` |
+| `explore` | `fit`, `fields`, `surprise`, `scan`, `survey`, `ask`, `triage`, `relations`, `relation`, `compare`, `joint`, `map`, `cohort`, `disparity`, `alarms` (broken, section 8), `grid`, `events`, `leads`, `lead ID`, `stories`, `ledger`, `report`, `dossier`, `verdict`, `split-fit`, `split-survey`, `temporal-survey`, `blocks`, `methods`, `confirm` (spends the reserve only with `--spend`) |
+| (root) | `machine`, `context [STUDY] [--out]`, `ui [--serve]` |
 
-### 6.2 MCP (`python -m pegasus_core.cli mcp`, or `pegasus-mcp`)
+### 6.2 MCP
 
-Nine tools: `list_blocks`, `list_fields`, `get_expectation`, `search_leads`, `explain_lead`, `place_story`, `method_status`, `ledger_status`, `confirm_claim` (a dry run unless the server has `--allow-confirm` and the call has `spend=true` and a named caller). Resources: `pegasus://architecture` and `pegasus://architecture/{number}` (sections of `ARCHITECTURE.md`, parsed from headings `## N. Title` / `### N.M Title`), `pegasus://evaluation` and `pegasus://evaluation/{slug}` (`EVALUATION.md` and its entries). Session tools default to SIM.DO / death / 2010-2023.
+Deleted (ADR-0038). Its nine tools are `explore` commands: `blocks`, `fields`, `surprise`, `leads`, `lead`, `stories`,
+`methods`, `ledger`, `confirm`.
 
 ### 6.3 Python
 
@@ -317,7 +299,7 @@ keys alone adopted on request); the gateway's readers on one template with one c
 (shown equal on 33 tables of real reads; facility_cube, the composition batch's frame and splitting gateway.py left);
 the study folder's ten estimate tables as one `estimates.parquet` (a measure vocabulary, every interval naming its
 method, every rate its denominator and scale, every period explicit; views `rates` and `municipalities`; every producer
-emits through `_estimate_row`, and the trends, ratios, figures, report and methods read the estimates; `pegasus-core study
+emits through `_estimate_row`, and the trends, ratios, figures, report and methods read the estimates; `pegasus study run
 --products-only` rewrites the products from the store); one declaration of what a reader's
 cells are (`questions.basis`/`not_read`: a method's kinds and bases, a question's quality flag), which the survey, the
 harness and the share lens apply alike; studies of SINASC (microcephaly, Pernambuco) and SIA (dialysis, Alagoas)
@@ -373,7 +355,7 @@ Measured 2026-10-10 in the capability assessment (machine shared with the overni
 - **The scope left out sources that hold the topic.** The first deep launch dropped CIHA, whose newest year is preliminary, by probing that year alone; and SIM-DOFET's P37.1 (the Santa Maria hypothesis's own source), because records were counted by sex-age cell and a foetal death has no age. Now every item is counted over the years the lake holds (free), the probe reads only an item with none, on its largest published year, and records are counted whatever their cell: CIHA B58 1,229, P37.1 324; SIM-DOFET P37.1 247.
 - **Administrative facts read as fields.** Beyond groups, SIH read 19 billing values (`VAL_*`, `US_TOT`) as measures and processing months as intervals. `fields.declared` now gives every column whose declared `fact_domain` is administrative a reason, so no reader makes a field of it, whatever its kind (pegasus_data is extending the domains to measures and dates). A study's runtime is the declaration's too: `questions` and `readers` restrict what is asked and which field kinds are read, and the estimate scales with them.
 - **Administrative columns read as groups of people.** Group dimensions were every categorical role, so SIH's billing, financing and management marks (26 of its 35) gave findings like "group heterogeneity in COBRANCA". pegasus_data now declares each categorical column's `fact_domain` (person, clinical, process, administrative, with evidence; 5,384 of 5,411 placed), and `tools.group_columns` leaves the administrative ones out: SIH 35 → 13, TOXG 8 → 7, SIM 34 → 32.
-- **A study could not be cut down.** `topic.include`/`exclude` were accepted and never applied, `where` refuses all but BR, and every depth's download, time and chapter fits were fixed. Now `where` (states, municipalities), `topic.only` and `exclude`, and each depth's preset choices (`readers`, `related`, `relations`, `chapters`, `persons`, `replicate`, `download`, `draws`, `nulls`: `study.PRESETS`, each overridable) set what a study ingests and runs, `pegasus-core scope` prices each choice (`minutes_by_choice`), and a source whose latest year holds none of the topic's records is left out before its other years are fetched (`_probe`). Related codes are found in every read dataset whose records carry several codes, not only in items fitted with mention readers. A code-set survey had found none. The deep quick study (`studies/toxoplasmosis_quick.yml`: 4 sources, 2015–2023, 21 code-set items) resolves in 50 s, estimate 42 min; the full deep scope took 4 min to resolve, at 76 min with chapter fits.
+- **A study could not be cut down.** `topic.include`/`exclude` were accepted and never applied, `where` refuses all but BR, and every depth's download, time and chapter fits were fixed. Now `where` (states, municipalities), `topic.only` and `exclude`, and each depth's preset choices (`readers`, `related`, `relations`, `chapters`, `persons`, `replicate`, `download`, `draws`, `nulls`: `study.PRESETS`, each overridable) set what a study ingests and runs, `pegasus study scope` prices each choice (`minutes_by_choice`), and a source whose latest year holds none of the topic's records is left out before its other years are fetched (`_probe`). Related codes are found in every read dataset whose records carry several codes, not only in items fitted with mention readers. A code-set survey had found none. The deep quick study (`studies/toxoplasmosis_quick.yml`: 4 sources, 2015–2023, 21 code-set items) resolves in 50 s, estimate 42 min; the full deep scope took 4 min to resolve, at 76 min with chapter fits.
 - **SIGTAP decides which datasets can hold a procedure.** The scope keeps only the procedures a dataset's column can record, using SIGTAP's registration instruments (pegasus_data `can_record`). The serology procedures (BPA and AIH secondary) no longer pull in APAC datasets; the lakes hold 0 of them in 310 M APAC and AIH rows.
 - **Items admitted uncounted failed at their fit.** Pricing counts records only for years in the lake (it downloads nothing), so survey10 fitted SIA-AN's serology item, which has 0 such records in 2010–2014, and it failed. The items are now counted once the store is prepared (`study._count_prepared`, `resolve`'s rule) and excluded with why. The estimate stays the one made before running.
 - **Deep-depth paths reviewed before their first run (2026-10-11), eight defects fixed:**
@@ -443,5 +425,4 @@ Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on dema
 ## 10. Mechanical dependencies of the documents on the code
 
 - `scripts/check_docs.py` fails when: an ADR referenced does not exist, ADR numbers are not contiguous or not in `DECISIONS.md`, an evaluation entry is not in `EVALUATION.md` or a `docs/` link does not resolve, an `OQ-N` is not a row of `OPEN_QUESTIONS.md`, a `scripts/*.py` named in a document does not exist, a module under `src/pegasus_core` is not named (in backticks) in this file, or `CLAUDE.md` and `AGENTS.md` differ.
-- `mcp_server` reads `ARCHITECTURE.md` section headings (`## N. Title`, `### N.M Title`) and `EVALUATION.md`; the architecture resources return nothing useful if the headings change shape.
 - `config.code_key` hashes function source, so editing a function re-keys exactly the stored artefacts that call it; docstrings and comments are excluded from the hash.

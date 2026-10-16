@@ -216,7 +216,7 @@ def dossier(path: str | Path, limit: int = 30, kinds: tuple[str, ...] = ("answer
              ".k{color:#666;white-space:nowrap}</style>",
              f"<h1>PegaSUS: the first {len(leads)} leads by rank</h1>",
              "<p>Statistical leads (stages C–D), with stage E's reading. A person's verdict is recorded with "
-             "<code>pegasus-core verdict LEAD_ID confirmed|artefact|unknown --note …</code>.</p>"]
+             "<code>pegasus explore verdict LEAD_ID confirmed|artefact|unknown --note …</code>.</p>"]
     for ld in leads:
         tri = ld.robustness.get("triage", {})
         corr = ld.replications.get("corroboration", {})

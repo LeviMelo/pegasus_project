@@ -12,3 +12,4 @@ studies/*/
 # the gate's slice declarations are tracked, their study folders are not
 !studies/slices/
 studies/slices/*/
+runs/

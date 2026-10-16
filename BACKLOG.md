@@ -29,7 +29,7 @@ where: BR
 depth: exhaustive
 ```
 
-**Accepted when** `pegasus-core study toxoplasmosis.yml` delivers a study folder in which:
+**Accepted when** `pegasus study run toxoplasmosis` delivers a study folder in which:
 1. **Scope:** `scope.yml` lists, each with its reason, at least:
    - SINAN TOXG and TOXC;
    - SIH admissions with the codes in any diagnosis;
@@ -94,7 +94,7 @@ The interface and the product first, over today's machinery, so every later phas
 | 1.6 | **Descriptive tables**: counts, crude and age-standardised rates with intervals by place, period, group (pegasus_data's `age_standardised_rates` and populations) | core | toxoplasmosis' descriptive table matches a direct recount from the lake |
 | 1.7 | **Figures**: maps of rates and findings, series against expectation with intervals, by field | core | figures written for every field with findings **Maps built (`study._map_figure`): the rate by state beside each municipality's standardised departure from B1, the findings' places outlined (pegasus_data `mesh`); with the series, two figures per primary field.** |
 | 1.8 | **The report**: `report.html` from the folder (§3.5), stories first, names and units, capped lists, limitations assembled from declarations; replaces `report`/`dossier` | core | an epidemiologist can read the survey-depth toxoplasmosis report without help; it opens in a second **Stories and declared limitations built: findings joined by a shared municipality and overlapping years into stories (the summary's unit, `story` in findings.parquet); methods and limitations assembled from the sources' `source_notes` and `exposure` (definition, preliminary years by the finality rule, known errors, denominators with evidence). Readability to be judged on the run.** |
-| 1.9 | **Export**: `pegasus-core export <study> --to <dir>` (whole folder by default; `--tables`, `--format`) | core | the exported folder is self-contained and loads elsewhere |
+| 1.9 | **Export**: `pegasus study export <study> --to <dir>` (whole folder by default; `--tables`, `--format`) | core | the exported folder is self-contained and loads elsewhere |
 | 1.10 | **Milestone: survey-depth toxoplasmosis study** | core | acceptance items 1 (primary roles), 3 (built components), 7, 8 at survey depth; evaluation entry |
 
 ## Phase 2: fields, every kind the sources support

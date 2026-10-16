@@ -1,19 +1,49 @@
-"""The ``pegasus-core`` command (ARCHITECTURE §9.3): a thin layer over `tools`."""
+"""The ``pegasus`` command (ARCHITECTURE §10.6; ADR-0038): nouns and verbs over the engine, each the peer of an
+action in the desktop window (pegasus_app), which calls the same functions (`workspace`, `jobs`). ``--json`` before
+the noun makes a command print JSON instead of tables, for scripts and for an assistant the person consults."""
 
 from __future__ import annotations
 
 import json
+import sys
+import time
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(help="PegaSUS: epidemiological studies of Brazil's health data from one declaration. "
-                       "A study: search -> new -> scope -> study -> audit -> export. The other commands are the "
-                       "model's own tools.", no_args_is_help=True)
-STUDIES = "Studies"
+app = typer.Typer(name="pegasus", help="PegaSUS: epidemiological studies of Brazil's health data, each from one "
+                  "declaration. A study: `study search` -> `study new` -> `study scope` -> `study run` -> `study "
+                  "audit`; `run` follows and stops runs; `data` shows what DATASUS holds; `explore` is the "
+                  "hypothesis-generating machinery; `context` prints what an outside assistant needs.",
+                  no_args_is_help=True)
+study_app = typer.Typer(help="Studies: design, price, run, check and export them.", no_args_is_help=True)
+run_app = typer.Typer(help="Runs: every heavy job, detached, admitted by memory; follow, list and stop them.",
+                      no_args_is_help=True)
+data_app = typer.Typer(help="The data: datasets, their columns and what reads them.", no_args_is_help=True)
+store_app = typer.Typer(help="The engine's store: plans, link runs, keys and caches.", no_args_is_help=True)
+explore_app = typer.Typer(help="Exploration (hypothesis-generating): fits, scans, leads, stories, the ledger.",
+                          no_args_is_help=True)
+app.add_typer(study_app, name="study")
+app.add_typer(run_app, name="run")
+app.add_typer(data_app, name="data")
+app.add_typer(store_app, name="store")
+app.add_typer(explore_app, name="explore")
 console = Console()
+STATE = {"json": False}
+
+
+@app.callback()
+def _root(json_: bool = typer.Option(False, "--json", help="print JSON instead of tables")) -> None:
+    STATE["json"] = json_
+
+
+def _emit_json(obj) -> bool:
+    """Print ``obj`` as JSON when ``--json`` was asked; whether it was."""
+    if STATE["json"]:
+        sys.stdout.write(json.dumps(obj, indent=1, default=str, ensure_ascii=False) + "\n")
+    return STATE["json"]
 
 Years = typer.Option("2010-2023", help="first-last year of the fitted monolith")
 
@@ -29,7 +59,7 @@ def _session(dataset: str, event: str, years: str, graph: str, grain: str = "yea
     return tools.Session(dataset, event, _years(years), graph, source={"grain": grain} if grain != "year" else {})
 
 
-@app.command()
+@explore_app.command("fit")
 def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
         device: str | None = None,
         source: str = typer.Option(None, help="a non-default reader as JSON, e.g. a declared field's "
@@ -58,7 +88,7 @@ def fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: 
     raise typer.Exit(1 if failed else 0)
 
 
-@app.command()
+@data_app.command("coverage")
 def coverage(dataset: str = typer.Argument(None, help="a dataset; none: every dataset, summarised"),
              event: str = typer.Argument(None, help="its event type (default: the first declared)"),
              gaps: bool = typer.Option(False, help="only the columns read by nothing")) -> None:
@@ -96,7 +126,7 @@ def coverage(dataset: str = typer.Argument(None, help="a dataset; none: every da
                   f"{sum(not r['read_by'] and not r['reason'] for r in rows)} with neither")
 
 
-@app.command("links")
+@store_app.command("links")
 def plan_links(plan: str = typer.Argument(..., help="a plan file (YAML)")) -> None:
     """Compute the stored link runs a plan reads for its years (`update`'s first step, alone), under the job slot."""
     from . import jobs, update
@@ -108,7 +138,7 @@ def plan_links(plan: str = typer.Argument(..., help="a plan file (YAML)")) -> No
         console.print(f"{k}: {v}")
 
 
-@app.command("update")
+@store_app.command("update")
 def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years, systems, relations, triage, report"),
                  force: bool = typer.Option(False, help="redo every reading, current or not")) -> None:
     """Bring the persistent state (fits, register, report) up to a plan, redoing only what changed (`update`), under
@@ -125,12 +155,14 @@ def update_state(plan: str = typer.Argument(..., help="a plan file (YAML): years
     console.print_json(json.dumps(out, default=str))
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@run_app.command("start", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def run(ctx: typer.Context, gpu: bool = typer.Option(False, help="also take the GPU slot"),
+        wait: bool = typer.Option(False, help="follow the run here until it ends"),
         threads: int = typer.Option(0, help="threads for the commands (default: half the logical cores)"),
         log: list[str] = typer.Option(None, help="one log per command, in order (default: this output)")) -> None:
-    """Run heavy commands under the machine's job slot, one after another: `pegasus-core run [--gpu] [--log a.log
-    --log b.log] -- python scripts/x.py ARGS :: python scripts/y.py ARGS` (`jobs.run`; "python" is this interpreter)."""
+    """Run heavy commands as one run, one after another under the machine's job slot: `pegasus run start [--gpu] [--log
+    a.log --log b.log] -- python scripts/x.py ARGS :: python scripts/y.py ARGS` ("python" is this interpreter). The run
+    is detached; `--wait` follows it here."""
     from . import jobs
 
     args = [a for a in ctx.args if a != "--"]
@@ -144,10 +176,12 @@ def run(ctx: typer.Context, gpu: bool = typer.Option(False, help="also take the 
     commands += [cur] if cur else []
     if log and len(log) != len(commands):
         raise typer.BadParameter(f"{len(log)} logs for {len(commands)} commands")
-    raise typer.Exit(jobs.run(commands, logs=log, gpu=gpu, n_threads=threads or None))
+    r = jobs.submit("commands", " ; ".join(" ".join(c) for c in commands)[:80], commands=commands,
+                    options={"logs": log, "gpu": gpu, "threads": threads or None})
+    _started(r, wait)
 
 
-@app.command()
+@explore_app.command("fields")
 def fields(dataset: str, event: str, block: str, years: str = Years, graph: str = "contiguity") -> None:
     """The admissible fields of a fitted block."""
     s = _session(dataset, event, years, graph)
@@ -157,7 +191,7 @@ def fields(dataset: str, event: str, block: str, years: str = Years, graph: str 
     console.print(t)
 
 
-@app.command()
+@explore_app.command("surprise")
 def surprise(dataset: str, event: str, node: str, tier: str = "B1", years: str = Years,
              graph: str = "contiguity") -> None:
     """A field's calibration at a tier, and its most surprising cells."""
@@ -173,7 +207,7 @@ def surprise(dataset: str, event: str, node: str, tier: str = "B1", years: str =
     console.print(t)
 
 
-@app.command()
+@explore_app.command("scan")
 def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, graph: str = "contiguity",
          tier: str = typer.Option(None, help="defaults to the lens's tier")) -> None:
     """One lens on one field (ledgered)."""
@@ -184,7 +218,7 @@ def scan(dataset: str, event: str, node: str, lens: str, years: str = Years, gra
     console.print(t)
 
 
-@app.command()
+@explore_app.command("survey")
 def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            blocks: list[str] = typer.Option(None, help="default: every fitted block"),
            levels: list[str] = typer.Option(None, help="tree levels to read (e.g. group); default: every level"),
@@ -196,7 +230,7 @@ def survey(dataset: str, event: str, years: str = Years, graph: str = "contiguit
     console.print(f"{len(admitted)} leads admitted")
 
 
-@app.command()
+@explore_app.command("ask")
 def ask(dataset: str, event: str, question: str, node: str, years: str = Years, graph: str = "contiguity",
         q: float = 0.05, limit: int = 20, grain: str = "year") -> None:
     """One stage-C question (excess, step, trend; seasonality at ``--grain month``) of one field, through every method that answers it."""
@@ -215,7 +249,7 @@ def ask(dataset: str, event: str, question: str, node: str, years: str = Years, 
                   f"agreement {questions.agreement(answers)}; failed {getattr(answers, 'failed', {})}")
 
 
-@app.command()
+@explore_app.command("relations")
 def relations(plan: list[str] = typer.Argument(..., help="DATASET:EVENT:BLOCK[,BLOCK…], e.g. SIM.DO:death:I,IX"),
               years: str = Years, graph: str = "contiguity", min_events: int = 2000, q: float = 0.05) -> None:
     """Stage D across systems: which fields' departures move together, at which spatial scale and lag."""
@@ -229,7 +263,7 @@ def relations(plan: list[str] = typer.Argument(..., help="DATASET:EVENT:BLOCK[,B
     console.print(t)
 
 
-@app.command()
+@explore_app.command("triage")
 def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
            replicate: bool = True, stale: bool = typer.Option(False, help="only the leads whose verdict other rules made")) -> None:
     """Classify the open leads (substitution, system, noise, signal) and replicate them (§7.7, §8.3)."""
@@ -246,7 +280,7 @@ def triage(dataset: str, event: str, years: str = Years, graph: str = "contiguit
     console.print(t)
 
 
-@app.command()
+@explore_app.command("grid")
 def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "contiguity",
          kinds: str = "place,cluster,region,state,macro", shapes: str = "spike,step,trend,group", grain: str = "year",
          lenses: str = typer.Option(None, help="methods to read, comma-separated; default every method of the questions"),
@@ -270,7 +304,7 @@ def grid(dataset: str, event: str, node: str, years: str = Years, graph: str = "
     console.print_json(json.dumps(res["surface"], default=float))
 
 
-@app.command()
+@explore_app.command("relation")
 def relation(dataset: str, event: str, node: str, exposure: list[str], years: str = Years, graph: str = "contiguity",
              grain: str = "month", max_lag: int = 12, scale: str = "ibge_immediate_region",
              within: str = typer.Option(None, help="macro-regions, e.g. 2 for the Northeast"),
@@ -284,7 +318,7 @@ def relation(dataset: str, event: str, node: str, exposure: list[str], years: st
     console.print_json(json.dumps(c.summary(), default=float))
 
 
-@app.command()
+@explore_app.command("leads")
 def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     """The lead register, best rank first."""
     from . import leads as register
@@ -296,7 +330,7 @@ def leads(limit: int = 30, kind: str = typer.Option(None)) -> None:
     console.print(t)
 
 
-@app.command()
+@explore_app.command("events")
 def events(years: str = Years) -> None:
     """Every method of every built question against the documented positives (`harness.event_record`)."""
     from . import harness
@@ -309,7 +343,7 @@ def events(years: str = Years) -> None:
     console.print(t)
 
 
-@app.command()
+@explore_app.command("alarms")
 def alarms(dataset: str, event: str, node: str, as_of: str,
            report: str = typer.Option(None, help="the date an event becomes known (default: the declared entry date)"),
            years: str = Years, recurrence: float = 260.0, weeks: int = 8) -> None:
@@ -324,7 +358,7 @@ def alarms(dataset: str, event: str, node: str, as_of: str,
     console.print(t)
 
 
-@app.command()
+@explore_app.command("joint")
 def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g. SIM.DO:death:A90-A99"),
           years: str = Years, q: float = 0.05, limit: int = 30) -> None:
     """Places and periods where several fields depart together (the fast subset scan over fields, §7.3)."""
@@ -342,7 +376,7 @@ def joint(fields: list[str] = typer.Argument(..., help="DATASET:EVENT:NODE, e.g.
     console.print(f"{len(found)} joint departures")
 
 
-@app.command()
+@store_app.command("keys")
 def keys(action: str = typer.Argument(..., help="snapshot, migrate, window or gc"),
          path: str = typer.Argument(..., help="snapshot: the file to write; migrate: the snapshot taken before"),
          apply: bool = typer.Option(False, help="migrate: move the entries (default: count them only)")) -> None:
@@ -395,7 +429,7 @@ def keys(action: str = typer.Argument(..., help="snapshot, migrate, window or gc
     store.migrate(mapping, dry_run=not apply)
 
 
-@app.command()
+@explore_app.command("compare")
 def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = typer.Argument(..., help="DATASET:EVENT:NODE"),
             years: str = Years, q: float = 0.05, lags: int = 2, grain: str = typer.Option("year", help="year or month"),
             window: str = typer.Option(None, help="first,last period label, e.g. 201401,201712"),
@@ -421,7 +455,7 @@ def compare(x: str = typer.Argument(..., help="DATASET:EVENT:NODE"), y: str = ty
     console.print(t)
 
 
-@app.command()
+@explore_app.command("cohort")
 def cohort(dataset: str, event: str, role: str, year: int,
            outcome: list[str] = typer.Option(..., help="an outcome kind, DATASET:ROLE (pegasus_data codes), repeatable"),
            draws: int = 10, q: float = 0.05) -> None:
@@ -439,7 +473,7 @@ def cohort(dataset: str, event: str, role: str, year: int,
     console.print(t)
 
 
-@app.command()
+@explore_app.command("disparity")
 def disparity(dataset: str, event: str, node: str, years: str = Years, reference: str = "1", q: float = 0.05) -> None:
     """Race disparities of a field: places whose disparity departs from the national one (indirect standardisation)."""
     from . import gateway, tools
@@ -454,7 +488,7 @@ def disparity(dataset: str, event: str, node: str, years: str = Years, reference
     console.print(t)
 
 
-@app.command()
+@explore_app.command("dossier")
 def dossier(out: str = typer.Option("reports/dossier.html", help="the HTML page written"), limit: int = 30) -> None:
     """One page of dossiers, the leads in rank order: claim, series, methods, stage E's reading, verdict."""
     from . import report as report_mod
@@ -462,7 +496,7 @@ def dossier(out: str = typer.Option("reports/dossier.html", help="the HTML page 
     console.print(f"written {report_mod.dossier(out, limit=limit)}")
 
 
-@app.command()
+@explore_app.command("verdict")
 def verdict(lead_id: str, kind: str = typer.Argument(..., help="confirmed | artefact | unknown"),
             note: str = typer.Option("", help="what the verdict rests on")) -> None:
     """Record a person's verdict on a lead (written back to the register; confirmed leads become documented events)."""
@@ -472,7 +506,7 @@ def verdict(lead_id: str, kind: str = typer.Argument(..., help="confirmed | arte
     console.print(f"{x.id}: {kind} ({x.status})")
 
 
-@app.command()
+@explore_app.command("report")
 def report(out: str = typer.Option("reports/leads.md", help="the Markdown file written"), limit: int = 25) -> None:
     """The register as a person reads it: answers per question and block with named places, then relations."""
     from . import report as report_mod
@@ -481,7 +515,7 @@ def report(out: str = typer.Option("reports/leads.md", help="the Markdown file w
     console.print(f"written {path}")
 
 
-@app.command()
+@explore_app.command("stories")
 def stories(limit: int = 25) -> None:
     """Leads grouped into stories (by place or subset), best first."""
     from . import leads as register
@@ -492,7 +526,7 @@ def stories(limit: int = 25) -> None:
     console.print(t)
 
 
-@app.command()
+@explore_app.command("ledger")
 def ledger(family: str = typer.Option(None)) -> None:
     """Tests in the ledger, by family."""
     from collections import Counter
@@ -507,7 +541,7 @@ def ledger(family: str = typer.Option(None)) -> None:
     console.print(t)
 
 
-@app.command("split-fit")
+@explore_app.command("split-fit")
 def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, graph: str = "contiguity",
               device: str | None = None) -> None:
     """Deal the events of blocks to the sides A, E and fit each block on side A alone (§8.3)."""
@@ -519,7 +553,7 @@ def split_fit(dataset: str, event: str, blocks: list[str], years: str = Years, g
         console.print_json(json.dumps(model.summary(), default=float))
 
 
-@app.command("split-survey")
+@explore_app.command("split-survey")
 def split_survey(dataset: str, event: str, years: str = Years, graph: str = "contiguity",
                  blocks: list[str] = typer.Option(None, help="default: every fitted block")) -> None:
     """The survey on side A, then the size of each lead it selects read on side E (§8.3: a size, never a verdict)."""
@@ -530,7 +564,7 @@ def split_survey(dataset: str, event: str, years: str = Years, graph: str = "con
     console.print(f"{sum(1 for x in done if x.replications.get('honest', {}).get('sized'))} sized on side E")
 
 
-@app.command("temporal-survey")
+@explore_app.command("temporal-survey")
 def temporal_survey(dataset: str, event: str, last: int, years: str = Years, graph: str = "contiguity",
                     blocks: list[str] = typer.Option(None, help="default: every fitted block")) -> None:
     """Select on the years up to LAST (its own register leads_T<LAST>), then test what it selected on the later years of
@@ -542,17 +576,8 @@ def temporal_survey(dataset: str, event: str, last: int, years: str = Years, gra
     console.print(f"{sum(1 for x in done if x.replication != 'R0')} stand on the later years")
 
 
-@app.command("mcp")
-def mcp_command(allow_confirm: bool = typer.Option(False, help="let confirm_claim spend the confirmation reserve"),
-                ledger: str = typer.Option(None, help="a ledger directory other than PEGASUS_HOME/ledger")) -> None:
-    """Serve the tools over MCP on stdio (needs the `mcp` extra); read-only unless --allow-confirm."""
-    from . import mcp_server
 
-    mcp_server.main((["--allow-confirm"] if allow_confirm else []) + (["--ledger", ledger] if ledger else []))
-
-
-
-@app.command("search", rich_help_panel=STUDIES)
+@study_app.command("search")
 def search_command(query: str = typer.Argument(..., help="a term, or several separated by commas (infarto, "
                                                          "leptospir)")) -> None:
     """What a study of QUERY would seed on: ICD-10 codes by label, the SINAN agravos holding them, matching contexts."""
@@ -578,14 +603,14 @@ def search_command(query: str = typer.Argument(..., help="a term, or several sep
         for r in found["roles"]:
             t.add_row(r["dataset"], r["role"], r["kind"], str(r["name"])[:70])
         console.print(t)
-    console.print("next: pegasus-core new NAME --icd10 CODES [--sinan AGRAVOS] --where UF --period FIRST-LAST")
+    console.print("next: pegasus study new NAME --icd10 CODES [--sinan AGRAVOS] --where UF --period FIRST-LAST")
 
 
 def _list(text: str | None) -> list[str] | None:
     return [x.strip() for x in text.split(",") if x.strip()] if text else None
 
 
-@app.command("new", rich_help_panel=STUDIES)
+@study_app.command("new")
 def new_command(name: str = typer.Argument(..., help="the study's name (its file and folder)"),
                 icd10: str = typer.Option(None, help="ICD-10 codes, comma-separated (I21,I22)"),
                 sinan: str = typer.Option(None, help="SINAN agravos, comma-separated (LEPT)"),
@@ -607,71 +632,73 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
     seeds = [study.parse_records(records, name_ or name, per)] if records else None
     path = study.new(name, _list(icd10), _list(sinan), _list(terms), places[0] if len(places) == 1 else places,
                      period, depth, _list(only), _list(contexts), folder, seeds)
-    console.print(f"written {path}\nnext: pegasus-core scope {path}   (what it reads, and the minutes)\n"
-                  f"      pegasus-core study {path}   (the folder lands in {Path(folder) / name})")
+    console.print(f"written {path}\nnext: pegasus study scope {name}   (what it reads, and the minutes)\n"
+                  f"      pegasus study run {name}     (the folder lands in {Path(folder) / name})")
 
 
-@app.command("scope", rich_help_panel=STUDIES)
-def scope_command(declaration: str) -> None:
+@study_app.command("scope")
+def scope_command(name: str = typer.Argument(..., help="the study's name or its declaration's path")) -> None:
     """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
     download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes
     ``scope.yml`` in the study's folder and shows what each choice costs."""
-    import yaml
+    from . import gateway, workspace
 
-    from . import study
-
-    decl = study.load(declaration)
-    resolved = study.resolve(decl)
-    scope = resolved.to_dict()
-    out = study.folder_of(decl)
-    out.mkdir(parents=True, exist_ok=True)
-    # written, not printed: the console wraps long lines and the printed YAML did not parse (2026-10-12)
-    (out / "scope.yml").write_text(yaml.safe_dump(scope, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    scope = workspace.scope(name)
+    if _emit_json(scope):
+        return
     t = Table("read", "dataset", "event", "years", "minutes", "why")
     for i in scope["read"]:
-        from . import gateway
-
         base, cond = gateway.split_event(i["event"])
-        t.add_row("", i["dataset"], base + (f" ({cond['name']})" if cond else ""), f"{i['years'][0]}-{i['years'][-1]}" if i["years"] else "",
-                  f"{(i['est_seconds'] or 0) / 60:.1f}", i["reason"][:90])
+        t.add_row("", i["dataset"], base + (f" ({cond['name']})" if cond else ""),
+                  f"{i['years'][0]}-{i['years'][-1]}" if i["years"] else "", f"{(i['est_seconds'] or 0) / 60:.1f}",
+                  i["reason"][:90])
     console.print(t)
     console.print_json(json.dumps(scope["minutes_by_choice"], ensure_ascii=False))
     console.print(f"{len(scope['read'])} read, {len(scope['deferred'])} deferred, {len(scope['not_read'])} not read; "
-                  f"estimated {scope['estimated_minutes']} min; written to {out / 'scope.yml'}")
-    if not scope["read"]:
-        console.print(f"[bold red]{study.nothing_read(resolved)}[/bold red]")
+                  f"estimated {scope['estimated_minutes']} min; written to {scope['written']}")
+    if scope["nothing_read"]:
+        console.print(f"[bold red]{scope['nothing_read']}[/bold red]")
 
 
-@app.command("study", rich_help_panel=STUDIES)
-def study_command(declaration: str,
+@study_app.command("run")
+def study_command(name: str = typer.Argument(..., help="the study's name or its declaration's path"),
                   products_only: bool = typer.Option(False, help="the products alone, from the fits and answers the "
-                                                                 "store holds (the lanes not run)")) -> None:
-    """Run a study from its declaration (ARCHITECTURE §3) and write its folder beside the declaration."""
-    from . import jobs, study
+                                                                 "store holds (the lanes not run)"),
+                  wait: bool = typer.Option(True, help="follow the run here until it ends (Ctrl+C leaves it running)")
+                  ) -> None:
+    """Run a study (ARCHITECTURE §3): a detached run, admitted by memory beside the others, which writes the folder
+    beside the declaration. The window shows it as it runs."""
+    from . import workspace
 
-    decl = study.load(declaration)
-    with jobs.slot(f"study {decl.study}"):
-        out = study.run(decl, log=console.print, products_only=products_only)
-    console.print(f"study folder: {out}")
-    try:
-        parts = study.body(out)
-    except Exception as exc:  # noqa: BLE001 - the folder stands; its check is said, never a failed run
-        console.print(f"the folder's check could not run: {type(exc).__name__}: {exc}")
+    _started(workspace.start_study(name, products_only), wait)
+
+
+def _started(r: dict, wait: bool) -> None:
+    from . import jobs
+
+    if _emit_json(r) or not wait:
+        if not STATE["json"]:
+            console.print(f"run {r['id']} started (pid {r['pid']}); `pegasus run show {r['id']}`, "
+                          f"`pegasus run stop {r['id']}`")
         return
-    missing = [r for r in parts if r["status"] != "met"]
-    console.print(f"{len(parts) - len(missing)} of {len(parts)} parts of the analytic body met"
-                  + ("" if not missing else ":"))
-    for r in missing:
-        console.print(f"  missing {r['part']}: {r['evidence']}")
-    console.print(f"read {out / 'report.html'} and {out / 'METHODS.md'}; `pegasus-core audit {out}` for the whole check")
+    console.print(f"run {r['id']} started; following its log (Ctrl+C leaves it running)", highlight=False)
+    try:
+        meta = jobs.wait(r["id"], follow=lambda line: console.print(line, markup=False, highlight=False))
+    except KeyboardInterrupt:
+        console.print(f"\nleft running: `pegasus run show {r['id']}`, `pegasus run stop {r['id']}`")
+        return
+    console.print(f"run {meta['id']}: {meta['state']}" + (f" ({meta['error']})" if meta.get("error") else ""))
+    raise typer.Exit(0 if meta["state"] == "done" else 1)
 
 
-@app.command("audit", rich_help_panel=STUDIES)
+@study_app.command("audit")
 def audit_command(folder: str) -> None:
     """A study folder's analytic body (each part a paper needs: met or missing, with evidence), then the win
     condition's acceptance items 1-10."""
     from . import study
 
+    if _emit_json({"body": study.body(folder), "audit": study.audit(folder)}):
+        return
     t = Table("part", "status", "evidence")
     for r in study.body(folder):
         t.add_row(r["part"], r["status"], r["evidence"])
@@ -682,7 +709,7 @@ def audit_command(folder: str) -> None:
     console.print(t)
 
 
-@app.command("export", rich_help_panel=STUDIES)
+@study_app.command("export")
 def export_command(folder: str, to: str = typer.Option(..., help="the directory to write"),
                    tables: str = typer.Option(None, help="comma-separated views of study.duckdb; default all"),
                    fmt: str = typer.Option("parquet", "--format", help="parquet or csv")) -> None:
@@ -692,7 +719,7 @@ def export_command(folder: str, to: str = typer.Option(..., help="the directory 
     console.print(f"exported to {study.export(folder, to, tables.split(',') if tables else None, fmt)}")
 
 
-@app.command("gc")
+@store_app.command("gc")
 def gc_command(budget_gb: float = typer.Option(4.0, help="what the caches (gateway, blockdata) may hold"),
                keep_hours: float = typer.Option(24.0, help="entries read or written this recently are kept"),
                dry_run: bool = typer.Option(False, help="count what would go, delete nothing")) -> None:
@@ -702,7 +729,7 @@ def gc_command(budget_gb: float = typer.Option(4.0, help="what the caches (gatew
     print(store.gc(budget_gb, keep_hours, dry_run))
 
 
-@app.command("map")
+@explore_app.command("map")
 def dependency_map(years: str = typer.Option("2015-2019", help="first-last year of the health fields"),
                    negatives: int = typer.Option(0, help="worlds of Moran-randomised surrogates for the false-edge rate"),
                    health_only: bool = typer.Option(False, help="negatives keep the real context fields"),
@@ -727,6 +754,328 @@ def dependency_map(years: str = typer.Option("2015-2019", help="first-last year 
     for x in e[:top]:
         t.add_row(x["x"], x["y"], f"{x['rho']:+.3f}", f"{x['n_eff']:.0f}", f"{x['rho_c']:+.3f}", x["status"] or "-")
     console.print(t)
+
+
+# ------------------------------------------------------------------------------------------------- studies and runs
+
+
+@study_app.command("list")
+def study_list() -> None:
+    """Every study in the workspace: where, when, its depth, its analytic body and its last run."""
+    from . import workspace
+
+    rows = workspace.studies()
+    if _emit_json(rows):
+        return
+    t = Table("study", "where", "period", "depth", "body", "last run", "written")
+    for r in rows:
+        last = r["last_run"]
+        t.add_row(r["name"] if not r["group"] else f"{r['group']}/{r['name']}", str(r["where"]), str(r["period"]),
+                  str(r["depth"]), f"{r['body']['met']}/{r['body']['total']}" if r["body"] else "-",
+                  f"{last['state']} {last['id']}" if last else "-", str(r["written"] or "-"))
+    console.print(t)
+
+
+@study_app.command("show")
+def study_show(name: str = typer.Argument(..., help="the study's name or its declaration's path")) -> None:
+    """One study: its declaration, what it reads, its analytic body part by part, its folder's files, its runs."""
+    from . import workspace
+
+    d = workspace.study_detail(name)
+    if _emit_json(d):
+        return
+    console.print(f"[bold]{d['name']}[/bold]  {d['declaration']}\nfolder {d['folder']}  written {d['written'] or '-'}")
+    if d["parts"]:
+        t = Table("part", "status", "evidence")
+        for r in d["parts"]:
+            t.add_row(r["part"], r["status"], r["evidence"])
+        console.print(t)
+    t = Table("run", "state", "created", "ended", "peak GB")
+    for r in d["runs"][:10]:
+        t.add_row(r["id"], r["state"], r["created"], str(r["ended"] or "-"), str(r["peak_gb"] or "-"))
+    console.print(t)
+
+
+@study_app.command("tables")
+def study_tables(name: str = typer.Argument(..., help="the study's name or its declaration's path")) -> None:
+    """A study's tables (the views of its study.duckdb): rows and columns."""
+    from . import workspace
+
+    rows = workspace.tables(name)
+    if _emit_json(rows):
+        return
+    t = Table("table", "rows", "columns")
+    for r in rows:
+        t.add_row(r["table"], f"{r['rows']:,}", ", ".join(c["name"] for c in r["columns"]))
+    console.print(t)
+
+
+def _filter(text: str) -> dict:
+    """``"col op value"``: op one of `workspace.FILTER_OPS`; the value read as JSON when it parses (numbers, lists)."""
+    import re
+
+    m = re.match(r"^\s*(\w+)\s*(is not null|is null|!=|<=|>=|=|<|>|\bin\b|\blike\b)\s*(.*)$", text, re.IGNORECASE)
+    if not m:
+        raise typer.BadParameter(f"{text!r}: write 'column op value', e.g. 'first >= 2019'")
+    column, op, raw = m.group(1), m.group(2).lower(), m.group(3).strip()
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        value = raw
+    return {"column": column, "op": op, "value": value}
+
+
+@study_app.command("table")
+def study_table(name: str = typer.Argument(..., help="the study's name or its declaration's path"),
+                table: str = typer.Argument(..., help="a table of `study tables`"),
+                where: list[str] = typer.Option(None, help="a filter 'column op value' (=, !=, <, <=, >, >=, in, "
+                                                           "like, is null); repeat for more"),
+                order: str = typer.Option(None, help="columns to order by, comma-separated; -col descends"),
+                columns: str = typer.Option(None, help="the columns kept, comma-separated"),
+                limit: int = typer.Option(50, help="rows shown"), offset: int = typer.Option(0),
+                csv: str = typer.Option(None, help="write the matching rows (up to --limit) to this CSV file")) -> None:
+    """Rows of one of a study's tables, filtered and ordered: what the window's table browser shows."""
+    from . import workspace
+
+    out = workspace.rows(name, table, [_filter(w) for w in where or []], _list(order), _list(columns), limit, offset)
+    if csv:
+        import csv as csv_mod
+
+        with open(csv, "w", newline="", encoding="utf-8") as fh:
+            w = csv_mod.writer(fh)
+            w.writerow(out["columns"])
+            w.writerows(out["rows"])
+        console.print(f"{len(out['rows'])} of {out['total']} rows written to {csv}")
+        return
+    if _emit_json(out):
+        return
+    t = Table(*out["columns"])
+    for r in out["rows"]:
+        t.add_row(*["" if v is None else str(v) for v in r])
+    console.print(t)
+    console.print(f"rows {offset + 1}-{offset + len(out['rows'])} of {out['total']:,}")
+
+
+@run_app.command("list")
+def run_list(limit: int = typer.Option(30, help="the newest runs shown"),
+             study: str = typer.Option(None, help="one study's runs")) -> None:
+    """The runs, newest first: state, when, memory."""
+    from . import jobs
+
+    rows = jobs.runs(limit, study)
+    if _emit_json(rows):
+        return
+    t = Table("run", "state", "label", "created", "ended", "need GB", "peak GB")
+    for r in rows:
+        t.add_row(r["id"], r["state"], r["label"], r["created"], str(r["ended"] or "-"), str(r["need_gb"] or "-"),
+                  str(r["peak_gb"] or "-"))
+    console.print(t)
+
+
+@run_app.command("show")
+def run_show(run_id: str) -> None:
+    """One run's record and what it has done: its phases, lanes, items and products, from its events."""
+    from . import jobs
+
+    meta, events = jobs.get(run_id), jobs.events(run_id)
+    if _emit_json({**meta, "events": events}):
+        return
+    console.print_json(json.dumps({k: v for k, v in meta.items() if k not in ("commands",)}, default=str))
+    t = Table("time", "kind", "what", "status", "seconds", "detail")
+    for e in events:
+        if e["kind"] == "resources":
+            continue
+        what = e.get("phase") or e.get("item") or e.get("lane") or e.get("product") or e.get("target") or ""
+        detail = e.get("error") or e.get("state") or ""
+        t.add_row(time.strftime("%H:%M:%S", time.localtime(e["t"])), e["kind"],
+                  str(what)[:70], str(e.get("status", "")), str(e.get("seconds", "")), str(detail)[:80])
+    console.print(t)
+
+
+@run_app.command("log")
+def run_log(run_id: str, lines: int = typer.Option(60, help="the last lines shown"),
+            follow: bool = typer.Option(False, "--follow", "-f", help="follow it until the run ends")) -> None:
+    """A run's output."""
+    from . import jobs
+
+    if follow:
+        jobs.wait(run_id, follow=lambda line: console.print(line, markup=False, highlight=False))
+        return
+    text = jobs.log_tail(run_id, lines)
+    if not _emit_json({"id": run_id, "text": text}):
+        console.print(text, markup=False, highlight=False)
+
+
+@run_app.command("events")
+def run_events(run_id: str, since: float = typer.Option(0.0, help="only the events after this unix time")) -> None:
+    """A run's typed events, as JSON lines: what each of its processes did."""
+    from . import jobs
+
+    for e in jobs.events(run_id, since):
+        sys.stdout.write(json.dumps(e, default=str, ensure_ascii=False) + "\n")
+
+
+@run_app.command("stop")
+def run_stop(run_id: str) -> None:
+    """End a run and every process it started."""
+    from . import jobs
+
+    meta = jobs.stop(run_id)
+    if not _emit_json(meta):
+        console.print(f"run {run_id}: {meta['state']}")
+
+
+@run_app.command("wait")
+def run_wait(run_id: str) -> None:
+    """Follow a run's log until it ends; the exit code says whether it was done."""
+    from . import jobs
+
+    meta = jobs.wait(run_id, follow=None if STATE["json"] else
+                     (lambda line: console.print(line, markup=False, highlight=False)))
+    _emit_json(meta)
+    raise typer.Exit(0 if meta["state"] == "done" else 1)
+
+
+@app.command("machine")
+def machine_command() -> None:
+    """The machine as runs see it: memory, CPU, disks, the heavy slots and who holds them."""
+    from . import jobs
+
+    m = jobs.machine()
+    if _emit_json(m):
+        return
+    console.print(f"memory {m['ram_available_gb']} of {m['ram_total_gb']} GB available, CPU {m['cpu_percent']} %, "
+                  f"{m['slots']} heavy slots")
+    for d in m["disks"]:
+        console.print(f"disk {d['path']} {d['free_gb']} of {d['total_gb']} GB free")
+    for h in m["holders"]:
+        console.print(f"holder {h['pid']} {h['label']}: needs {h['need_gb']}, expects {h['expect_gb']}, "
+                      f"holds {h['rss_gb']} GB" + (f" (run {h['run']})" if h.get("run") else ""))
+
+
+def _command_list() -> list[dict]:
+    """Every command of this program with its arguments and first help line: what `context` lists."""
+    root = typer.main.get_command(app)
+    out = []
+
+    def walk(cmd, path):
+        if hasattr(cmd, "commands"):                     # a group (typer vendors its own click)
+            for name, sub in sorted(cmd.commands.items()):
+                walk(sub, [*path, name])
+            return
+        params = " ".join(p.name.upper() if p.required else f"[{p.name.upper()}]"
+                          for p in cmd.params if getattr(p, "param_type_name", "") == "argument")
+        out.append({"path": " ".join(path) + (f" {params}" if params else ""),
+                    "help": " ".join((cmd.help or "").split("\n\n")[0].split())})
+    walk(root, [])
+    return out
+
+
+@app.command("context")
+def context_command(study: str = typer.Argument(None, help="a study whose declaration, scope, body and tables are "
+                                                           "included"),
+                    out: str = typer.Option(None, help="write it to this file instead of printing it")) -> None:
+    """What an assistant outside PegaSUS (a chatbot you consult) needs to read this workspace and propose commands:
+    PegaSUS's rules, its commands, the declaration, the studies, and a study in detail. Paste it, or attach the file."""
+    from . import workspace
+
+    text = workspace.context(study, _command_list())
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        console.print(f"written {out} ({len(text):,} characters)")
+    elif not _emit_json({"markdown": text}):
+        sys.stdout.write(text)
+
+
+@app.command("ui")
+def ui_command(serve: bool = typer.Option(False, help="serve the interface to a browser tab instead of a window")
+               ) -> None:
+    """Open the desktop window (pegasus_app) on this workspace."""
+    try:
+        from pegasus_app import __main__ as desktop
+    except ImportError as exc:
+        raise typer.BadParameter("pegasus_app is not installed in this environment (pip install -e "
+                                 "../pegasus_app)") from exc
+    desktop.main(["--serve"] if serve else [])
+
+
+# ------------------------------------------------------------------------- exploration: what the MCP tools served
+
+
+@explore_app.command("blocks")
+def explore_blocks(dataset: str = typer.Argument(None), event: str = typer.Argument(None)) -> None:
+    """The fitted blocks in the store, by dataset, event, graph and years: a block is fitted before its fields are
+    read."""
+    from . import tools
+
+    rows = tools.fitted(dataset, event)
+    if _emit_json(rows):
+        return
+    t = Table("dataset", "event", "graph", "years", "block")
+    for r in rows:
+        y = r["years"]
+        t.add_row(r["dataset"], r["event"], r["graph"], f"{y[0]}-{y[-1]}" if y else "", r["block"])
+    console.print(t)
+
+
+@explore_app.command("lead")
+def explore_lead(lead_id: str) -> None:
+    """One lead in full: its lens's statistics and null, its triage with evidence, each replication, its siblings and
+    its story."""
+    from . import leads, tools
+
+    register = leads.Register().current()
+    x = next((y for y in register if y.id == lead_id), None)
+    if x is None:
+        raise typer.BadParameter(f"no lead {lead_id!r} in the register (`pegasus explore leads` lists ids)")
+    console.print_json(json.dumps({**tools.explain_lead(x, register), "tier": x.tier}, default=str))
+
+
+@explore_app.command("methods")
+def explore_methods() -> None:
+    """Every method's measured record (ARCHITECTURE §10.5): the documented events it found, its findings in null
+    worlds."""
+    from . import tools
+
+    console.print_json(json.dumps(tools.method_status(), default=str))
+
+
+@explore_app.command("confirm")
+def explore_confirm(node: str = typer.Argument(..., help="the field: an ICD-10 node"),
+                    lens: str = typer.Argument(..., help="outbreak | change_point | space_time | spatial_cluster"),
+                    places: str = typer.Option(..., help="municipality codes, comma-separated"),
+                    years: str = typer.Option(..., help="first-last: the window the lead was selected on"),
+                    direction: str = typer.Option(..., help="up | down"),
+                    caller: str = typer.Option(..., help="who asks: recorded with the claim"),
+                    spend: bool = typer.Option(False, help="spend the reserve; without it, a dry run"),
+                    dataset: str = "SIM.DO", event: str = "death", span: str = "2010-2023",
+                    graph: str = "contiguity") -> None:
+    """SPENDS error budget. Test one claim, fixed before looking, once on the confirmation reserve (the reserved period
+    no scan, fit or exploration reads) under online FDR (LOND). Without --spend, the level it would be tested at; a
+    claim already spent returns its earlier verdict."""
+    from . import control, replication
+
+    if lens not in replication.THETA:
+        raise typer.BadParameter(f"lens {lens!r} cannot be confirmed; one of {sorted(replication.THETA)}")
+    if direction not in ("up", "down"):
+        raise typer.BadParameter("direction is up or down")
+    span_years = _years(years) if "-" in years else [int(years)]
+    locus = {"places": sorted(int(x) for x in places.split(",")), "years": [span_years[0], span_years[-1]],
+             "direction": direction}
+    s = _session(dataset, event, span, graph)
+    s.expectations.field(node)
+    spec = {"field": node, "lens": lens, "locus": locus}
+    reserve = control.Reserve(s.ledger)
+    prev = reserve.previous(spec)
+    if prev:
+        console.print_json(json.dumps({"status": "already_spent", "claim": spec, "earlier": prev}, default=str))
+        return
+    if not spend:
+        console.print_json(json.dumps({"status": "dry_run", "claim": spec, "reserve": reserve.status()}, default=str))
+        return
+    result = s.confirm(node, lens, locus, actor="person", caller=caller.strip())
+    console.print_json(json.dumps({"status": "spent", "claim": spec, "result": result,
+                                   "reserve": control.Reserve(s.ledger).status()}, default=str))
 
 
 def main() -> None:

@@ -1116,15 +1116,23 @@ the estimate tells the researcher what a depth costs.
 32 GB RAM (about 20 usable), 20 logical cores, an RTX 4050 (6 GB, CUDA 12.1), a constrained disk. numpy and scipy;
 CHOLMOD (scikit-sparse) for sparse Cholesky; PyTorch (CUDA) for contractions and batched dense algebra; numba; pyarrow,
 duckdb. float32 on the GPU with float64 accumulation; float64 factorisations; every random draw seeded from (object,
-cell, purpose). A heavy computation takes the machine-wide job slot and the GPU slot and states its threads; a run
-refuses to start under its free-disk and free-memory floors.
+cell, purpose). A heavy computation takes a machine-wide heavy slot (one per 16 GB) and the GPU slot, states its
+threads, and starts when the machine's memory, less what the jobs already running still expect to take, covers what
+it needs to make progress (`jobs.room_gb`; a study's need is its own process and its largest measured lane). A study's
+lanes are admitted against the same room, so two studies share the machine lane by lane (ADR-0038).
 
 ### 10.6 Interfaces
 
-- **`pegasus-core scope | study | export`** (§3), and the same as a Python API (`pegasus_core.study(path)`). The other
-  commands of today (`fit`, `ask`, `surprise`, `survey`, `update`, …) become internal steps or developer tools
-  (`STATUS.md`).
-- **No agents.** The MCP server (`mcp_server`) is parked; it is not part of the product.
+A person designs, runs and judges every study; nothing in PegaSUS calls an AI (ADR-0038).
+- **The workspace** is a directory: `studies/` (declarations and their folders), `runs/` (each run's record, log and
+  typed events), `workspace.yml` (the engine's environment for it). Files on disk are the truth.
+- **A run** is a detached process in the register (`jobs.submit`), followed, stopped and listed from anywhere.
+- **`pegasus`**, nouns and verbs with `--json`: `study` (search, new, scope, run, audit, export, list, show), `run`,
+  `data`, `store`, `explore` (the hypothesis-generating machinery), `machine`, `context` (what an assistant the person
+  consults outside PegaSUS needs), `ui`.
+- **The window** (`../pegasus_app`) is a local service and a web-rendered desktop window over the same functions
+  (`workspace`, `jobs`): runs, studies, results, plots, the declaration, the data, exploration, comparison. It computes
+  nothing the command line cannot.
 
 ---
 

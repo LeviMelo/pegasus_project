@@ -248,7 +248,7 @@ def load(path: str | Path) -> Declaration:
         known = set(gateway.declared_fields())
         unknown = [c for c in named if isinstance(c, str) and c not in known]
         if unknown:
-            problems.append(f"contexts {unknown}: no declared context field of that name (`pegasus-core contexts` "
+            problems.append(f"contexts {unknown}: no declared context field of that name (`pegasus study search` "
                             "lists them)")
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
@@ -1716,16 +1716,23 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
         if (out / old).exists():
             shutil.rmtree(out / old, ignore_errors=True)
     shutil.copyfile(decl.path, out / "study.yml")
+    from . import jobs
+
     phases, t = {}, time.time()
+    jobs.emit("phase", phase="scope", status="start")
     scope = resolve(decl, log=log)
     phases["scope"] = round(time.time() - t, 1)
     estimate = scope.to_dict()["estimated_minutes"]            # made before running (acceptance item 10), kept as made
+    jobs.emit("phase", phase="scope", status="end", seconds=phases["scope"], estimate_s=round((estimate or 0) * 60, 1),
+              items=[{"item": _step_name(i), "dataset": i.dataset, "event": i.event, "est_seconds": i.est_seconds}
+                     for i in scope.items if i.status == "in"])
     (out / "scope.yml").write_text(yaml.safe_dump(scope.to_dict(), sort_keys=False, allow_unicode=True), encoding="utf-8")
     read = [i for i in scope.items if i.status == "in"]
     if not read:
         # an empty folder is never written as a study (dengue in Goiás deferred every item past its budget, 2026-10-15)
         raise DeclarationError(f"{decl.path}: {nothing_read(scope)}")
     t = time.time()
+    jobs.emit("phase", phase="store", status="start")
     read = _probe(scope, read, log)
     prepared = _prepare_store(decl, read, log)
     read = _count_prepared(scope, read, log)
@@ -1735,11 +1742,17 @@ def run(decl: Declaration, log=print, products_only: bool = False) -> Path:
     (out / "scope.yml").write_text(yaml.safe_dump({**scope.to_dict(), "estimated_minutes": estimate}, sort_keys=False,
                                                   allow_unicode=True), encoding="utf-8")
     phases["store"], t = round(time.time() - t, 1), time.time()
+    jobs.emit("phase", phase="store", status="end", seconds=phases["store"])
+    jobs.emit("phase", phase="lanes", status="start", estimate_s=round(sum(i.est_seconds or 0 for i in read), 1),
+              skipped=products_only)
     steps = {} if products_only else _run_items(decl, read, log)
     phases["lanes"], t = round(time.time() - t, 1), time.time()
+    jobs.emit("phase", phase="lanes", status="end", seconds=phases["lanes"])
+    jobs.emit("phase", phase="products", status="start")
     products = _Lap()
     tables = _write_products(decl, scope, out, log, products)
     phases["products"] = round(time.time() - t, 1)
+    jobs.emit("phase", phase="products", status="end", seconds=phases["products"], failed=len(products.failed))
     # the wall clock of each phase against the scope's estimate (acceptance item 10), what the next estimate reads
     prov = {"study": decl.study, "depth": decl.depth, "written": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "seconds": round(time.time() - t0, 1), "phases": phases, "products_seconds": dict(products),
@@ -1837,20 +1850,36 @@ def _prepare_store(decl: Declaration, read: list[Item], log) -> dict:
     t0 = time.time()
     others = [[o.dataset, o.event] for o in read]
     out: dict = {}
+    from . import jobs
+
     for ds in dict.fromkeys(i.dataset for i in read if i.extract):
+        t = time.time()
+        jobs.emit("store", what="extract", target=ds, status="start")
         try:
             _ensure_extract([i for i in read if i.extract and i.dataset == ds], out, log)
+            jobs.emit("store", what="extract", target=ds, status="end", seconds=round(time.time() - t, 1))
         except Exception as exc:  # noqa: BLE001 - the items' own runs fail on it and record why
             out[f"extract {ds}"] = f"failed: {type(exc).__name__}: {exc}"
+            jobs.emit("store", what="extract", target=ds, status="failed", seconds=round(time.time() - t, 1),
+                      error=out[f"extract {ds}"])
     for it in read:
         plan = _plan(it, [o for o in others if o[0] != it.dataset])
+        t = time.time()
+        jobs.emit("store", what="lake and links", target=_step_name(it), status="start")
         try:
             update._ensure_lake(plan, out, log)
             update._ensure_links(plan, out, log)
+            jobs.emit("store", what="lake and links", target=_step_name(it), status="end",
+                      seconds=round(time.time() - t, 1))
         except Exception as exc:  # noqa: BLE001 - the item's own run tries again and records its failure
             out[f"store {_step_name(it)}"] = f"failed: {type(exc).__name__}: {exc}"
+            jobs.emit("store", what="lake and links", target=_step_name(it), status="failed",
+                      seconds=round(time.time() - t, 1), error=out[f"store {_step_name(it)}"])
     if decl.choice("persons"):
+        t = time.time()
+        jobs.emit("store", what="capture links", status="start")
         _capture_links(decl, read, out, log)
+        jobs.emit("store", what="capture links", status="end", seconds=round(time.time() - t, 1))
     out["seconds"] = round(time.time() - t0, 1)
     log(f"study {decl.study}: store prepared in {out['seconds']:.0f} s")
     return out
@@ -1956,16 +1985,22 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
         print(f"study {decl_study}: {it.dataset} {it.event} {it.years[0]}-{it.years[-1]} blocks {it.blocks}"
               + (f" [{device}]" if device else ""), flush=True)
         step = _step_name(it)
+        what = {"item": step, "lane": group[0].dataset, "dataset": it.dataset, "event": it.event,
+                "years": [it.years[0], it.years[-1]], "est_seconds": it.est_seconds}
+        jobs.emit("item", status="start", **what)
         try:
             t_item = time.time()
             steps[step] = config.on_cpu_if_cuda_fails(update.run, _plan(it, [o for o in others if o[0] != it.dataset]),
                                                       log=print)
             steps[step]["seconds"] = round(time.time() - t_item, 1)
+            jobs.emit("item", status="end", seconds=steps[step]["seconds"], **what)
         except Exception as exc:  # noqa: BLE001 - one source failing is recorded in the folder, the others still run
             where = traceback.extract_tb(exc.__traceback__)[-3:]
             steps[step] = {"error": f"{type(exc).__name__}: {exc}",
                            "at": [f"{Path(w.filename).name}:{w.lineno} {w.name}" for w in where]}
             print(f"study {decl_study}: {step} failed: {type(exc).__name__}: {exc} at {steps[step]['at']}", flush=True)
+            jobs.emit("item", status="failed", seconds=round(time.time() - t_item, 1), error=steps[step]["error"],
+                      at=steps[step]["at"], **what)
         if device:
             steps[step]["device"] = os.environ.get("PEGASUS_DEVICE") or device     # cpu after a CUDA failure
         steps[step]["peak_gb"] = _peak_gb()              # the lane's peak so far: what the next study admits it by
@@ -1983,6 +2018,22 @@ def _peak_gb() -> float:
 
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
     return round(peak / 2**30, 2)
+
+
+#: the study's own process beside its lanes (the scope, the store, the products), measured near 2 GB
+MAIN_GB = float(os.environ.get("PEGASUS_STUDY_MAIN_GB", "2"))
+
+
+def need_gb(decl: Declaration) -> float:
+    """The memory a study needs to make progress, what its run is admitted with (`jobs.slot`): its own process and its
+    largest lane, measured in its folder's last provenance, else `LANE_DEFAULT_GB`. Its other lanes start as the
+    machine's room allows (`_run_items`), so a study admitted beside another runs fewer lanes at once, not none."""
+    try:
+        steps = json.loads((folder_of(decl) / "provenance.json").read_text(encoding="utf-8")).get("steps") or {}
+        peaks = [float(v["peak_gb"]) for v in steps.values() if isinstance(v, dict) and v.get("peak_gb")]
+    except (OSError, ValueError):
+        peaks = []
+    return MAIN_GB + (max(peaks) if peaks else LANE_DEFAULT_GB)
 
 
 #: a lane's expected peak when no earlier study measured its dataset. A code-set lane peaks near 2.5 GB (TOXG, TOXC,
@@ -2038,6 +2089,8 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
 
     import psutil
 
+    from . import jobs
+
     others = [[o.dataset, o.event] for o in read]
     shutil.rmtree(config.home() / "lanes" / decl.study, ignore_errors=True)     # an earlier run's lanes: reused pids
     groups: dict[str, list[Item]] = {}
@@ -2057,9 +2110,11 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
 
     def room() -> float:
         # available memory less what the running lanes may still take: each up to its dataset's measured peak
+        # and less what the machine's other jobs still expect to take (`jobs.room_gb`): two studies run at once
         held = sum(c.memory_info().rss for c in me.children(recursive=True)) / 2**30
         expect = sum(need[g[0].dataset] for _, g in running.values())
-        return psutil.virtual_memory().available / 2**30 - max(expect - held, 0.0)
+        jobs.expect(MAIN_GB + expect)
+        return jobs.room_gb() - max(expect - held, 0.0)
 
     steps: dict = {}
     pending, running, lost = list(order), {}, []
@@ -2105,6 +2160,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                     try:
                         proc.suspend()
                         paused[pid] = proc
+                        jobs.emit("lane", lane_pid=pid, status="paused", available_gb=round(avail, 2))
                         log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} ({gb:.1f} GB) paused beside "
                             f"lane {keep} ({active[keep][1]:.1f} GB)")
                     except psutil.Error:
@@ -2120,6 +2176,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 try:
                     paused.pop(pid).resume()
                     log(f"study {decl.study}: {avail:.1f} GB available: lane {pid} resumed")
+                    jobs.emit("lane", lane_pid=pid, status="resumed", available_gb=round(avail, 2))
                 except psutil.Error:
                     pass
 
@@ -2142,6 +2199,8 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 group = pending.pop(0)
                 log(f"study {decl.study}: lane for {group[0].dataset} ({len(group)} items) on {device}, "
                     f"{free_gb:.1f} GB of room, {need[group[0].dataset]:.1f} GB expected")
+                jobs.emit("lane", lane=group[0].dataset, status="start", items=len(group), device=device,
+                          expected_gb=round(need[group[0].dataset], 2))
                 try:
                     running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
                 except cf.process.BrokenProcessPool:
@@ -2153,7 +2212,9 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 _device, group = running.pop(f)
                 try:
                     steps.update(f.result())
+                    jobs.emit("lane", lane=group[0].dataset, status="end", items=len(group))
                 except cf.process.BrokenProcessPool:
+                    jobs.emit("lane", lane=group[0].dataset, status="failed", error="its process pool broke")
                     broken = True
                     if group[0].dataset in retried:
                         log(f"study {decl.study}: the lane of {group[0].dataset} broke its pool again: run here")
@@ -2164,6 +2225,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                         log(f"study {decl.study}: the lane of {group[0].dataset} broke its pool: resubmitted to a new one")
                 except Exception as exc:  # noqa: BLE001 - a lane that raised: its group runs again below, in this process
                     log(f"study {decl.study}: the lane of {group[0].dataset} failed ({type(exc).__name__}): run again here")
+                    jobs.emit("lane", lane=group[0].dataset, status="failed", error=f"{type(exc).__name__}: {exc}")
                     lost.append(group)
             if broken and not running:
                 pool.shutdown(wait=False, cancel_futures=True)
@@ -2237,9 +2299,13 @@ class _Lap(dict):
         self.gaps: dict[str, str] = {}          # what could not be read, by design or by data (not a failure)
 
     def __call__(self, name: str) -> None:
+        from . import jobs
+
         now = time.time()
         self[name] = round(self.get(name, 0.0) + now - self._t, 1)
         self._t = now
+        jobs.emit("product", product=name, status="failed" if name in self.failed else "end", seconds=self[name],
+                  **({"error": self.failed[name]} if name in self.failed else {}))
 
     def guard(self, name: str, fn, default, log):
         """One product run in isolation: an exception is logged and recorded (`provenance.json`'s products_failed, which
@@ -6897,7 +6963,7 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
                  f"<li>{e(x['seed'])}: {e(x['why'])}</li>" for x in scope.excluded) + "</ul>",
              "<h2>7. Methods and limitations</h2>", _limitations(decl, scope, desc, linkage),
              "<h2>8. Provenance</h2><p>provenance.json; every table of the folder is a table of study.duckdb, which "
-             "opens on any machine. <code>pegasus-core export</code> copies the folder (and writes CSV on request).</p>"]
+             "opens on any machine. <code>pegasus study export</code> copies the folder (and writes CSV on request).</p>"]
     css = ("body{font-family:system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}"
            "table{border-collapse:collapse;font-size:13px;margin:.5em 0}td,th{border-bottom:1px solid #ddd;"
            "padding:3px 8px;text-align:left}th{background:#f4f4f4}img{max-width:100%;margin:.5em 0}.meta,.more{color:#666}")
@@ -7864,7 +7930,7 @@ def new(name: str, icd10: list[str] | None = None, sinan: list[str] | None = Non
     `load` reports is not written."""
     if not (icd10 or sinan or terms or records):
         raise DeclarationError("a study needs seeds: --icd10 codes, --sinan agravos, --terms, or --records a condition "
-                               "(`pegasus-core search`)")
+                               "(`pegasus study search`)")
     path = Path(folder) / f"{name}.yml"
     if path.exists():
         raise DeclarationError(f"{path} exists: choose another name, or edit it")
@@ -7876,7 +7942,7 @@ def new(name: str, icd10: list[str] | None = None, sinan: list[str] | None = Non
 
     def flow(xs) -> str:
         return "[" + ", ".join(str(x) for x in xs) + "]"
-    lines = [f"# {name}: written by `pegasus-core new`; every key is described in the README and ARCHITECTURE §3.1.",
+    lines = [f"# {name}: written by `pegasus study new`; every key is described in the README and ARCHITECTURE §3.1.",
              f"study: {name}",
              "topic:",
              "  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms",

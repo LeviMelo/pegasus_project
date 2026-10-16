@@ -30,6 +30,31 @@ def keyless(fn):
 FIT_YEARS = list(range(2010, 2024))
 
 @keyless
+def workspace() -> Path:
+    """The directory of the studies (``studies/``: declarations and their folders) and the runs (``runs/``):
+    ``PEGASUS_WORKSPACE``, else this repository."""
+    return Path(os.environ.get("PEGASUS_WORKSPACE") or REPO).resolve()
+
+
+@keyless
+def workspace_env() -> dict[str, str]:
+    """The engine's settings a workspace keeps (``workspace.yml``'s ``env``: the store, the data root, an adoption
+    window), so a run started from the window, which inherits no shell, runs as one started from a configured shell.
+    A variable the process already has wins."""
+    path = workspace() / "workspace.yml"
+    if not path.exists():
+        return {}
+    import yaml
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {str(k): str(v) for k, v in (doc.get("env") or {}).items()}
+
+
+for _k, _v in workspace_env().items():
+    os.environ.setdefault(_k, _v)
+
+
+@keyless
 def home() -> Path:
     path = Path(os.environ.get("PEGASUS_HOME", REPO / "pegasus_home"))
     path.mkdir(parents=True, exist_ok=True)
