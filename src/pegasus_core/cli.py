@@ -672,12 +672,22 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
 
 
 @study_app.command("scope")
-def scope_command(name: str = typer.Argument(..., help="the study's name or its declaration's path")) -> None:
+def scope_command(name: str = typer.Argument(..., help="the study's name or its declaration's path"),
+                  last: bool = typer.Option(False, "--last", help="the last priced scope as written, not priced again")
+                  ) -> None:
     """What a study declaration resolves to (ARCHITECTURE §3.2): the sources it reads and why, the years and their
     download cost, what is deferred past the declaration's choices, what a seed named and is not read. Writes the
     priced scope beside the declaration (``NAME.scope.yml``) and shows what each choice costs."""
     from . import gateway, workspace
 
+    if last:
+        kept = workspace.priced(name)
+        if kept is None:
+            raise LookupError(f"{name} has not been priced: `pegasus study scope {name}`")
+        if not _emit_json(kept):
+            console.print(f"{kept['source']} scope written {kept['written']} ({kept['path']})")
+            console.print_json(json.dumps(kept["scope"].get("minutes_by_choice"), ensure_ascii=False))
+        return
     scope = workspace.scope(name)
     if _emit_json(scope):
         return
@@ -1064,6 +1074,42 @@ def _role_filter(text: str) -> dict:
         value = raw
     op = {"=": "==", "in": "in", "not in": "not in"}.get(m.group(2).lower(), m.group(2))
     return {"column": m.group(1), "op": op, "value": value}
+
+
+@data_app.command("codes")
+def data_codes(dataset: str = typer.Argument(...), column: str = typer.Argument(..., help="a column (RACACOR)"),
+               year: int = typer.Argument(...),
+               partition: str = typer.Option(None, help="BR or a state the lake holds for the year")) -> None:
+    """A column's values in one year as the lake holds them: each code with the label its codelist gives it that year,
+    the records holding it, and the records with none (the column's completeness)."""
+    from . import workspace
+
+    out = workspace.codes(dataset, column, year, partition)
+    if _emit_json(out):
+        return
+    console.print(f"{out['dataset']} {out['column']} ({out['name']}) {out['year']} {out['partition']}: "
+                  f"{out['records']:,} records, {out['empty']:,} empty ({(out['filled_share'] or 0):.1%} filled)")
+    t = Table("code", "label", "records", "share")
+    for r in out["values"]:
+        t.add_row(r["code"], str(r["label"] or "(undecoded)"), f"{r['records']:,}",
+                  f"{r['records'] / out['records']:.1%}" if out["records"] else "")
+    console.print(t)
+
+
+@data_app.command("contexts")
+def data_contexts(filter_: str = typer.Option(None, "--filter", help="a word in the name or what it measures")) -> None:
+    """The municipal contexts a study relates its rates to: what each measures, its unit, years, denominator, source."""
+    from . import workspace
+
+    rows = [r for r in workspace.contexts() if not filter_ or filter_.lower() in
+            f"{r['context']} {r['what'] or ''}".lower()]
+    if _emit_json(rows):
+        return
+    t = Table("context", "what", "unit", "years", "over", "source")
+    for r in rows:
+        t.add_row(r["context"], str(r["what"] or "")[:70], str(r["unit"] or "")[:30], str(r["years"] or ""),
+                  str(r["over"] or ""), str(r["source"] or ""))
+    console.print(t)
 
 
 @plot_app.command("list")

@@ -767,3 +767,87 @@ def promote(name: str) -> dict:
     if folder.exists():
         shutil.move(str(folder), str(studies_dir() / folder.name))
     return study_detail(target.stem)
+
+
+# ------------------------------------------------------------------------- codes, contexts and the priced scope
+
+
+def codes(code: str, column: str, year: int, partition: str | None = None) -> dict:
+    """A column's values in one year as the lake holds them, each with the label pegasus_data gives it for that year
+    (its codelist's validity window; an undecoded code shows as itself), the records holding it, and the records with
+    none: what a code means in that vintage, and how complete the column is. From the lake only; the reserve's years
+    are refused, an identifier column is refused."""
+    import re
+    import warnings
+
+    import pegasus_data as pg
+    import pyarrow.compute as pc
+
+    from . import control, gateway
+
+    key = gateway.dataset_key(code)
+    control.check_reserved(key, [year])
+    roles = {r["column"]: r for r in pg.roles(key)}
+    if roles.get(column, {}).get("kind") in HIDDEN_KINDS:
+        raise PermissionError(f"{column} identifies people or records: its values are not listed")
+    held = {int(y): v for y, v in pg.lake_coverage(key, root=config.data_root()).items()}.get(int(year))
+    if not held:
+        raise LookupError(f"{key} {year} is not in the lake")
+    parts = held.get("uf_codes") or []
+    partition = partition or ("BR" if "BR" in parts else (parts[0] if parts else "BR"))
+
+    def read():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return pg.query(key, period=int(year), geography=partition, select=[column], max_download=0,
+                            root=config.data_root())
+    table = _kept("codes", (key, int(year), partition, column), read)
+    name = next((c for c in table.column_names if c == column or c.endswith(f"({column})")), None)
+    if name is None:
+        raise LookupError(f"{key} {year} holds no column {column}")
+    counts = pc.value_counts(table.column(name)).to_pylist()
+    rows, empty = [], 0
+    for c in counts:
+        value = c["values"]
+        if value is None or value == "":
+            empty += c["counts"]
+            continue
+        m = re.fullmatch(r"(.*) \(([^()]*)\)", str(value))
+        rows.append({"value": str(value), "code": m.group(2) if m else str(value),
+                     "label": m.group(1) if m else None, "records": c["counts"]})
+    rows.sort(key=lambda r: -r["records"])
+    total = table.num_rows
+    role = roles.get(column) or {}
+    return {"dataset": key, "column": column, "name": role.get("name"), "kind": role.get("kind"),
+            "codelists": role.get("codelists"), "missing": role.get("missing"), "year": int(year),
+            "partition": partition, "records": total, "empty": empty,
+            "filled_share": round(1 - empty / total, 4) if total else None, "values": rows}
+
+
+def contexts() -> list[dict]:
+    """The municipal contexts a study can relate its rates to (pegasus_data's declared fields): what each measures, its
+    unit, years, denominator and source."""
+    from . import gateway
+
+    out = []
+    for name, spec in sorted(gateway.declared_fields().items()):
+        out.append({"context": name, "what": spec.get("what") or spec.get("label") or spec.get("description"),
+                    "unit": spec.get("unit"), "years": spec.get("years"), "over": spec.get("over"),
+                    "source": spec.get("source") or (f"IBGE SIDRA table {spec['table']}" if spec.get("table") else None),
+                    "verified": spec.get("verified")})
+    return out
+
+
+def priced(name: str) -> dict | None:
+    """A study's last priced scope (`scope`, beside its declaration), else the scope its last run read, with when it
+    was written: what the study reads and why, and the minutes behind each choice."""
+    import yaml
+
+    path = find(name)
+    for source, f in (("priced", path.with_name(f"{path.stem}.scope.yml")),
+                      ("run", path.parent / _summary_name(path) / "scope.yml")):
+        if f.exists():
+            return {"source": source, "path": str(f),
+                    "written": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(f.stat().st_mtime)),
+                    "scope": yaml.safe_load(f.read_text(encoding="utf-8"))}
+    return None
