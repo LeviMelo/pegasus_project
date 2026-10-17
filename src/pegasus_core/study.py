@@ -2062,7 +2062,8 @@ def _lanes_left(study_name: str) -> dict[int, float]:
     return out
 
 
-def _run_group(decl_study: str, group: list[Item], others: list, device: str | None, threads: int | None) -> dict:
+def _run_group(decl_study: str, group: list[Item], others: list, device: str | None, threads: int | None,
+               owner: int | None = None) -> dict:
     """One lane's work: a dataset's items in order (they share its fits and caches), on ``device`` with ``threads``.
     A module function so a spawned process can run it."""
     from . import jobs, update
@@ -2074,7 +2075,9 @@ def _run_group(decl_study: str, group: list[Item], others: list, device: str | N
     import psutil
 
     steps = {}
-    parent = os.getppid()
+    # the study's own process, named by it: a lane run in that process had read its parent, the shell or window that
+    # started a detached run, gone at once, and stopped before its first item (2026-10-17)
+    parent = owner or os.getpid()
     for k, it in enumerate(group):
         if not psutil.pid_exists(parent):
             # the study that started this lane is gone (killed, or relaunched on new code): its remaining items would
@@ -2207,7 +2210,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
     order = sorted(groups.values(), key=lambda g: -sum(i.est_seconds or 0 for i in g))
     lanes = max(1, min(STUDY_LANES, len(order)))
     if lanes == 1:
-        return _run_group(decl.study, read, others, None, None)
+        return _run_group(decl.study, read, others, None, None, os.getpid())
     import torch
 
     gpu = torch.cuda.is_available() and not os.environ.get("PEGASUS_DEVICE")
@@ -2310,7 +2313,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 jobs.emit("lane", lane=group[0].dataset, status="start", items=len(group), device=device,
                           expected_gb=round(need[group[0].dataset], 2))
                 try:
-                    running[pool.submit(_run_group, decl.study, group, others, device, per_lane)] = (device, group)
+                    running[pool.submit(_run_group, decl.study, group, others, device, per_lane, os.getpid())] = (device, group)
                 except cf.process.BrokenProcessPool:
                     pending.insert(0, group)
                     broken = True
@@ -2345,7 +2348,7 @@ def _run_items(decl: Declaration, read: list[Item], log) -> dict:
                 proc.resume()
         pool.shutdown(wait=True)
     for group in lost:
-        steps.update(_run_group(decl.study, group, others, None, None))
+        steps.update(_run_group(decl.study, group, others, None, None, os.getpid()))
     return steps
 
 
