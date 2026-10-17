@@ -953,9 +953,19 @@ def study_table(name: str = typer.Argument(..., help="the study's name or its de
                 order: str = typer.Option(None, help="columns to order by, comma-separated; -col descends"),
                 columns: str = typer.Option(None, help="the columns kept, comma-separated"),
                 limit: int = typer.Option(50, help="rows shown"), offset: int = typer.Option(0),
-                csv: str = typer.Option(None, help="write the matching rows (up to --limit) to this CSV file")) -> None:
+                csv: str = typer.Option(None, help="write the matching rows (up to --limit) to this CSV file"),
+                methods: bool = typer.Option(False, help="how the table's numbers were made, not its rows")) -> None:
     """Rows of one of a study's tables, filtered and ordered: what the window's table browser shows."""
     from . import workspace
+
+    if methods:
+        m = workspace.methods_of(name, table)
+        if not _emit_json(m):
+            for x in m["measures"]:
+                console.print(f"[bold]{x['measure']}[/bold] ({', '.join(x['columns']) or 'measure'}): {x['method']}",
+                              highlight=False)
+            console.print(f"provenance: {m['provenance']}", highlight=False)
+        return
 
     out = workspace.rows(name, table, [_filter(w) for w in where or []], _list(order), _list(columns), limit, offset)
     if csv:

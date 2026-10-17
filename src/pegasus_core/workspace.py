@@ -851,3 +851,33 @@ def priced(name: str) -> dict | None:
                     "written": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(f.stat().st_mtime)),
                     "scope": yaml.safe_load(f.read_text(encoding="utf-8"))}
     return None
+
+
+def methods_of(name: str, table: str) -> dict:
+    """How a study's table's numbers were made: the method of every measure it holds (`study.MEASURES`, the sentence
+    the report and METHODS.md print), found as a column of the table or a value of its `measure` column, and the
+    folder's provenance (when, on which code and data)."""
+    from . import study
+
+    known = {t["table"]: [c["name"] for c in t["columns"]] for t in tables(name)}
+    if table not in known:
+        raise LookupError(f"{name} has no table {table!r}")
+    import re
+
+    held = set(known[table])
+    # a view's columns name the measure they are filtered on in its own SQL (study.RATES_VIEW: `max(estimate) FILTER
+    # (WHERE measure = 'rate_ratio' ...) AS ratio_to_brazil`): read from there, never from the column's spelling
+    view = getattr(study, f"{table.upper()}_VIEW", "")
+    columns = {col: m for m, col in re.findall(r"FILTER \(WHERE measure = '(\w+)'[^)]*\) AS (\w+)", view)}
+    held |= set(columns.values())
+    if "measure" in held:
+        with _connect(name) as con:
+            held |= {m for (m,) in con.execute(f'SELECT DISTINCT measure FROM "{table}"').fetchall() if m}
+    measures = [{"measure": m, "method": text, "columns": sorted(c for c, x in columns.items() if x == m)}
+                for m, text in study.MEASURES.items() if m in held]
+    prov = {}
+    path = folder(name) / "provenance.json"
+    if path.exists():
+        p = json.loads(path.read_text(encoding="utf-8"))
+        prov = {k: p.get(k) for k in ("written", "code_version", "data_version", "depth", "seconds")}
+    return {"study": name, "table": table, "measures": measures, "provenance": prov}
