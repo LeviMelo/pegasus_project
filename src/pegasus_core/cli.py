@@ -653,22 +653,20 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
                                                        "(clauses joined by ' and ')"),
                 name_: str = typer.Option(None, "--name", help="the condition topic's name (low birth weight)"),
                 per: str = typer.Option(None, help="the events a condition topic is rated per (SINASC-DN)"),
-                folder: str = typer.Option("studies", help="where the declaration is written"),
                 scratch: bool = typer.Option(False, help="a quick look, kept in studies/scratch/ until promoted")
                 ) -> None:
-    """Write a study declaration from its choices, validated and commented (the step after search)."""
-    from . import study
+    """Write a study declaration in the workspace from its choices, validated and commented (the step after search):
+    what the window's New study does."""
+    from . import study, workspace
 
     places = _list(where) or ["BR"]
     seeds = [study.parse_records(records, name_ or name, per)] if records else None
-    if scratch:
-        from . import workspace
-
-        folder = str(workspace.scratch_dir())
-    path = study.new(name, _list(icd10), _list(sinan), _list(terms), places[0] if len(places) == 1 else places,
-                     period, depth, _list(only), _list(contexts), folder, seeds)
-    console.print(f"written {path}\nnext: pegasus study scope {name}   (what it reads, and the minutes)\n"
-                  f"      pegasus study run {name}     (the folder lands in {Path(folder) / name})")
+    d = workspace.new_study(name, _list(icd10), _list(sinan), _list(terms),
+                            places[0] if len(places) == 1 else places, period, depth, _list(only), _list(contexts),
+                            seeds, scratch)
+    if not _emit_json(d):
+        console.print(f"written {d['path']}\nnext: pegasus study scope {name}   (what it reads, and the minutes)\n"
+                      f"      pegasus study run {name}     (the folder lands beside it)")
 
 
 @study_app.command("scope")
@@ -688,7 +686,16 @@ def scope_command(name: str = typer.Argument(..., help="the study's name or its 
             console.print(f"{kept['source']} scope written {kept['written']} ({kept['path']})")
             console.print_json(json.dumps(kept["scope"].get("minutes_by_choice"), ensure_ascii=False))
         return
-    scope = workspace.scope(name)
+    # priced as a run, as the window prices it: the one path, listed with the other runs
+    from . import jobs
+
+    r = workspace.price(name)
+    meta = jobs.wait(r["id"])
+    if meta["state"] != "done":
+        raise RuntimeError(f"pricing {name} ended {meta['state']}: {meta.get('error')} (`pegasus run log {r['id']}`)")
+    kept = workspace.priced(name)
+    scope = {**kept["scope"], "written": kept["path"], "nothing_read": (meta["result"] or {}).get("nothing_read"),
+             "run": meta["id"]}
     if _emit_json(scope):
         return
     t = Table("read", "dataset", "event", "years", "minutes", "why")
