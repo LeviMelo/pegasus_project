@@ -48,3 +48,23 @@ the label fix, and the rebuild below writes it again.
 - the condition's label written clean ("death: infant death (deceased.age_years < 1)"), where the folder of
   2026-10-15 03:41 held its encoded event name;
 - the period's rate unchanged at 13.5 per 1,000 live births.
+
+**A new study through the window's service, end to end** (2026-10-17, commit `ccc7901`): suicide (X60-X84) in
+Alagoas, 2019-2023, SIM-DO alone, survey depth.
+- It was created by `POST /api/studies`, a key set with the declaration's comments kept, saved, and priced as a run
+  (8.2 min, 2 read, 25 not read).
+- It was started by `POST /api/runs`. The run outlived the service's restart. Its lane fitted the new code set (41.6 s)
+  and asked its questions, and each step was said.
+- 20 of 20 parts of the analytic body; peak memory 3.05 GB.
+- 5.2 per 100,000 person-years (835 deaths, 95 % 4.8-5.6), one of the country's lowest state rates, as published.
+
+**Every route on every study.** One request to each route the window reads, on every study of the workspace (556
+requests). On the first pass:
+- the table list failed with a 500 on two folders written before 2026-10-14 (their views read another checkout's
+  paths). Each table is now listed with why and the command that writes it again;
+- the ledger's summary took 16 s on each call. It is now read once per state of its parts.
+
+After the fixes, none failed. Three calls were slow:
+- the register's first read (18 s) and the ledger's (15 s), then kept;
+- a national scope's 1.5 MB YAML, 7 s in the pure-Python parser and 0.4 s in the C one, now used.
+
