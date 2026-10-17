@@ -68,3 +68,11 @@ After the fixes, none failed. Three calls were slow:
 - the register's first read (18 s) and the ledger's (15 s), then kept;
 - a national scope's 1.5 MB YAML, 7 s in the pure-Python parser and 0.4 s in the C one, now used.
 
+**Open: the estimate of a new code set's lane.** The window shows each phase against its estimate, and on
+suicidio_al the two disagreed:
+- the lanes phase was estimated at 1.1 s and took 64 s, because a code set's fit had never been stored (fit 41.6 s,
+  questions 19 s);
+- the whole run was estimated at 8.2 min and took 3 min 43 s.
+
+The estimator (`study._estimate`, BACKLOG 9.1) under-prices an unstored code-set fit and over-prices the fixed phases.
+
