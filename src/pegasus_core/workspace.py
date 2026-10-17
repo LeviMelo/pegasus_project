@@ -229,6 +229,17 @@ def context(name: str | None = None, commands: list[dict] | None = None) -> str:
         if tables:
             out += ["", "### Tables (views of study.duckdb)", ""]
             out += [f"- `{t}` ({n:,} rows): {', '.join(cols)}" for t, (n, cols) in tables.items()]
+        from . import plots
+
+        out += ["", "### Plots", "",
+                "A plot is a Vega-Lite 6 file in the folder (`plots/ID.vl.json`) whose data is a query of the tables "
+                "above, kept in `usermeta.pegasus`: `{table, where: [{column, op, value}], columns: [...]}`; a map adds "
+                "`geometry: municipalities.geojson, key: u` and uses mark `geoshape`. Propose one as a file the person "
+                "saves with `pegasus plot save NAME ID --spec FILE`, or as `pegasus plot new` options; a query that "
+                "matches no rows is refused. Rows that share one x and colour pile up: filter `stratum`, "
+                "`denominator_kind` and `field` in `rates`."]
+        for p in plots.plots(d["name"]):
+            out.append(f"- `{p['id']}`: {p.get('title') or ''} ({p.get('mark')} of `{p.get('table')}`)")
     return "\n".join(out) + "\n"
 
 
