@@ -611,6 +611,8 @@ def search_command(query: str = typer.Argument(..., help="a term, or several sep
     from . import study
 
     found = study.search(query)
+    if _emit_json(found):
+        return
     t = Table("ICD-10", "level", "label")
     for r in found["icd10"]:
         t.add_row(r["code"], r["level"], r["label"])
