@@ -315,13 +315,28 @@ def _connect(name: str):
     return duckdb.connect(str(db), read_only=True)
 
 
+#: what a folder whose study.duckdb cannot be read needs: before 2026-10-14 its tables were views of files by their
+#: path on the machine that wrote them, and a folder moved or written elsewhere reads none
+UNREADABLE = ("its study.duckdb reads files this folder does not hold (written before 2026-10-14, when its tables were "
+              "views of paths elsewhere): write its products again, `pegasus study run {name} --products-only`")
+
+
 def tables(name: str) -> list[dict]:
-    """The tables of a study (the views of its ``study.duckdb``): rows and columns with their types."""
+    """The tables of a study (the views of its ``study.duckdb``): rows and columns with their types; a table that
+    cannot be read is listed with why, so the rest of the folder is still read."""
+    import duckdb
+
     with _connect(name) as con:
         out = []
         for (t,) in con.execute("SELECT table_name FROM information_schema.tables ORDER BY table_name").fetchall():
-            cols = [{"name": c, "type": ty} for c, ty, *_ in con.execute(f'DESCRIBE "{t}"').fetchall()]
-            out.append({"table": t, "rows": con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0], "columns": cols})
+            try:
+                cols = [{"name": c, "type": ty} for c, ty, *_ in con.execute(f'DESCRIBE "{t}"').fetchall()]
+                out.append({"table": t, "rows": con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0],
+                            "columns": cols})
+            except duckdb.Error as exc:
+                out.append({"table": t, "rows": None, "columns": [],
+                            "error": UNREADABLE.format(name=name) if isinstance(exc, duckdb.IOException)
+                            else f"{type(exc).__name__}: {exc}"})
         return out
 
 
@@ -334,11 +349,16 @@ def rows(name: str, table: str, where: list[dict] | None = None, order: list[str
     """Rows of a study's table: ``where`` a list of ``{column, op, value}`` (`FILTER_OPS`; ``in`` takes a list),
     ``order`` columns (``-col`` descending), ``columns`` those kept. Every name is checked against the table, every
     value is a parameter. Returns the columns, the rows, and the count before ``limit``."""
+    import duckdb
+
     with _connect(name) as con:
         known = {t for (t,) in con.execute("SELECT table_name FROM information_schema.tables").fetchall()}
         if table not in known:
             raise LookupError(f"{name} has no table {table!r}: {', '.join(sorted(known))}")
-        cols = [c for c, *_ in con.execute(f'DESCRIBE "{table}"').fetchall()]
+        try:
+            cols = [c for c, *_ in con.execute(f'DESCRIBE "{table}"').fetchall()]
+        except duckdb.IOException as exc:
+            raise ValueError(UNREADABLE.format(name=name)) from exc
 
         def col(c: str) -> str:
             if c not in cols:
@@ -704,10 +724,12 @@ def stories(cls: str | None = None, place: int | None = None, limit: int = 30) -
 
 
 def ledger() -> dict:
-    """The ledger, the denominator of every error rate: tests by family and actor, and the confirmation reserve."""
-    from . import tools
+    """The ledger, the denominator of every error rate: tests by family and actor, and the confirmation reserve; read
+    once per state of its part files (16 s for 716,134 tests, 2026-10-17) and released when unused (`_kept`)."""
+    from . import control, tools
 
-    return tools.ledger_status()
+    parts = tuple(sorted(p.name for p in control.Ledger().path.glob("part-*.parquet")))
+    return _kept("ledger", parts, tools.ledger_status)
 
 
 def methods() -> dict:
@@ -859,9 +881,12 @@ def methods_of(name: str, table: str) -> dict:
     folder's provenance (when, on which code and data)."""
     from . import study
 
-    known = {t["table"]: [c["name"] for c in t["columns"]] for t in tables(name)}
-    if table not in known:
+    listed = {t["table"]: t for t in tables(name)}
+    if table not in listed:
         raise LookupError(f"{name} has no table {table!r}")
+    if listed[table].get("error"):
+        raise ValueError(listed[table]["error"])
+    known = {t: [c["name"] for c in v["columns"]] for t, v in listed.items()}
     import re
 
     held = set(known[table])

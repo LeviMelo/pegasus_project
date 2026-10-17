@@ -82,9 +82,12 @@ def check(name: str, spec: dict) -> dict:
     if not isinstance(spec, dict):
         raise ValueError("a plot is a Vega-Lite specification (a JSON object)")
     q = query_of(spec)
-    known = {t["table"]: {c["name"] for c in t["columns"]} for t in workspace.tables(name)}
-    if q["table"] not in known:
-        raise ValueError(f"{name} has no table {q['table']!r}: {', '.join(sorted(known))}")
+    listed = {t["table"]: t for t in workspace.tables(name)}
+    if q["table"] not in listed:
+        raise ValueError(f"{name} has no table {q['table']!r}: {', '.join(sorted(listed))}")
+    if listed[q["table"]].get("error"):
+        raise ValueError(listed[q["table"]]["error"])
+    known = {k: {c["name"] for c in v["columns"]} for k, v in listed.items()}
     for c in [*(q.get("columns") or []), *(w["column"] for w in q.get("where") or [])]:
         if c not in known[q["table"]]:
             raise ValueError(f"{q['table']} has no column {c!r}")
