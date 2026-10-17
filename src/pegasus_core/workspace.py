@@ -148,7 +148,8 @@ def study_detail(name: str) -> dict:
     scope = None
     if (folder / "scope.yml").exists():
         try:
-            scope = yaml.safe_load((folder / "scope.yml").read_text(encoding="utf-8"))
+            scope = yaml.load((folder / "scope.yml").read_text(encoding="utf-8"),
+                              Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
         except ValueError:
             scope = None
     files = []
@@ -871,7 +872,9 @@ def priced(name: str) -> dict | None:
         if f.exists():
             return {"source": source, "path": str(f),
                     "written": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(f.stat().st_mtime)),
-                    "scope": yaml.safe_load(f.read_text(encoding="utf-8"))}
+                    # the C parser: a national exhaustive scope is megabytes, 7 s in the pure-Python one
+                    "scope": yaml.load(f.read_text(encoding="utf-8"), Loader=getattr(yaml, "CSafeLoader",
+                                                                                      yaml.SafeLoader))}
     return None
 
 
