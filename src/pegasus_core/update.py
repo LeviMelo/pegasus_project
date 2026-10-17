@@ -605,7 +605,11 @@ class _Timed(dict):
         self._t = time.time()
 
     def __setitem__(self, key, value):
+        from . import jobs
+
         now = time.time()
         self.seconds[key] = round(self.seconds.get(key, 0.0) + now - self._t, 1)
         self._t = now
         super().__setitem__(key, value)
+        # each step of a lane's item as it ends: an item ran for an hour with nothing said between its start and end
+        jobs.emit("step", step=key, seconds=self.seconds[key], outcome=str(value)[:200])
