@@ -351,6 +351,10 @@ and the ledger in the store (§10.2). The folder holds the declaration, the reso
 onto the referenced objects, and only what the study itself produces. Store entries a study references are **pinned**:
 cache eviction never removes them while the study exists. Two studies sharing a field share its storage.
 
+**Written whole.** A run writes `<folder>.partial` and puts it in place at its end, carrying over the person's own
+files (`plots/`): a stopped or failed run leaves the last whole folder. A priced scope is written beside the
+declaration (`NAME.scope.yml`), never into the folder.
+
 ```
 toxoplasmosis/
   study.yml                 the declaration as written
