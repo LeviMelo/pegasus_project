@@ -16,6 +16,35 @@ from . import config, jobs
 __keyless__ = True
 
 
+#: seconds a large read is kept in memory after its last use (`_kept`): a national year of records (1.5 million rows)
+#: and the lead register (169,805 leads) had stayed in the window's service for good, beside the machine's other work
+IDLE_S = 600
+_KEPT: dict[str, tuple] = {}            # name -> (key, value, last used)
+_SWEEPER: list = []
+
+
+def _kept(name: str, key, make):
+    """``make()``'s value for ``key``, kept in memory while it is used and released `IDLE_S` seconds after its last
+    use; one value per ``name`` (a person reads one partition, one register, at a time)."""
+    import threading
+
+    held = _KEPT.get(name)
+    if held is None or held[0] != key:
+        _KEPT.pop(name, None)                 # the earlier read released before the next is made
+        held = (key, make(), time.time())
+    _KEPT[name] = (held[0], held[1], time.time())
+    if not _SWEEPER:
+        def sweep():
+            while True:
+                time.sleep(60)
+                for n, (_, _, used) in list(_KEPT.items()):
+                    if time.time() - used > IDLE_S:
+                        _KEPT.pop(n, None)
+        _SWEEPER.append(threading.Thread(target=sweep, daemon=True, name="workspace-idle"))
+        _SWEEPER[0].start()
+    return held[1]
+
+
 def studies_dir() -> Path:
     path = jobs.workspace() / "studies"
     path.mkdir(parents=True, exist_ok=True)
@@ -425,7 +454,6 @@ def dataset(code: str) -> dict:
 
 #: role kinds hidden in the record viewer until revealed (author, 2026-10-15)
 HIDDEN_KINDS = ("identifier",)
-_RECORDS: dict[tuple, object] = {}
 
 
 def records(code: str, year: int, partition: str | None = None, rows_filter: dict[str, list[str]] | None = None,
@@ -451,14 +479,12 @@ def records(code: str, year: int, partition: str | None = None, rows_filter: dic
     if parts and partition not in parts:
         raise LookupError(f"{key} {year}: the lake holds {', '.join(parts)}, not {partition}")
     ask = (key, int(year), partition, json.dumps(rows_filter, sort_keys=True), json.dumps(condition, sort_keys=True))
-    table = _RECORDS.get(ask)
-    if table is None:
+    def read():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            table = pg.query(key, period=int(year), geography=partition, max_download=0, root=config.data_root(),
-                             rows=rows_filter or None, condition=condition or None)
-        _RECORDS.clear()                         # one read kept: a person pages one at a time
-        _RECORDS[ask] = table
+            return pg.query(key, period=int(year), geography=partition, max_download=0, root=config.data_root(),
+                            rows=rows_filter or None, condition=condition or None)
+    table = _kept("records", ask, read)
     hidden_cols = {r["column"] for r in pg.roles(key) if r.get("kind") in HIDDEN_KINDS}
     hidden = [c for c in table.column_names if c in hidden_cols or any(c.endswith(f"({h})") for h in hidden_cols)]
     shown = [c for c in table.column_names if reveal or c not in hidden]
@@ -514,9 +540,16 @@ def declaration(name: str) -> dict:
 
 
 def check(text: str) -> dict:
-    """A draft's problems and effective choices, nothing written."""
+    """A draft's problems, its keys as parsed (the engine's reading, so the window parses no YAML of its own) and its
+    effective choices; nothing written."""
+    import yaml
+
     problems, effective = _problems(text)
-    return {"problems": problems, "effective": effective}
+    try:
+        doc = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        doc = None
+    return {"problems": problems, "doc": doc, "effective": effective}
 
 
 def set_key(text: str, key: str, value) -> str:
@@ -612,19 +645,14 @@ def price(name: str) -> dict:
 # ----------------------------------------------------------------------------- exploration (hypothesis-generating)
 
 
-_REGISTER: dict[str, tuple] = {}
-
-
 def _register() -> list:
-    """The lead register, read once per state of its part files (27 s for 169,805 leads, 2026-10-15)."""
+    """The lead register, read once per state of its part files (27 s for 169,805 leads, 2026-10-15) and released
+    when unused (`_kept`)."""
     from . import leads
 
     reg = leads.Register()
     names = tuple(sorted(p.name for p in reg.path.glob("part-*.parquet")))
-    kept = _REGISTER.get("leads")
-    if kept is None or kept[0] != names:
-        _REGISTER["leads"] = (names, reg.current())
-    return _REGISTER["leads"][1]
+    return _kept("leads", names, reg.current)
 
 
 #: the filters of the lead register (`tools.find_leads`)
