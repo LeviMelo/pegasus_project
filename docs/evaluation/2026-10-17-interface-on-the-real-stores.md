@@ -22,6 +22,7 @@ real `pegasus_home` and data root, on 2026-10-15 and 2026-10-17. A separate proj
 | a plot of `rates` | a query matching no rows (a stratum named wrong) saved an empty plot | an empty query is refused |
 | a map | d3 read GeoJSON's counter-clockwise rings as the globe less each municipality, and the table's `u` (text) never joined the boundaries' `u` (number) | rings rewound for d3, keys compared as text |
 | the table browser | sort ties came in the database's order, so a page could repeat or skip rows | ties are broken by every other column |
+| lepto_rs_check run detached | a lane run in the study's own process checked its parent (the shell that started the run, gone at once) and stopped before its first item: lanes 0 s, no steps, the body whole only because the store held every fit; the provenance then miscalibrated other studies' estimates (one declaration priced 6.7 and 20.4 min) | a lane checks the study's process, named by it; rerun: both items ran, each step said with its seconds (`step` events) |
 
 **Readings, each against the files.** The Alagoas readings are the folder's existing rows; the folder predates
 the label fix, and the rebuild below writes it again.
