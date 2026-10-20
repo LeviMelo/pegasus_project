@@ -2141,15 +2141,21 @@ def declared_fields() -> dict:
     return declared()
 
 
+#: the keys of a field's declaration that are words about it, not what its values are: editing them recomputes nothing
+#: (labels for the window's lists, 2026-10-19, had re-keyed every context reading)
+FIELD_WORDS = frozenset({"label", "population_label", "what", "gaps", "description", "note", "notes", "citation"})
+
+
 def _field_key(name: str, years: list[int] | None) -> dict:
-    """What a context field's stored reading is a function of: its declaration (pegasus_data's fields.yml) and the lake
+    """What a context field's stored reading is a function of: its declaration less its words (`FIELD_WORDS`) and the lake
     files it was built into (each year's partition: path, size, time of writing). Keyed by its name and years alone, the
     climate fields rebuilt from BR-DWGD (pegasus_data ADR-0178) were served as INMET's 8 stations of Alagoas
     (2026-10-14)."""
     import json
     from pathlib import Path
 
-    h = hashlib.sha256(json.dumps(declared_fields().get(name) or {}, sort_keys=True, default=str).encode())
+    spec = {k: v for k, v in (declared_fields().get(name) or {}).items() if k not in FIELD_WORDS}
+    h = hashlib.sha256(json.dumps(spec, sort_keys=True, default=str).encode())
     root = Path(config.data_root()) / "lake" / "fields" / name
     if root.exists():
         wanted = {f"year={int(y)}" for y in years or []}
