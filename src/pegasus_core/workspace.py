@@ -159,19 +159,31 @@ def find(name: str) -> Path:
     p = Path(name)
     if p.suffix in (".yml", ".yaml") and p.exists():
         return p.resolve()
-    hits = [d for d in declarations() if d.stem == name or _summary_name(d) == name]
+    decls = declarations()
+    hits = [d for d in decls if d.stem == name] or [d for d in decls if _summary_name(d) == name]
     if not hits:
         raise LookupError(f"no study {name!r} in {studies_dir()}")
     return hits[0].resolve()
 
 
 def _summary_name(path: Path) -> str:
+    """A declaration's study name (its ``study:``, else its file name), read once per version of the file: `find` asks
+    it of every declaration, and parsing them all on each call took 4 of the cards' 5.5 s (2026-10-19)."""
     import yaml
 
     try:
-        return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("study") or path.stem
-    except (OSError, ValueError):
+        key = (str(path), path.stat().st_mtime_ns)
+    except OSError:
         return path.stem
+    if key not in _NAMES:
+        try:
+            _NAMES[key] = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("study") or path.stem
+        except (OSError, ValueError):
+            _NAMES[key] = path.stem
+    return _NAMES[key]
+
+
+_NAMES: dict[tuple[str, int], str] = {}
 
 
 def study_detail(name: str) -> dict:
@@ -1123,15 +1135,30 @@ _SUMMARIES: dict[str, tuple] = {}
 
 
 def summary(name: str) -> dict:
-    """`_summary_of` kept until the study's declaration or folder changes (a card on the Studies page each)."""
+    """`_summary_of` kept until the study's declaration, its folder, its last run or the code that summarises it (the
+    engine's, pegasus_data's) changes: in memory, and on disk in ``PEGASUS_HOME/workspace/summaries``, so a window just
+    opened draws its cards at once (21 studies took 6-10 s to summarise cold)."""
     path = find(name)
     prov = path.parent / _summary_name(path) / "provenance.json"
-    stamp = (path.stat().st_mtime, prov.stat().st_mtime if prov.exists() else None,
-             tuple((r["id"], r["state"]) for r in jobs.runs(limit=1, study=_summary_name(path))))
+    stamp = [path.stat().st_mtime, prov.stat().st_mtime if prov.exists() else None,
+             [[r["id"], r["state"]] for r in jobs.runs(limit=1, study=_summary_name(path))],
+             config.code_version(), config.data_code_version()]
     kept = _SUMMARIES.get(name)
-    if kept is None or kept[0] != stamp:
-        _SUMMARIES[name] = (stamp, _summary_of(name))
-    return _SUMMARIES[name][1]
+    if kept is not None and kept[0] == stamp:
+        return kept[1]
+    disk = config.home() / "workspace" / "summaries" / f"{name.replace('/', '__')}.json"
+    try:
+        held = json.loads(disk.read_text(encoding="utf-8"))
+        if held.get("stamp") == stamp:
+            _SUMMARIES[name] = (stamp, held["summary"])
+            return held["summary"]
+    except (OSError, ValueError):
+        pass
+    out = _summary_of(name)
+    _SUMMARIES[name] = (stamp, out)
+    disk.parent.mkdir(parents=True, exist_ok=True)
+    jobs._write_json(disk, {"stamp": stamp, "summary": out})
+    return out
 
 
 def _summary_of(name: str) -> dict:
@@ -1153,6 +1180,11 @@ def _summary_of(name: str) -> dict:
     if not s["written"]:
         return out
     with _connect(name) as con:
+        if "estimates" not in {t for (t,) in con.execute("SELECT table_name FROM information_schema.tables").fetchall()}:
+            # a folder written before its rates were kept in one `estimates` table (the smoke folders of 2026-10-13)
+            return {**out, "note": "This folder was written by an earlier version of PegaSUS and holds no table of rates: "
+                                   "run the study again to see them here."}
+
         def q(sql, params=()):
             cur = con.execute(sql, list(params))
             cols = [d[0] for d in cur.description]
