@@ -437,6 +437,10 @@ def rows(name: str, table: str, where: list[dict] | None = None, order: list[str
 # -------------------------------------------------------------------------------------------------------- the data
 
 
+#: the version of a catalog row's fields, in the kept catalog's stamp: a row that gains a field is listed again
+CATALOG_SHAPE = 2
+
+
 def datasets(refresh: bool = False) -> dict:
     """What DATASUS publishes, as pegasus_data's catalog lists it: its systems and their datasets (files, gigabytes,
     years, states), each with the event types a study can read of it. Kept in ``PEGASUS_HOME/workspace/datasets.json``
@@ -449,7 +453,7 @@ def datasets(refresh: bool = False) -> dict:
     top = pg.explore(root=root)
     cache = config.home() / "workspace" / "datasets.json"
     # pegasus_data's commit, not its version: a dataset described or given an event type is a commit
-    stamp = {"as_of": str(top.as_of), "data_version": config.data_code_version()}
+    stamp = {"as_of": str(top.as_of), "data_version": config.data_code_version(), "shape": CATALOG_SHAPE}
     if cache.exists() and not refresh:
         try:
             kept = json.loads(cache.read_text(encoding="utf-8"))
@@ -482,7 +486,8 @@ def datasets(refresh: bool = False) -> dict:
                 continue
             desc = _description(r["dataset"])
             events = readable.get(key, [])
-            rows[key] = {**published, "dataset": r["dataset"], "code": key, "name": r.get("name"), "event_types": events,
+            rows[key] = {**published, "dataset": r["dataset"], "code": key, "name": r.get("name"),
+                         "official_name": desc.get("official_name"), "event_types": events,
                          "also": [], "what_it_is": desc.get("what_it_is"),
                          "use": ("incomplete" if key in unready else "study") if events else desc.get("use") or
                          ("described" if desc.get("what_one_row_is") else "undescribed"),

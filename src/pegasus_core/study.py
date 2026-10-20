@@ -7971,7 +7971,7 @@ def audit(folder: str | Path) -> list[dict]:
 def search(query: str, limit: int = 40) -> dict[str, list[dict]]:
     """What a study of ``query`` would seed on: the ICD-10 codes whose label holds it (pegasus_data `label_matches`,
     accents and case ignored; categories first), the SINAN agravos whose records carry one of those codes as their
-    condition (pegasus_data `condition_codes`: the agravo's own ICD-10 code, not its name matched), and the declared
+    condition (pegasus_data `condition_codes`: the agravo's own ICD-10 code) or whose name holds it, with that name, and the declared
     context fields whose name or label holds it (`gateway.declared_fields`). The first step from a question to a
     declaration (`new`): a person picks the codes, nothing is chosen for them."""
     import unicodedata
@@ -7992,9 +7992,17 @@ def search(query: str, limit: int = 40) -> dict[str, list[dict]]:
         c = str(c or "").replace(".", "").upper()
         if c and any(c.startswith(x[:3]) and (len(x) == 3 or c.startswith(x)) for x in cats):
             agravos.setdefault(str(d), set()).add(c)
-    sinan = [{"sinan": d.split("-", 1)[-1].split("_", 1)[-1], "dataset": d, "codes": sorted(cs)}
-             for d, cs in sorted(agravos.items()) if d.upper().startswith("SINAN")]
     words = [plain(x.strip()) for x in terms]
+    # an agravo found by its own name too ("violência", which no ICD-10 label holds), named as the catalog names it
+    from .workspace import datasets as catalog
+
+    rows = {r["code"]: r for r in catalog()["datasets"] if r["code"].startswith("SINAN")}
+    for d, r in rows.items():
+        if any(w in plain(f"{r.get('name') or ''} {r.get('official_name') or ''}") for w in words):
+            agravos.setdefault(d, set())
+    sinan = [{"sinan": d.split("-", 1)[-1].split("_", 1)[-1], "dataset": d, "name": (rows.get(d) or {}).get("name"),
+              "official_name": (rows.get(d) or {}).get("official_name"), "codes": sorted(cs)}
+             for d, cs in sorted(agravos.items()) if d.upper().startswith("SINAN")]
     contexts = []
     for name, spec in sorted(gateway.declared_fields().items()):
         text = plain(f"{name} {spec.get('label') or ''} {spec.get('description') or ''}")
