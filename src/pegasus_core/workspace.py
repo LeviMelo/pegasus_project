@@ -458,25 +458,61 @@ def datasets(refresh: bool = False) -> dict:
         except ValueError:
             pass
     readable: dict[str, list[str]] = {}
+    unready: dict[str, str] = {}
     for ds in gateway.event_datasets():
-        readable[gateway.dataset_key(ds)] = [e["name"] for e in gateway.event_types(ds)]
-    rows = []
+        key = gateway.dataset_key(ds)
+        readable[key] = [e["name"] for e in gateway.event_types(ds)]
+        why = _unreadable(ds, readable[key])
+        if why:
+            unready[key] = why
+    rows: dict[str, dict] = {}
     for s in top.rows:
         for r in pg.explore(s["system"], root=root).rows:
             key = gateway.dataset_key(r["dataset"])
+            published = {"system": s["system"], "files": r.get("files"), "gigabytes": r.get("gigabytes"), "years": r.get("years"),
+                         "ufs": r.get("ufs")}
+            if key in rows:
+                # one dataset published twice (SIA's APAC on the FTP and as Dados Abertos exports): one row, under its own
+                # system, the other publication beside it
+                kept = rows[key]
+                if s["system"] == str(r["dataset"]).split(".")[0] and kept["system"] != s["system"]:
+                    rows[key] = {**kept, **published, "also": [*kept["also"], {k: kept[k] for k in published}]}
+                else:
+                    kept["also"].append(published)
+                continue
             desc = _description(r["dataset"])
-            rows.append({"system": s["system"], "dataset": r["dataset"], "code": key, "name": r.get("name"),
-                         "files": r.get("files"), "gigabytes": r.get("gigabytes"), "years": r.get("years"),
-                         "ufs": r.get("ufs"), "event_types": readable.get(key, []),
-                         "what_it_is": desc.get("what_it_is"),
-                         "use": "study" if readable.get(key) else desc.get("use") or
+            events = readable.get(key, [])
+            rows[key] = {**published, "dataset": r["dataset"], "code": key, "name": r.get("name"), "event_types": events,
+                         "also": [], "what_it_is": desc.get("what_it_is"),
+                         "use": ("incomplete" if key in unready else "study") if events else desc.get("use") or
                          ("described" if desc.get("what_one_row_is") else "undescribed"),
-                         "why_no_event_type": None if readable.get(key) else desc.get("why_no_event_type")})
+                         "why_no_event_type": unready.get(key) if events else desc.get("why_no_event_type")}
+    rows = list(rows.values())
     out = {**stamp, "systems": [{k: s.get(k) for k in ("system", "name", "files", "gigabytes", "datasets", "years")}
                                 for s in top.rows], "datasets": rows}
     cache.parent.mkdir(parents=True, exist_ok=True)
     jobs._write_json(cache, out)
     return out
+
+
+def _unreadable(dataset: str, events: list[str]) -> str | None:
+    """Why no study can read any of a dataset's event types, in words, or None when one can: a study places and
+    standardises events by their residence, sex and age (`gateway._strata`), and a dataset whose roles do not say which
+    columns hold them has event types a study cannot use (SISCAN's 15 had no age, 2026-10-19)."""
+    import re
+
+    from . import gateway
+
+    whys = []
+    for event in events:
+        try:
+            gateway._strata(dataset, event)
+            return None
+        except LookupError as e:
+            text = re.sub(r"^[\w.-]+: ", "", str(e))
+            m = re.match(r"no (\w+) stratum in pegasus_data's roles", text)
+            whys.append(f"pegasus_data does not yet say which column holds the {m.group(1)}" if m else text)
+    return whys[0] if whys else None
 
 
 #: what pegasus_data says of a dataset in words (`pg.info`): its names, what it is, what one row is, its unit of
