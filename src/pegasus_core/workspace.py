@@ -60,6 +60,43 @@ def declarations() -> list[Path]:
                   key=lambda p: (len(p.relative_to(studies_dir()).parts), p.name))
 
 
+#: each part of the analytic body as a reader names it: a title and what it means for a paper
+PARTS = {
+    "scope": ("Sources and their reasons", "Each source read says why, and each left out says why not"),
+    "descriptive epidemiology": ("Rates with intervals", "Rates with their 95 % intervals and denominators"),
+    "descriptive: geography": ("Rates by place", "The whole area and its regions"),
+    "descriptive: case definition": ("Case definition", "Confirmed cases rated apart where a source records them"),
+    "descriptive: perinatal denominators": ("Perinatal denominators", "Pregnancy and perinatal events rated per live birth"),
+    "descriptive: period": ("Whole-period estimates", "Each rate over the whole period as well as by year"),
+    "trends": ("Trends", "Annual percent changes with their intervals, crude and age-sex adjusted"),
+    "seasons": ("Seasonality", "The monthly pattern with its intervals"),
+    "places": ("Municipalities", "Rates and smoothed standardised ratios for every municipality"),
+    "associations": ("Associations with contexts", "How the rates relate to municipal contexts"),
+    "case fatality": ("Case fatality", "Deaths among the cases, crude and adjusted, with its trend"),
+    "groups": ("Case mix", "Who the cases are: their characteristics, with intervals"),
+    "measures": ("Measures", "The topic's own quantities, such as age or length of stay"),
+    "persons": ("Persons", "Linked persons and what happened to them"),
+    "completeness": ("Completeness", "How many events could be placed and counted"),
+    "completeness across systems": ("Completeness across sources", "Cases found in one source and missed by another"),
+    "data quality": ("Data quality", "What the sources fail to record, year by year"),
+    "linkage": ("Record linkage", "The links between sources, with their false-match rates"),
+    "hypotheses": ("Declared hypotheses", "Answers to the tests declared before looking"),
+    "relations": ("Relations between fields", "How the topic's fields move together"),
+    "screen": ("Relations screen", "The topic's fields against every other field"),
+    "findings": ("Exploratory findings", "Signals worth a look, each checked against recording artefacts"),
+    "figures": ("Figures", "A series and a map for each field"),
+    "methods": ("Methods", "The methods text"),
+    "codebook": ("Codebook", "Every table's columns described"),
+    "report": ("Report", "The study's report"),
+    "every step ran": ("Every step ran", "No step of the analysis failed"),
+}
+
+
+def _titled(parts: list[dict]) -> list[dict]:
+    return [{**p, "title": PARTS.get(p["part"], (p["part"].capitalize(), ""))[0],
+             "about": PARTS.get(p["part"], ("", ""))[1]} for p in parts]
+
+
 def body(folder: Path) -> list[dict] | None:
     """A folder's analytic body (`study.body`), kept in ``body.json`` beside its provenance and made again when the
     folder is newer: 0.9 s a folder made the list of studies wait."""
@@ -158,7 +195,9 @@ def study_detail(name: str) -> dict:
             if f.is_file() and not f.name.endswith(".tmp"):
                 files.append({"path": f.relative_to(folder).as_posix(), "bytes": f.stat().st_size,
                               "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(f.stat().st_mtime))})
-    return {**s, "text": path.read_text(encoding="utf-8"), "scope": scope, "parts": body(folder), "files": files,
+    parts = body(folder)
+    return {**s, "text": path.read_text(encoding="utf-8"), "scope": scope, "parts": _titled(parts) if parts else parts,
+            "files": files,
             "runs": jobs.runs(study=s["name"])}
 
 
