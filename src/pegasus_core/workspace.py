@@ -1010,13 +1010,24 @@ def _icd10():
 _TREE: dict = {}
 
 
+def _agravo_name(agravo: str) -> str | None:
+    """A SINAN agravo's name as its source writes it ("Dengue"), from its dataset's description; None when undescribed."""
+    return _description(f"SINAN-{agravo}").get("official_name")
+
+
 def _topic(doc: dict) -> str:
-    """What a study is about, from its declaration's seeds read as names: a condition's name; up to three ICD-10 codes
-    by their labels, more by the smallest ICD-10 group holding them all; SINAN agravos when no code names the topic;
-    the label terms."""
+    """What a study is about, from its declaration's seeds read as names: a single SINAN agravo's name; a condition's
+    name; up to three ICD-10 codes by their labels, more by the smallest ICD-10 group holding them all; SINAN agravos
+    when no code names the topic; the label terms."""
     seeds = ((doc.get("topic") or {}).get("seeds") or {})
     parts = [str(r.get("name") or r.get("dataset")) for r in seeds.get("records") or []]
     codes = [str(c).replace(".", "") for c in seeds.get("icd10") or []]
+    agravos = list(seeds.get("sinan") or [])
+    if len(agravos) == 1 and not parts:
+        # one notifiable disease names the topic as its readers do ("Dengue"); its ICD-10 codes are its definition
+        name = _agravo_name(agravos[0])
+        if name:
+            return "; ".join([name, *(seeds.get("terms") or [])])
     if codes:
         tree = _icd10()
         if len(codes) <= 3:
