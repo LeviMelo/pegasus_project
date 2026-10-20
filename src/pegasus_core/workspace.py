@@ -470,7 +470,8 @@ def datasets(refresh: bool = False) -> dict:
                          "ufs": r.get("ufs"), "event_types": readable.get(key, []),
                          "what_it_is": desc.get("what_it_is"),
                          "use": "study" if readable.get(key) else desc.get("use") or
-                         ("described" if desc.get("what_one_row_is") else "undescribed")})
+                         ("described" if desc.get("what_one_row_is") else "undescribed"),
+                         "why_no_event_type": None if readable.get(key) else desc.get("why_no_event_type")})
     out = {**stamp, "systems": [{k: s.get(k) for k in ("system", "name", "files", "gigabytes", "datasets", "years")}
                                 for s in top.rows], "datasets": rows}
     cache.parent.mkdir(parents=True, exist_ok=True)
