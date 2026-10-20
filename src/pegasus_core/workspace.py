@@ -963,13 +963,13 @@ def codes(code: str, column: str, year: int, partition: str | None = None) -> di
 
 
 def contexts() -> list[dict]:
-    """The municipal contexts a study can relate its rates to (pegasus_data's declared fields): what each measures, its
-    unit, years, denominator and source."""
+    """The municipal contexts a study can relate its rates to (pegasus_data's declared fields): its short name, what it
+    measures, its unit, years, denominator and source."""
     from . import gateway
 
     out = []
     for name, spec in sorted(gateway.declared_fields().items()):
-        out.append({"context": name, "what": spec.get("what") or spec.get("label") or spec.get("description"),
+        out.append({"context": name, "label": spec.get("label"), "what": spec.get("what") or spec.get("description"),
                     "unit": spec.get("unit"), "years": spec.get("years"), "over": spec.get("over"),
                     "source": spec.get("source") or (f"IBGE SIDRA table {spec['table']}" if spec.get("table") else None),
                     "verified": spec.get("verified")})
