@@ -1268,7 +1268,7 @@ def cards() -> list[dict]:
             s = {**_summary(path), "title": name, "place": None, "fields": [], "error": f"{type(exc).__name__}: {exc}"}
         heads = sorted((f for f in s["fields"] if f["primary"]), key=lambda f: -(f["events"] or 0))[:4]
         out.append({k: s.get(k) for k in ("name", "title", "place", "period", "depth", "group", "written", "body",
-                                          "last_run", "error")}
+                                          "last_run", "error", "note")}
                    | {"fields": [{
                        "label": h["label"], "event": h["event"], "dataset": h["dataset"], "reading": h["reading"],
                        "unit": h["unit"], "events": h["events"], "crude": h["crude"],
