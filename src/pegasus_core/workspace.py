@@ -909,3 +909,207 @@ def methods_of(name: str, table: str) -> dict:
         p = json.loads(path.read_text(encoding="utf-8"))
         prov = {k: p.get(k) for k in ("written", "code_version", "data_version", "depth", "seconds")}
     return {"study": name, "table": table, "measures": measures, "provenance": prov}
+
+
+# ------------------------------------------------------------------------------------- a study as the window draws it
+
+
+STATES = {"RO": "Rondônia", "AC": "Acre", "AM": "Amazonas", "RR": "Roraima", "PA": "Pará", "AP": "Amapá",
+          "TO": "Tocantins", "MA": "Maranhão", "PI": "Piauí", "CE": "Ceará", "RN": "Rio Grande do Norte",
+          "PB": "Paraíba", "PE": "Pernambuco", "AL": "Alagoas", "SE": "Sergipe", "BA": "Bahia", "MG": "Minas Gerais",
+          "ES": "Espírito Santo", "RJ": "Rio de Janeiro", "SP": "São Paulo", "PR": "Paraná", "SC": "Santa Catarina",
+          "RS": "Rio Grande do Sul", "MS": "Mato Grosso do Sul", "MT": "Mato Grosso", "GO": "Goiás",
+          "DF": "Distrito Federal", "BR": "Brazil"}
+_STATE_CODES = {"11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP", "17": "TO", "21": "MA",
+                "22": "PI", "23": "CE", "24": "RN", "25": "PB", "26": "PE", "27": "AL", "28": "SE", "29": "BA",
+                "31": "MG", "32": "ES", "33": "RJ", "35": "SP", "41": "PR", "42": "SC", "43": "RS", "50": "MS",
+                "51": "MT", "52": "GO", "53": "DF"}
+
+
+def place_name(where) -> str:
+    """A declaration's ``where`` as a person reads it: Brazil, a state's name, or the states named."""
+    items = where if isinstance(where, list) else [where]
+    names = []
+    for w in items:
+        w = str(w)
+        code = _STATE_CODES.get(w, w) if w.isdigit() and len(w) == 2 else w
+        names.append(STATES.get(code.upper(), f"municipality {w}" if w.isdigit() else w))
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _icd10():
+    """The ICD-10 tree as {code: (label, parent)}, read once."""
+    if "icd10" not in _TREE:
+        from . import gateway
+
+        _TREE["icd10"] = {r["code"]: (r["label"], r["parent"]) for r in gateway.code_tree("ICD10").to_pylist()}
+    return _TREE["icd10"]
+
+
+_TREE: dict = {}
+
+
+def _topic(doc: dict) -> str:
+    """What a study is about, from its declaration's seeds read as names: a condition's name; up to three ICD-10 codes
+    by their labels, more by the smallest ICD-10 group holding them all; SINAN agravos when no code names the topic;
+    the label terms."""
+    seeds = ((doc.get("topic") or {}).get("seeds") or {})
+    parts = [str(r.get("name") or r.get("dataset")) for r in seeds.get("records") or []]
+    codes = [str(c).replace(".", "") for c in seeds.get("icd10") or []]
+    if codes:
+        tree = _icd10()
+        if len(codes) <= 3:
+            parts.append(", ".join(tree.get(c, (c, None))[0] for c in codes))
+        else:
+            def chain(c):
+                out = []
+                while c:
+                    out.append(c)
+                    c = tree.get(c, (None, None))[1]
+                return out
+            common = set(chain(codes[0]))
+            for c in codes[1:]:
+                common &= set(chain(c))
+            shared = [c for c in chain(codes[0]) if c in common]
+            parts.append(f"{tree[shared[0]][0]} ({shared[0]})" if shared else ", ".join(codes))
+    if not codes:
+        parts += [f"{a} (SINAN)" for a in seeds.get("sinan") or []]
+    parts += list(seeds.get("terms") or [])
+    return "; ".join(parts) or str(doc.get("study"))
+
+
+def _reading(field: str, roles: dict) -> str:
+    """How a field counts its events, in words: the classifier column it reads (its role's name) or codes anywhere on
+    the record; where it places them (the residence, else the support named)."""
+    import re
+
+    m = re.match(r"[^:]+:[^:]+:([A-Za-z_]+)\[(.*?)\]", field)
+    how = "anywhere on the record" if field.split(":")[2].startswith("mentions") else \
+        (roles.get(m.group(1)) or m.group(1)) if m else "the event's own classification"
+    s = re.search(r"support=([A-Z_]+)", field)
+    where = f"placed by {roles.get(s.group(1)) or s.group(1)}" if s else "placed by residence"
+    return f"{how}; {where}"
+
+
+_SUMMARIES: dict[str, tuple] = {}
+
+
+def summary(name: str) -> dict:
+    """`_summary_of` kept until the study's declaration or folder changes (a card on the Studies page each)."""
+    path = find(name)
+    prov = path.parent / _summary_name(path) / "provenance.json"
+    stamp = (path.stat().st_mtime, prov.stat().st_mtime if prov.exists() else None,
+             tuple((r["id"], r["state"]) for r in jobs.runs(limit=1, study=_summary_name(path))))
+    kept = _SUMMARIES.get(name)
+    if kept is None or kept[0] != stamp:
+        _SUMMARIES[name] = (stamp, _summary_of(name))
+    return _SUMMARIES[name][1]
+
+
+def _summary_of(name: str) -> dict:
+    """A study as the window shows it first: who and what it is about in words, its state, and for each field it read
+    (the topic counted one way) the period's rate with its interval, the rates by year, the trend, the rates by sex,
+    age band, race and region, and the case fatality; each number as the folder's estimates hold it."""
+    import pegasus_data as pg
+    import yaml
+
+    path = find(name)
+    s = _summary(path)
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        doc = {}
+    out = {**s, "title": doc.get("title") or _topic(doc), "place": place_name(doc.get("where", "BR")),
+           "fields": []}
+    if not s["written"]:
+        return out
+    with _connect(name) as con:
+        def q(sql, params=()):
+            cur = con.execute(sql, list(params))
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+        own = "geography IN ('area', 'national')"
+        heads = q(f"""SELECT field, label, dataset, unit, denominator_kind, first, last, numerator AS events,
+                             estimate, low, high
+                      FROM estimates WHERE section = 'rates' AND {own} AND stratum IS NULL AND period_kind = 'period'
+                        AND measure = 'crude_rate' AND label NOT LIKE '%— race:%'
+                      ORDER BY strpos(field, 'support=') > 0, length(field)""")
+        roles_of: dict[str, dict] = {}
+        for h in heads:
+            ds = h["dataset"]
+            if ds not in roles_of:
+                try:
+                    roles_of[ds] = {r["column"]: r.get("name") for r in pg.roles(ds)}
+                except Exception:  # noqa: BLE001 - a dataset without roles reads its columns as named
+                    roles_of[ds] = {}
+            f, label = h["field"], h["label"]
+
+            def rate(measure, extra="", field=f, label=label):
+                return q(f"""SELECT first, last, numerator AS events, estimate, low, high, stratum, geography,
+                                    place_name, unit FROM estimates
+                             WHERE section = 'rates' AND field = ? AND label = ? AND measure = ? {extra}""",
+                         (field, label, measure))
+            std = rate("standardised_rate", f"AND {own} AND stratum IS NULL AND period_kind = 'period'")
+            series = {r["first"]: r for r in rate("crude_rate", f"AND {own} AND stratum IS NULL AND period_kind = 'year'")}
+            std_series = {r["first"]: r for r in rate("standardised_rate",
+                                                      f"AND {own} AND stratum IS NULL AND period_kind = 'year'")}
+            trend = q(f"""SELECT variable, estimate, low, high, unit FROM estimates
+                          WHERE section = 'trends' AND field = ? AND {own} AND stratum IS NULL AND measure = 'aapc'""",
+                      (f,))
+            strata = rate("crude_rate", f"AND {own} AND stratum IS NOT NULL AND period_kind = 'period'")
+            races = q(f"""SELECT label, estimate, low, high, numerator AS events FROM estimates
+                          WHERE section = 'rates' AND field = ? AND label LIKE ? AND {own} AND stratum IS NULL
+                            AND period_kind = 'period' AND measure = 'crude_rate'""", (f, label + " — race:%"))
+            regions = rate("crude_rate", "AND geography NOT IN ('area', 'national', 'reference', 'municipality') "
+                                         "AND stratum IS NULL AND period_kind = 'period'")
+            fatality = q("""SELECT period_kind, first, last, estimate, low, high, numerator, denominator, measure
+                            FROM estimates WHERE section = 'case fatality' AND field = ? AND stratum IS NULL
+                              AND measure IN ('case_fatality', 'case_fatality_adjusted', 'mortality_after')
+                            ORDER BY measure, first""", (f,))
+
+            def ci(r):
+                return None if r is None else {"estimate": r["estimate"], "low": r["low"], "high": r["high"]}
+            out["fields"].append({
+                "field": f, "label": label.split(": ", 1)[-1].split(" — ")[0], "event": label.split(":")[0],
+                "dataset": ds, "reading": _reading(f, roles_of[ds]), "primary": "support=" not in f,
+                "unit": h["unit"], "per": h["denominator_kind"], "first": h["first"], "last": h["last"],
+                "events": h["events"], "crude": ci(h), "standardised": ci(std[0] if std else None),
+                "series": [{"year": y, "events": r["events"], **ci(r),
+                            "standardised": ci(std_series.get(y))} for y, r in sorted(series.items())],
+                "trend": [{"of": t["variable"], "estimate": t["estimate"], "low": t["low"], "high": t["high"],
+                           "unit": t["unit"]} for t in trend],
+                "sex": [{"group": r["stratum"].removeprefix("sex: "), **ci(r)} for r in strata
+                        if r["stratum"].startswith("sex: ") and "age" not in r["stratum"]],
+                "age": [{"group": r["stratum"].removeprefix("age "), **ci(r)} for r in strata
+                        if r["stratum"].startswith("age ")],
+                "race": [{"group": r["label"].rsplit("race: ", 1)[-1], "events": r["events"], **ci(r)} for r in races],
+                "regions": [{"level": r["geography"], "place": r["place_name"], **ci(r)} for r in regions],
+                "case_fatality": [{"measure": r["measure"], "period": r["period_kind"], "first": r["first"],
+                                   "last": r["last"], "deaths": r["numerator"], "cases": r["denominator"], **ci(r)}
+                                  for r in fatality],
+            })
+    return out
+
+
+def cards() -> list[dict]:
+    """Every study as a card: its title, place and period, its state, and its fields as the period's rate with its
+    interval, the trend and the rates by year (each source's own reading of the topic, most events first: a card that
+    showed one field had shown suicide in Rio Grande do Sul by its admissions, 0.15 per 100,000, not its deaths)."""
+    out = []
+    for path in declarations():
+        name = _summary_name(path)
+        try:
+            s = summary(name)
+        except Exception as exc:  # noqa: BLE001 - a study whose folder cannot be read is a card that says why
+            s = {**_summary(path), "title": name, "place": None, "fields": [], "error": f"{type(exc).__name__}: {exc}"}
+        heads = sorted((f for f in s["fields"] if f["primary"]), key=lambda f: -(f["events"] or 0))[:4]
+        out.append({k: s.get(k) for k in ("name", "title", "place", "period", "depth", "group", "written", "body",
+                                          "last_run", "error")}
+                   | {"fields": [{
+                       "label": h["label"], "event": h["event"], "dataset": h["dataset"], "reading": h["reading"],
+                       "unit": h["unit"], "events": h["events"], "crude": h["crude"],
+                       "trend": next((t for t in h["trend"] if str(t["of"] or "").startswith("crude")), None),
+                       "series": [{"year": p["year"], "estimate": p["estimate"]} for p in h["series"]]}
+                       for h in heads]})
+    return out

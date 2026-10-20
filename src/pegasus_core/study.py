@@ -65,8 +65,8 @@ PRESETS = {
                    "persons": True, "replicate": True, "download": float("inf"), "draws": 20,
                    "related_questions": [], "questions": None, "nulls": 4.0, "triage": True},
 }
-KEYS = {"study", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios", "questions",
-        "nulls", *PRESETS["survey"]}
+KEYS = {"study", "title", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios",
+        "questions", "nulls", *PRESETS["survey"]}
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 
@@ -120,6 +120,7 @@ NULLS = {"quick": 0.25, "standard": 1.0, "precise": 4.0}
 #: context` read it; `load` checks the values. A key `load` accepts and this list misses fails at import.
 DECLARATION = [
     {"key": "study", "form": "name", "required": True, "help": "the study's name: its file and its folder"},
+    {"key": "title", "form": "text", "help": "the study's title as a reader sees it (default: its topic's names)"},
     {"key": "topic.seeds.icd10", "form": "codes", "help": "ICD-10 codes at any level (I21, B58, O98.6)"},
     {"key": "topic.seeds.sinan", "form": "codes", "help": "SINAN agravos (LEPT, TOXG): `pegasus study search`"},
     {"key": "topic.seeds.terms", "form": "words",
