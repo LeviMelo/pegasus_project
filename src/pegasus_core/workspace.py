@@ -409,7 +409,8 @@ def datasets(refresh: bool = False) -> dict:
     root = config.data_root()
     top = pg.explore(root=root)
     cache = config.home() / "workspace" / "datasets.json"
-    stamp = {"as_of": str(top.as_of), "data_version": config.data_version()}
+    # pegasus_data's commit, not its version: a dataset described or given an event type is a commit
+    stamp = {"as_of": str(top.as_of), "data_version": config.data_code_version()}
     if cache.exists() and not refresh:
         try:
             kept = json.loads(cache.read_text(encoding="utf-8"))
@@ -424,9 +425,13 @@ def datasets(refresh: bool = False) -> dict:
     for s in top.rows:
         for r in pg.explore(s["system"], root=root).rows:
             key = gateway.dataset_key(r["dataset"])
+            desc = _description(r["dataset"])
             rows.append({"system": s["system"], "dataset": r["dataset"], "code": key, "name": r.get("name"),
                          "files": r.get("files"), "gigabytes": r.get("gigabytes"), "years": r.get("years"),
-                         "ufs": r.get("ufs"), "event_types": readable.get(key, [])})
+                         "ufs": r.get("ufs"), "event_types": readable.get(key, []),
+                         "what_it_is": desc.get("what_it_is"),
+                         "use": "study" if readable.get(key) else desc.get("use") or
+                         ("described" if desc.get("what_one_row_is") else "undescribed")})
     out = {**stamp, "systems": [{k: s.get(k) for k in ("system", "name", "files", "gigabytes", "datasets", "years")}
                                 for s in top.rows], "datasets": rows}
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -434,10 +439,27 @@ def datasets(refresh: bool = False) -> dict:
     return out
 
 
+#: what pegasus_data says of a dataset in words (`pg.info`): its names, what it is, what one row is, its unit of
+#: analysis, its known biases and gotchas, and what PegaSUS can use it for when it holds no event type
+DESCRIPTION_KEYS = ("official_name", "translated_name", "what_it_is", "what_one_row_is", "unit_of_analysis",
+                    "known_biases", "gotchas", "use", "why_no_event_type")
+
+
+def _description(dataset: str) -> dict:
+    import pegasus_data as pg
+
+    try:
+        info = pg.info(dataset).as_dict()
+    except Exception:  # noqa: BLE001 - a dataset pegasus_data does not describe is said so, not hidden
+        return {}
+    merged = {**(info.get("identity") or {}), **(info.get("documentation") or {})}
+    return {k: merged[k] for k in DESCRIPTION_KEYS if merged.get(k) not in (None, "", [])}
+
+
 def dataset(code: str) -> dict:
-    """One dataset's anatomy: what the catalog lists by year, what the lake holds (whole years, partitions, rows), the
-    confirmation reserve's years, its event types, its columns' roles (meaning, kind, codelists, the years each is
-    valid, the codes that mean not recorded) and the links it is a side of."""
+    """One dataset's anatomy: what it is in words (`_description`), what the catalog lists by year, what the lake holds
+    (whole years, partitions, rows), the confirmation reserve's years, its event types, its columns' roles (meaning,
+    kind, codelists, the years each is valid, the codes that mean not recorded) and the links it is a side of."""
     import pegasus_data as pg
 
     from . import control, gateway
@@ -465,7 +487,7 @@ def dataset(code: str) -> dict:
              if key in (gateway.dataset_key(s.left.dataset), gateway.dataset_key(s.right.dataset))]
     keep = ("column", "role", "entity", "property", "kind", "model", "name", "codelists", "first_year", "last_year",
             "missing", "unit", "measure", "note", "derived", "reviewed")
-    return {**listed, "published": pg.explore(key, root=root).rows,
+    return {**listed, "description": _description(listed["dataset"]), "published": pg.explore(key, root=root).rows,
             "lake": [{"year": y, **lake[y]} for y in sorted(lake)],
             "whole_years": whole, "reserved_years": control.reserved(key),
             "event_types": [{k: e.get(k) for k in ("name", "kind", "grain", "classifiers", "marks", "status", "note")}
@@ -978,15 +1000,29 @@ def _topic(doc: dict) -> str:
     return "; ".join(parts) or str(doc.get("study"))
 
 
-def _reading(field: str, roles: dict) -> str:
+def _region_name(r: dict) -> str:
+    """A region's name: its own, a state's by its code, else its place without its code ("27001 AL 1ª Região de
+    Saúde")."""
+    import re
+
+    place = str(r.get("place") or "")
+    if r.get("place_name"):
+        return str(r["place_name"])
+    if r.get("geography") == "state" and place in _STATE_CODES:
+        return STATES[_STATE_CODES[place]]
+    return re.sub(r"^\d+\s+", "", place)
+
+
+def _reading(field: str, roles: dict, label: str = "") -> str:
     """How a field counts its events, in words: the classifier column it reads (its role's name) or codes anywhere on
-    the record; where it places them (the residence, else the support named)."""
+    the record; where it places them (the residence, else the support named in its id or, for a condition's field,
+    its label's " — support:COLUMN")."""
     import re
 
     m = re.match(r"[^:]+:[^:]+:([A-Za-z_]+)\[(.*?)\]", field)
     how = "anywhere on the record" if field.split(":")[2].startswith("mentions") else \
         (roles.get(m.group(1)) or m.group(1)) if m else "the event's own classification"
-    s = re.search(r"support=([A-Z_]+)", field)
+    s = re.search(r"support=([A-Z_]+)", field) or re.search(r" — support:([A-Z_]+)", label)
     where = f"placed by {roles.get(s.group(1)) or s.group(1)}" if s else "placed by residence"
     return f"{how}; {where}"
 
@@ -1010,6 +1046,7 @@ def _summary_of(name: str) -> dict:
     """A study as the window shows it first: who and what it is about in words, its state, and for each field it read
     (the topic counted one way) the period's rate with its interval, the rates by year, the trend, the rates by sex,
     age band, race and region, and the case fatality; each number as the folder's estimates hold it."""
+
     import pegasus_data as pg
     import yaml
 
@@ -1047,7 +1084,7 @@ def _summary_of(name: str) -> dict:
 
             def rate(measure, extra="", field=f, label=label):
                 return q(f"""SELECT first, last, numerator AS events, estimate, low, high, stratum, geography,
-                                    place_name, unit FROM estimates
+                                    place, place_name, unit FROM estimates
                              WHERE section = 'rates' AND field = ? AND label = ? AND measure = ? {extra}""",
                          (field, label, measure))
             std = rate("standardised_rate", f"AND {own} AND stratum IS NULL AND period_kind = 'period'")
@@ -1072,7 +1109,8 @@ def _summary_of(name: str) -> dict:
                 return None if r is None else {"estimate": r["estimate"], "low": r["low"], "high": r["high"]}
             out["fields"].append({
                 "field": f, "label": label.split(": ", 1)[-1].split(" — ")[0], "event": label.split(":")[0],
-                "dataset": ds, "reading": _reading(f, roles_of[ds]), "primary": "support=" not in f,
+                "dataset": ds, "reading": _reading(f, roles_of[ds], label),
+                "primary": "support=" not in f and " — support:" not in label,
                 "unit": h["unit"], "per": h["denominator_kind"], "first": h["first"], "last": h["last"],
                 "events": h["events"], "crude": ci(h), "standardised": ci(std[0] if std else None),
                 "series": [{"year": y, "events": r["events"], **ci(r),
@@ -1084,7 +1122,8 @@ def _summary_of(name: str) -> dict:
                 "age": [{"group": r["stratum"].removeprefix("age "), **ci(r)} for r in strata
                         if r["stratum"].startswith("age ")],
                 "race": [{"group": r["label"].rsplit("race: ", 1)[-1], "events": r["events"], **ci(r)} for r in races],
-                "regions": [{"level": r["geography"], "place": r["place_name"], **ci(r)} for r in regions],
+                # a region's name is its place without its code ("27001 AL 1ª Região de Saúde")
+                "regions": [{"level": r["geography"], "place": _region_name(r), **ci(r)} for r in regions],
                 "case_fatality": [{"measure": r["measure"], "period": r["period_kind"], "first": r["first"],
                                    "last": r["last"], "deaths": r["numerator"], "cases": r["denominator"], **ci(r)}
                                   for r in fatality],
