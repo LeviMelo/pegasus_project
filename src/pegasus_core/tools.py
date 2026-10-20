@@ -1980,22 +1980,27 @@ def explain_lead(x: leads.Lead, register: list[leads.Lead]) -> dict[str, Any]:
 def ledger_status(ledger: control.Ledger | None = None, q: float = 0.05) -> dict[str, Any]:
     """Tests per family and actor in the ledger, and the confirmation reserve: tests spent, rejections, and the
     level the next claim would be tested at."""
+    import pyarrow.compute as pc
+
     ledger = ledger or control.Ledger()
-    pending = [r for r in ledger.table().to_pylist() if r["kind"] == "pending"]
+    # counted in Arrow: the ledger's 1.4 million rows made Python dicts took 15 of the window's 22 s (2026-10-19)
+    t = ledger.table()
+    pending = t.filter(pc.equal(t["kind"], "pending"))
     reserve = control.Reserve(ledger, q)
     status = reserve.status()
-    by_family: dict[str, int] = {}
-    actors: dict[str, int] = {}
-    for r in pending:
-        by_family[r["family"]] = by_family.get(r["family"], 0) + 1
-        actors[r["actor"]] = actors.get(r["actor"], 0) + 1
-    claims = [r for r in pending if r["split"] == control.Reserve.SPLIT]
-    return {"tests": len(pending), "n_families": len(by_family), "actors": actors,
+
+    def counts(column: str) -> dict[str, int]:
+        return {r["values"]: r["counts"] for r in pc.value_counts(pending[column]).to_pylist()}
+
+    by_family, actors = counts("family"), counts("actor")
+    spent = pending.filter(pc.equal(pending["split"], control.Reserve.SPLIT))
+    claims = spent.slice(max(0, spent.num_rows - 10)).select(["id", "at", "actor", "spec"]).to_pylist()
+    return {"tests": pending.num_rows, "n_families": len(by_family), "actors": actors,
             "families": dict(sorted(by_family.items(), key=lambda kv: -kv[1])[:25]),
             "reserve": {"split": control.Reserve.SPLIT, "q": q, "spent": status["spent"], "rejections": status["rejections"],
                         "next_level": status["next_level"],
                         "last_claims": [{"id": r["id"], "at": r["at"], "actor": r["actor"], "spec": json.loads(r["spec"])}
-                                        for r in claims[-10:]]}}
+                                        for r in claims]}}
 
 
 def method_status() -> dict[str, Any]:
