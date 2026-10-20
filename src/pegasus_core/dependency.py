@@ -44,8 +44,9 @@ def normal_scores(v: np.ndarray) -> np.ndarray:
 
 
 #: the event kinds that count care used rather than a health state (pegasus_data `event_types` kind): a place's level of
-#: use (access, referral, billing) enters every such field, and the map reads them net of it (`maps.factors`)
-CARE_KINDS = ("hospitalisation", "authorisation")
+#: use (access, referral, billing) enters every such field, and the map reads them net of it (`maps.factors`). Procedures
+#: (SIA, SIH-SP) and screening exams and the persons examined (SISCAN, pegasus_data ADR-0196) are care used too
+CARE_KINDS = ("hospitalisation", "authorisation", "procedure", "exam", "examinee")
 
 
 def _window(su, years: list[int], places: np.ndarray) -> tuple[np.ndarray, ...]:
