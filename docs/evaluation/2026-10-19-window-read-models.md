@@ -27,4 +27,4 @@ study (556 requests, 0 failed).
 |---|---|---|---|
 | `cards()`, 21 studies | 16.2 s | 1.6 s (0.7 s in memory) | summaries kept on disk under the declaration, folder, last run and code; declaration names read once per file version (`find` had parsed every YAML on each call, 579 parses) |
 | `ledger()` | 22.0 s | 3.6 s, same output | the 1,441,753 rows counted in Arrow instead of as Python dicts |
-| `leads()`, first read | 27.5 s | unchanged | 169,806 leads decoded from JSON once per process (10.9 s in `json.loads`); 0.7 s after. Left as is: `leads.current` sits under keyed computations, and the window says the first read is slow |
+| `leads()`, first read | 27.5 s | unchanged | 169,806 leads decoded from JSON once per process (10.9 s in `json.loads`); 0.7 s after. Not changed in this pass; the window says the first read is slow. Open: a register read without decoding every lead's JSON (a columnar register, or reading only the page's leads) |
