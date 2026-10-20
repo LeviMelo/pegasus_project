@@ -1808,6 +1808,10 @@ def _strata(dataset: str, event: str | None = None, year: int | None = None) -> 
     entity = by_prop["residence"]["entity"]
     implied = {"mother": 2}.get(entity)
     if "sex" not in by_prop and implied is None:
+        # events of one sex by their nature, as pegasus_data declares with its evidence (SISCAN's cervical exams,
+        # whose files carry no sex column: ADR-0197 there)
+        implied = (pg.dataset_facts(dataset).get("implied_sex") or {}).get("sex")
+    if "sex" not in by_prop and implied is None:
         raise LookupError(f"{dataset}: no sex stratum, and entity {entity!r} implies none")
     return {"residence": by_prop["residence"]["column"], "place": "residence", "age": age["column"],
             "age_missing": tuple(age.get("missing") or ()),

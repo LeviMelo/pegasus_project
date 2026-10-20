@@ -8,6 +8,7 @@ runs (`jobs`). Everything here reads those files and the engine's own functions;
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -528,7 +529,8 @@ def _unreadable(dataset: str, events: list[str]) -> str | None:
         except LookupError as e:
             text = re.sub(r"^[\w.-]+: ", "", str(e))
             m = re.match(r"no (\w+) stratum in pegasus_data's roles", text)
-            whys.append(f"pegasus_data does not yet say which column holds the {m.group(1)}" if m else text)
+            whys.append(f"No column of its records is known to hold the {m.group(1)}, so a study cannot place or "
+                        "standardise its events yet" if m else text)
     return whys[0] if whys else None
 
 
@@ -539,6 +541,8 @@ DESCRIPTION_KEYS = ("official_name", "translated_name", "what_it_is", "what_one_
 
 
 def _description(dataset: str) -> dict:
+    """What pegasus_data says of a dataset (`DESCRIPTION_KEYS`), each text as a reader of the window takes it
+    (`reader_text`); `pg.info` and the command line keep the curation's full text."""
     import pegasus_data as pg
 
     try:
@@ -546,7 +550,25 @@ def _description(dataset: str) -> dict:
     except Exception:  # noqa: BLE001 - a dataset pegasus_data does not describe is said so, not hidden
         return {}
     merged = {**(info.get("identity") or {}), **(info.get("documentation") or {})}
-    return {k: merged[k] for k in DESCRIPTION_KEYS if merged.get(k) not in (None, "", [])}
+    out = {k: merged[k] for k in DESCRIPTION_KEYS if merged.get(k) not in (None, "", [])}
+    return {k: ([reader_text(x) for x in v] if isinstance(v, list) else reader_text(v) if isinstance(v, str) else v)
+            for k, v in out.items()}
+
+
+#: a sentence of a curation's history: "Corrected 2026-10-08: ...", "Until 2026-10-08 it was an alias ..."
+_HISTORY = re.compile(r"^(?:Corrected|Until|Since|Before|Renamed|Earlier)\b[^.]*?\b20\d\d-\d\d-\d\d\b")
+#: a reference to the project's own records inside a text: (ADR-0077), OQ-90, a bare date in brackets
+_RECORD = re.compile(r"\s*\b(?:ADR|OQ)-?\d+\b[;,]?|\s*\(\s*20\d\d-\d\d-\d\d\s*\)")
+
+
+def reader_text(text: str) -> str:
+    """A curation text as the window shows it: without the sentences of its own history (when an entry was
+    corrected, what it said before) and without references to the project's decision and question records, which
+    belong to the record of the work, not to what a researcher reads about a dataset (2026-10-19)."""
+    text = _RECORD.sub("", text)
+    text = re.sub(r"\s*\(\s*[;,]?\s*\)", "", re.sub(r"\(\s*[;,]\s*", "(", text))
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text.strip())
+    return " ".join(x for x in sentences if not _HISTORY.match(x)).strip()
 
 
 def dataset(code: str) -> dict:

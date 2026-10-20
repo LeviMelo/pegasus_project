@@ -6920,7 +6920,8 @@ def _report(decl: Declaration, scope: Scope, out: Path, rows: list[dict], desc: 
              f"<p class=meta>{e(_area_text())} · depth {e(decl.depth)} · period "
              f"{decl.years[0]}–{decl.years[-1]} · q {decl.q} · written {time.strftime('%Y-%m-%d %H:%M')}</p>",
              "<h2>1. Summary</h2>",
-             f"<p>{len(sources)} sources read ({e(', '.join(sources))}) in {len(read)} fields.</p>",
+             f"<p>{len(sources)} source{'s' if len(sources) != 1 else ''} read ({e(', '.join(sources))}) in {len(read)} "
+             f"field{'s' if len(read) != 1 else ''}.</p>",
              "<ul>" + "".join(summary) + "</ul>",
              # the counts as they are: sources are datasets (fields are items), and a noise finding (an exact interval
              # holding 1) is no recording explanation (731 of Alagoas's 751 "explained" findings were noise; the
