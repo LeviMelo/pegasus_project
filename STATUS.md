@@ -66,7 +66,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 
 | module | lines | responsibility | main public names | imports |
 |---|---|---|---|---|
-| `config` | 319 | homes and roots; versions; seeds; the **code-closure key** (`code_key`: a hash of the AST of the named functions and everything in the package they reach, so an edit re-keys only what it can change) | `home`, `data_root`, `population_root`, `population_source`, `population_pinned`, `code_version`, `code_key`, `code_closure`, `data_version`, `resource_version`, `data_code_version`, `data_package_dir`, `seed`, `supply_exponents`, `FIT_YEARS` (2010-2023) | none (sets `PEGASUS_DATA_HOME` default at import) |
+| `config` | 319 | homes and roots; versions; seeds; the **code-closure key** (`code_key`: a hash of the AST of the named functions and everything in the package they reach, so an edit re-keys only what it can change) | `home`, `data_root`, `population_root`, `population_source`, `population_pinned`, `code_version`, `code_key`, `code_closure`, `data_version`, `resource_version`, `data_code_version`, `data_package_dir`, `seed`, `supply_exponents`, `FIT_YEARS` (2010-2023) | none (the data root is pegasus_data's own resolution) |
 | `store` | 145 | content-addressed artefacts `pegasus_home/<kind>/<sha256[:20] of key>/` = `table.parquet` (zstd) or `arrays.npz` + `manifest.json` (key, code and data versions, written time); `gc` evicts caches | `address`, `put_table`, `get_table`, `put_arrays`, `get_arrays`, `manifest`, `manifests`, `gc`, `CACHE_KINDS` (`gateway`, `blockdata`) | config |
 | `structures` | 120 | precision structures of effects (iid, RW, ICAR, kNN) | `Shape`, `iid`, `random_walk`, `icar`, `knn_graph`, `centre` | none |
 | `graphs` | 102 | proximity graphs over places through the gateway, stored as arrays (`graphs`) | `edges`, `graph`, `DEFAULT` ("contiguity") | config, facility, gateway, store, structures |
@@ -144,8 +144,7 @@ Lines are of `src/pegasus_core/` on 2026-10-10. "Imports" lists pegasus_core mod
 | root | default | role |
 |---|---|---|
 | `PEGASUS_HOME` | `<repo>/pegasus_home/` (gitignored, 8.3 GB) | everything PegaSUS writes |
-| `PEGASUS_DATA_ROOT` | `C:/Users/Galaxy/pegasus_core_data` (`config.data_root`) | pegasus_data's home for PegaSUS's own reads: `_catalog/`, `blobs/`, `lake/` (`CIHA`, `SIHSUS`, `SIM`, `SINAN`, `SINASC`, `demas`, `fields`, `links`, `modelled`, `population`, `roles`, `sidra`), `registries/`, `work/`. `config` also sets `PEGASUS_DATA_HOME` to it at import, because an unrooted pegasus_data call creates a home beside the working directory |
-| `PEGASUS_POPULATION_ROOT` | `C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home` | read for population series already built there |
+| pegasus_data's one home | `C:/Users/Galaxy/pegasus_core_data`, named in `%APPDATA%/pegasus-data/config.toml` (`config.data_root` resolves it through pegasus_data; `PEGASUS_DATA_HOME` overrides; pegasus_data ADR-0200) | `_catalog/`, `blobs/`, `lake/` (`CIHA`, `SIHSUS`, `SIM`, `SINAN`, `SINASC`, `demas`, `fields`, `links`, `modelled`, `population`, `roles`, `sidra`), `registries/`, `work/`; the population series too (`config.population_root` is the same root; they were read from pegasus_data's repository home until 2026-10-24) |
 
 | variable | read by | effect |
 |---|---|---|
@@ -424,7 +423,7 @@ Fixed since the 2026-10-10 assessment: `alarms` (BACKLOG 0.3–0.3c: fit on dema
 - `scans/lenses` v0 lenses are live as methods of questions, not dead.
 - Store kind `triage_block` and the `_archive/` registers have no reader or writer in `src/`.
 - `data/` holds ~190 experiment scripts that import the package; none is on a production path. `data/handoffs/` keeps only two build logs (the notes moved to `history/2026-10-handoffs/data/`).
-- `pegasus_project/pegasus_data_home/` (untracked) is a stray pegasus_data home created by an unrooted call before `config` set `PEGASUS_DATA_HOME`.
+- `pegasus_project/pegasus_data_home/` (untracked) was a stray pegasus_data home created by an unrooted call. It held a crawl listing and no downloads, and is to be deleted (pegasus_data ADR-0200).
 - Docstrings in `src/` still cite `ARCHITECTURE §N` of revision 4 and `docs/plans/...` (now under `history/2026-10-plans/`).
 
 ---

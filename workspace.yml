@@ -2,6 +2,5 @@
 # variable already set in the environment wins.
 env:
   PEGASUS_HOME: C:/Users/Galaxy/LEVI/projects/pegasus_project/pegasus_home
-  PEGASUS_DATA_ROOT: C:/Users/Galaxy/pegasus_core_data
   # the code-key values of the last change of keys alone (`pegasus store keys window`): reads adopt entries keyed by them
   PEGASUS_ADOPT: C:/Users/Galaxy/LEVI/projects/pegasus_project/pegasus_home/keys/current_window.json

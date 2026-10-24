@@ -1,9 +1,8 @@
 """Homes, versions and seeds (ARCHITECTURE §11.1, §11.3).
 
 PegaSUS writes only under ``PEGASUS_HOME``. pegasus_data is reached through its
-API with two roots: ``PEGASUS_DATA_ROOT``, where PegaSUS's own queries fetch
-and build (never pegasus_data's maintainer home), and ``PEGASUS_POPULATION_ROOT``,
-read for population series already built there.
+API, in pegasus_data's one home, resolved exactly as every pegasus_data call
+resolves it (``PEGASUS_DATA_HOME``, a config file, the per-user data directory).
 """
 
 from __future__ import annotations
@@ -63,18 +62,26 @@ def home() -> Path:
 
 @keyless
 def data_root() -> str:
-    return os.environ.get("PEGASUS_DATA_ROOT", "C:/Users/Galaxy/pegasus_core_data")
+    """pegasus_data's home, as pegasus_data itself resolves it: one root, one name (``PEGASUS_DATA_HOME``).
+
+    The engine kept a root of its own (``PEGASUS_DATA_ROOT``, defaulting to a path on this machine) and pinned
+    pegasus_data to it, while pegasus_data, unpinned, made a home beside the working directory: two names for one
+    root, and a home per project that downloaded again what another held (2026-10-24, eight homes on one machine)."""
+    return _resolved_root(os.environ.get("PEGASUS_DATA_HOME", ""), os.getcwd())
 
 
-# a pegasus_data call that names no root addresses PegaSUS's data root: unset, pegasus_data creates a home beside the
-# working directory, and two did (pegasus_project/pegasus_data_home fetched 167 files again, 2026-10-05..09)
-os.environ.setdefault("PEGASUS_DATA_HOME", data_root())
+@keyless
+@lru_cache(maxsize=8)
+def _resolved_root(_env: str, _cwd: str) -> str:
+    from pegasus_data.locate import resolve_placement
+
+    return Path(resolve_placement()["root"].value).as_posix()  # the spelling the engine always used
 
 
 @keyless
 def population_root() -> str:
-    return os.environ.get("PEGASUS_POPULATION_ROOT",
-                          "C:/Users/Galaxy/LEVI/projects/pegasus_data/pegasus_data_home")
+    """Where the population series are read: the one home (they were read from pegasus_data's repository home)."""
+    return data_root()
 
 
 def study_area() -> frozenset[int] | None:

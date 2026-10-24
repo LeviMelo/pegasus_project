@@ -127,8 +127,9 @@ explanation.
 2. **A capability that is meaning or data belongs in pegasus_data** and is built there. The test: *would an
    epidemiologist who never uses PegaSUS want this as data?* Sources, intake, code systems, the concept index's tables,
    links and their viability, contexts and source definitions are all pegasus_data's.
-3. **PegaSUS never writes into pegasus_data's home.** PegaSUS's data root (`PEGASUS_DATA_ROOT`) is pegasus_data's home
-   for PegaSUS's own queries, and PegaSUS pins `PEGASUS_DATA_HOME` to it so no call creates a home elsewhere.
+3. **PegaSUS never writes into pegasus_data's home** except through pegasus_data's API. Its data root is pegasus_data's
+   one home, resolved by pegasus_data itself (`config.data_root`: `PEGASUS_DATA_HOME`, a config file, the per-user data
+   directory; pegasus_data ADR-0200). The engine keeps no root variable of its own.
 
 ### 2.2 What pegasus_data provides
 

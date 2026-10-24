@@ -29,7 +29,7 @@ PY=C:/Users/Galaxy/miniconda3/envs/pegasus/python.exe
 | the workspace's settings | `workspace.yml` (`env`) | the store, the data root, the adoption window, for every command and run; a variable already set wins |
 | documents consistent | `$PY scripts/check_docs.py` | ADRs, evaluation index, open questions, modules named in ARCHITECTURE, CLAUDE.md = AGENTS.md |
 | pegasus_data reachable | `$PY -c "import pegasus_data, pegasus_core; print(pegasus_data.__file__)"` | |
-| warm the gateway cache | `PYTHONUTF8=1 $PY scripts/warm_gateway.py SIM.DO death 2010 2023` | one year at a time; downloads through pegasus_data into `PEGASUS_DATA_ROOT` |
+| warm the gateway cache | `PYTHONUTF8=1 $PY scripts/warm_gateway.py SIM.DO death 2010 2023` | one year at a time; downloads through pegasus_data into its one home (`pegasus-data where`) |
 | fit blocks, detached | `pegasus run start -- pegasus explore fit DATASET EVENT BLOCK... --years FIRST-LAST [--device cuda] [--source JSON] [--cold]` | one `BLOCK <name> <summary>` line each, the robust refit included; a failed block is reported and the next one fitted |
 | the solver | v1 for every model (counts, the low-rank interaction, marks, shares); v0 retired 2026-10-06 | exact Newton on the assembled Hessian and Newton on log τ (ARCHITECTURE §5.3–5.4); `PEGASUS_SCORING_PROBES` (16) and `PEGASUS_LAML_TOL` (0.1) tune the strengths |
 | one field's question pass, profiled | `PYTHONUTF8=1 $PY scripts/profile_field.py SIH-RD hospitalisation X J09-J18 --years 2010-2023` | every question of one field on a sandbox ledger: seconds and answers per question, the top functions; the profile to `data/probes/profile/` (§5.8's chapter target) |
