@@ -1139,17 +1139,17 @@ def _region_name(r: dict) -> str:
     return re.sub(r"^\d+\s+", "", place)
 
 
-def _reading(field: str, roles: dict, label: str = "") -> str:
+def _reading(field: str, roles: dict, label: str = "", place: str | None = None) -> str:
     """How a field counts its events, in words: the classifier column it reads (its role's name) or codes anywhere on
-    the record; where it places them (the residence, else the support named in its id or, for a condition's field,
-    its label's " — support:COLUMN")."""
+    the record; where it places them (the residence, or the place the source's stratum stands for, ``place``; else the
+    support named in its id or, for a condition's field, its label's " — support:COLUMN")."""
     import re
 
     m = re.match(r"[^:]+:[^:]+:([A-Za-z_]+)\[(.*?)\]", field)
     how = "anywhere on the record" if field.split(":")[2].startswith("mentions") else \
         (roles.get(m.group(1)) or m.group(1)) if m else "the event's own classification"
     s = re.search(r"support=([A-Z_]+)", field) or re.search(r" — support:([A-Z_]+)", label)
-    where = f"placed by {roles.get(s.group(1)) or s.group(1)}" if s else "placed by residence"
+    where = f"placed by {roles.get(s.group(1)) or s.group(1)}" if s else f"placed by {place or 'residence'}"
     return f"{how}; {where}"
 
 
@@ -1190,6 +1190,8 @@ def _summary_of(name: str) -> dict:
 
     import pegasus_data as pg
     import yaml
+
+    from . import gateway
 
     path = find(name)
     s = _summary(path)
@@ -1255,7 +1257,7 @@ def _summary_of(name: str) -> dict:
                 return None if r is None else {"estimate": r["estimate"], "low": r["low"], "high": r["high"]}
             out["fields"].append({
                 "field": f, "label": label.split(": ", 1)[-1].split(" — ")[0], "event": label.split(":")[0],
-                "dataset": ds, "reading": _reading(f, roles_of[ds], label),
+                "dataset": ds, "reading": _reading(f, roles_of[ds], label, gateway.place_label(ds)),
                 "primary": "support=" not in f and " — support:" not in label,
                 "unit": h["unit"], "per": h["denominator_kind"], "first": h["first"], "last": h["last"],
                 "events": h["events"], "crude": ci(h), "standardised": ci(std[0] if std else None),

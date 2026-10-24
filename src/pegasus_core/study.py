@@ -5199,7 +5199,9 @@ def _methods(decl: Declaration, scope: Scope, desc: list[dict],
               "it). Events "
               "are attributed to the municipality of residence: every state's files are read and the records whose "
               "residence lies in the area kept, so a resident cared for in another state is counted, and a field read at "
-              "another place (of care, of infection) says so in its label.",
+              "another place (of care, of infection) says so in its label." + "".join(
+                  f" {ds} places its events at the {place}, not the residence." for ds, place in sorted(
+                      {(i.dataset, gateway.place_label(i.dataset)) for i in read} - {(i.dataset, None) for i in read})),
               f"Denominators: {'; '.join(pers) or 'none'}. Rates per person-years use the resident population of the "
               "field's population source by municipality, sex, age and year; a source that declares other events as its "
               "denominator (live births) is rated per 1,000 of them."]

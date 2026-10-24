@@ -2347,6 +2347,14 @@ def roles(dataset: str) -> list[dict]:
     return pg.roles(dataset)
 
 
+def place_label(dataset: str) -> str | None:
+    """The place a person's events are attributed to, in words, when it is not their residence: pegasus_data's
+    ``place_label`` on the residence stratum (FA-HUM's cases stand at the probable place of infection, the file holding
+    no residence); None for a residence. Read apart from `_strata`, whose code every count is keyed by."""
+    stratum = next((r for r in roles(dataset) if r.get("model") == "stratum" and r.get("property") == "residence"), None)
+    return (stratum or {}).get("place_label") or None
+
+
 def condition_event(event: str, clauses: list[dict], name: str, per: str | None = None) -> str:
     """``event`` restricted to the records whose roles satisfy ``clauses`` (pegasus_data's condition grammar, ADR-0193:
     low birth weight, infant deaths, caesarean births): an event type of its own, named ``name``, its denominator events

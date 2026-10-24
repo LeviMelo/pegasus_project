@@ -599,7 +599,9 @@ population).
   hospital), never at a place the record merely names (`mark`: the registry office, the death-verification service, a
   managing authority) (`support:<column>`), its records without one unallocated by municipality, the exposure the
   place's residents. The topic's own field is always by **residence**: an area study reads every state's files and
-  keeps, in the lake's scan, the records whose residence is in the area (pegasus_data's decision 0043).
+  keeps, in the lake's scan, the records whose residence is in the area (pegasus_data's decision 0043). A source
+  whose files hold no residence names the place its stratum stands for (pegasus_data's `place_label`: FA-HUM's probable
+  place of infection), and the readings and the methods say that place, never "residence" (`gateway.place_label`).
 - **A second coding of the same events** (an alternative classifier of the primary's own structure: SIM's cause before
   investigation, `CAUSABAS_O`) is counted and described beside the primary, asked no questions and given no supports
   or linked shares (`study.Item.count_only`); an alternative of another structure (SIA's diagnosis beside its
