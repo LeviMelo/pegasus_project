@@ -597,3 +597,7 @@ contexts_considered:
     decision: exclude
     why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
       yellow fever: no pathway to spine surgery'
+  pns_chronic_spine_problem_percent:
+    decision: include
+    why: state-grain covariate (27 units), read through load_field and used only in state-level analyses with its
+      CI limits; PegaSUS's state-grain reading pending
