@@ -1214,11 +1214,11 @@ def resolve(decl: Declaration, log=print) -> Scope:
             # fewer than one of the topic's records a year, nationally: no question can see a departure in it (SIA-PS
             # held 14 and its whole lake, 2,284 files, was built for them, 2026-10-12)
             it.status = "none"
-            excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"{it.records} of the topic's records in "
+            excluded.append({"seed": _seed_name(it), "why": f"{it.records} of the topic's records in "
                              f"{held[0]}-{held[-1]}, fewer than one a year: too few for any question"})
         elif it.records == 0:
             it.status = "none"
-            excluded.append({"seed": f"{it.dataset}:{it.event}", "why": f"its tree holds {held_codes(it)} "
+            excluded.append({"seed": _seed_name(it), "why": f"its tree holds {held_codes(it)} "
                              f"but its records hold none in {held[0]}-{held[-1]}, the years the lake holds"})
     if not decl.choice("readers"):
         # a survey reads the topic's primary codes; its codes anywhere on the records only where the primary reading
@@ -1304,6 +1304,15 @@ def resolve(decl: Declaration, log=print) -> Scope:
     overhead = fixed + per_field * sum(i.fields for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
                  _link_runs_needed([i for i in items if i.status == "in"]), medicines, _candidates(decl), overlap, overhead)
+
+
+def _seed_name(it: Item) -> str:
+    """An item as a scope's not-read entry names it: the dataset, the event and the reader. One event is read by several
+    items (its primary classifier, a second coding, a code list); named by its event alone, one read with 118 records
+    and another leaving none read as two claims about the same source (SIM-DOFET, 2026-11-23)."""
+    src = it.source or {}
+    reader = src.get("classifier") or ("primary classifier" if it.nodes or src.get("codes") else None)
+    return f"{it.dataset}:{it.event}" + (f" ({reader})" if reader else "")
 
 
 def _seeded_procedures(decl: Declaration, excluded: list[dict]) -> list[str]:
