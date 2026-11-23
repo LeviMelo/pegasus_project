@@ -290,8 +290,9 @@ contexts_considered:
       health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of spine surgery'
   sidra:XN:Doenças crônicas:
     decision: include
-    why: 'PNS 2013/2019 by state holds the prevalence of chronic spine problems: the disease denominator the first
-      audit asked for, against which SUS spine surgery rates are read'
+    why: 'state-level covariate read directly, 27 units, with CIs; field pending state grain: PNS chronic spine
+      problems (SIDRA 4638; limits 4616/4617), the disease denominator against which SUS spine-surgery rates are
+      read at state level'
   sidra:XN:Higiene e saúde bucal:
     decision: exclude
     why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
@@ -504,8 +505,8 @@ contexts_considered:
     why: 'national price indices: used as deflators through pegasus_data price_index, not as a place context'
   intake:ans:
     decision: include
-    why: 'ANS ICB beneficiary links by municipality, sex and age band: the denominator of the age-sex standardised
-      private-plan comparison (section private2)'
+    why: 'ANS beneficiary links by municipality, sex and age band (declared field ans_beneficiaries_quarterly):
+      the denominator of the age-sex standardised private-plan comparison (section private2)'
   intake:ans_beneficiaries_municipal:
     decision: exclude
     why: 'municipal beneficiaries by segment: the declared private-coverage share already carries them'
