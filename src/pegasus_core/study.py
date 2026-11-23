@@ -31,7 +31,7 @@ import pyarrow.parquet as pq
 from . import config, control, fields, gateway, leads, questions, store
 
 DEPTHS = ("survey", "standard", "deep", "exhaustive")
-SEED_SYSTEMS = ("icd10", "sinan", "terms", "records")
+SEED_SYSTEMS = ("icd10", "sigtap", "sinan", "terms", "records")
 #: a records seed's keys: the dataset (and its event), the condition on pegasus_data roles (its grammar, ADR-0193 there),
 #: the topic's name, and the events it is rated per
 RECORD_KEYS = {"dataset", "event", "condition", "name", "per"}
@@ -65,8 +65,11 @@ PRESETS = {
                    "persons": True, "replicate": True, "download": float("inf"), "draws": 20,
                    "related_questions": [], "questions": None, "nulls": 4.0, "triage": True},
 }
-KEYS = {"study", "title", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts", "ratios",
-        "questions", "nulls", *PRESETS["survey"]}
+KEYS = {"study", "title", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts",
+        "contexts_considered", "ratios", "questions", "nulls", *PRESETS["survey"]}
+#: a decision on a context candidate (`gateway.context_candidates`): include it (then declared as fields in pegasus_data
+#: and named), or exclude it, each with why, written knowing what the group holds (pegasus_data docs/plans/recon.md)
+DECISIONS = ("include", "exclude")
 RATIO_KEYS = {"numerator", "denominator", "lag"}
 TOPIC_KEYS = {"seeds", "include", "exclude", "only"}
 
@@ -89,6 +92,7 @@ class Declaration:
     q: float = 0.05
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
+    contexts_considered: dict = field(default_factory=dict)   # candidate id -> {decision, why}
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
     questions: list[str] | None = None  # the questions asked of every field (None: the depth's, `PRESETS`)
     nulls: float | None = None           # replicate null worlds per test, a factor on each method's own (`NULLS`)
@@ -122,6 +126,8 @@ DECLARATION = [
     {"key": "study", "form": "name", "required": True, "help": "the study's name: its file and its folder"},
     {"key": "title", "form": "text", "help": "the study's title as a reader sees it (default: its topic's names)"},
     {"key": "topic.seeds.icd10", "form": "codes", "help": "ICD-10 codes at any level (I21, B58, O98.6)"},
+    {"key": "topic.seeds.sigtap", "form": "codes",
+     "help": "SIGTAP procedures at any level: group (04), subgroup (0403), form (040301) or procedure (0403010012)"},
     {"key": "topic.seeds.sinan", "form": "codes", "help": "SINAN agravos (LEPT, TOXG): `pegasus study search`"},
     {"key": "topic.seeds.terms", "form": "words",
      "help": "terms matched against every code system's labels (the weakest evidence)"},
@@ -143,6 +149,9 @@ DECLARATION = [
     {"key": "q", "form": "number", "default": 0.05, "help": "the study's false-discovery rate"},
     {"key": "contexts", "form": "contexts", "default": "auto",
      "help": "municipal contexts related to the rates (auto: every declared one)"},
+    {"key": "contexts_considered", "form": "decisions", "default": {},
+     "help": "each context candidate the scope lists (SIDRA research and subject, intake source): include or exclude, "
+             "and why, decided from what it holds (NAME.candidates.yml)"},
     {"key": "hypotheses", "form": "list", "default": [],
      "help": "declared tests, each answered with its own error control: {component: transient, where, when, note} "
              "or {component: relation, leader, lags, when, macro, control}"},
@@ -312,6 +321,15 @@ def load(path: str | Path) -> Declaration:
         if unknown:
             problems.append(f"contexts {unknown}: no declared context field of that name (`pegasus study search` "
                             "lists them)")
+    considered = doc.get("contexts_considered") or {}
+    if not isinstance(considered, dict):
+        problems.append("contexts_considered: a mapping of candidate ids (`pegasus study scope` lists them) to "
+                        "{decision: include|exclude, why: ...}")
+        considered = {}
+    for cid, d in considered.items():
+        if not isinstance(d, dict) or d.get("decision") not in DECISIONS or not str(d.get("why") or "").strip():
+            problems.append(f"contexts_considered[{cid!r}]: needs decision ({' or '.join(DECISIONS)}) and why, the "
+                            "reason written from what the group holds")
     if problems:
         raise DeclarationError(f"{path}:\n  - " + "\n  - ".join(problems))
     return Declaration(study=str(doc["study"]), seeds={k: ([dict(c) for c in v] if k == "records" else [str(c) for c in v])
@@ -320,6 +338,7 @@ def load(path: str | Path) -> Declaration:
                        only=list(topic.get("only") or []),
                        where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
+                       contexts_considered={str(k): dict(v) for k, v in considered.items()},
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
                        related=(float("inf") if rel == "all" else list(rel) if isinstance(rel, list) else float(rel)) if rel is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
@@ -378,6 +397,7 @@ class Scope:
     paths: list[dict] = field(default_factory=list)     # declared links touching the read sources, with their runs' verdicts
     link_runs: list[dict] = field(default_factory=list)  # national link runs the items read and the store lacks, priced
     medicines: list[dict] = field(default_factory=list)  # the topic's declared treatments: substances, use, citation, reads
+    candidates: list[dict] = field(default_factory=list)  # context candidates with the declaration's decision on each
     lane_overlap: float = 1.0            # items' summed seconds over the lanes' wall clock, measured (`_phase_record`)
     overhead_seconds: float = 0.0        # the measured scope, store and products phases of the last run at this depth
 
@@ -391,6 +411,8 @@ class Scope:
                 "deferred": [asdict(i) for i in self.items if i.status != "in"],
                 "not_read": self.excluded, "contexts": self.contexts, "related_codes": self.related,
                 "person_paths": self.paths, "link_runs_to_compute": self.link_runs, "medicines": self.medicines,
+                "context_candidates": self.candidates,
+                "context_candidates_undecided": sum(1 for c in self.candidates if not c.get("decision")),
                 "minutes_by_choice": self.minutes_by_choice(),
                 "estimated_minutes": round((self._lanes_seconds() + sum(r["est_seconds"] or 0 for r in self.link_runs)
                                             + self.overhead_seconds) / 60, 1)}
@@ -917,11 +939,15 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
 
     prefixes = sorted(set(nodes) | set(codes))
     terms = decl.seeds.get("terms", [])
-    if not prefixes and not terms:
+    seeded_procedures = _seeded_procedures(decl, excluded)
+    if not prefixes and not terms and not seeded_procedures:
         return
-    ix = pg.concept_index(prefixes, terms, root=config.data_root())
+    ix = (pg.concept_index(prefixes, terms, root=config.data_root()) if prefixes or terms
+          else {"labels": [], "conditions": [], "procedures": []})
     seeded = {it.dataset for it in items if it.source is None and it.nodes is None}
-    procedures = sorted({r["code"] for r in ix["labels"] if r["structure"] == "SIGTAP" and r["level"] == "procedure"})
+    # the procedures a term names, and the topic's own (`topic.seeds.sigtap`, any level of the tree, as its procedures)
+    procedures = sorted({r["code"] for r in ix["labels"] if r["structure"] == "SIGTAP" and r["level"] == "procedure"}
+                        | set(seeded_procedures))
     for ds in sorted(served):
         for et in gateway.event_types(ds):
             for c in et.get("classifiers") or []:
@@ -1277,7 +1303,47 @@ def resolve(decl: Declaration, log=print) -> Scope:
     overlap, fixed, per_field = _phase_record(decl)
     overhead = fixed + per_field * sum(i.fields for i in items if i.status == "in")
     return Scope(decl.study, decl.depth, items, excluded, contexts, budget, related, paths,
-                 _link_runs_needed([i for i in items if i.status == "in"]), medicines, overlap, overhead)
+                 _link_runs_needed([i for i in items if i.status == "in"]), medicines, _candidates(decl), overlap, overhead)
+
+
+def _seeded_procedures(decl: Declaration, excluded: list[dict]) -> list[str]:
+    """The procedures of the topic's SIGTAP seeds (``topic.seeds.sigtap``: a group 04, subgroup 0403, form 040301 or
+    procedure 0403010012), as the tree's procedures under each; a seed that is no node of the tree is said. Four of the
+    ten ABNc studies are defined by a procedure (craniectomy, spine surgery, radiosurgery, the payment table), which no
+    ICD seed reaches."""
+    seeds = [str(c).strip().replace(".", "").replace("-", "") for c in decl.seeds.get("sigtap", [])]
+    if not seeds:
+        return []
+    tree = gateway.code_tree("SIGTAP").to_pylist()
+    nodes = {r["code"] for r in tree}
+    leaves = [r["code"] for r in tree if r["level"] == "subcategory"]
+    out: set[str] = set()
+    for c in seeds:
+        if c not in nodes:
+            excluded.append({"seed": f"sigtap:{c}", "why": "not a node of the SIGTAP tree (group 2, subgroup 4, form 6 "
+                                                          "or procedure 10 digits, as the Tabela Unificada codes them)"})
+            continue
+        out |= {leaf for leaf in leaves if leaf.startswith(c)}
+    return sorted(out)
+
+
+def _candidates(decl: Declaration) -> list[dict]:
+    """Every context candidate of the study's years (`gateway.context_candidates`) with the declaration's decision on it
+    (`contexts_considered`), or none: a group nobody decided is listed as undecided, never dropped. A decision naming
+    no candidate of these years is kept and said."""
+    years = (min(decl.years), max(decl.years))
+    out = []
+    for g in gateway.context_candidates(years):
+        d = decl.contexts_considered.get(g["id"]) or {}
+        out.append({"id": g["id"], "kind": g["kind"], "research": g["research"], "subject": g["subject"],
+                    "size": len(g.get("tables") or g.get("columns") or []),
+                    "read_by_fields": g.get("fields") or [],
+                    "decision": d.get("decision"), "why": d.get("why")})
+    for cid in sorted(set(decl.contexts_considered) - {c["id"] for c in out}):
+        out.append({"id": cid, "kind": "unknown", "research": None, "subject": None, "size": 0, "read_by_fields": [],
+                    "decision": decl.contexts_considered[cid].get("decision"),
+                    "why": "no such candidate in these years: " + str(decl.contexts_considered[cid].get("why"))})
+    return out
 
 
 def _one_per_field(items: list[Item]) -> list[Item]:
@@ -7659,6 +7725,14 @@ def body(folder: str | Path) -> list[dict]:
     unread = (scope.get("deferred") or []) + (scope.get("not_read") or [])
     part("scope", bool(read) and all((x.get("note") or x.get("why") or x.get("reason")) for x in unread),
          f"{len(read)} sources read with their reasons, {len(unread)} left out each with why")
+    # every context candidate decided (`contexts_considered`), each from what it holds: a study that never looked at
+    # what pegasus_data holds beyond its declared fields (ten ABNc papers, 2026-11) is incomplete, not merely narrow
+    cands = scope.get("context_candidates") or []
+    undecided = [c["id"] for c in cands if not c.get("decision")]
+    part("contexts considered", bool(cands) and not undecided,
+         f"{len(cands) - len(undecided)} of {len(cands)} context candidates decided"
+         + (f"; undecided: {', '.join(undecided[:5])}" + (" ..." if len(undecided) > 5 else "") if undecided else "")
+         if cands else "the scope lists no context candidates (scoped before candidates were listed)")
     est = table("estimates")
 
     def section(name: str):
@@ -8047,17 +8121,19 @@ def parse_records(text: str, name: str, per: str | None = None) -> dict:
 
 def new(name: str, icd10: list[str] | None = None, sinan: list[str] | None = None, terms: list[str] | None = None,
         where: str = "BR", period: str = "2014-2023", depth: str = "standard", only: list[str] | None = None,
-        contexts: list[str] | None = None, folder: str | Path = "studies", records: list[dict] | None = None) -> Path:
+        contexts: list[str] | None = None, folder: str | Path = "studies", records: list[dict] | None = None,
+        sigtap: list[str] | None = None) -> Path:
     """A study declaration written from its choices (ARCHITECTURE §3.1), every key commented with what it does and
     what to change, validated by `load` before it is kept: the step after `search`. A declaration whose problems
     `load` reports is not written."""
-    if not (icd10 or sinan or terms or records):
-        raise DeclarationError("a study needs seeds: --icd10 codes, --sinan agravos, --terms, or --records a condition "
+    if not (icd10 or sinan or terms or records or sigtap):
+        raise DeclarationError("a study needs seeds: --icd10 codes, --sigtap procedures, --sinan agravos, --terms, or "
+                               "--records a condition "
                                "(`pegasus study search`)")
     path = Path(folder) / f"{name}.yml"
     if path.exists():
         raise DeclarationError(f"{path} exists: choose another name, or edit it")
-    seeds = {k: v for k, v in (("icd10", icd10), ("sinan", sinan), ("terms", terms)) if v}
+    seeds = {k: v for k, v in (("icd10", icd10), ("sigtap", sigtap), ("sinan", sinan), ("terms", terms)) if v}
     import json as json_
 
     def record_line(r: dict) -> str:

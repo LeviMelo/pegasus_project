@@ -230,6 +230,12 @@ def scope(name: str) -> dict:
     target = path.with_name(f"{path.stem}.scope.yml")
     # written, not printed: the console wraps long lines and the printed YAML did not parse (2026-10-12)
     target.write_text(yaml.safe_dump(out, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    # every context candidate's tables or columns, beside the scope's one line per group: what a decision is made from
+    from . import gateway
+
+    years = (min(decl.years), max(decl.years))
+    path.with_name(f"{path.stem}.candidates.yml").write_text(
+        yaml.safe_dump(gateway.context_candidates(years), sort_keys=False, allow_unicode=True), encoding="utf-8")
     return {**out, "written": str(target),
             "nothing_read": None if out["read"] else study.nothing_read(resolved)}
 
@@ -772,13 +778,13 @@ def save_declaration(name: str, text: str) -> dict:
 def new_study(name: str, icd10: list[str] | None = None, sinan: list[str] | None = None,
               terms: list[str] | None = None, where: str | list[str] = "BR", period: str = "2014-2023",
               depth: str = "standard", only: list[str] | None = None, contexts: list[str] | None = None,
-              records: list[dict] | None = None, scratch: bool = False) -> dict:
+              records: list[dict] | None = None, scratch: bool = False, sigtap: list[str] | None = None) -> dict:
     """A new study's declaration, written in the workspace and validated (`study.new`); ``scratch`` keeps it in
     ``studies/scratch/``, a quick look kept as a study of its own until `promote` makes it one of the workspace's."""
     from . import study
 
     study.new(name, icd10, sinan, terms, where, period, depth, only, contexts,
-              scratch_dir() if scratch else studies_dir(), records)
+              scratch_dir() if scratch else studies_dir(), records, sigtap)
     return declaration(name)
 
 

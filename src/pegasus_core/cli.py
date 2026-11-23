@@ -642,6 +642,7 @@ def _list(text: str | None) -> list[str] | None:
 @study_app.command("new")
 def new_command(name: str = typer.Argument(..., help="the study's name (its file and folder)"),
                 icd10: str = typer.Option(None, help="ICD-10 codes, comma-separated (I21,I22)"),
+                sigtap: str = typer.Option(None, help="SIGTAP procedures at any level, comma-separated (0403)"),
                 sinan: str = typer.Option(None, help="SINAN agravos, comma-separated (LEPT)"),
                 terms: str = typer.Option(None, help="label terms, comma-separated"),
                 where: str = typer.Option("BR", help="BR, a state (AL) or states/municipalities comma-separated"),
@@ -663,7 +664,7 @@ def new_command(name: str = typer.Argument(..., help="the study's name (its file
     seeds = [study.parse_records(records, name_ or name, per)] if records else None
     d = workspace.new_study(name, _list(icd10), _list(sinan), _list(terms),
                             places[0] if len(places) == 1 else places, period, depth, _list(only), _list(contexts),
-                            seeds, scratch)
+                            seeds, scratch, _list(sigtap))
     if not _emit_json(d):
         console.print(f"written {d['path']}\nnext: pegasus study scope {name}   (what it reads, and the minutes)\n"
                       f"      pegasus study run {name}     (the folder lands beside it)")

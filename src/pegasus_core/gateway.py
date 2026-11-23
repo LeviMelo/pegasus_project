@@ -3160,3 +3160,12 @@ def facility_column(dataset: str) -> tuple[str, str | None]:
         raise LookupError(f"{dataset}: no facility among its institution roles")
     where = [r for r in rs if r.get("model") == "where" and r.get("property") in ("facility_municipality", "municipality")]
     return fac[0]["column"], where[0]["column"] if where else None
+
+
+def context_candidates(years: tuple[int, int], levels: tuple[str, ...] = ("N6",)) -> list[dict]:
+    """pegasus_data's context candidates of a study's years (`pegasus_data.fields.context_candidates`): every SIDRA
+    research and subject with tables at ``levels`` in those years, and every intake source placed by a municipality or
+    a state, each with what a declared field already reads of it."""
+    from pegasus_data.fields import context_candidates as candidates
+
+    return candidates(years, levels, root=config.data_root())
