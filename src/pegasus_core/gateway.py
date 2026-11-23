@@ -2210,6 +2210,15 @@ def rated(contexts: list, left: list | None = None) -> list:
     out = []
     for c in contexts:
         try:
+            spec = declared_fields().get(str(context_name(c))) or {}
+            if str(spec.get("level") or "").upper() == "N3":
+                # a state's value (PNS: IBGE's survey estimates by state) is no municipality's measurement: copied onto
+                # 5,570 places it would fake precision, and its table has no municipality to join. Read at state level
+                # only (a state effect), which this reader does not do yet (2026-11-23)
+                if left is not None:
+                    left.append((str(context_name(c)), "a state-level field: read at state level only, not in a "
+                                                       "municipal model"))
+                continue
             if _context_entry(c)[2]:
                 out.append(c)
             elif left is not None:
