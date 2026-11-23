@@ -599,3 +599,369 @@ contexts_considered:
     decision: include
     why: state-grain covariate (27 units), read through load_field and used only in state-level analyses with its
       CI limits; PegaSUS's state-grain reading pending
+  "sidra:CD:Etnia":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:DR:Meio ambiente":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:DE:Unidades locais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Acesso a esgotamento sanitário":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Acesso a serviço de coleta de lixo doméstico":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Acesso a serviços de telefonia":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Acesso a sistema de abastecimento de água":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Acesso à internet":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Adequação de moradia":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:IU:Agenda 21 Local":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Articulações interinstitucionais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Balança comercial":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Coeficiente de mortalidade por homicídios ou por acidentes de transporte":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Comitês de Bacias Hidrográficas":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Concentração de poluentes no ar em áreas urbanas":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Desflorestamento na Amazônia Legal":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Desmatamento nos Biomas":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Doenças relacionadas ao saneamento ambiental inadequado":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Esperança de vida ao nascer":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Espécies invasoras":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Existência de conselhos municipais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Frequência escolar":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:IU:Incidência de AIDS":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Meio ambiente":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Mulheres em trabalhos formais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Organizações da Sociedade Civil":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Patrimônio cultural":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:População e terras indígenas":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:IU:Produto Interno Bruto per capita":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:IU:Queimadas e incêndios florestais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Razão de dependência":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:IU:Rejeitos radioativos: geração e armazenamento":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Rendimento domiciliar per capita":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:IU:Rendimento médio mensal":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:IU:Taxa de alfabetização":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:IU:Taxa de crescimento da população":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:IU:Taxa de fecundidade":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Taxa de mortalidade infantil":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:IU:Terras em uso agrossilvipastoril":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Uso de agrotóxicos":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Uso de fertilizantes":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Área remanescente e desflorestamento na Mata Atlântica e nas formações vegetais litorâneas":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Áreas protegidas":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:IU:Índice de Gini da distribuição do rendimento":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:LA:Produção vegetal":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Boa saúde e bem-estar":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:C2:Educação":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:C2:Educação de qualidade":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:C2:Energia limpa e acessível":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:C2:Erradicação da pobreza":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:C2:Esgotamento sanitário":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:C2:Fome zero e agricultura sustentável":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Geral":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Igualdade de gênero":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Indústria, inovação e infraestrutura":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Mortalidade":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:C2:Nascidos vivos":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:C2:Parcerias e meios de implementação":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Paz, justiça e instituições eficazes":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Saúde":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:C2:Trabalho decente e crescimento econômico":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Vida na água":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:C2:Água potável e saneamento":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:C2:Óbitos":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:AC:Construção civil":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:PB:Comércio":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:PY:Serviços empresariais não-financeiros":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:PK:Indústria":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:PZ:Indústria":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:XY:Indústria":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:MC:Comércio":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:SC:Serviços":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:XN:Antropometria":
+    decision: exclude
+    why: "anthropometry (survey, state level): obesity is a spine-disease risk, but state-level prevalence cannot enter a health-region model; noted as unmeasured need"
+  "sidra:XN:Atenção primária à saúde":
+    decision: exclude
+    why: "primary-care coverage (survey, state level): not on the surgical pathway measured and too coarse for health regions"
+  "sidra:XN:Características do trabalho e apoio social":
+    decision: exclude
+    why: "work characteristics (survey, state level): manual work is a back-pain risk, but state-level shares cannot enter a health-region model; noted as unmeasured need"
+  "sidra:XN:Doenças transmissíveis":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:PD:Características da pessoa":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:PD:Domicílios":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:PD:Famílias":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:PD:Fecundidade":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:PD:Instrução e Educação":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:PD:Internet":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:PD:Migração e deslocamento":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:PD:Responsável pelo domicílio/família":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:PD:Trabalho e rendimento":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:B5:Atenção primária à saúde":
+    decision: exclude
+    why: "primary-care coverage (survey, state level): not on the surgical pathway measured and too coarse for health regions"
+  "sidra:B5:Covid-19":
+    decision: exclude
+    why: "population health and fertility indicators: none measures spine disease; the PNS chronic spine-problem prevalence is the need term used"
+  "sidra:B5:Rendimento de todas as fontes":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:B5:Segurança alimentar":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:B5:Tecnologia de informação e comunicação":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:B5:Teletrabalho":
+    decision: exclude
+    why: "housing, sanitation and connectivity: urban and income context is carried by the census fields used; no further pathway to spine surgery"
+  "sidra:B5:Turismo":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:DD:População desocupada":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:AX:Abate de animais":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:CQ:Couro":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:LT:Leite":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:OF:Aquisição":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:OF:Despesa":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:OF:Famílias":
+    decision: exclude
+    why: "population structure and composition: age and sex enter through indirect standardisation; the rest has no stated pathway to spine surgery"
+  "sidra:OF:Rendimento":
+    decision: exclude
+    why: "income, education and poverty: carried by the Census 2022 income and education fields the paper uses (low-income share)"
+  "sidra:PO:Ovos de galinha":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:XE:Geral":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "sidra:SI:Construção civil":
+    decision: exclude
+    why: "economic, environmental or administrative statistics with no pathway to spine-surgery rates in people"
+  "intake:siops_municipal":
+    decision: exclude
+    why: "municipal health spending: the paper's payment measure is the federal SIH payment per stay; municipal co-financing cannot be attributed to spine stays"
+  "field:brdwgd:gaussian":
+    decision: exclude
+    why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
+  "field:intake:ans_tiss_hospital_items":
+    decision: include
+    why: "private-plan hospital billing items with TUSS procedure codes: the spine-surgery terms mapped to SIGTAP (section private)"
+  "field:intake:ans_tiss_hospital_remuneration":
+    decision: exclude
+    why: "private-plan payments: not comparable with the SUS federal payment and not linked to the items"
+  "field:intake:ans_tiss_outpatient_items":
+    decision: exclude
+    why: "outpatient private-plan items: spine surgery is inpatient"
+  "field:intake:ans_tiss_outpatient_remuneration":
+    decision: exclude
+    why: "outpatient private-plan payments: as the outpatient items"
+  "field:inmet:climate":
+    decision: exclude
+    why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
+  "field:brdwgd:climate_monthly":
+    decision: exclude
+    why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
+  "field:cnes:accreditations":
+    decision: include
+    why: "high-complexity neurosurgical accreditation: distance to an accredited unit and the accredited-unit term of the outcome models (sections space, outcomes)"
+  "field:cnes:beds":
+    decision: include
+    why: "SUS neurosurgical beds per 100,000 of the health region (section supply); the other bed types are not the spine pathway's"
+  "field:cnes:radiotherapy_machines":
+    decision: exclude
+    why: "radiotherapy machines: off the spine-surgery pathway"
+  "field:cnes:professionals":
+    decision: include
+    why: "neurosurgeons and orthopaedists per 100,000 of the health region (sections supply, supply2, space); the other professions are not spine operators"
+  "field:cnes:equipment":
+    decision: exclude
+    why: "imaging and other equipment counts: the indication for spine surgery is not modelled on scanner supply, and the surgeon and bed terms carry supply"
+  "field:cnes:facilities":
+    decision: include
+    why: "the hospital's legal nature (public, non-profit, business) for payment by legal nature (section money_legal)"
+  "field:cnes:specialised_services":
+    decision: exclude
+    why: "specialised-service registrations: the accreditation field already marks the units allowed to operate"
+  "field:cnes:teams":
+    decision: exclude
+    why: "primary-care and other teams: not on the surgical pathway measured"
+  "field:brdwgd:precipitation_months":
+    decision: exclude
+    why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
+  "field:records:SIM-DO":
+    decision: exclude
+    why: "death-certificate fields as context: the paper uses no certificate field; death after discharge could not be linked (post-discharge pass rejected)"
+  "field:brdwgd:temperature_months":
+    decision: exclude
+    why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
