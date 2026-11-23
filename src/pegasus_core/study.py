@@ -2703,6 +2703,9 @@ def _write_products(decl: Declaration, scope: Scope, out: Path, log, lap: _Lap |
     profile = lap.guard("context profiles", lambda: _context_profiles(decl, scope, rows, log), [], log)
     covariates = lap.guard("contexts", lambda: _context_table(decl, scope, places, names, log), [], log)
     ecological = lap.guard("ecological", lambda: _ecological(places, covariates, log), [], log) if covariates else []
+    # the state-grain contexts, at state level with a state effect, never copied onto municipalities
+    state_ctx = lap.guard("state contexts", lambda: _state_contexts(decl, scope, log), {}, log)
+    ecological += lap.guard("ecological state", lambda: _ecological_state(places, state_ctx, log), [], log) if state_ctx else []
     places += lap.guard("spatial autocorrelation", lambda: _spatial_autocorrelation(places, decl.q, log), [], log)
     lap("context profiles")
     pq.write_table(_rows_table(profile) if profile else pa.table({"finding": pa.array([], pa.string())}),
@@ -6420,6 +6423,143 @@ def _ecological(places: list[dict], contexts: list[dict], log) -> list[dict]:
                 out.append(_estimate_row("associations", "moran_i", {**base, "model": kind},
                                          estimate=obs, p=float((1 + (null >= obs).sum()) / 1000),
                                          denominator=float(ok.sum()), denominator_kind="municipalities"))
+    return out
+
+
+def _state_contexts(decl: Declaration, scope: Scope, log) -> dict[str, dict]:
+    """The scope's state-grain contexts (pegasus_data fields with ``level: N3``, which `gateway.rated` leaves out of the
+    municipal models): per field, each state's estimate and its sampling standard error (from the published 95% limits,
+    (upper - lower) / 3.92, else from the CV), read at the survey year nearest the middle of the study's period
+    (docs/plans/state-contexts.md). A state value is never copied onto municipalities."""
+    import pegasus_data as pg
+
+    spec_of = gateway.declared_fields()
+    mid = (decl.years[0] + decl.years[-1]) / 2
+    out: dict[str, dict] = {}
+    for entry in scope.contexts:
+        name = gateway.context_name(entry)
+        try:
+            fields_, _, _, declared = gateway._context_entry(entry)
+        except Exception:  # noqa: BLE001 - an entry pegasus_data no longer declares: not a state context
+            continue
+        spec = spec_of.get(fields_[0]) or {}
+        if len(fields_) != 1 or str(spec.get("level") or "").upper() != "N3" or not declared:
+            continue
+        year = min(declared, key=lambda x: (abs(x - mid), -x))
+        try:
+            t = pg.load_field(fields_[0], years=[year]).to_pylist()
+        except Exception as exc:  # noqa: BLE001 - a state field that cannot be read is said
+            log(f"study: state context {name} {year}: {type(exc).__name__}: {exc}")
+            continue
+        vals: dict[str, tuple[float, float | None]] = {}
+        for r_ in t:
+            v = r_.get("value")
+            if v is None or not np.isfinite(v):
+                continue
+            lo, hi, cv = r_.get("lower"), r_.get("upper"), r_.get("cv")
+            se = ((hi - lo) / 3.92 if lo is not None and hi is not None
+                  else (cv * v / 100 if cv is not None else None))
+            vals[str(r_["uf"])[:2]] = (float(v), float(se) if se is not None and np.isfinite(se) else None)
+        out[name] = {"year": year, "unit": str(spec.get("unit") or ""), "label": " ".join(str(spec.get("what") or "").split()) or None,
+                     "values": vals}
+    return out
+
+
+#: overimputations of a state context's survey error (Blackwell, Honaker and King 2017): each draw refits both models
+STATE_OVERIMPUTATIONS = 50
+
+
+def _ecological_state(places: list[dict], state_ctx: dict[str, dict], log) -> list[dict]:
+    """Each count field against each state-grain context, at state level (docs/plans/state-contexts.md): the
+    municipalities' events with their age-sex expectations as offset, (1) in a cross-level NB2 with a random intercept
+    per state (glmmTMB, `rmodels.nb_random_intercept`) and (2) aggregated to the states (NB2 GLM at the null model's
+    dispersion, HC3); the state value standardised over the states; its survey error carried by multiple
+    overimputation (each state's value drawn from Normal(estimate, se), both models refitted, combined by Rubin's
+    rules). Inference counts states. Associations between states, never effects on persons."""
+    import statsmodels.api as sm
+
+    from . import rmodels
+
+    out: list[dict] = []
+    fields_: dict[str, dict] = {}
+    for r in places:
+        if r.get("period_kind") != "period" or r.get("geography") != "municipality":
+            continue
+        f = fields_.setdefault(r["field"], {"label": r.get("label"), "dataset": r.get("dataset"), "y": {}, "e": {}})
+        u = int(r["place"])
+        if r["measure"] == "count":
+            f["y"][u] = float(r["estimate"])
+        elif r["measure"] == "smr" and str(r.get("comparator", "")).startswith("the area"):
+            f["e"][u] = float(r["denominator"])
+    for fid, f in fields_.items():
+        us = np.array(sorted(u for u in f["y"] if f["e"].get(u, 0) > 0), dtype=np.int64)
+        if len(us) < 20:
+            continue
+        y = np.array([f["y"][u] for u in us])
+        off = np.log(np.array([f["e"][u] for u in us]))
+        st = np.array([str(u)[:2] for u in us])
+        base = {"field": fid, "label": f["label"], "dataset": f["dataset"], "geography": "state", "period_kind": "period"}
+        for name, ctx in state_ctx.items():
+            vals = ctx["values"]
+            states = sorted(set(st) & set(vals))
+            if len(states) < 20:
+                log(f"study: state context {name} for {fid}: {len(states)} states with a value, fewer than 20: not modelled")
+                continue
+            keep = np.isin(st, states)
+            ym, om, sm_ = y[keep], off[keep], st[keep]
+            Y = np.array([ym[sm_ == s].sum() for s in states])
+            E = np.array([np.exp(om[sm_ == s]).sum() for s in states])
+            est = np.array([vals[s][0] for s in states])
+            se = np.array([vals[s][1] if vals[s][1] is not None else 0.0 for s in states])
+            try:
+                null = sm.NegativeBinomial(Y, np.ones((len(Y), 1)), offset=np.log(E), loglike_method="nb2").fit(disp=0, maxiter=200)
+                alpha = float(null.params[-1])
+            except Exception:  # noqa: BLE001 - the moments' estimate where the null will not fit
+                alpha = float("nan")
+            if not np.isfinite(alpha) or alpha <= 0:
+                mu0 = E * Y.sum() / E.sum()
+                alpha = max(float(((Y - mu0) ** 2 - mu0).sum() / (mu0 ** 2).sum()), 1e-8)
+            rng = np.random.default_rng(config.seed(fid, name, "overimpute"))
+            draws = STATE_OVERIMPUTATIONS if (se > 0).any() else 1
+            agg, cross, failed = [], [], 0
+            for _ in range(draws):
+                z = est + se * rng.standard_normal(len(est)) if draws > 1 else est
+                zs = (z - z.mean()) / z.std() if z.std() > 0 else z * 0
+                X = sm.add_constant(zs, has_constant="add")
+                res = sm.GLM(Y, X, family=sm.families.NegativeBinomial(alpha=alpha), offset=np.log(E)).fit(cov_type="HC3")
+                agg.append((float(res.params[1]), float(res.bse[1]) ** 2))
+                zmap = dict(zip(states, zs, strict=True))
+                try:
+                    b, v, ok = rmodels.nb_random_intercept(ym, om, np.array([zmap[s] for s in sm_]), sm_)
+                    if ok and np.isfinite(b) and np.isfinite(v):
+                        cross.append((b, v))
+                    else:
+                        failed += 1
+                except Exception as exc:  # noqa: BLE001 - a draw the mixed model cannot fit is counted
+                    failed += 1
+                    log(f"study: state context {name} for {fid}: glmmTMB: {type(exc).__name__}: {exc}")
+            sd_note = f"1 SD over {len(states)} states = {np.std(est):.4g} {ctx['unit']}".strip()
+            for kind, got, interval in (
+                    ("cross-level NB2, state random intercept (glmmTMB)", cross, "Wald"),
+                    ("state-aggregated NB2", agg, "HC3")):
+                if not got:
+                    continue
+                b = np.array([g[0] for g in got])
+                w = np.array([g[1] for g in got])
+                m = len(got)
+                total = w.mean() + ((1 + 1 / m) * b.var(ddof=1) if m > 1 else 0.0)
+                qbar, sd = float(b.mean()), float(np.sqrt(total))
+                from scipy.stats import norm
+
+                p = float(2 * norm.sf(abs(qbar) / sd)) if sd > 0 else float("nan")
+                note = (f"{sd_note}; survey year {ctx['year']}; "
+                        + (f"Rubin over {m} overimputations of the survey error" if m > 1 else "survey error not published: estimate taken as known")
+                        + (f"; {failed} of {draws} mixed-model draws did not converge" if kind.startswith("cross") and failed else ""))
+                out.append(_estimate_row(
+                    "associations", "association", {**base, "variable": name, "value_label": ctx["label"], "note": note},
+                    estimate=float(np.exp(qbar)), low=float(np.exp(qbar - 1.96 * sd)), high=float(np.exp(qbar + 1.96 * sd)),
+                    interval=f"{interval}, {'Rubin over ' + str(m) + ' overimputations' if m > 1 else 'fixed estimate'}",
+                    p=p, denominator=float(len(states)), denominator_kind="states", model=kind))
     return out
 
 

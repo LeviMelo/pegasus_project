@@ -1,4 +1,4 @@
-# State-grain contexts in a study's ecological models (plan, 2026-11-23)
+# State-grain contexts in a study's ecological models (plan, 2026-11-23; built, ADR-0039)
 
 **Why.** pegasus_data now serves state-grain fields (`level: N3`: twelve PNS fields, counts and IBGE's published shares,
 each with its 95% limits and CV; pegasus_data 4e8d168c, 2f67854c). A study of places (t06 helmets, t08 chronic spine
@@ -45,3 +45,6 @@ ecological-fallacy sentence of `_ecological` applies twice over: an association 
 - The aggregated and cross-level models are reported side by side, and the overimputation widens the interval
   against the fixed-estimate fit by a measured amount.
 - Then an ADR records the decision, and `gateway.rated`'s reason names the new step.
+
+**Status (2026-11-23).** Built (`study._state_contexts`, `study._ecological_state`, `rmodels`) and decided (ADR-0039) on the
+spine-surgery x PNS spine check above; the abnc_t08 and abnc_t06 rows come with their next study runs.

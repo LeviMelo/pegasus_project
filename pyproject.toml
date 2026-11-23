@@ -27,6 +27,7 @@ dependencies = [
   "scikit-learn>=1.4",    # the graphical lasso of the direct relations (relations.direct_relations, §7.6)
   "scikit-sparse>=0.5",   # CHOLMOD for the v1 solver (ARCHITECTURE §5.3); on Windows from conda-forge, installed --no-deps
   "statsmodels>=0.14",
+  "rpy2>=3.5,<3.6",                # R 4.4.1 reference models (glmmTMB), ADR-0039; rpy2 3.6 needs R >= 4.5
   "pydantic>=2",
   "typer>=0.12",
   "rich>=13",
