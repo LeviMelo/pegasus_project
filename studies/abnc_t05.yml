@@ -922,6 +922,89 @@ contexts_considered:
     decision: exclude
     why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
       yellow fever: no pathway to radiotherapy timing for malignant brain tumours'
+  field:brdwgd:gaussian:
+    decision: exclude
+    why: 'weather and climate: no pathway from temperature or rain to the scheduling of a radiotherapy course over
+      the study years; seasonality is absorbed by the year term'
+  field:intake:ans_tiss_hospital_items:
+    decision: exclude
+    why: private-plan billing items carry no person identifier and cannot join the SUS radiotherapy cohort; private
+      coverage enters as the municipal share, included
+  field:intake:ans_tiss_hospital_remuneration:
+    decision: exclude
+    why: 'private-plan payments: as the billing items, no link to the SUS cohort'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: private-plan outpatient items (private radiotherapy included) carry no person identifier; private coverage
+      enters as the municipal share, included
+  field:intake:ans_tiss_outpatient_remuneration:
+    decision: exclude
+    why: 'private-plan payments: as the outpatient items'
+  field:inmet:climate:
+    decision: exclude
+    why: 'weather and climate: no pathway from temperature or rain to the scheduling of a radiotherapy course over
+      the study years; seasonality is absorbed by the year term'
+  field:brdwgd:climate_monthly:
+    decision: exclude
+    why: 'weather and climate: no pathway from temperature or rain to the scheduling of a radiotherapy course over
+      the study years; seasonality is absorbed by the year term'
+  field:cnes:accreditations:
+    decision: include
+    why: CACON, UNACON, radiotherapy and high-complexity neurosurgical accreditation at the centre's municipality
+      (sections supply, supply_neuro); stroke, thrombectomy and neuro reference-centre accreditations lie off the
+      radiotherapy pathway
+  field:cnes:beds:
+    decision: exclude
+    why: 'inpatient beds: radiotherapy is an outpatient course, and the surgical step is represented by neurosurgeons
+      and neurosurgical accreditation, included'
+  field:cnes:radiotherapy_machines:
+    decision: include
+    why: linear accelerators per million of the patient's health region and at the centre's municipality (sections
+      supply, crosssite, supply_neuro); cobalt and brachytherapy units are not used for brain tumours
+  field:cnes:professionals:
+    decision: include
+    why: neurosurgeons per million of the patient's health region and SUS radiotherapist hours (sections supply,
+      supply_neuro); the other professions lie off the radiotherapy pathway
+  field:cnes:equipment:
+    decision: include
+    why: 'SUS MRI and CT scanners per million of the patient''s health region: planning imaging before radiotherapy
+      (section supply_neuro); dialysis, EEG, hemodynamics and mammography lie off the pathway'
+  field:cnes:facilities:
+    decision: exclude
+    why: 'counts of hospitals, clinics and primary care units: capacity on the radiotherapy pathway is measured
+      by accelerators, radiotherapist hours and accreditations, included'
+  field:cnes:specialised_services:
+    decision: exclude
+    why: registered neurology-neurosurgery services carry no capacity measure; the neurosurgical step enters as
+      neurosurgeons and high-complexity accreditation, included
+  field:cnes:teams:
+    decision: exclude
+    why: family-health and primary-care teams act before diagnosis; the interval starts at the pathological diagnosis,
+      after that stage
+  field:sidra:persons_10_plus:
+    decision: exclude
+    why: 'literacy denominators: socioeconomic position enters as the Census low-income share'
+  field:sidra:persons_10_plus_literate:
+    decision: exclude
+    why: 'literacy: socioeconomic position enters as the Census low-income share'
+  field:sidra:pns_violence_by_stranger:
+    decision: exclude
+    why: 'violence by strangers (PNS): no pathway to radiotherapy timing'
+  field:sidra:pns_violence_by_stranger_percent:
+    decision: exclude
+    why: as above
+  field:brdwgd:precipitation_months:
+    decision: exclude
+    why: 'weather and climate: no pathway from temperature or rain to the scheduling of a radiotherapy course over
+      the study years; seasonality is absorbed by the year term'
+  field:records:SIM-DO:
+    decision: exclude
+    why: certification quality (ill-defined and garbage-code shares) bears only on the supplementary courses-per-death
+      ratio, which is reported as context, not as a claim; the paper's outcome is the APAC interval
+  field:brdwgd:temperature_months:
+    decision: exclude
+    why: 'weather and climate: no pathway from temperature or rain to the scheduling of a radiotherapy course over
+      the study years; seasonality is absorbed by the year term'
   cnes_linear_accelerators:
     decision: include
     why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): linear accelerators per million
