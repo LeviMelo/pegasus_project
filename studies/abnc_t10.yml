@@ -1,0 +1,589 @@
+# abnc_t10: written by `pegasus study new`; every key is described in the README and ARCHITECTURE §3.1.
+study: abnc_t10
+topic:
+  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms
+    sigtap: ["0403"]
+period: 2010-2024               # first-last year
+where: BR                    # BR, states (AL or 27, several as a list) or municipality codes
+depth: standard               # survey, standard, deep or exhaustive: presets of the choices below
+# related: 3                   # related codes read beside the topic's own, strongest first (0: none)
+# persons: true                # the cohort scan over linked persons (deep and exhaustive)
+# download: 10                 # gigabytes the study may download (years held in the lake are free)
+contexts: [ans_tiss_hospital_events, ans_tiss_hospital_items]   # decided 2026-11-23 (contexts_considered below); IPCA/INPC read via price_index (series, not fields)
+# hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
+#   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
+# every context candidate of the scope decided from what its group holds (abnc2027_neuro papers/t10/contexts_considered.yml)
+contexts_considered:
+  intake:ans:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: ANS beneficiaries by municipality, age and sex, assistance coverage (December
+      of each year): private-plan coverage by state and municipality (QT_BENEFICIARIO_ATIVO over population), the main private coverage measure.)'
+  intake:ans_beneficiaries_municipal:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: ANS quarterly beneficiaries by municipality, segment, contract type and age/sex:
+      private coverage and its time series by municipality and region, at finer time grain than the December extract.)'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: ANS TISS outpatient events by provider UF with VL_EVENTO_PAGO, CBO and consultation
+      type: amounts private plans pay professionals by state and month, for the private-plan fee comparison.)'
+  intake:ans_tiss_hosp_cons:
+    decision: include
+    why: 'ANS TISS hospital events: the private-plan fee comparison (events and paid items, 2023-2024; fields ans_tiss_hospital_items and ans_tiss_hospital_events).'
+  intake:bnafar:
+    decision: exclude
+    why: 'Medicine stock positions in BNAFAR/Horus by CNES and municipality: pharmaceutical stock, not neurosurgical hospital payment or supply.'
+  intake:census2010_domicilios:
+    decision: exclude
+    why: 'Census 2010 household microdata (housing structure, amenities, goods): housing context; personal and household income come from the person microdata.'
+  intake:census2010_emigracao:
+    decision: exclude
+    why: 'Census 2010 international emigrants: migration flow, no bearing on hospital payment.'
+  intake:census2010_mortalidade:
+    decision: exclude
+    why: 'Census 2010 deaths of household members: deaths already covered by SIM, no payment content.'
+  intake:census2010_pessoas:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census 2010 person microdata (age, education, income V6529 and others, municipality
+      CODMUN): municipal income and age distribution of the population served, computable at municipality grain for 2010.)'
+  intake:health_regions:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: MoH municipality to health region and macro-region crosswalk with region and
+      UF codes: aggregates municipal data to health regions, for hospital and supply contrasts below the state level.)'
+  intake:inep:
+    decision: exclude
+    why: 'School census enrolments by school and municipality: education context, no bearing on hospital payment.'
+  intake:pni_doses:
+    decision: exclude
+    why: 'Vaccine doses applied by municipality and establishment: vaccination, no bearing on hospital payment.'
+  intake:s2id:
+    decision: exclude
+    why: 'Disaster damage records by municipality (storms, drought, deaths): environmental events, not payment, supply or coverage.'
+  intake:sies:
+    decision: exclude
+    why: 'Distribution and requests of vaccination supplies by municipality: vaccine logistics, no bearing on hospital payment.'
+  intake:sisagua_control_basic:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_control_other:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_control_outside_standard:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_supply_population:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_surveillance_basic:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_surveillance_cyanobacteria:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_surveillance_other:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sisagua_tanker_population:
+    decision: exclude
+    why: 'SISAGUA drinking-water control or surveillance records by municipality: water quality, no bearing on hospital payment, supply or coverage.'
+  intake:sngpc_compounded:
+    decision: exclude
+    why: 'Compounded medicine sales by municipality (SNGPC): pharmacy sales, no bearing on hospital payment.'
+  intake:sngpc_industrialized:
+    decision: exclude
+    why: 'Industrialised medicine sales by municipality and CID (SNGPC): pharmacy sales, not hospital payment, supply or coverage.'
+  intake:srag:
+    decision: exclude
+    why: 'Severe acute respiratory illness notifications: infectious disease surveillance, not neurosurgical payment.'
+  intake:yellow_fever_epizootics:
+    decision: exclude
+    why: 'Yellow fever epizootics (animal cases): zoonotic surveillance, no bearing on hospital payment.'
+  intake:yellow_fever_humans:
+    decision: exclude
+    why: 'Human yellow fever cases: infectious surveillance, no bearing on hospital payment.'
+  sidra:AA:Acidentes, violência e segurança:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Alimentação:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Aquisição de produtos alimentícios:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Asma:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Atividade física:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Características básicas:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Características da escola:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Comportamento alimentar:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Contexto familiar:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Contexto socioeconômico:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Equipamentos de ensino:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Escolaridade materna e paterna:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Higiene e saúde bucal:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Imagem corporal:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Informações gerais:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Saúde mental:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Saúde sexual e reprodutiva:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Segurança:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Situações em casa e na escola:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Tabaco na escola:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Uso de cigarro:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Uso de drogas:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Uso de serviço de saúde:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:AA:Uso de álcool:
+    decision: exclude
+    why: 'PeNSE school-survey tables on 9th-grade pupils (2012-2015): adolescent behaviour and school characteristics, not hospital payment, supply or coverage in
+      the adult neurosurgical population.'
+  sidra:B5:Características adicionais do mercado de trabalho:
+    decision: exclude
+    why: 'PNAD Continua additional labour characteristics (informality, hours): earnings and unemployment already carried by the labour-market group.'
+  sidra:B5:Características do domicílio:
+    decision: exclude
+    why: 'PNAD Continua housing tables (rooms, goods, tenure): housing characteristics, income already carried by other included groups.'
+  sidra:B5:Características gerais da população:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNAD Continua annual population by sex, age, race and education (2012-2025):
+      state-level population structure for standardisation.)'
+  sidra:B5:Deficiência:
+    decision: exclude
+    why: 'PNAD Continua disability module 2022: prevalence of disability, not payment, supply or coverage.'
+  sidra:B5:Educação:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNAD Continua annual schooling (2016-2025): years of study by state, socioeconomic
+      gradient for private-plan use.)'
+  sidra:B5:Furto e roubo:
+    decision: exclude
+    why: 'PNAD Continua theft and robbery victimisation 2021: crime module, no bearing on hospital payment.'
+  sidra:B5:Mercado de trabalho:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNAD Continua annual labour market (2012-2025): unemployment and real mean
+      earnings by state, income context for the population served.)'
+  sidra:B5:Outras formas de trabalho:
+    decision: exclude
+    why: 'PNAD Continua unpaid and other forms of work (care, own-use production): outside hospital payment context.'
+  sidra:C2:Cidades e comunidades sustentáveis:
+    decision: exclude
+    why: 'Inhalable-particle air quality indicator: environmental exposure, not payment, supply or coverage.'
+  sidra:CA:Agroindústria rural:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  'sidra:CA:Características dos estabelecimentos agropecuários ':
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  'sidra:CA:Características dos produtores agropecuários ':
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Confederação da Agricultura e Pecuária do Brasil (CNA):
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Extração vegetal:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Floricultura:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Horticultura:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Lavouras permanentes:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Lavouras temporárias:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Movimentação financeira:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Pecuária:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Pessoal ocupado:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CA:Silvicultura:
+    decision: exclude
+    why: 'Agricultural census 2017 tables (farms, crops, livestock, rural finance): no bearing on hospital payment, neurosurgical supply or private coverage.'
+  sidra:CD:Aglomerado subnormal:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Atividade:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Características do domicílio:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Características gerais dos indígenas:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Cor ou raça:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Deficiência:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Deslocamento:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Domicílios:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Educação:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census 2010 schooling and literacy: educational level of the population by
+      state and municipality, a standard socioeconomic gradient for access to private care.)'
+  sidra:CD:Emigração:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Faces de logradouros:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Famílias:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Fecundidade:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Geral:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census 2022 general results (labour force, population characteristics): current
+      population and labour status by state and municipality for the 2022-2024 end of the series.)'
+  sidra:CD:Indicadores demográficos:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census 2022 ageing index, median age: age structure by state and municipality,
+      relevant to demand for cranial and spinal surgery.)'
+  sidra:CD:Migração:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Migração e deslocamento:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Mortalidade:
+    decision: exclude
+    why: 'Census 2010 deaths in the household in the year before the census: single year of a death count already covered by SIM, not payment or supply.'
+  sidra:CD:Nupcialidade:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Nupcialidade e fecundidade:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Pessoas:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census population by sex, age and residence (1970-2010): population served
+      and age structure by state and municipality, denominators for neurosurgical volume per capita.)'
+  sidra:CD:População indígena:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:População quilombola:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Registro civil:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Registro de nascimento:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Religião:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Rendimento:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census household and personal income tables (2000 and 2010): income of the
+      population served and its distribution by state and municipality, to explain demand for private plans versus SUS.)'
+  sidra:CD:Terras indígenas:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Território:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census area and density of units (2010): area and population density by municipality,
+      for geographic access and supply per area.)'
+  sidra:CD:Territórios quilombolas:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CD:Trabalho e rendimento:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Census 2010 labour and income tables: employment status and earnings by state
+      and municipality, a socioeconomic context for capacity to pay.)'
+  sidra:CD:Trabalho infantil:
+    decision: exclude
+    why: 'Census table on a demographic or housing topic (race, religion, migration, fertility, housing, disability, indigenous or quilombola groups): no variable
+      for payment, supply, income or coverage beyond groups already included.'
+  sidra:CL:Empresas e outras organizações:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: CEMPRE tables by CNAE section/division (2006-2024: firms, employed staff,
+      wages): firms and payroll of human-health activities (private hospitals, clinics) by state and municipality, a supply-side and wage-cost context for hospital
+      payment.)'
+  sidra:CL:Unidades locais:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: CEMPRE local units by CNAE activity (2006-2021: units, employed staff, wages):
+      counts of health-care establishments and their payroll by state and municipality, to set against SIH payment and CNES supply.)'
+  sidra:D5:Geral:
+    decision: exclude
+    why: 'Urbanised area and vacant lots (2019): land-use classification, no health payment content.'
+  sidra:D9:Geral:
+    decision: exclude
+    why: 'Individual microentrepreneur (MEI) counts and survival: small-business registry, not hospital supply or health payment.'
+  sidra:DD:Rendimento:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNAD Continua quarterly real mean monthly income and income mass (2012-2026):
+      state-level income series to compare with the real value of the SUS table over time.)'
+  sidra:DD:Trabalho:
+    decision: exclude
+    why: 'PNAD Continua quarterly labour status (employment, informality): income series already included from the income group.'
+  sidra:EL:Geral:
+    decision: exclude
+    why: 'Pollinator contribution indicator: agricultural ecology, no bearing on hospital payment.'
+  sidra:EO:Biodiversidade:
+    decision: exclude
+    why: 'Biodiversity knowledge index: environmental data, no bearing on hospital payment.'
+  sidra:ES:Estoques agropecuários:
+    decision: exclude
+    why: 'Agricultural storage survey (stocks, capacity): agricultural, no bearing on hospital payment.'
+  sidra:FP:Entidades sem fins lucrativos:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: FASFIL non-profit entities (local units, employed staff, wages, 2006-2016):
+      the non-profit sector that includes philanthropic hospitals, relevant to the paper''s non-profit legal-nature payment contrast; state and municipality.)'
+  sidra:FP:Fundações e Associações sem fins lucrativos:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: FASFIL foundations and associations (units, staff, wages, 2006-2010): non-profit
+      health institutions by state, a subset of the FASFIL group, for the non-profit hospital contrast.)'
+  sidra:IA:Índices de preços:
+    decision: include
+    why: 'IPCA, the paper''s deflator: read via pegasus_data.price_index (series price_index_ipca).'
+  sidra:IG:Índices de preços:
+    decision: exclude
+    why: 'IPCA-E quarterly index (tables 2006-2010 only): ends before most of the study period, and the IPCA series covers the same ground.'
+  sidra:IO:Contas Nacionais e Regionais:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Municipal GDP and gross value added by activity (1999-2023, tables 21 and
+      5938), including public administration, health and education: income of the area and size of the public sector by state and municipality. Nearest proxy to public
+      activity but NOT health spending.)'
+  sidra:IQ:Índices de preços:
+    decision: exclude
+    why: 'IPCA-15 mid-month price index (2006-2012 tables): a preview of the IPCA already included, adds no information for annual or monthly deflation.'
+  sidra:IU:População residente em áreas costeiras:
+    decision: exclude
+    why: 'Coastal-area population and density (2010): geographic classification with no health payment content.'
+  sidra:PA:Lavouras permanentes:
+    decision: exclude
+    why: 'Municipal permanent-crop production: agricultural output, no bearing on hospital payment.'
+  sidra:PA:Lavouras temporárias:
+    decision: exclude
+    why: 'Municipal temporary-crop production: agricultural output, no bearing on hospital payment.'
+  sidra:PA:Lavouras temporárias e permanentes:
+    decision: exclude
+    why: 'Municipal crop area and production: agricultural output, no bearing on hospital payment.'
+  sidra:PC:Índices de preços:
+    decision: include
+    why: 'INPC, the deflator sensitivity: read via pegasus_data.price_index (series price_index_inpc); its health sub-items are not used.'
+  sidra:PM:Geral:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: MUNIC 2021 municipal health management (municipal health fund, health secretariat,
+      municipal facilities run by third parties, regional management, 182 tables): municipal governance of health financing, but records existence only, with NO spending
+      amounts. FLAG: does not hold subnational health spending.)'
+  sidra:PM:Informações básicas municipais:
+    decision: exclude
+    why: 'MUNIC 2020 basic municipal information (housing programmes, slums, social rent): holds no health financing or health service variables.'
+  sidra:PP:Pecuária:
+    decision: exclude
+    why: 'Municipal livestock survey (herds, milk, eggs, to 2012): agricultural production, no bearing on hospital payment.'
+  sidra:RC:Casamentos:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:RC:Divórcios:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:RC:Nascidos vivos:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:RC:Separações:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:RC:Óbitos fetais:
+    decision: exclude
+    why: 'Civil registry (marriages, divorces, births, deaths): vital-event counts with no information on hospital payment, supply, income or coverage.'
+  sidra:SB:Abastecimento de água:
+    decision: exclude
+    why: 'Sanitation survey (water supply, sewerage): infrastructure context with no bearing on neurosurgical payment.'
+  sidra:SB:Esgotamento sanitário:
+    decision: exclude
+    why: 'Sanitation survey (water supply, sewerage): infrastructure context with no bearing on neurosurgical payment.'
+  sidra:SH:Hospedagem:
+    decision: exclude
+    why: 'Lodging survey (hotels): tourism accommodation, not hospital supply.'
+  sidra:VS:Extração vegetal:
+    decision: exclude
+    why: 'Forest extraction production values: no bearing on hospital payment.'
+  sidra:VS:Silvicultura:
+    decision: exclude
+    why: 'Forestry production values: no bearing on hospital payment.'
+  sidra:XF:Geral:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: Population estimates 2001-2026 (table 6579): annual population by state and
+      municipality, the denominator for volume, payment and neurosurgeons per capita.)'
+  sidra:XN:Acidentes:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Alimentação:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Atividade física:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Características do domicílio e serviços domiciliares de saúde:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Cobertura de plano de saúde:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNS 2013 health-plan coverage by sex, age, schooling, race, household income
+      and the monthly plan fee (table 4192): private coverage and fees by state (2013 only), cross-check for the ANS series.)'
+  sidra:XN:Deficiência:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Doenças crônicas:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Higiene e saúde bucal:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Idosos:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Percepção do estado de saúde:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Saúde da mulher:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Tabagismo:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Uso de serviço de saúde:
+    decision: exclude
+    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters
+      it, so this group, relevant to a population study, is not used here. (draft note: PNS 2013/2019 use of health services (urgent care, hospitalisation, who paid,
+      SUS versus private) by state: share of care taken in SUS versus private, context for payment rules.)'
+  sidra:XN:Uso de álcool:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Vida sexual:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'
+  sidra:XN:Violência:
+    decision: exclude
+    why: 'PNS 2013/2019 table on individual health behaviour or morbidity: describes risk factors or disease prevalence, not payment, supply, income or coverage.'

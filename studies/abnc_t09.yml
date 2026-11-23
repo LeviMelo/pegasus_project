@@ -1,0 +1,14 @@
+# abnc_t09: written by `pegasus study new`; every key is described in the README and ARCHITECTURE §3.1.
+study: abnc_t09
+topic:
+  seeds:                       # the topic: ICD-10 codes (any level), SINAN agravos, label terms
+    sigtap: ["0304010219", "0304010227", "0304010243", "0304010510"]
+period: 2010-2024               # first-last year
+where: BR                    # BR, states (AL or 27, several as a list) or municipality codes
+depth: standard               # survey, standard, deep or exhaustive: presets of the choices below
+# related: 3                   # related codes read beside the topic's own, strongest first (0: none)
+# persons: true                # the cohort scan over linked persons (deep and exhaustive)
+# download: 10                 # gigabytes the study may download (years held in the lake are free)
+contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
+# hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
+#   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}

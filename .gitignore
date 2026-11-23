@@ -15,3 +15,5 @@ studies/slices/*/
 runs/
 # a declaration priced by `pegasus study scope` (beside it, never in its folder)
 studies/**/*.scope.yml
+# its context candidates, written beside the scope (`workspace.scope`): generated, never kept
+studies/**/*.candidates.yml
