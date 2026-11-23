@@ -918,21 +918,22 @@ contexts_considered:
       yellow fever: no pathway to radiotherapy timing for malignant brain tumours'
   cnes_linear_accelerators:
     decision: include
-    why: 'municipal covariate, December 2019 (CNES): linear accelerators per million residents of the patient''s
-      health region, and at the treating centre''s municipality (section supply): capacity as a driver of delay'
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): linear accelerators per million
+      residents of the patient''s health region, and at the treating centre''s municipality (section supply): capacity
+      as a driver of delay'
   cnes_radiotherapists_hours_sus:
     decision: include
-    why: 'municipal covariate, December 2019 (CNES): SUS radiotherapist hours per million residents of the patient''s
-      health region (section supply): staffing as a driver of delay'
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): SUS radiotherapist hours per million
+      residents of the patient''s health region (section supply): staffing as a driver of delay'
   cnes_accreditation_oncology_cacon:
     decision: include
-    why: 'municipal covariate, December 2019 (CNES): any CACON at the treating centre''s municipality, counted apart
-      from the radiotherapy accreditations (section supply)'
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): any CACON at the treating centre''s
+      municipality, counted apart from the radiotherapy accreditations (section supply)'
   cnes_accreditation_radiotherapy:
     decision: include
-    why: 'municipal covariate, December 2019 (CNES): any radiotherapy accreditation at the treating centre''s municipality
-      (section supply)'
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): any radiotherapy accreditation
+      at the treating centre''s municipality (section supply)'
   cnes_accreditation_oncology_unacon:
     decision: include
-    why: 'municipal covariate, December 2019 (CNES): UNACON counts reported beside the national supply (section
-      supply)'
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): UNACON counts reported beside
+      the national supply (section supply)'
