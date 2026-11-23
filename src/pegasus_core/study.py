@@ -232,6 +232,12 @@ def load(path: str | Path) -> Declaration:
         problems.append("'topic.seeds' is required: codes in any of " + ", ".join(SEED_SYSTEMS))
     for k in sorted(set(seeds) - set(SEED_SYSTEMS)):
         problems.append(f"unknown seed system {k!r} (systems: {', '.join(SEED_SYSTEMS)})")
+    for k in ("icd10", "sigtap", "sinan"):
+        # a code is text: YAML reads 0403 as the octal number 259 and 0403010314 as a number without its leading zero,
+        # which no reading can undo; quoted, it is the code
+        unquoted = [c for c in seeds.get(k) or [] if not isinstance(c, str)]
+        if unquoted:
+            problems.append(f"topic.seeds.{k}: {unquoted} read as numbers, not codes; quote each code ('0403')")
     for i, r in enumerate(seeds.get("records") or []):
         where_ = f"topic.seeds.records[{i}]"
         if not isinstance(r, dict):
@@ -8149,7 +8155,8 @@ def new(name: str, icd10: list[str] | None = None, sinan: list[str] | None = Non
         return "      - " + json_.dumps(r, ensure_ascii=False)
 
     def flow(xs) -> str:
-        return "[" + ", ".join(str(x) for x in xs) + "]"
+        # codes quoted: YAML 1.1 reads an unquoted 0403 as the octal number 259 (a SIGTAP seed read nothing, 2026-11-23)
+        return "[" + ", ".join(f"'{x}'" for x in xs) + "]"
     lines = [f"# {name}: written by `pegasus study new`; every key is described in the README and ARCHITECTURE §3.1.",
              f"study: {name}",
              "topic:",

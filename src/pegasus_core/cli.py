@@ -711,6 +711,7 @@ def scope_command(name: str = typer.Argument(..., help="the study's name or its 
                   f"estimated {scope['estimated_minutes']} min; written to {scope['written']}")
     if scope["nothing_read"]:
         console.print(f"[bold red]{scope['nothing_read']}[/bold red]")
+        raise typer.Exit(1)          # a scope that reads nothing is no success (a seed misread as a number had passed)
 
 
 @study_app.command("run")
