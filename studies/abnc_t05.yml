@@ -830,23 +830,29 @@ contexts_considered:
       and TISS has no person identifier'
   intake:ans_tiss_hosp_cons:
     decision: exclude
-    why: 'private hospital events (TISS): not used for radiotherapy timing for malignant brain tumours'
+    why: private-plan hospital events carry no person identifier and no radiotherapy course, so they cannot join
+      the SUS radiotherapy cohort; patients who leave for private radiotherapy are represented by the private-plan
+      coverage share, which is included
   intake:bnafar:
     decision: exclude
     why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
       yellow fever: no pathway to radiotherapy timing for malignant brain tumours'
   intake:census2010_domicilios:
     decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
+    why: '2010 Census microdata: the area covariates come from the 2022 Census, nearer the study years, at the same
+      grain'
   intake:census2010_emigracao:
     decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
+    why: '2010 Census microdata: the area covariates come from the 2022 Census, nearer the study years, at the same
+      grain'
   intake:census2010_mortalidade:
     decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
+    why: '2010 Census microdata: the area covariates come from the 2022 Census, nearer the study years, at the same
+      grain'
   intake:census2010_pessoas:
     decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
+    why: '2010 Census microdata: the area covariates come from the 2022 Census, nearer the study years, at the same
+      grain'
   intake:health_regions:
     decision: exclude
     why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as
@@ -937,3 +943,19 @@ contexts_considered:
     decision: include
     why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): UNACON counts reported beside
       the national supply (section supply)'
+  cnes_equipment_mri_sus:
+    decision: include
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): SUS MRI scanners per million residents
+      of the patient''s health region: planning imaging before radiotherapy (section supply_neuro, sensitivity)'
+  cnes_equipment_ct_sus:
+    decision: include
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): SUS CT scanners per million residents
+      of the patient''s health region: planning imaging (section supply_neuro, sensitivity)'
+  cnes_neurosurgeons_professionals:
+    decision: include
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): neurosurgeons per million residents
+      of the patient''s health region: the surgical step before radiotherapy (section supply_neuro, sensitivity)'
+  cnes_accreditation_neuro_high_complexity:
+    decision: include
+    why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): any high-complexity neurosurgical
+      accreditation at the treating centre''s municipality (section supply_neuro, sensitivity)'
