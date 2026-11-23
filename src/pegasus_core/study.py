@@ -1031,7 +1031,25 @@ def _concept_items(decl: Declaration, nodes: list[str], codes: list[str], items:
 def resolve(decl: Declaration, log=print) -> Scope:
     """The scope of a declaration (ARCHITECTURE §4, version 1): every event type whose primary classifier holds the
     seeds' ICD-10 nodes, and the SINAN agravos named; each with the years it publishes and their download cost,
-    deferred past the depth's budget."""
+    deferred past the depth's budget.
+
+    Pricing downloads nothing (`gateway.max_download` is 0 throughout): a read the lake cannot answer whole raises, and
+    the item is deferred with why. abnc_t02's pricing counted SIA-AM 2025, which the lake held but DATASUS had
+    republished (108 files of September-December): the read fetched and decoded the year into memory, and the scope
+    was killed at 10.1 GB (2026-11-23)."""
+    before = os.environ.get("PEGASUS_MAX_DOWNLOAD")
+    os.environ["PEGASUS_MAX_DOWNLOAD"] = "0"
+    try:
+        return _resolve(decl, log)
+    finally:
+        if before is None:
+            os.environ.pop("PEGASUS_MAX_DOWNLOAD", None)
+        else:
+            os.environ["PEGASUS_MAX_DOWNLOAD"] = before
+
+
+def _resolve(decl: Declaration, log=print) -> Scope:
+    """`resolve`'s body, under its no-download limit."""
     _LAKE.clear()                         # the lake as it is now (`_cost`)
     if decl.where not in (None, "BR"):    # the study's area (`config.study_area`), read by every count and block
         os.environ["PEGASUS_AREA"] = ",".join(str(a) for a in decl.where)

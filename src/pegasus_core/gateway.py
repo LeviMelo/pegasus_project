@@ -864,7 +864,7 @@ def _lake_key(dataset: str, year: int) -> dict:
 
 
 def _records(dataset: str, event: str, year: int, columns: list[str], identity: bool = False,
-             rows: dict[str, list[str]] | None = None) -> pa.Table:
+             rows: dict[str, list[str]] | None = None, geography: str = "BR") -> pa.Table:
     """Raw-coded records of one event type for one year (pegasus_data `read_events`, its records: the duplicates rule
     and the status applied, no consolidation), ``columns``, the status column and ``__w`` (the events each record
     stands for: its weight, else 1). ``identity`` adds each record's identity ``_rid`` by pegasus_data's own rule
@@ -896,11 +896,13 @@ def _records(dataset: str, event: str, year: int, columns: list[str], identity: 
     # to download failed (the toxoplasmosis slice, 2026-10-15)
     records = _extract_records(dataset, year, rows) if rows and not cond else None
     if records is not None:
+        if geography != "BR":                    # an extract's year is national: one partition of it is no reading
+            raise ValueError(f"{dataset} {year}: an extract is read whole, not by publication state ({geography})")
         kwargs = {k: v for k, v in kwargs.items() if k not in ("rows",)}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         table = read_events(dataset, data_event_type(dataset, base), columns, consolidate=False, period=year,
-                            geography="BR", prepare=prepare, **kwargs,
+                            geography=geography, prepare=prepare, **kwargs,
                             **({"records": records} if records is not None else {}),
                             **({"condition": cond["clauses"]} if cond else {}))
     status = (spec.get("status") or {}).get("column")
@@ -1005,7 +1007,7 @@ def _reader_key(what: str, fn, dataset: str, event: str, year: int, *, places: p
 
 def _cells(dataset: str, event: str, year: int, columns: list[str], strata: dict, *, area=None,
            places: pa.Array | None = None, select: str = "", where: str = "", identity: bool = False,
-           rows: dict | None = None) -> duckdb.DuckDBPyConnection:
+           rows: dict | None = None, geography: str = "BR") -> duckdb.DuckDBPyConnection:
     """A year's records of the event type as the cells of a DuckDB connection: ``e`` holds each record's residence
     ``u``, ``sex``, ``age`` and weight ``wt`` by the strata, and the reader's own ``select``; ``r`` the records read (the
     strata's columns and ``columns``; the area's residents only, and ``rows``, filtered in the lake); ``v`` the valid
@@ -1013,7 +1015,7 @@ def _cells(dataset: str, event: str, year: int, columns: list[str], strata: dict
     cols = list(dict.fromkeys([strata["residence"], *([strata["age"]] if strata["age"] else []), *columns,
                                *([strata["sex"]] if strata["sex"] else [])]))
     raw = _records(dataset, event, year, cols, identity=identity,
-                   rows={**_area_rows(strata["residence"], area), **(rows or {})} or None)
+                   rows={**_area_rows(strata["residence"], area), **(rows or {})} or None, geography=geography)
     con = duckdb.connect()
     con.register("r", raw)
     con.register("v", pa.table({"u": places if places is not None else valid_places(year)}))
@@ -1658,21 +1660,48 @@ def cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds:
                 {"source": f"co-occurrence of {seeds} in {dataset} {columns} {year}"})
 
 
+def publication_states(dataset: str, year: int) -> list[str]:
+    """The partitions one reading of ``dataset``'s year opens in the lake: its states where the year is filed by state
+    (SIH), else ["BR"] (a national file: SIM, SINASC). A reader whose result is a sum over records reads them one
+    partition at a time and adds: every record is in exactly one partition of the reading."""
+    import pegasus_data as pg
+
+    try:
+        v = pg.lake_coverage(dataset, root=config.data_root()).get(int(year)) or {}
+    except Exception:  # noqa: BLE001 - a dataset the lake cannot describe: read nationally
+        return ["BR"]
+    codes = [str(c) for c in (v.get("uf_codes") or [])]
+    return ["BR"] if not codes or "BR" in codes else sorted(codes)
+
+
 def _cooccurrence(dataset: str, event: str, year: int, columns: list[str], seeds: list[str], area) -> pa.Table:
     """`cooccurrence`'s table, computed: an area's residents (a study of one state reads its own records' co-mentions,
-    never Brazil's), at the scan."""
+    never Brazil's), at the scan. Read one publication partition at a time (`publication_states`) and summed: the four
+    counts are sums over records, and a national SIH year (12-14 million records) held whole in Arrow, with two DuckDB
+    copies of it carrying a list column, took abnc_t02's scope past 10 GB (2026-11-23)."""
     text = "concat_ws(' ', " + ", ".join(f"coalesce(CAST(\"{c}\" AS VARCHAR), '')" for c in columns) + ")"
     seed_hit = " OR ".join(f"list_contains(list_transform(codes, x -> starts_with(x, '{s_}')), true)" for s_ in seeds) or "false"
     seed_cat = ", ".join(f"'{s_[:3]}'" for s_ in seeds) or "''"
-    con = _cells(dataset, event, year, list(columns), _strata(dataset, event, year), area=area,
-                 select=f"list_distinct(regexp_extract_all(upper({text}), '[A-Z][0-9]{{2}}[0-9X]?')) AS codes")
-    con.execute(f"""CREATE TEMP TABLE f AS SELECT sex, CAST(least(age // 10, 8) AS SMALLINT) AS band, codes,
-            ({seed_hit}) AS seed FROM e WHERE sex IS NOT NULL AND age IS NOT NULL AND age >= 0""")
-    return con.execute(f"""
-        WITH s AS (SELECT sex, band, count(*) AS n, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_seed FROM f GROUP BY ALL),
-             c AS (SELECT sex, band, cat, count(*) AS n_code, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_both
-                   FROM (SELECT sex, band, seed, unnest(list_distinct(list_transform(codes, x -> left(x, 3)))) AS cat FROM f)
-                   WHERE cat NOT IN ({seed_cat}) GROUP BY ALL)
+    strata = _strata(dataset, event, year)
+    parts_s, parts_c = [], []
+    for geo in publication_states(dataset, year):
+        con = _cells(dataset, event, year, list(columns), strata, area=area, geography=geo,
+                     select=f"list_distinct(regexp_extract_all(upper({text}), '[A-Z][0-9]{{2}}[0-9X]?')) AS codes")
+        con.execute(f"""CREATE TEMP TABLE f AS SELECT sex, CAST(least(age // 10, 8) AS SMALLINT) AS band, codes,
+                ({seed_hit}) AS seed FROM e WHERE sex IS NOT NULL AND age IS NOT NULL AND age >= 0""")
+        parts_s.append(con.execute("""SELECT sex, band, count(*) AS n, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_seed
+            FROM f GROUP BY ALL""").fetch_arrow_table())
+        parts_c.append(con.execute(f"""SELECT sex, band, cat, count(*) AS n_code, sum(CASE WHEN seed THEN 1 ELSE 0 END) AS n_both
+            FROM (SELECT sex, band, seed, unnest(list_distinct(list_transform(codes, x -> left(x, 3)))) AS cat FROM f)
+            WHERE cat NOT IN ({seed_cat}) GROUP BY ALL""").fetch_arrow_table())
+        con.close()
+    out = duckdb.connect()
+    out.register("ps", pa.concat_tables(parts_s, promote_options="default"))
+    out.register("pc", pa.concat_tables(parts_c, promote_options="default"))
+    return out.execute("""
+        WITH s AS (SELECT sex, band, CAST(sum(n) AS BIGINT) AS n, CAST(sum(n_seed) AS BIGINT) AS n_seed FROM ps GROUP BY ALL),
+             c AS (SELECT sex, band, cat, CAST(sum(n_code) AS BIGINT) AS n_code, CAST(sum(n_both) AS BIGINT) AS n_both
+                   FROM pc GROUP BY ALL)
         SELECT c.sex, c.band, c.cat AS code, c.n_code, c.n_both, s.n, s.n_seed FROM c JOIN s USING (sex, band)""").fetch_arrow_table()
 
 
