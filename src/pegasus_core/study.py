@@ -820,11 +820,24 @@ def _link_runs() -> list[dict]:
     return out
 
 
-def _person_paths(items: list[Item], runs: list[dict]) -> list[dict]:
+def _context_datasets(decl: Declaration) -> set[str]:
+    """The datasets a declaration reads through its included context candidates of declared records fields
+    (``field:records:<dataset>``, decided include in ``contexts_considered``): read by the study as context, so a person
+    path to them follows persons into a system the study covers. abnc_t10 included SIM-DO's certification fields and
+    links its admissions to SIM, and the scope said SIM-DO "is not read by the study" (the reviewer, 2026-11-23)."""
+    out = set()
+    for cid, d in (decl.contexts_considered or {}).items():
+        if str((d or {}).get("decision")) == "include" and str(cid).startswith("field:records:"):
+            out.add(gateway.dataset_key(str(cid).split(":", 2)[2]))
+    return out
+
+
+def _person_paths(items: list[Item], runs: list[dict], also_read: set[str] = frozenset()) -> list[dict]:
     """Scope v2's person paths (BACKLOG 4.3, 6.2): every declared link (pegasus_data `links.yml`) with a side on a read
     source, what it pairs, and each stored run's verdict; ``verdict`` is the best of them, "not run" when none is
-    stored. A path is not a field: `_linked_items` reads the ones whose runs are usable."""
-    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"}
+    stored. A path is not a field: `_linked_items` reads the ones whose runs are usable. ``also_read``: the datasets the
+    study reads as context (`_context_datasets`)."""
+    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"} | set(also_read)
     rank = {"viable": 2, "use with caution": 1}
     out = []
     for name, spec in gateway.link_specs().items():
@@ -843,7 +856,8 @@ def _person_paths(items: list[Item], runs: list[dict]) -> list[dict]:
     return out
 
 
-def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], excluded: list[dict]) -> list[Item]:
+def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], excluded: list[dict],
+                  also_read: set[str] = frozenset()) -> list[Item]:
     """The linked-share fields of the person paths (ARCHITECTURE §5.2): on every read source a usable path has a side
     on, the share of the source's events paired across the link (`fields.link_source`), over the years whose covering
     runs (`gateway.covering_runs`: a padded side's records of a year are paired by the runs around it) are all stored
@@ -853,7 +867,7 @@ def _linked_items(items: list[Item], paths: list[dict], runs: list[dict], exclud
     from pegasus_data.linkage.engine import link_method, stored_key
 
     verdicts = {(r["run"].get("spec"), r["stem"]): r.get("verdict") for r in runs}
-    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"}
+    read = {gateway.dataset_key(i.dataset) for i in items if i.status == "in"} | set(also_read)
     out = []
     for p in (p for p in paths if p["verdict"] in USABLE_LINKS):
         method = link_method(p["link"])
@@ -1284,9 +1298,10 @@ def _resolve(decl: Declaration, log=print) -> Scope:
             it.readers = {}
             it.note = (it.note + "; " if it.note else "") + "counted only: its fields are asked of its confirmed events"
     runs = _link_runs()
-    paths = _person_paths(items, runs)
+    context_read = _context_datasets(decl)
+    paths = _person_paths(items, runs, context_read)
     if "linked" in decl.choice("readers"):
-        _linked_items(items, paths, runs, excluded)     # else the paths are listed; each linked share is a fit of its own
+        _linked_items(items, paths, runs, excluded, context_read)     # else the paths are listed; each linked share is a fit of its own
     _estimate(decl, items)
     contexts = sorted(gateway.declared_fields()) if decl.contexts == "auto" else list(decl.contexts)
     medicines = [{"substance": sub["name"], "use": sub.get("use", ""), "conditions": t["conditions"], "source": t["source"],
