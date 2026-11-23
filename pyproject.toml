@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "PegaSUS: one hierarchical model of Brazil's health events, read for leads"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "PegaSUS" }]
+authors = [{ name = "Levi de Melo Amorim", email = "levi.amorim@nees.ufal.br" }]
 keywords = ["epidemiology", "datasus", "sus", "brazil", "spatiotemporal", "anomaly detection"]
 # pegasus-data is installed editable from ../pegasus_data (CLAUDE.md §2).
 dependencies = [
