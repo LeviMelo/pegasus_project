@@ -80,24 +80,24 @@ contexts_considered:
       timing for malignant brain tumours; rurality enters through the urban share'
   sidra:CD:Características do domicílio:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Características do domicílio'' tables (as named by IBGE): not in this paper''s models: socioeconomic
+      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
+      both included from their own groups, and age enters through standardisation'
   sidra:CD:Cor ou raça:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Cor ou raça'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Domicílios:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Domicílios'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Educação:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Educação'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Faces de logradouros:
     decision: exclude
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
@@ -112,14 +112,11 @@ contexts_considered:
       tables: no pathway to radiotherapy timing for malignant brain tumours'
   sidra:CD:Geral:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census population by age and sex: denominators and standardisation use POPSVS'
   sidra:CD:Indicadores demográficos:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census ageing and dependency indices: age enters each patient''s model and the age-sex standardisation
+      of uptake'
   sidra:CD:Migração:
     decision: exclude
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
@@ -140,10 +137,9 @@ contexts_considered:
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
       tables: no pathway to radiotherapy timing for malignant brain tumours'
   sidra:CD:Pessoas:
-    decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    decision: include
+    why: municipal covariate of the paper's models (urban share; lib/covariates.py), built from the declared fields
+      population_resident_census, population_urban
   sidra:CD:População indígena:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -161,19 +157,18 @@ contexts_considered:
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
       tables: no pathway to radiotherapy timing for malignant brain tumours'
   sidra:CD:Rendimento:
-    decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    decision: include
+    why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared
+      fields persons_income_universe, persons_low_income
   sidra:CD:Terras indígenas:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
       are not modelled separately'
   sidra:CD:Território:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Território'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Territórios quilombolas:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -245,7 +240,7 @@ contexts_considered:
       for malignant brain tumours'
   sidra:XN:Cobertura de plano de saúde:
     decision: exclude
-    why: 'PNS plan coverage by state: private coverage enters as the declared municipal ANS coverage share'
+    why: 'PNS plan coverage by state (27 units): private coverage enters at municipal grain from ANS, included'
   sidra:XN:Doenças crônicas:
     decision: exclude
     why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
@@ -416,7 +411,8 @@ contexts_considered:
       tumours; supply comes from CNES'
   sidra:IO:Contas Nacionais e Regionais:
     decision: exclude
-    why: 'national and regional accounts: GDP per capita is already a declared municipal field'
+    why: 'municipal GDP and gross value added: socioeconomic position enters as the Census low-income share, the
+      measure closest to a patient''s means of travel and paying out of pocket'
   sidra:PA:Lavouras permanentes:
     decision: exclude
     why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to radiotherapy
@@ -821,11 +817,13 @@ contexts_considered:
     why: 'business, construction, trade, services and industry surveys by state: economic structure is carried by
       the declared municipal GDP per capita and income fields'
   intake:ans:
-    decision: exclude
-    why: 'ANS beneficiary links by plan, age and sex: private coverage enters as the declared municipal share'
+    decision: include
+    why: municipal covariate of the paper's models (private-plan coverage share; lib/covariates.py), built from
+      the declared fields ans_beneficiaries
   intake:ans_beneficiaries_municipal:
     decision: exclude
-    why: 'municipal beneficiaries by segment: the declared private-coverage share already carries them'
+    why: 'beneficiaries by segment and quarter: private coverage (patients leaving the SUS) enters as the municipal
+      share from intake:ans, included'
   intake:ans_tiss_amb_cons:
     decision: exclude
     why: 'private outpatient events (TISS): radiotherapy timing for malignant brain tumours is a SUS question here
@@ -871,9 +869,9 @@ contexts_considered:
       yellow fever: no pathway to radiotherapy timing for malignant brain tumours'
   intake:siops_municipal:
     decision: exclude
-    why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): radiotherapy timing
-      for malignant brain tumours is paid by federal SUS production payment (AIH/APAC) at regional centres, which
-      municipal spending does not measure'
+    why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): radiotherapy is a federal
+      APAC payment to regional CACON/UNACON centres, so the residence''s spending does not buy the course whose
+      start is measured; the centre (cluster and random effect) carries the provider side'
   intake:sisagua_control_basic:
     decision: exclude
     why: 'drinking-water quality and supply: no pathway to radiotherapy timing for malignant brain tumours'

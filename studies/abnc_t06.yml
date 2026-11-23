@@ -79,24 +79,23 @@ contexts_considered:
       brain injury; rurality enters through the urban share'
   sidra:CD:Características do domicílio:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Características do domicílio'' tables (as named by IBGE): not in this paper''s models: socioeconomic
+      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
+      both included from their own groups, and age enters through standardisation'
   sidra:CD:Cor ou raça:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Cor ou raça'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Domicílios:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Domicílios'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Educação:
-    decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    decision: include
+    why: municipal covariate of the paper's models (literacy 15+; lib/covariates.py), built from the declared fields
+      persons_15_plus, persons_15_plus_literate
   sidra:CD:Faces de logradouros:
     decision: exclude
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
@@ -111,14 +110,14 @@ contexts_considered:
       tables: no pathway to traumatic brain injury'
   sidra:CD:Geral:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Geral'' tables (as named by IBGE): not in this paper''s models: socioeconomic position enters
+      as the Census low-income share (and literacy where used), urbanisation as the urban share, both included from
+      their own groups, and age enters through standardisation'
   sidra:CD:Indicadores demográficos:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Indicadores demográficos'' tables (as named by IBGE): not in this paper''s models: socioeconomic
+      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
+      both included from their own groups, and age enters through standardisation'
   sidra:CD:Migração:
     decision: exclude
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
@@ -139,10 +138,9 @@ contexts_considered:
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
       tables: no pathway to traumatic brain injury'
   sidra:CD:Pessoas:
-    decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    decision: include
+    why: municipal covariate of the paper's models (urban share; lib/covariates.py), built from the declared fields
+      population_resident_census, population_urban
   sidra:CD:População indígena:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -160,19 +158,18 @@ contexts_considered:
     why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
       tables: no pathway to traumatic brain injury'
   sidra:CD:Rendimento:
-    decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    decision: include
+    why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared
+      fields persons_income_universe, persons_low_income
   sidra:CD:Terras indígenas:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
       are not modelled separately'
   sidra:CD:Território:
     decision: exclude
-    why: 'Census 2022 aggregates of income, work, schooling, housing, race, slums, density and age structure: the
-      paper''s covariates (low-income share, literacy, urban share, population by age and sex) are already declared
-      fields from the same Census, and age enters through standardisation'
+    why: 'Census 2022 ''Território'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
+      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
+      from their own groups, and age enters through standardisation'
   sidra:CD:Territórios quilombolas:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -781,8 +778,9 @@ contexts_considered:
     why: 'business, construction, trade, services and industry surveys by state: economic structure is carried by
       the declared municipal GDP per capita and income fields'
   intake:ans:
-    decision: exclude
-    why: 'ANS beneficiary links by plan, age and sex: private coverage enters as the declared municipal share'
+    decision: include
+    why: municipal covariate of the paper's models (private-plan coverage share; lib/covariates.py), built from
+      the declared fields ans_beneficiaries
   intake:ans_beneficiaries_municipal:
     decision: exclude
     why: 'municipal beneficiaries by segment: the declared private-coverage share already carries them'
