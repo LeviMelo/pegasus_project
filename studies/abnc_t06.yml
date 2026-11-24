@@ -28,23 +28,23 @@ contexts_considered:
     decision: include
     why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared fields persons_income_universe, persons_low_income
   sidra:XN:Acidentes:
-    decision: include
-    why: 'PNS helmet and seat-belt use by state: the exposure of the ecological helmet analysis (now read from a local extract, to be a declared field)'
+    decision: exclude
+    why: 'PNS 2013/2019 helmet and seat-belt use and road-injury prevalence, 27 states, two waves (revised 2026-11-24 at S1). t06''s question is where along the chain from injury to death a TBI death occurs and what moves it (the mechanism and age mix, distance from care); helmet use bears on how many motorcycle injuries happen, not on where their deaths occur. The first-cycle ecological correlation (27 states) answers an incidence question, registered as QUESTIONS.md Q-9 with the vehicle fleet.'
   sidra:XN:Doenças crônicas:
     decision: exclude
     why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of traumatic brain injury in this paper'
   sidra:XN:Idosos:
-    decision: include
-    why: 'PNS functional limitation of older adults by state: a context of fall TBI at 75+'
+    decision: exclude
+    why: 'PNS functional limitation of older adults, 27 states, 2013/2019 (revised 2026-11-24 at S1): it bears on how often older adults fall, an incidence question; where fall TBI deaths occur is measured on the deaths themselves (place of death, admission, linked death), and age enters each model directly.'
   sidra:XN:Uso de serviço de saúde:
-    decision: include
-    why: 'PNS urgent care at home and service use by state: the only available reflection of prehospital care, which the paper cannot otherwise measure'
+    decision: exclude
+    why: 'PNS service use and urgent care at home, 27 states, 2013/2019 (revised 2026-11-24 at S1): the first cycle took it as the only reflection of prehospital care. CNES registers mobile prehospital emergency units (SAMU, establishment type 42) by municipality and month, a direct measure at the grain of the distance analysis, read from CNES-ST (field requested from the platform); a state survey share of two waves adds nothing to it.'
   sidra:XN:Uso de álcool:
-    decision: include
-    why: 'PNS drink-driving and heavy drinking by state: a context of road and assault TBI'
+    decision: exclude
+    why: 'PNS drink-driving and heavy drinking, 27 states, 2013/2019 (revised 2026-11-24 at S1): a determinant of road and assault injury incidence, not of where the resulting deaths occur; the mechanism itself is read on every death and stay.'
   sidra:XN:Violência:
-    decision: include
-    why: 'PNS experienced violence by state: a context of assault TBI'
+    decision: exclude
+    why: 'PNS violence experienced, 27 states, 2013/2019 (revised 2026-11-24 at S1): assault incidence, not where assault TBI deaths occur; assault deaths are counted from the certificates themselves, with undetermined intent (Y10-Y34) tracked beside them as the recording rival.'
   sidra:AA:Segurança:
     decision: exclude
     why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of traumatic brain injury'
@@ -76,5 +76,64 @@ contexts_considered:
     decision: exclude
     why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): traumatic brain injury is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not measure'
   pns_helmet_motorcycle_driver_percent:
+    decision: exclude
+    why: 'helmet use by state, PNS 2019 (revised 2026-11-24 at S1): as sidra:XN:Acidentes, an incidence determinant off the paper''s question (QUESTIONS.md Q-9).'
+  # Decided 2026-11-24 at S1 (abnc2027_neuro papers/t06/protocol.md): the 19 candidates the scope left undecided,
+  # each from what it holds and the claims C1-C4 of the protocol.
+  sidra:RC:Óbitos:
     decision: include
-    why: state-grain covariate (27 units), read through load_field and used only in state-level analyses with its CI limits; PegaSUS's state-grain reading pending
+    why: 'Civil-registry deaths 2003-2024 by municipality of residence, nature of death (natural, non-natural, unknown), sex, age, month and place of occurrence (hospital, other health establishment, home, public road, other; table 2654). It is a second source for the paper''s central quantity: the share of violent deaths that occur outside a health establishment, by residence municipality and year, independent of SIM''s LOCOCOR. It also gives the SIM-to-registry ratio of non-natural deaths by municipality, the coverage check on the distance gradient (remote municipalities under-register deaths; line S0 review R5).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Consolidated private-plan outpatient events (TISS) by state and the beneficiary''s municipality: no diagnosis and no inpatient event. Every t06 quantity is a death or an admission; the private side is read from TISS hospital events by ICD-10 (intake:ans_tiss_hosp_cons, S06) and CIHA, so outpatient events give no numerator (line S0 review R2).'
+  intake:srag:
+    decision: include
+    why: 'SIVEP-Gripe SARI notifications by municipality and month, with ICU admission (field srag_icu), 2018-2026. In-hospital and 30-day TBI death rose in 2020-2021 (stays: 11.8% and 12.0% in-hospital against 10.6-11.1% in 2015-2019; rebuilt cohort, S1 exploration 2026-11-24). A period term cannot tell ICU strain from a change in who was admitted; SARI ICU admissions per SUS ICU bed by health region and month can (line S0 review R7). Used in one sensitivity of C4: in-hospital and 30-day death of 2020-2022 stays against the region-month SARI ICU load.'
+  field:brdwgd:gaussian:
+    decision: exclude
+    why: 'Monthly air temperature (mean, maximum, minimum) and precipitation by municipality, BR-DWGD. Weather moves how many falls and road crashes happen in a month (incidence), not whether the death occurs before the hospital, in it or after discharge. The paper''s time axis is the year (the mechanism-age mix), and no claim is seasonal.'
+  field:brdwgd:climate_monthly:
+    decision: exclude
+    why: 'The monthly sums behind the BR-DWGD climate fields (days held, maximum and minimum temperature sums, precipitation) by municipality and month: the base of field:brdwgd:gaussian, excluded for the same reason (incidence by season, no seasonal claim).'
+  field:brdwgd:precipitation_months:
+    decision: exclude
+    why: 'Months with precipitation data, the denominator of precipitation_mm: a bookkeeping field of the excluded climate family.'
+  field:brdwgd:temperature_months:
+    decision: exclude
+    why: 'Months with temperature data, the denominator of the BR-DWGD temperature fields: a bookkeeping field of the excluded climate family.'
+  field:inmet:climate:
+    decision: exclude
+    why: 'INMET station observations kept to validate the BR-DWGD fields (not by municipality of residence): station weather, excluded with the climate family.'
+  field:intake:ans_tiss_hospital_items:
+    decision: exclude
+    why: 'Item lines (TUSS code, quantity, value) of private-plan hospital events: what was billed inside a private admission. t06 counts private TBI admissions from the events with their ICD-10 (ans_tiss_hosp_cons); the items carry no place-of-death or survival information.'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'Item lines of private-plan outpatient events: outpatient and without diagnosis, as intake:ans_tiss_amb_cons.'
+  field:cnes:beds:
+    decision: include
+    why: 'SUS ICU beds (cnes_beds_icu_sus) and neurosurgery beds by municipality, December, 2008-2023 (2024 held at 2023). Severe TBI needs intensive care before and beyond any operation: ICU beds per 100,000 in the health region of residence enter the admitted-patient models (C4) and the distance analysis (C3) as general critical-care supply beside the neurosurgical one, and are the denominator of the SARI ICU load (intake:srag).'
+  field:cnes:radiotherapy_machines:
+    decision: exclude
+    why: 'Linear accelerators, cobalt and brachytherapy units: cancer treatment capacity, with no pathway to injury, its place of death or its survival.'
+  field:cnes:professionals:
+    decision: include
+    why: 'Professionals by municipality, December 2008-2023: neurosurgeons (cnes_neurosurgeons_professionals) and all physicians (cnes_physicians_professionals) per 100,000 by health region. C3 asks whether the rise of out-of-facility death with distance follows neurosurgical supply or care in general; the two supplies are the competing exposures, entered together. Nurses, orthopaedists and the other professions are read only as part of the all-physicians count.'
+  field:cnes:equipment:
+    decision: include
+    why: 'SUS CT scanners by municipality, December 2008-2023 (cnes_equipment_ct_sus): every TBI admission beyond concussion needs CT to be diagnosed and graded, and a non-accredited hospital without CT transfers. CT per 100,000 by health region enters C3 and C4 beside the accredited distance. MRI and the other equipment do not bear on acute TBI.'
+  field:cnes:facilities:
+    decision: include
+    why: 'SUS and non-SUS hospitals and other establishments by municipality, December 2008-2023. C3''s rival reading is distance from any hospital, not from neurosurgery: whether the residence municipality has a SUS hospital (cnes_facilities_hospital_sus) is that rival, entered beside the distance to an accredited unit. Primary-care units and specialised clinics are not read.'
+  field:cnes:teams:
+    decision: exclude
+    why: 'Family-health and primary-care teams by municipality: first-contact care. A TBI reaches care through emergency services, the street or the home, not through primary care; prehospital care is read from CNES mobile emergency units (type 42) and remoteness from hospitals and physicians. No t06 claim places a death before admission on primary care (line S0 review R3).'
+  field:sidra:pns_violence_by_stranger:
+    decision: exclude
+    why: 'Adults assaulted by a stranger, PNS 2013, 27 states (count): assault incidence, as sidra:XN:Violência; not where assault TBI deaths occur.'
+  field:sidra:pns_violence_by_stranger_percent:
+    decision: exclude
+    why: 'The same PNS 2013 estimate as a share of adults, 27 states: excluded with its count.'
+  field:records:SIM-DO:
+    decision: include
+    why: 'Deaths by residence and their ill-defined (R00-R99) and garbage-coded (GBD 2019) shares by municipality, 1996-2023. The out-of-facility share and the mechanism of TBI deaths rest on certificates; remote municipalities certify worse and more often without a physician. The ill-defined and garbage shares enter C1 and C3 as the certification-quality rival, beside the registry coverage ratio (sidra:RC:Óbitos).'
