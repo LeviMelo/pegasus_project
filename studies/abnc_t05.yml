@@ -138,8 +138,8 @@ contexts_considered:
       tables: no pathway to radiotherapy timing for malignant brain tumours'
   sidra:CD:Pessoas:
     decision: include
-    why: municipal covariate of the paper's models (urban share; lib/covariates.py), built from the declared fields
-      population_resident_census, population_urban
+    why: residence covariate of the delay model's sensitivity analysis (urban share; lib/covariates.py), built from
+      the declared fields population_resident_census, population_urban
   sidra:CD:População indígena:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -158,8 +158,8 @@ contexts_considered:
       tables: no pathway to radiotherapy timing for malignant brain tumours'
   sidra:CD:Rendimento:
     decision: include
-    why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared
-      fields persons_income_universe, persons_low_income
+    why: residence covariate of the delay model's sensitivity analysis (low-income share; lib/covariates.py), built
+      from the declared fields persons_income_universe, persons_low_income
   sidra:CD:Terras indígenas:
     decision: exclude
     why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
@@ -818,8 +818,8 @@ contexts_considered:
       the declared municipal GDP per capita and income fields'
   intake:ans:
     decision: include
-    why: municipal covariate of the paper's models (private-plan coverage share; lib/covariates.py), built from
-      the declared fields ans_beneficiaries
+    why: residence covariate of the delay model's sensitivity analysis (private-plan coverage share; lib/covariates.py),
+      built from the declared fields ans_beneficiaries
   intake:ans_beneficiaries_municipal:
     decision: exclude
     why: 'beneficiaries by segment and quarter: private coverage (patients leaving the SUS) enters as the municipal

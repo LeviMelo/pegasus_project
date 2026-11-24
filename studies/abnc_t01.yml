@@ -10,6 +10,875 @@ depth: standard               # survey, standard, deep or exhaustive: presets of
 # related: 3                   # related codes read beside the topic's own, strongest first (0: none)
 # persons: true                # the cohort scan over linked persons (deep and exhaustive)
 # download: 10                 # gigabytes the study may download (years held in the lake are free)
-contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
+contexts: [persons_low_income, population_urban, population_resident_census, ans_beneficiaries, cnes_neurosurgeons_professionals, cnes_equipment_ct_sus]   # decided 2026-11-23 (contexts_considered below)
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
+# every context candidate decided from what its group holds (abnc2027_neuro papers/t01/contexts_considered.yml)
+contexts_considered:
+  intake:ans:
+    decision: include
+    why: 'Used: private medical-hospital beneficiaries (field ans_beneficiaries, December, municipality, over POPSVS), the private_coverage covariate of the g-computation,
+      hierarchical, instrumental-variable and transition-context models and of the BYM2 context model of treatment rates (lib/covariates.py municipal(), residence
+      municipality of the treatment year; 2012-2020 take the 2021 stock, flagged). Privately insured patients are treated outside the SUS, so coverage conditions
+      who reaches the cohort.'
+  intake:ans_beneficiaries_municipal:
+    decision: exclude
+    why: 'Quarterly ANS beneficiaries by municipality, contract type, age and sex: the December medical-hospital stock (ans_beneficiaries) already carries private
+      coverage; the dental series and quarterly detail do not bear on aneurysm treatment.'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'ANS TISS private outpatient events by provider UF: columns hold CBO, consultation type and amounts but no procedure or imaging code, so private angiography
+      or CT use cannot be identified; the private hospital events are the relevant private-sector series.'
+  intake:ans_tiss_hosp_cons:
+    decision: exclude
+    why: Private-plan hospital events carry no procedure code, so private clipping and coiling cannot be told apart; the study's question is treatment in the SUS;
+      not used.
+  intake:bnafar:
+    decision: exclude
+    why: 'Medicine stock positions in BNAFAR/Horus by CNES and municipality (from 2025-03): pharmaceutical stock, outside the study years and not neurovascular supply.'
+  intake:census2010_domicilios:
+    decision: exclude
+    why: 'Census 2010 household microdata (housing, amenities): a 2010 baseline, superseded by the census 2022 tables read (income, urban share), which fall inside
+      the study period.'
+  intake:census2010_emigracao:
+    decision: exclude
+    why: 'Census 2010 international emigrants: a 2010 baseline, superseded by the census 2022 tables read (income, urban share), which fall inside the study period;
+      migration flow has no bearing on technique choice.'
+  intake:census2010_mortalidade:
+    decision: exclude
+    why: 'Census 2010 deaths of household members (self-reported): a 2010 baseline, superseded by the census 2022 tables read (income, urban share), which fall inside
+      the study period; deaths are read from SIM.'
+  intake:census2010_pessoas:
+    decision: exclude
+    why: 'Census 2010 person microdata (age, education, income, 245 columns): a 2010 baseline, superseded by the census 2022 tables read (income, urban share), which
+      fall inside the study period.'
+  intake:health_regions:
+    decision: include
+    why: 'Used: municipality to health region and macroregion crosswalk (space.municipalities(): health_region, region), the grain of the standardised treatment ratios
+      and funnel, the crossed residence-health-region random intercept, the outside-home-region treatment share and the coiling share by region.'
+  intake:inep:
+    decision: exclude
+    why: 'INEP school census enrolments: schooling of children and adolescents; the cohort is adults and education is carried by the census where needed.'
+  intake:pni_doses:
+    decision: exclude
+    why: 'National immunisation programme doses by residence: vaccination coverage, no bearing on aneurysm treatment.'
+  intake:s2id:
+    decision: exclude
+    why: 'S2iD disaster damage records by municipality (floods, droughts): no pathway to aneurysm technique choice. Pandemic pressure on hospitals is handled through
+      the year terms and a period sensitivity, not through disaster records.'
+  intake:sies:
+    decision: exclude
+    why: 'Vaccine supply information system (SIES) distributed and requested doses: immunisation logistics, no bearing.'
+  intake:siops_municipal:
+    decision: exclude
+    why: 'SIOPS municipal health spending (own resources, SUS transfers, personnel, tax base): municipal declarations; neurovascular treatment is delivered by a few
+      state and university referral hospitals and paid through SIH billing, reached across the health region, so the residence municipality''s budget does not describe
+      supply. Supply of the treating hospital is read from CNES (establishment, legal nature, volume) and access from distance to the nearest coiling- and clipping-capable
+      centre.'
+  intake:sisagua_control_basic:
+    decision: exclude
+    why: 'SISAGUA drinking-water control basic by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice or
+      30-day death.'
+  intake:sisagua_control_other:
+    decision: exclude
+    why: 'SISAGUA drinking-water control other by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice or
+      30-day death.'
+  intake:sisagua_control_outside_standard:
+    decision: exclude
+    why: 'SISAGUA drinking-water control outside standard by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment
+      choice or 30-day death.'
+  intake:sisagua_supply_population:
+    decision: exclude
+    why: 'SISAGUA drinking-water supply population by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice
+      or 30-day death.'
+  intake:sisagua_surveillance_basic:
+    decision: exclude
+    why: 'SISAGUA drinking-water surveillance basic by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice
+      or 30-day death.'
+  intake:sisagua_surveillance_cyanobacteria:
+    decision: exclude
+    why: 'SISAGUA drinking-water surveillance cyanobacteria by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment
+      choice or 30-day death.'
+  intake:sisagua_surveillance_other:
+    decision: exclude
+    why: 'SISAGUA drinking-water surveillance other by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice
+      or 30-day death.'
+  intake:sisagua_tanker_population:
+    decision: exclude
+    why: 'SISAGUA drinking-water tanker population by municipality: water quality and supply, an environmental exposure with no pathway to aneurysm treatment choice
+      or 30-day death.'
+  intake:sngpc_compounded:
+    decision: exclude
+    why: 'ANVISA controlled-substance compounded sales: pharmacy sales, no bearing on aneurysm treatment.'
+  intake:sngpc_industrialized:
+    decision: exclude
+    why: 'ANVISA controlled-substance industrialised sales by CID: pharmacy sales of controlled drugs, not neurovascular supply or incidence.'
+  intake:srag:
+    decision: exclude
+    why: 'SRAG severe respiratory illness notifications (influenza, COVID-19): hospital respiratory load that could touch 2020-2021 capacity, but the study handles
+      the pandemic through year terms and a period sensitivity; the notification system is not a measure of neurovascular capacity.'
+  intake:yellow_fever_epizootics:
+    decision: exclude
+    why: 'Yellow fever epizootics: vector-borne surveillance, no bearing.'
+  intake:yellow_fever_humans:
+    decision: exclude
+    why: 'Yellow fever human cases: infectious disease surveillance, no bearing.'
+  sidra:AA:Acidentes, violência e segurança:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Alimentação:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Aquisição de produtos alimentícios:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Asma:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Atividade física:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Características básicas:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Características da escola:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Comportamento alimentar:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Contexto familiar:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Contexto socioeconômico:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Equipamentos de ensino:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Escolaridade materna e paterna:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Higiene e saúde bucal:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Imagem corporal:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Informações gerais:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Saúde mental:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Saúde sexual e reprodutiva:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Segurança:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Situações em casa e na escola:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Tabaco na escola:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Uso de cigarro:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Uso de drogas:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Uso de serviço de saúde:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AA:Uso de álcool:
+    decision: exclude
+    why: 'School Health Survey (PeNSE): schoolchildren aged 13-17, UF and capitals; the cohort is adults with aneurysm.'
+  sidra:AC:Construção civil:
+    decision: exclude
+    why: 'Annual construction industry survey: no bearing.'
+  sidra:AX:Abate de animais:
+    decision: exclude
+    why: 'Quarterly animal slaughter survey: no bearing.'
+  sidra:B5:Atenção primária à saúde:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Características adicionais do mercado de trabalho:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Características do domicílio:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Características gerais da população:
+    decision: exclude
+    why: 'Continuous PNAD general population characteristics: UF-grain survey; age and sex come from the records and POPSVS.'
+  sidra:B5:Covid-19:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Deficiência:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Educação:
+    decision: exclude
+    why: 'Continuous PNAD education: UF grain; the census education table exists at municipal grain and is not read by this paper either.'
+  sidra:B5:Furto e roubo:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Mercado de trabalho:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Outras formas de trabalho:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Rendimento de todas as fontes:
+    decision: exclude
+    why: 'Continuous PNAD income of all sources: UF grain; the census low-income share is the municipal income covariate.'
+  sidra:B5:Segurança alimentar:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Tecnologia de informação e comunicação:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Teletrabalho:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:B5:Turismo:
+    decision: exclude
+    why: 'Continuous PNAD (labour, household, income, ICT, tourism): quarterly household survey at UF and metropolitan grain, not municipal; the census income share
+      is the area income covariate.'
+  sidra:C2:Boa saúde e bem-estar:
+    decision: exclude
+    why: 'SDG 3 indicators (UF): health outcomes and coverage at state grain; the paper reads the records themselves.'
+  sidra:C2:Cidades e comunidades sustentáveis:
+    decision: exclude
+    why: 'SDG 11 urban indicators (UF): derived indicators at state grain; urbanicity is the census urban share.'
+  sidra:C2:Educação:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Educação de qualidade:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Energia limpa e acessível:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Erradicação da pobreza:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Esgotamento sanitário:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Fome zero e agricultura sustentável:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Geral:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Igualdade de gênero:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Indústria, inovação e infraestrutura:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Mortalidade:
+    decision: exclude
+    why: 'SDG mortality indicators (UF): derived from SIM, which is read directly.'
+  sidra:C2:Nascidos vivos:
+    decision: exclude
+    why: 'SDG live-birth indicators (UF): derived from SINASC; no bearing on adult aneurysm treatment.'
+  sidra:C2:Parcerias e meios de implementação:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Paz, justiça e instituições eficazes:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Saúde:
+    decision: exclude
+    why: 'SDG health indicators (UF): outcome and coverage measures at state grain; the paper reads the records themselves.'
+  sidra:C2:Trabalho decente e crescimento econômico:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Vida na água:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Água potável e saneamento:
+    decision: exclude
+    why: 'Sustainable Development Goals indicators (IBGE; UF and national): derived indicators duplicating primary sources considered elsewhere; coarse grain and
+      no pathway to aneurysm treatment.'
+  sidra:C2:Óbitos:
+    decision: exclude
+    why: 'SDG death indicators (UF): derived from SIM, which is read directly.'
+  sidra:CA:Agroindústria rural:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  'sidra:CA:Características dos estabelecimentos agropecuários ':
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  'sidra:CA:Características dos produtores agropecuários ':
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Confederação da Agricultura e Pecuária do Brasil (CNA):
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Extração vegetal:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Floricultura:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Horticultura:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Lavouras permanentes:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Lavouras temporárias:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Movimentação financeira:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Pecuária:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Pessoal ocupado:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CA:Silvicultura:
+    decision: exclude
+    why: 'Agricultural census: farm structure and production by municipality; rural residence is carried by the census urban share, and farm outputs have no pathway
+      to aneurysm treatment.'
+  sidra:CD:Características do domicílio:
+    decision: exclude
+    why: 'Census 2022 household tables (sewer, water, waste, bathroom) are declared fields and the sewer share sits in covariates.municipal(), but no t01 model or
+      map reads it: deprivation is carried by the census low-income share and urban share, and sanitation has no pathway to aneurysm technique choice or 30-day death.'
+  sidra:CD:Cor ou raça:
+    decision: exclude
+    why: Census 2022 racial composition by municipality is not read by any t01 analysis; it is largely collinear with macroregion and the income tertile, both in
+      the models. Disparity by race would need the individual records of the SIH, not an area share.
+  sidra:CD:Domicílios:
+    decision: exclude
+    why: 'Census 2022 dwelling tables (type, tenure, occupancy): housing characteristics not read by the paper; deprivation enters as the low-income share.'
+  sidra:CD:Educação:
+    decision: exclude
+    why: Census 2022 literacy of persons 15 or more is in covariates.municipal() but no t01 analysis reads it; the income tertile already carries the socioeconomic
+      gradient (the two shares are strongly correlated across municipalities), and a third near-collinear share would not change the access reading.
+  sidra:CD:Etnia:
+    decision: exclude
+    why: 'Census 2022 ethnicity (indigenous groups): small population groups; no bearing on technique choice.'
+  sidra:CD:Faces de logradouros:
+    decision: exclude
+    why: 'Census 2022 street-face counts: urban fabric, no bearing.'
+  sidra:CD:Famílias:
+    decision: exclude
+    why: 'Census 2022 family composition: household structure, no pathway to technique choice.'
+  sidra:CD:Fecundidade:
+    decision: exclude
+    why: 'Census 2022 fertility: reproductive, no bearing on adult aneurysm treatment.'
+  sidra:CD:Geral:
+    decision: exclude
+    why: 'Census 2022 general tables (resident population, area): the urban share is taken from Pessoas; resident counts are replaced by the POPSVS denominators.'
+  sidra:CD:Indicadores demográficos:
+    decision: exclude
+    why: 'Census 2022 demographic indicators: derived from age structure, which enters through the individual age spline and age-sex standardisation.'
+  sidra:CD:Migração:
+    decision: exclude
+    why: 'Census 2022 migration (place of birth, residence five years ago): flows of residents; patient flows to hospitals are measured directly from residence and
+      treating-hospital municipalities.'
+  sidra:CD:Migração e deslocamento:
+    decision: exclude
+    why: 'Census 2022 commuting and migration: patient flows are measured directly from residence and treating-hospital municipalities.'
+  sidra:CD:Mortalidade:
+    decision: exclude
+    why: 'Census 2022 household deaths in the reference year: self-reported, superseded by SIM.'
+  sidra:CD:Nupcialidade:
+    decision: exclude
+    why: 'Census 2022 marital union: no bearing.'
+  sidra:CD:Nupcialidade e fecundidade:
+    decision: exclude
+    why: 'Census 2022 union and fertility: no bearing.'
+  sidra:CD:Pessoas:
+    decision: include
+    why: 'Used: census 2022 urban share (population_urban over population_resident_census, municipality), a covariate of the outcome, hierarchical and instrumental-variable
+      models and of the BYM2 context model; the age tables are not used (age and sex enter through the individual records and the standardisation).'
+  sidra:CD:População indígena:
+    decision: exclude
+    why: 'Census 2022 indigenous population: small shares concentrated in the North; remoteness enters through distance to the nearest capable centre.'
+  sidra:CD:População quilombola:
+    decision: exclude
+    why: 'Census 2022 quilombola population: small shares; no pathway to technique choice.'
+  sidra:CD:Registro civil:
+    decision: exclude
+    why: 'Census 2022 civil registration of births: no bearing.'
+  sidra:CD:Religião:
+    decision: exclude
+    why: 'Census 2022 religion: no pathway to technique choice.'
+  sidra:CD:Rendimento:
+    decision: include
+    why: 'Used: census 2022 low-income share (persons_low_income over persons_income_universe, municipality), the tertile income_t (richer, mid, poorer) of the outcome,
+      hierarchical and instrumental-variable models, and a covariate of the BYM2 context model; a static trait, not a yearly series.'
+  sidra:CD:Terras indígenas:
+    decision: exclude
+    why: 'Census 2022 indigenous lands: tiny population shares in a few municipalities; remoteness enters through distance to the nearest capable centre and travel
+      to the treating hospital.'
+  sidra:CD:Território:
+    decision: exclude
+    why: 'Census 2022 territorial tables: area and density; distance is measured from residence postcode to hospital coordinates, not from area.'
+  sidra:CD:Territórios quilombolas:
+    decision: exclude
+    why: 'Census 2022 quilombola territories: small population shares in a few municipalities; no pathway to technique choice.'
+  sidra:CL:Empresas e outras organizações:
+    decision: exclude
+    why: 'Central business register (firms and local units): economic structure by municipality; area income is carried by the census low-income share.'
+  sidra:CL:Unidades locais:
+    decision: exclude
+    why: 'Central business register (firms and local units): economic structure by municipality; area income is carried by the census low-income share.'
+  sidra:CQ:Couro:
+    decision: exclude
+    why: 'Quarterly leather survey: no bearing.'
+  sidra:D5:Geral:
+    decision: exclude
+    why: 'Urbanised areas of Brazil: the built-up footprint of cities; the census 2022 urban share is the urbanicity covariate and distance is measured from residence
+      to hospital, not from area.'
+  sidra:D9:Geral:
+    decision: exclude
+    why: 'Micro-entrepreneur register statistics: economic activity, no bearing on aneurysm treatment.'
+  sidra:DD:População desocupada:
+    decision: exclude
+    why: 'Continuous PNAD labour and income series: UF and metropolitan grain; not joinable at municipal level, and income is carried by the census share.'
+  sidra:DD:Rendimento:
+    decision: exclude
+    why: 'Continuous PNAD labour and income series: UF and metropolitan grain; not joinable at municipal level, and income is carried by the census share.'
+  sidra:DD:Trabalho:
+    decision: exclude
+    why: 'Continuous PNAD labour and income series: UF and metropolitan grain; not joinable at municipal level, and income is carried by the census share.'
+  sidra:DE:Unidades locais:
+    decision: exclude
+    why: 'Firm demography: openings and closures of businesses; no bearing on aneurysm treatment.'
+  sidra:DR:Meio ambiente:
+    decision: exclude
+    why: 'Land environmental economic accounts: environmental, no bearing.'
+  sidra:EL:Geral:
+    decision: exclude
+    why: 'Pollinator contribution to crops: agricultural, no bearing.'
+  sidra:EO:Biodiversidade:
+    decision: exclude
+    why: 'Biodiversity assessment: environmental, no bearing.'
+  sidra:ES:Estoques agropecuários:
+    decision: exclude
+    why: 'Agricultural stocks survey: no bearing.'
+  sidra:FP:Entidades sem fins lucrativos:
+    decision: exclude
+    why: 'Private foundations and non-profit associations: organisation counts, no bearing on aneurysm treatment.'
+  sidra:FP:Fundações e Associações sem fins lucrativos:
+    decision: exclude
+    why: 'Private foundations and non-profit associations: organisation counts, no bearing on aneurysm treatment.'
+  sidra:IA:Índices de preços:
+    decision: exclude
+    why: 'Extended consumer price index (IPCA): prices; the cost deflator is applied in the money section and is not a context field.'
+  sidra:IO:Contas Nacionais e Regionais:
+    decision: exclude
+    why: Municipal GDP per capita (field gdp) is in covariates.municipal() but no t01 analysis reads it; municipal GDP reflects industry and public-sector activity
+      rather than household means, and the census low-income share is the income covariate. The treating hospital is usually a regional hub, so the residence municipality's
+      GDP does not describe its financing.
+  sidra:IQ:Índices de preços:
+    decision: exclude
+    why: 'IPCA-15 price index: no bearing.'
+  sidra:IU:Acesso a esgotamento sanitário:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Acesso a serviço de coleta de lixo doméstico:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Acesso a serviços de telefonia:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Acesso a sistema de abastecimento de água:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Acesso à internet:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Adequação de moradia:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Agenda 21 Local:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Articulações interinstitucionais:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Balança comercial:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Coeficiente de mortalidade por homicídios ou por acidentes de transporte:
+    decision: exclude
+    why: 'IBGE indicator of death by homicide or traffic accident (UF): injury mortality, not aneurysm; deaths are read from SIM.'
+  sidra:IU:Comitês de Bacias Hidrográficas:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Concentração de poluentes no ar em áreas urbanas:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Desflorestamento na Amazônia Legal:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Desmatamento nos Biomas:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Doenças relacionadas ao saneamento ambiental inadequado:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Esperança de vida ao nascer:
+    decision: exclude
+    why: 'IBGE life expectancy at birth (UF): a state-level outcome measure, not a determinant of technique choice.'
+  sidra:IU:Espécies invasoras:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Existência de conselhos municipais:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Frequência escolar:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Incidência de AIDS:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Meio ambiente:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Mulheres em trabalhos formais:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Patrimônio cultural:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Produto Interno Bruto per capita:
+    decision: exclude
+    why: 'IBGE sustainable-development indicator of GDP per capita (UF): derived from the municipal GDP table, itself not read by t01; state grain.'
+  sidra:IU:Queimadas e incêndios florestais:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Razão de dependência:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Rendimento domiciliar per capita:
+    decision: exclude
+    why: 'IBGE indicator of per-capita household income (UF, PNAD): state grain; the census low-income share is read at municipal grain.'
+  sidra:IU:Rendimento médio mensal:
+    decision: exclude
+    why: 'IBGE indicator of mean monthly income (UF, PNAD): state grain; the census low-income share is read at municipal grain.'
+  sidra:IU:Taxa de alfabetização:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Taxa de fecundidade:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Taxa de mortalidade infantil:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Terras em uso agrossilvipastoril:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Uso de agrotóxicos:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Uso de fertilizantes:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Áreas protegidas:
+    decision: exclude
+    why: 'Sustainable Development Indicators (IBGE; national, UF and region series): derived indicators duplicating census, vital-statistics or household-survey sources
+      considered elsewhere; no municipal grain and no pathway to aneurysm treatment.'
+  sidra:IU:Índice de Gini da distribuição do rendimento:
+    decision: exclude
+    why: 'IBGE Gini index of income (UF, PNAD): inequality at state grain; not joinable at municipal level.'
+  sidra:LA:Produção vegetal:
+    decision: exclude
+    why: 'Systematic survey of agricultural production: no bearing.'
+  sidra:LT:Leite:
+    decision: exclude
+    why: 'Quarterly milk survey: no bearing.'
+  sidra:MC:Comércio:
+    decision: exclude
+    why: 'Monthly commerce survey: no bearing.'
+  sidra:OF:Aquisição:
+    decision: exclude
+    why: 'Household budget survey (POF): expenditure and income at UF grain, one wave in the period; not a municipal covariate.'
+  sidra:OF:Despesa:
+    decision: exclude
+    why: 'Household budget survey (POF): expenditure and income at UF grain, one wave in the period; not a municipal covariate.'
+  sidra:OF:Famílias:
+    decision: exclude
+    why: 'Household budget survey (POF): expenditure and income at UF grain, one wave in the period; not a municipal covariate.'
+  sidra:OF:Rendimento:
+    decision: exclude
+    why: 'Household budget survey (POF): expenditure and income at UF grain, one wave in the period; not a municipal covariate.'
+  sidra:PA:Lavouras permanentes:
+    decision: exclude
+    why: 'Municipal crop production: agricultural, no bearing.'
+  sidra:PA:Lavouras temporárias:
+    decision: exclude
+    why: 'Municipal crop production: agricultural, no bearing.'
+  sidra:PA:Lavouras temporárias e permanentes:
+    decision: exclude
+    why: 'Municipal crop production: agricultural, no bearing.'
+  sidra:PB:Comércio:
+    decision: exclude
+    why: 'Annual commerce survey: no bearing.'
+  sidra:PC:Índices de preços:
+    decision: exclude
+    why: 'National consumer price index (INPC) by metropolitan area: prices; costs are deflated in the money section with its own index, not as a context field.'
+  sidra:PD:Características da pessoa:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Domicílios:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Famílias:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Fecundidade:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Instrução e Educação:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Internet:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Migração e deslocamento:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Responsável pelo domicílio/família:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PD:Trabalho e rendimento:
+    decision: exclude
+    why: 'Annual PNAD (to 2015): household survey at UF grain, discontinued; replaced by the census 2022 tables for area traits.'
+  sidra:PK:Indústria:
+    decision: exclude
+    why: 'Annual industry survey (firms): no bearing.'
+  sidra:PM:Geral:
+    decision: exclude
+    why: 'Municipal basic information survey (MUNIC): municipal administrative structure and policies; health-service supply is read from CNES, not from the municipal
+      questionnaire.'
+  sidra:PM:Informações básicas municipais:
+    decision: exclude
+    why: 'Municipal basic information survey (MUNIC): municipal administrative structure and policies; health-service supply is read from CNES, not from the municipal
+      questionnaire.'
+  sidra:PO:Ovos de galinha:
+    decision: exclude
+    why: 'Egg production survey: no bearing.'
+  sidra:PP:Pecuária:
+    decision: exclude
+    why: 'Municipal livestock production: agricultural, no bearing.'
+  sidra:PY:Serviços empresariais não-financeiros:
+    decision: exclude
+    why: 'Annual non-financial business services survey: no bearing.'
+  sidra:PZ:Indústria:
+    decision: exclude
+    why: 'Monthly industrial production: no bearing.'
+  sidra:RC:Casamentos:
+    decision: exclude
+    why: 'Civil registry statistics (marriages, divorces, births, deaths) by municipality of registry: vital registry, with deaths and births read from SIM and SINASC;
+      no bearing on technique choice.'
+  sidra:RC:Divórcios:
+    decision: exclude
+    why: 'Civil registry statistics (marriages, divorces, births, deaths) by municipality of registry: vital registry, with deaths and births read from SIM and SINASC;
+      no bearing on technique choice.'
+  sidra:RC:Nascidos vivos:
+    decision: exclude
+    why: 'Civil registry statistics (marriages, divorces, births, deaths) by municipality of registry: vital registry, with deaths and births read from SIM and SINASC;
+      no bearing on technique choice.'
+  sidra:RC:Separações:
+    decision: exclude
+    why: 'Civil registry statistics (marriages, divorces, births, deaths) by municipality of registry: vital registry, with deaths and births read from SIM and SINASC;
+      no bearing on technique choice.'
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: 'Civil registry deaths by place of registry: SIM is the death source (underlying cause and linkage to treatment stays); the registry table adds no cause.'
+  sidra:RC:Óbitos fetais:
+    decision: exclude
+    why: 'Civil registry statistics (marriages, divorces, births, deaths) by municipality of registry: vital registry, with deaths and births read from SIM and SINASC;
+      no bearing on technique choice.'
+  sidra:SB:Abastecimento de água:
+    decision: exclude
+    why: 'National Basic Sanitation Survey (water supply, sewerage services): service provision; the census income and urban shares carry deprivation, and sanitation
+      has no pathway to aneurysm treatment.'
+  sidra:SB:Esgotamento sanitário:
+    decision: exclude
+    why: 'National Basic Sanitation Survey (water supply, sewerage services): service provision; the census income and urban shares carry deprivation, and sanitation
+      has no pathway to aneurysm treatment.'
+  sidra:SC:Serviços:
+    decision: exclude
+    why: 'Monthly services survey: no bearing.'
+  sidra:SH:Hospedagem:
+    decision: exclude
+    why: 'Accommodation survey: tourism and lodging, no bearing.'
+  sidra:SI:Construção civil:
+    decision: exclude
+    why: 'National construction cost index (SINAPI): no bearing.'
+  sidra:VS:Extração vegetal:
+    decision: exclude
+    why: 'Plant extraction and forestry production: agricultural, no bearing.'
+  sidra:VS:Silvicultura:
+    decision: exclude
+    why: 'Plant extraction and forestry production: agricultural, no bearing.'
+  sidra:XE:Geral:
+    decision: exclude
+    why: 'IBGE population projections (UF, to 2070): forward-looking and by state; the study measures 2012-2024 treatment, so the projection adds nothing to the denominators,
+      which are POPSVS by municipality.'
+  sidra:XF:Geral:
+    decision: exclude
+    why: 'IBGE population estimates: the denominators of the rates and standardisation are the DATASUS POPSVS series by municipality, age and sex read through pegasus_data
+      load_population (also behind the private-coverage ratio); the IBGE estimate table is the same base and is not read separately.'
+  sidra:XN:Acidentes:
+    decision: exclude
+    why: 'PNS road-traffic and household accident module (helmet, seat belt) by UF: injury risk behaviour, no bearing on aneurysm treatment.'
+  sidra:XN:Alimentação:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Antropometria:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Atenção primária à saúde:
+    decision: exclude
+    why: 'PNS primary-care registration and coverage by UF: primary care does not determine access to neurovascular centres, and the table is at state grain.'
+  sidra:XN:Atividade física:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Características do domicílio e serviços domiciliares de saúde:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Características do trabalho e apoio social:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Cobertura de plano de saúde:
+    decision: exclude
+    why: 'PNS private-plan coverage by UF (sample survey, 2013, 2019): the study already reads the municipal December stock of beneficiaries from ANS (ans_beneficiaries),
+      annual and municipal; the PNS adds a survey estimate at a coarser grain.'
+  sidra:XN:Deficiência:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Doenças crônicas:
+    decision: exclude
+    why: 'PNS hypertension and other chronic-disease prevalence by UF (waves 2013 and 2019): hypertension is an aneurysm rupture risk factor and would bear on incidence,
+      but the table is at UF grain with two time points, cannot enter municipal or hospital models, and the paper reads treatment rates as incidence mixed with access
+      (stated as a limitation, not read as unmet need).'
+  sidra:XN:Doenças transmissíveis:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Higiene e saúde bucal:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Idosos:
+    decision: exclude
+    why: 'PNS older-adult module by UF (functional limitation, care): descriptive of ageing, no municipal or hospital grain; age enters through the individual age
+      spline.'
+  sidra:XN:Percepção do estado de saúde:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Saúde da mulher:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Tabagismo:
+    decision: exclude
+    why: 'PNS smoking prevalence by UF (2013, 2019): a risk factor for aneurysm formation and rupture, but state grain and two waves; it cannot be joined at municipality
+      or hospital level and does not affect the choice between clipping and coiling.'
+  sidra:XN:Uso de serviço de saúde:
+    decision: exclude
+    why: 'PNS use of health services by UF (consultations, hospital stays): survey measures of access to care at state grain; access to aneurysm treatment is read
+      from the records themselves (distance to coiling- and clipping-capable centres, outside-health-region treatment, hospital volume).'
+  sidra:XN:Uso de álcool:
+    decision: exclude
+    why: 'PNS alcohol use by UF: a weak rupture risk factor at state grain with two waves; not joinable to the municipal or hospital grain.'
+  sidra:XN:Vida sexual:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XN:Violência:
+    decision: exclude
+    why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal
+      or hospital grain.'
+  sidra:XY:Indústria:
+    decision: exclude
+    why: 'Monthly industrial employment and wages: no bearing.'
