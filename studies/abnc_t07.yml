@@ -10,7 +10,7 @@ depth: standard               # survey, standard, deep or exhaustive: presets of
 # related: 3                   # related codes read beside the topic's own, strongest first (0: none)
 # persons: true                # the cohort scan over linked persons (deep and exhaustive)
 # download: 10                 # gigabytes the study may download (years held in the lake are free)
-contexts: [households_sewer_network, persons_15_plus_literate, persons_low_income, gdp, population_urban, population_resident_census, ans_beneficiaries, ans_tiss_hospital_events_by_cid, cnes_neurosurgeons_professionals, cnes_beds_neurosurgery_sus, cnes_beds_icu_sus, cnes_equipment_ct_sus, sim_deaths_ill_defined, sim_deaths_garbage_codes, sim_deaths_residence]   # decided 2026-11-23 (contexts_considered below)
+contexts: [households_sewer_network, persons_15_plus_literate, persons_low_income, gdp, population_urban, population_resident_census, ans_beneficiaries, ans_tiss_hospital_events_by_cid, cnes_neurosurgeons_professionals, cnes_beds_neurosurgery_sus, cnes_beds_icu_sus, cnes_equipment_ct_sus, sim_deaths_ill_defined, sim_deaths_garbage_codes, sim_deaths_residence, cnes_teams_esf, cnes_teams_eab_eap]   # decided 2026-11-23 (contexts_considered below)
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
 # every context candidate decided from what its group holds (abnc2027_neuro papers/t07/contexts_considered.yml)
@@ -105,16 +105,31 @@ contexts_considered:
     why: 'ANS TISS hospital items by procedure: t07 uses private-plan hospital events with the study diagnoses (ans_tiss_hospital_events_by_cid) to bound private substitution; paid items and their values are not part of its question.'
   field:inmet:climate:
     decision: exclude
-    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, but the study does not model month, and climate does not enter access to surgery or its outcomes at the annual regional grain.'
+    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, and month enters only the national interrupted series as harmonic season terms; climate does not enter access to surgery or its outcomes at the annual regional grain.'
   field:brdwgd:gaussian:
     decision: exclude
-    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, but the study does not model month, and climate does not enter access to surgery or its outcomes at the annual regional grain.'
+    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, and month enters only the national interrupted series as harmonic season terms; climate does not enter access to surgery or its outcomes at the annual regional grain.'
   field:brdwgd:climate_monthly:
     decision: exclude
-    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, but the study does not model month, and climate does not enter access to surgery or its outcomes at the annual regional grain.'
+    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, and month enters only the national interrupted series as harmonic season terms; climate does not enter access to surgery or its outcomes at the annual regional grain.'
   field:brdwgd:precipitation_months:
     decision: exclude
-    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, but the study does not model month, and climate does not enter access to surgery or its outcomes at the annual regional grain.'
+    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, and month enters only the national interrupted series as harmonic season terms; climate does not enter access to surgery or its outcomes at the annual regional grain.'
   field:brdwgd:temperature_months:
     decision: exclude
-    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, but the study does not model month, and climate does not enter access to surgery or its outcomes at the annual regional grain.'
+    why: 'Climate by municipality: t07''s outcomes are annual operation rates by health region and 30-day death and one-year reoperation of operated persons; falls in older adults may vary by season, and month enters only the national interrupted series as harmonic season terms; climate does not enter access to surgery or its outcomes at the annual regional grain.'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'Outpatient TISS items carry TUSS procedure codes without a diagnosis. Chronic subdural haematoma evacuation (SIGTAP 0403010314) is an inpatient operation, and t07 reads the private side from TISS hospital events by ICD-10 (S06.5, I62.0; field ans_tiss_hospital_events_by_cid, included). An outpatient item cannot place a subdural patient, so it adds no private numerator to the operation rate (line S0 review R2).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Consolidated outpatient TISS events by the beneficiary''s municipality: they are outpatient and hold no diagnosis. t07''s rate is of inpatient operations, and its private-side check uses TISS hospital events by ICD-10 with CIHA, so the outpatient setting gives the rate no numerator (line S0 review R2).'
+  field:cnes:teams:
+    decision: include
+    why: 't07 places the North and Northeast deficit before admission: less disease, less presentation or less diagnosis. Primary care team coverage (ESF, eAB/eAP, by municipality and year) measures the first contact through which an older adult with a fall or a slow neurological decline reaches imaging. It enters the health-region operation-ratio model beside CT scanners and certification quality, as a rival to the access reading (line S0 review R3).'
+  sidra:RC:Óbitos:
+    decision: include
+    why: 't07''s need proxy counts SIM deaths with underlying cause I62.0 by health region, and they are lowest in the North and Northeast. Under-registration of deaths in parts of those regions would produce the same pattern. Civil-registry deaths by municipality of residence, sex and age (table 2654, 2003-2024) give the SIM-to-registry ratio at 60+ by macroregion and state, the coverage check on that gradient (line S0 review R5).'
+  intake:srag:
+    decision: exclude
+    why: 'SIVEP-Gripe ICU notifications measure the pandemic''s strain on ICU capacity. t07''s pandemic claim is only that monthly operations fell in March 2020-December 2021 (a level term in the interrupted series) and that part of the 2023-2024 rise is recovery. No claim attributes the dip to ICU strain rather than to deferred presentation or surgery, so the period term carries what is claimed (line S0 review R7).'
