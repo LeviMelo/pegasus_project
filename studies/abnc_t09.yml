@@ -72,3 +72,64 @@ contexts_considered:
   intake:siops_municipal:
     decision: exclude
     why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): stereotactic radiosurgery is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not measure'
+  # decided 2026-11-24 at t09's S3 gate (abnc2027_neuro papers/t09/decisions.md D-4), from what each group holds
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: 'Registro Civil death counts by month, sex, age, place of occurrence and residence (tables 2654, 2681, 2682...): they carry no cause of death; the need denominator is SIM cancer deaths by underlying cause (records:SIM-DO, included)'
+  sidra:IU:Coeficiente de mortalidade por homicídios ou por acidentes de transporte:
+    decision: exclude
+    why: 'IDS homicide and transport mortality by state, 1992-2012 (table 899): external causes, no pathway to radiotherapy of the brain, and the series ends before the study'
+  sidra:C2:Boa saúde e bem-estar:
+    decision: exclude
+    why: 'SDG 3 indicators by state (3.4.1 NCD mortality, 3.6.1 road deaths, maternal, under-5 and neonatal mortality, poisoning, cooking fuel): state grain only, and the one bearing on cancer (3.4.1) pools cardiovascular, diabetes and respiratory deaths; cancer need is read from SIM by underlying cause at municipal grain'
+  sidra:C2:Paz, justiça e instituições eficazes:
+    decision: exclude
+    why: 'SDG 16 indicators by state (homicide, violence, registration of births, institutions): no pathway to stereotactic radiotherapy'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'ANS TISS consolidated private outpatient events by provider state: no procedure code and no residence, so private radiosurgery cannot be identified; private coverage enters as the ANS beneficiary share (included)'
+  intake:srag:
+    decision: exclude
+    why: 'SIVEP-Gripe severe respiratory illness (cases, COVID-19, ICU, deaths): the COVID-19 period enters the series model as a calendar term (March 2020-December 2021); municipal SRAG burden has no pathway to the choice of radiotherapy technique'
+  field:brdwgd:gaussian:
+    decision: exclude
+    why: 'gridded temperature and precipitation: no pathway to stereotactic radiotherapy use'
+  field:brdwgd:climate_monthly:
+    decision: exclude
+    why: 'gridded monthly climate sums: no pathway to stereotactic radiotherapy use'
+  field:brdwgd:precipitation_months:
+    decision: exclude
+    why: 'monthly precipitation: no pathway to stereotactic radiotherapy use; river travel enters through the IBGE coach and boat network'
+  field:brdwgd:temperature_months:
+    decision: exclude
+    why: 'monthly temperature: no pathway to stereotactic radiotherapy use'
+  field:inmet:climate:
+    decision: exclude
+    why: 'INMET station observations: no pathway to stereotactic radiotherapy use'
+  field:intake:ans_tiss_hospital_items:
+    decision: exclude
+    why: 'private-plan hospital item lines (TUSS): radiosurgery is outpatient; and without residence or person they cannot give private courses by place'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'private-plan outpatient item lines (TUSS code, quantity, value) by event, 2015-2025: they would count private radiosurgery items, but with no residence municipality or person they cannot be set against the SUS rates by place; the paper is about the SUS (Limitations)'
+  field:cnes:beds:
+    decision: exclude
+    why: 'hospital beds (ICU, neurology, neurosurgery): stereotactic radiotherapy is an outpatient course'
+  field:cnes:radiotherapy_machines:
+    decision: include
+    why: 'used: linear accelerators registered per municipality (cnes_linear_accelerators), the machine supply of radiotherapy municipalities with and without stereotactic billing (analysis/t09_paper.py section s3, linacs)'
+  field:cnes:professionals:
+    decision: exclude
+    why: 'professional counts (radiation oncologists, neurosurgeons and others): the stereotactic supply is read from the billing centres and their linear accelerators; staff counts by municipality do not say whether a team delivers stereotactic treatment'
+  field:cnes:equipment:
+    decision: include
+    why: 'used: SUS MRI scanners per 100,000 in the residence health region (cnes_equipment_mri_sus), a rival to the distance gradient (diagnosis and planning need MRI) (analysis/t09_paper.py section s3, mri)'
+  field:cnes:facilities:
+    decision: exclude
+    why: 'counts of SUS and non-SUS establishments: not a measure of radiotherapy supply, which is read from the radiotherapy centres themselves'
+  field:cnes:teams:
+    decision: exclude
+    why: 'primary-care and family-health teams: no pathway to the choice of radiotherapy technique'
+  field:records:SIM-DO:
+    decision: include
+    why: 'used: SIM deaths with underlying cause C00-C97 (and lung, breast, melanoma) by residence, 2019-2024, the need denominator (analysis/t09_paper.py section need)'
