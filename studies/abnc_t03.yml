@@ -117,3 +117,18 @@ contexts_considered:
   field:brdwgd:temperature_months:
     decision: exclude
     why: 'Climate by municipality: t03''s outcomes are where craniectomy is done (accredited or not), 30- and 90-day death and cranioplasty by person; trauma and stroke may vary by season, but the study does not model month, and climate does not enter where or how a craniectomy is done.'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'Outpatient TISS items carry TUSS procedure codes without a diagnosis. Decompressive craniectomy (SIGTAP 0403010020) and cranioplasty are inpatient operations, so an outpatient item places neither a private craniectomy nor a private reconstruction; private coverage enters as ans_beneficiaries, and non-SUS reconstruction is counted from CIHA (line S0 review R2).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Consolidated outpatient TISS events by the beneficiary''s municipality hold no diagnosis and no inpatient procedure; t03''s outcomes (where the operation is done, death, reconstruction in a later stay) are inpatient, so the outpatient setting gives no numerator (line S0 review R2).'
+  field:cnes:teams:
+    decision: exclude
+    why: 'Primary-care team coverage (ESF, eAB/eAP) measures first contact. Craniectomy follows an emergency (TBI, stroke, haemorrhage) that enters through emergency services, not primary care; the return for cranial reconstruction is a referral from the operating neurosurgical service, which the reconstruction model carries through the operating hospital''s network, distance to the nearest accredited unit and the CNES neurosurgical supply fields. No t03 claim places a deficit before admission (line S0 review R3).'
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: 'Civil-registry deaths give a SIM coverage ratio for population death counts. t03 counts no population deaths as a need proxy: its deaths are of operated persons, in the stay (recorded on the AIH, no certificate needed) or through the certificate link, and the link''s regional ascertainment is measured directly (in-hospital deaths found by the link, by region; link-only deaths and their chance share), a finer check than a registry ratio (line S0 review R5).'
+  intake:srag:
+    decision: exclude
+    why: 'SIVEP-Gripe ICU notifications measure pandemic strain on ICU capacity. t03 makes no claim that attributes a 2020-2021 change in craniectomy volume, accreditation share or mortality to ICU strain; the trend analyses carry the period through the year terms (line S0 review R7).'
