@@ -22,9 +22,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: include
     why: 'Used: private-plan hospital events with the study diagnoses (fields ans_tiss_hospital_events and ans_tiss_hospital_events_by_cid), the 1,824 to 4,129 series that argues against a move of patients into the SUS.'
-  intake:health_regions:
-    decision: include
-    why: 'Used: municipality to health region and macroregion crosswalk (CODIGO_REGIAO_SAUDE, CODIGO_MACRORREGIAO_SAUDE), the grain of the standardised ratios, funnel plot and random intercepts.'
   intake:siops_municipal:
     decision: exclude
     why: 'Municipal health spending and tax-base indicators (SIOPS, municipality grain): public financing, not neurosurgical supply; the paper measures supply directly from CNES (neurosurgeons, neurosurgery and ICU beds, CT scanners) and wealth from GDP and census income, so no SIOPS field is read.'

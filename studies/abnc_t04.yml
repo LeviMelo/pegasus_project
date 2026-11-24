@@ -22,9 +22,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: exclude
     why: 'ANS TISS private hospital events: CID filled by group only, too sparse for Q05 and hydrocephalus in children, so private closures and shunts cannot be counted; private coverage enters as ans_beneficiaries.'
-  intake:health_regions:
-    decision: include
-    why: 'Used: municipality to health region and macroregion crosswalk (CODIGO_REGIAO_SAUDE, CODIGO_MACRORREGIAO_SAUDE), the grain of the prevalence-at-birth map, the health-region variation of admission ratios, the health-region random intercept of the shunt model, the treated-outside-home-region flag and the per-100,000 supply denominators.'
   intake:siops_municipal:
     decision: exclude
     why: 'SIOPS municipal health spending (own resources, transfers, personnel, tax base): municipal declarations that do not fund paediatric neurosurgery, which is delivered by a few state and university referral hospitals reached through the health region; supply is read from CNES and access from distance to the nearest accredited unit and the outside-region flag.'

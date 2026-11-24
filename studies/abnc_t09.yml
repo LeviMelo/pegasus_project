@@ -69,9 +69,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: exclude
     why: 'private hospital events (TISS): not used for stereotactic radiosurgery'
-  intake:health_regions:
-    decision: exclude
-    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as a context field
   intake:siops_municipal:
     decision: exclude
     why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): stereotactic radiosurgery is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not measure'

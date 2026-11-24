@@ -72,9 +72,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: include
     why: private hospital TBI events (CID S06) by state (section tiss)
-  intake:health_regions:
-    decision: exclude
-    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as a context field
   intake:siops_municipal:
     decision: exclude
     why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): traumatic brain injury is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not measure'

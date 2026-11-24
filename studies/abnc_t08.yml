@@ -69,9 +69,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: include
     why: 'private hospital events with sex, age band, residence and length of stay: the private side of spine surgery (sections private, private2, stay)'
-  intake:health_regions:
-    decision: exclude
-    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as a context field
   pns_chronic_spine_problem_percent:
     decision: include
     why: state-grain covariate (27 units), read through load_field and used only in state-level analyses with its CI limits; PegaSUS's state-grain reading pending

@@ -72,9 +72,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: exclude
     why: private-plan hospital events carry no person identifier and no radiotherapy course, so they cannot join the SUS radiotherapy cohort; patients who leave for private radiotherapy are represented by the private-plan coverage share, which is included
-  intake:health_regions:
-    decision: exclude
-    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as a context field
   intake:siops_municipal:
     decision: exclude
     why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): radiotherapy is a federal APAC payment to regional CACON/UNACON centres, so the residence''s spending does not buy the course whose start is measured; the centre (cluster and random effect) carries the provider side'
@@ -147,3 +144,18 @@ contexts_considered:
   cnes_accreditation_neuro_high_complexity:
     decision: include
     why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): any high-complexity neurosurgical accreditation at the treating centre''s municipality (section supply_neuro, sensitivity)'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+  field:cnes:teams:
+    decision: exclude
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+  intake:srag:
+    decision: exclude
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."

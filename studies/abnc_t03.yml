@@ -21,9 +21,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: exclude
     why: TISS hospital events carry no procedure code, so private craniectomies stay unseen; private coverage already enters as ans_beneficiaries; not used.
-  intake:health_regions:
-    decision: include
-    why: 'Used: municipality to health region and macroregion crosswalk, the grain of the regional contrasts, the health-region random intercept, the outside-home-region flag and the per-100,000 supply denominators.'
   intake:siops_municipal:
     decision: exclude
     why: 'Municipal health spending and tax-base indicators (SIOPS, municipality grain): public financing, not neurosurgical supply; the paper measures supply directly from CNES (neurosurgeons, neurosurgery and ICU beds, CT scanners) and wealth from GDP and census income, so no SIOPS field is read.'

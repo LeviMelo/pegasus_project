@@ -21,9 +21,6 @@ contexts_considered:
   intake:ans_tiss_hosp_cons:
     decision: include
     why: 'ANS TISS hospital events: the private-plan fee comparison (events and paid items, 2023-2024; fields ans_tiss_hospital_items and ans_tiss_hospital_events).'
-  intake:health_regions:
-    decision: exclude
-    why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters it, so this group, relevant to a population study, is not used here. (draft note: MoH municipality to health region and macro-region crosswalk with region and UF codes: aggregates municipal data to health regions, for hospital and supply contrasts below the state level.)'
   intake:siops_municipal:
     decision: include
     why: 'SIOPS municipal health spending (total, own resources, SUS transfers), municipality-year 2010-2024, deflated with price_index: context for who finances the SUS beside the federal SIH payment (Discussion; supplement, municipal health spending).'
