@@ -66,7 +66,7 @@ PRESETS = {
                    "related_questions": [], "questions": None, "nulls": 4.0, "triage": True},
 }
 KEYS = {"study", "title", "topic", "period", "where", "grain", "depth", "q", "hypotheses", "contexts",
-        "contexts_considered", "ratios", "questions", "nulls", *PRESETS["survey"]}
+        "contexts_considered", "line", "ratios", "questions", "nulls", *PRESETS["survey"]}
 #: a decision on a context candidate (`gateway.context_candidates`): include it (then declared as fields in pegasus_data
 #: and named), or exclude it, each with why, written knowing what the group holds (pegasus_data docs/plans/recon.md)
 DECISIONS = ("include", "exclude")
@@ -92,7 +92,8 @@ class Declaration:
     q: float = 0.05
     hypotheses: list[dict] = field(default_factory=list)
     contexts: Any = "auto"
-    contexts_considered: dict = field(default_factory=dict)   # candidate id -> {decision, why}
+    contexts_considered: dict = field(default_factory=dict)   # candidate id -> {decision, why[, from: line:<name>]}
+    line: str | None = None    # the research line whose decisions are inherited (`_line_decisions`)
     ratios: list[dict] = field(default_factory=list)   # {numerator, denominator: "DATASET[:event][:codes]", lag: years}
     questions: list[str] | None = None  # the questions asked of every field (None: the depth's, `PRESETS`)
     nulls: float | None = None           # replicate null worlds per test, a factor on each method's own (`NULLS`)
@@ -152,6 +153,9 @@ DECLARATION = [
     {"key": "contexts_considered", "form": "decisions", "default": {},
      "help": "each context candidate the scope lists (SIDRA research and subject, intake source): include or exclude, "
              "and why, decided from what it holds (NAME.candidates.yml)"},
+    {"key": "line", "form": "text",
+     "help": "the research line whose shared context decisions the study inherits (studies/lines/LINE.yml, beside the "
+             "declaration); the study's own contexts_considered override them, so only topic-specific ones are written"},
     {"key": "hypotheses", "form": "list", "default": [],
      "help": "declared tests, each answered with its own error control: {component: transient, where, when, note} "
              "or {component: relation, leader, lags, when, macro, control}"},
@@ -209,6 +213,28 @@ def _area(where) -> list[int] | None:
 
 class DeclarationError(ValueError):
     """A declaration that cannot be read, with every problem named."""
+
+
+def _line_decisions(path: Path, line: object) -> dict[str, dict]:
+    """The context decisions a research line shares (``studies/lines/<line>.yml`` beside the declaration,
+    ``contexts_considered`` in the declaration's form), each marked ``from: line:<line>``. Studies of one line share most
+    of their data, so a candidate is decided once for the line, from what it holds; a study writes only what its topic
+    changes (research-workflow S0, the author's scientific cache)."""
+    import yaml
+
+    if not isinstance(line, str) or not line.strip():
+        raise DeclarationError(f"line {line!r}: the name of a research line (studies/lines/<line>.yml)")
+    f = path.parent / "lines" / f"{line}.yml"
+    if not f.exists():
+        raise DeclarationError(f"line {line!r}: no {f}")
+    doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    considered = doc.get("contexts_considered") or {}
+    bad = [cid for cid, d in considered.items() if not isinstance(d, dict) or d.get("decision") not in DECISIONS
+           or not str(d.get("why") or "").strip()]
+    if not isinstance(considered, dict) or bad:
+        raise DeclarationError(f"{f}: contexts_considered needs a decision ({' or '.join(DECISIONS)}) and why for "
+                               f"{bad[:5] if bad else 'each candidate'}")
+    return {str(k): {**dict(v), "from": f"line:{line}"} for k, v in considered.items()}
 
 
 def load(path: str | Path) -> Declaration:
@@ -328,6 +354,12 @@ def load(path: str | Path) -> Declaration:
             problems.append(f"contexts {unknown}: no declared context field of that name (`pegasus study search` "
                             "lists them)")
     considered = doc.get("contexts_considered") or {}
+    inherited: dict = {}
+    if doc.get("line") is not None:
+        try:
+            inherited = _line_decisions(path, doc["line"])
+        except DeclarationError as exc:
+            problems.append(str(exc))
     if not isinstance(considered, dict):
         problems.append("contexts_considered: a mapping of candidate ids (`pegasus study scope` lists them) to "
                         "{decision: include|exclude, why: ...}")
@@ -344,7 +376,8 @@ def load(path: str | Path) -> Declaration:
                        only=list(topic.get("only") or []),
                        where=area or "BR", grain=grain, depth=depth, q=float(doc.get("q", 0.05)),
                        hypotheses=list(doc.get("hypotheses") or []), contexts=doc.get("contexts", "auto"),
-                       contexts_considered={str(k): dict(v) for k, v in considered.items()},
+                       contexts_considered={**inherited, **{str(k): dict(v) for k, v in considered.items()}},
+                       line=str(doc["line"]) if doc.get("line") is not None else None,
                        ratios=list(ratios) if isinstance(ratios, list) else [ratios],
                        related=(float("inf") if rel == "all" else list(rel) if isinstance(rel, list) else float(rel)) if rel is not None else None,
                        download=float(doc["download"]) if doc.get("download") is not None else None,
@@ -1386,7 +1419,7 @@ def _candidates(decl: Declaration) -> list[dict]:
         out.append({"id": g["id"], "kind": g["kind"], "research": g["research"], "subject": g["subject"],
                     "size": len(g.get("tables") or g.get("columns") or []),
                     "read_by_fields": g.get("fields") or [],
-                    "decision": d.get("decision"), "why": d.get("why")})
+                    "decision": d.get("decision"), "why": d.get("why"), "from": d.get("from", "study") if d else None})
     for cid in sorted(set(decl.contexts_considered) - {c["id"] for c in out}):
         out.append({"id": cid, "kind": "unknown", "research": None, "subject": None, "size": 0, "read_by_fields": [],
                     "decision": decl.contexts_considered[cid].get("decision"),

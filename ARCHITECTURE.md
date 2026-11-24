@@ -539,6 +539,12 @@ ecological and the report says so.
 Every context field defined on the study's supports and period. The order in which they appear in the report comes
 from their measured relation to the topic's fields (§8.2), never from a list naming them.
 
+Every context candidate pegasus_data offers (SIDRA research and subject, intake source, declared field family) is
+decided in the declaration's `contexts_considered`, include or exclude with the reason read from what it holds; the
+scope counts the undecided. Studies of one research line share most of their data, so the line decides once:
+`line: <name>` inherits `studies/lines/<name>.yml`'s decisions, each marked `from: line:<name>`, and the study writes
+only the decisions its topic changes (2026-11-23, the author's scientific cache).
+
 ### 4.6 The scope
 
 `scope.yml`: the datasets, codes by system, fields by kind, related fields with their strength, person paths with
