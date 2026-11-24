@@ -118,3 +118,18 @@ contexts_considered:
   field:brdwgd:temperature_months:
     decision: exclude
     why: 'Temperature months: as field:brdwgd:gaussian.'
+  sidra:RC:Óbitos:
+    decision: include
+    why: 'Used in C5 (SAH deaths that reach treatment, by region): civil-registry deaths against SIM deaths by state and year give the SIM coverage ratio. Under-registration in the North would lower its I60 death count and so the share never treated; the North''s contrast is reported with and without this calibration, beside the ill-defined share (line S0 review R5).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Consolidated outpatient TISS events by UF hold no diagnosis and no inpatient procedure; clipping and coiling are inpatient SUS operations, and private coverage enters as ans_beneficiaries (line S0 review R2).'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'Outpatient TISS items carry TUSS codes without a diagnosis; aneurysm treatment is inpatient, and the question is care paid by the SUS (line S0 review R2).'
+  intake:srag:
+    decision: exclude
+    why: 'SIVEP-Gripe severe respiratory illness: the pandemic enters as a period sensitivity (without 2020-2021; a period term); SRAG cases by municipality have no pathway to aneurysm technique or 30-day death beyond that (line S0 review R7).'
+  field:cnes:teams:
+    decision: exclude
+    why: 'Primary-care team coverage measures first contact; ruptured aneurysms arrive through emergency services and unruptured ones by specialist referral, so team coverage places no t01 claim (line S0 review R3).'
