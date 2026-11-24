@@ -120,3 +120,22 @@ contexts_considered:
   "field:brdwgd:temperature_months":
     decision: exclude
     why: "climate and weather: no pathway from climate to spine-surgery rates over a decade"
+  # decided by the t08 session after the line's S0 correction (PegaSUS 02cc65a; abnc2027_neuro papers/review_S0_line.md)
+  "sidra:CD:Cor ou raça":
+    decision: exclude
+    why: "the paper uses no race variable (no race-specific rate, no imputation of race), so the race denominator and the imputation auxiliary the line includes it for have no use here"
+  "field:intake:ans_tiss_outpatient_items":
+    decision: exclude
+    why: "SIGTAP 0408.03 spine surgery is hospital surgery; the private-plan comparison reads TISS hospital events and items (included), and outpatient items hold no surgical stay"
+  "intake:ans_tiss_amb_cons":
+    decision: exclude
+    why: "outpatient private events: the paper's procedures are hospital stays, read on the private side from TISS hospital events (included)"
+  "field:cnes:teams":
+    decision: exclude
+    why: "primary-care team coverage is not modelled: the access terms are distance to an accredited unit and specialist supply (CNES professionals, beds, accreditations); referral through primary care is not measured by the paper"
+  "sidra:RC:Óbitos":
+    decision: exclude
+    why: "registry deaths as a coverage check of a regional mortality gradient: the paper has no population mortality rate; its deaths are in-hospital deaths recorded on the stay"
+  "intake:srag":
+    decision: exclude
+    why: "the pandemic enters only as the 2020-2021 fall in monthly elective stays against their expected level, reported descriptively with no claim on its mechanism, so ICU strain by municipality and week has no term to enter"
