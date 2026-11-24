@@ -146,16 +146,16 @@ contexts_considered:
     why: 'municipal covariate, December of each patient''s year 2014-2023 (CNES): any high-complexity neurosurgical accreditation at the treating centre''s municipality (section supply_neuro, sensitivity)'
   field:intake:ans_tiss_outpatient_items:
     decision: exclude
-    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy for malignant brain tumours, from the pathology report to the planned start, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
   intake:ans_tiss_amb_cons:
     decision: exclude
-    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy for malignant brain tumours, from the pathology report to the planned start, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
   field:cnes:teams:
     decision: exclude
-    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy for malignant brain tumours, from the pathology report to the planned start, which this group does not bear on (papers/review_S0_line.md R3); the decision every study made before the line left it to them."
   sidra:RC:Óbitos:
     decision: exclude
-    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy for malignant brain tumours, from the pathology report to the planned start, which this group does not bear on (papers/review_S0_line.md R5); the decision every study made before the line left it to them."
   intake:srag:
     decision: exclude
-    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy after surgery for malignant brain tumours, which this group does not bear on (papers/review_S0_line.md R2); the decision every study made before the line left it to them."
+    why: "t05 is certified (S5) and was not reopened by the line's S0 review: its claims are the SUS timeliness of radiotherapy for malignant brain tumours, from the pathology report to the planned start, which this group does not bear on (papers/review_S0_line.md R7); the decision every study made before the line left it to them."

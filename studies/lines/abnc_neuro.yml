@@ -40,87 +40,91 @@ contexts_considered:
       Census income.'
   sidra:CA:Agroindústria rural:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Agroindústria rural: 8 tables, 2017, finest grain municipal, partial. Rural agro-industry
-      production and sales (2017): agricultural production and establishments: no pathway from farming structure to the
-      incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census
-      urban share.'
+    why: 'IBGE Censo Agropecuário, Agroindústria rural: 8 tables, 2017, finest grain municipal (in some of the studies''
+      places and years only 5,412 of 5,570 municipalities). Rural agro-industry production and sales (2017): agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   'sidra:CA:Características dos estabelecimentos agropecuários ':
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Características dos estabelecimentos agropecuários: 154 tables, 2017, finest grain municipal,
-      partial. Farm establishment typology, land tenure and practices (2017): agricultural production and establishments:
-      no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality,
-      where a study needs it, is the Census urban share.'
+    why: 'IBGE Censo Agropecuário, Características dos estabelecimentos agropecuários: 154 tables, 2017, finest grain municipal
+      (in some of the studies'' places and years only 5,563 of 5,570 municipalities). Farm establishment typology, land
+      tenure and practices (2017): agricultural production and establishments: no pathway from farming structure to the
+      incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census
+      urban share.'
   'sidra:CA:Características dos produtores agropecuários ':
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Características dos produtores agropecuários: 80 tables, 2017, finest grain municipal,
-      partial. Farm producers'' age, sex, schooling and tenure (2017): agricultural production and establishments: no pathway
-      from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where
-      a study needs it, is the Census urban share.'
+    why: 'IBGE Censo Agropecuário, Características dos produtores agropecuários: 80 tables, 2017, finest grain municipal
+      (in some of the studies'' places and years only 5,563 of 5,570 municipalities). Farm producers'' age, sex, schooling
+      and tenure (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
+      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
+      share.'
   sidra:CA:Confederação da Agricultura e Pecuária do Brasil (CNA):
     decision: exclude
     why: 'IBGE Censo Agropecuário, Confederação da Agricultura e Pecuária do Brasil (CNA): 6 tables, 2017, finest grain
-      municipal, partial. Establishments with forestry, irrigation and other practices tabulated for the CNA (2017): agricultural
-      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
-      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
+      municipal (in some of the studies'' places and years only 5,563 of 5,570 municipalities). Establishments with forestry,
+      irrigation and other practices tabulated for the CNA (2017): agricultural production and establishments: no pathway
+      from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where
+      a study needs it, is the Census urban share.'
   sidra:CA:Extração vegetal:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Extração vegetal: 8 tables, 2017, finest grain municipal, partial. Establishments and
-      output of plant extraction (2017): agricultural production and establishments: no pathway from farming structure to
-      the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the
-      Census urban share.'
+    why: 'IBGE Censo Agropecuário, Extração vegetal: 8 tables, 2017, finest grain municipal (in some of the studies'' places
+      and years only 3,142 of 5,570 municipalities). Establishments and output of plant extraction (2017): agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Floricultura:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Floricultura: 8 tables, 2017, finest grain municipal, partial. Floriculture establishments
-      and output (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Censo Agropecuário, Floricultura: 8 tables, 2017, finest grain municipal (in some of the studies'' places
+      and years only 2,008 of 5,570 municipalities). Floriculture establishments and output (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Horticultura:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Horticultura: 8 tables, 2017, finest grain municipal, partial. Horticulture establishments
-      and output (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Censo Agropecuário, Horticultura: 8 tables, 2017, finest grain municipal (in some of the studies'' places
+      and years only 5,404 of 5,570 municipalities). Horticulture establishments and output (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Lavouras permanentes:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Lavouras permanentes: 8 tables, 2017, finest grain municipal, partial. Permanent-crop
-      output and area (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Censo Agropecuário, Lavouras permanentes: 8 tables, 2017, finest grain municipal (in some of the studies''
+      places and years only 5,489 of 5,570 municipalities). Permanent-crop output and area (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Lavouras temporárias:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Lavouras temporárias: 12 tables, 2017, finest grain municipal, partial. Temporary-crop
-      output and area (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Censo Agropecuário, Lavouras temporárias: 12 tables, 2017, finest grain municipal (in some of the studies''
+      places and years only 5,555 of 5,570 municipalities). Temporary-crop output and area (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Movimentação financeira:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Movimentação financeira: 26 tables, 2017, finest grain municipal, partial. Farm financing,
-      credit and investment (2017): agricultural production and establishments: no pathway from farming structure to the
-      incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census
-      urban share.'
+    why: 'IBGE Censo Agropecuário, Movimentação financeira: 26 tables, 2017, finest grain municipal (in some of the studies''
+      places and years only 5,563 of 5,570 municipalities). Farm financing, credit and investment (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CA:Pecuária:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Pecuária: 132 tables, 2017, finest grain municipal, partial. Livestock herds and practices
-      (2017): agricultural production and establishments: no pathway from farming structure to the incidence, referral,
-      treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
+    why: 'IBGE Censo Agropecuário, Pecuária: 132 tables, 2017, finest grain municipal (in some of the studies'' places and
+      years only 5,563 of 5,570 municipalities). Livestock herds and practices (2017): agricultural production and establishments:
+      no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality,
+      where a study needs it, is the Census urban share.'
   sidra:CA:Pessoal ocupado:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Pessoal ocupado: 32 tables, 2017, finest grain municipal, partial. Persons employed on
-      farms (2017): agricultural labour; occupational injury from farm work is not identifiable at municipal grain from
-      it, and agricultural production and establishments: no pathway from farming structure to the incidence, referral,
-      treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
+    why: 'IBGE Censo Agropecuário, Pessoal ocupado: 32 tables, 2017, finest grain municipal (in some of the studies'' places
+      and years only 5,563 of 5,570 municipalities). Persons employed on farms (2017): agricultural labour; occupational
+      injury from farm work is not identifiable at municipal grain from it, and agricultural production and establishments:
+      no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality,
+      where a study needs it, is the Census urban share.'
   sidra:CA:Silvicultura:
     decision: exclude
-    why: 'IBGE Censo Agropecuário, Silvicultura: 16 tables, 2017, finest grain municipal, partial. Forestry establishments
-      and output (2017): agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Censo Agropecuário, Silvicultura: 16 tables, 2017, finest grain municipal (in some of the studies'' places
+      and years only 3,972 of 5,570 municipalities). Forestry establishments and output (2017): agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:CD:Cor ou raça:
     decision: include
-    why: 'IBGE Censo Demográfico, Cor ou raça: 5 tables, 2010-2022, finest grain municipal (declared fields population_black,
-      _brown, _white, _indigenous, _asian over population_race_universe). Municipal race composition is a predictor in the
-      line''s multiple imputation of race, recorded on 66-90% of AIHs (sap/common.md), and the denominator of any race-specific
-      rate, which POPSVS does not carry.'
+    why: 'IBGE Censo Demográfico, Cor ou raça: 5 tables, 2010-2022, finest grain municipal. Municipal race composition is
+      a predictor in the line''s multiple imputation of race, recorded on 66-90% of AIHs (sap/common.md), and the denominator
+      of any race-specific rate, which POPSVS does not carry.'
   sidra:CD:Domicílios:
     decision: exclude
     why: 'IBGE Censo Demográfico, Domicílios: 30 tables, 2010-2022, finest grain municipal. Counts of households by type
@@ -146,9 +150,9 @@ contexts_considered:
       race from the records.'
   sidra:CD:Indicadores demográficos:
     decision: exclude
-    why: 'IBGE Censo Demográfico, Indicadores demográficos: 1 table, 2022, finest grain municipal, partial. Ageing index,
-      median age and sex ratio (2022): age and sex enter every line rate through standardisation on POPSVS, which these
-      summaries would duplicate.'
+    why: 'IBGE Censo Demográfico, Indicadores demográficos: 1 table, 2022, finest grain municipal (in some of the studies''
+      places and years only 656 of 5,570 municipalities). Ageing index, median age and sex ratio (2022): age and sex enter
+      every line rate through standardisation on POPSVS, which these summaries would duplicate.'
   sidra:CD:Migração:
     decision: exclude
     why: 'IBGE Censo Demográfico, Migração: 8 tables, 1991-2022, finest grain municipal. Native-born Brazilians by state
@@ -204,13 +208,15 @@ contexts_considered:
   sidra:EL:Geral:
     decision: exclude
     why: 'IBGE Contribuição dos Polinizadores para as Produções Agrícola e Extrativista do Brasil, Geral: 1 table, 1996-2023,
-      finest grain municipal, partial. Pollinators'' contribution to crop value: agricultural production and establishments:
-      no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality,
-      where a study needs it, is the Census urban share.'
+      finest grain municipal (in some of the studies'' places and years only 5,552 of 5,570 municipalities). Pollinators''
+      contribution to crop value: agricultural production and establishments: no pathway from farming structure to the incidence,
+      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
+      share.'
   sidra:D9:Geral:
     decision: exclude
     why: 'IBGE Estatísticas dos Cadastros de Microempreendedores Individuais, Geral: 10 tables, 2020-2022, finest grain
-      capitals. Individual micro-entrepreneurs (MEI) registered: business formalisation, no pathway to neurosurgical care.'
+      municipal and capitals. Individual micro-entrepreneurs (MEI) registered: business formalisation, no pathway to neurosurgical
+      care.'
   sidra:XF:Geral:
     decision: exclude
     why: 'IBGE Estimativas de População, Geral: 1 table, 2001-2026, finest grain municipal. IBGE yearly population estimates
@@ -224,33 +230,39 @@ contexts_considered:
   sidra:FP:Fundações e Associações sem fins lucrativos:
     decision: exclude
     why: 'IBGE Fundações Privadas e Associações Sem Fins Lucrativos, Fundações e Associações sem fins lucrativos: 1 table,
-      2010-2016, finest grain capitals. Private foundations and associations (2006-2016): as non-profit entities, hospital
-      legal nature comes from CNES.'
+      2010-2016, finest grain municipal (in some of the studies'' places and years only 5,559 of 5,570 municipalities) and
+      capitals. Private foundations and associations (2006-2016): as non-profit entities, hospital legal nature comes from
+      CNES.'
   sidra:C2:Cidades e comunidades sustentáveis:
     decision: exclude
     why: 'IBGE Objetivos de Desenvolvimento Sustentável, Cidades e comunidades sustentáveis: 1 table, 2010-2024, finest
-      grain municipal, partial. SDG 11.6.2 particulate level in urban areas: air quality, no measured pathway to the line''s
-      neurosurgical outcomes and not a municipality-year series.'
+      grain municipal (in some of the studies'' places and years only 5 of 5,571 municipalities). SDG 11.6.2 particulate
+      level in urban areas: air quality, no measured pathway to the line''s neurosurgical outcomes and not a municipality-year
+      series.'
   sidra:RC:Casamentos:
     decision: exclude
-    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Casamentos: 8 tables, 2003-2024, finest grain municipal, partial.
-      Civil-registry marriages: no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Casamentos: 8 tables, 2003-2024, finest grain municipal (in some
+      of the studies'' places and years only 5,570 of 5,571 municipalities). Civil-registry marriages: no pathway to neurosurgical
+      care.'
   sidra:RC:Divórcios:
     decision: exclude
-    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Divórcios: 13 tables, 2003-2024, finest grain municipal, partial.
-      Civil-registry divorces: no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Divórcios: 13 tables, 2003-2024, finest grain municipal (in some
+      of the studies'' places and years only 5,570 of 5,571 municipalities). Civil-registry divorces: no pathway to neurosurgical
+      care.'
   sidra:RC:Nascidos vivos:
     decision: exclude
-    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Nascidos vivos: 7 tables, 2003-2024, finest grain municipal, partial.
-      Civil-registry live births: SINASC is the line''s birth source, more complete and at record level.'
+    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Nascidos vivos: 7 tables, 2003-2024, finest grain municipal (in
+      some of the studies'' places and years only 5,570 of 5,571 municipalities). Civil-registry live births: SINASC is
+      the line''s birth source, more complete and at record level.'
   sidra:RC:Separações:
     decision: exclude
-    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Separações: 8 tables, 2003-2013, finest grain municipal, partial.
-      Civil-registry separations (ending 2013): no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Separações: 8 tables, 2003-2013, finest grain municipal for 3,278
+      of 5,570 municipalities. Civil-registry separations (ending 2013): no pathway to neurosurgical care.'
   sidra:RC:Óbitos fetais:
     decision: exclude
-    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Óbitos fetais: 2 tables, 2003-2024, finest grain municipal, partial.
-      Civil-registry foetal deaths: SIM-DOFET is the record-level source where a study needs them.'
+    why: 'IBGE Pesquisa Estatísticas do Registro Civil, Óbitos fetais: 2 tables, 2003-2024, finest grain municipal (in some
+      of the studies'' places and years only 5,570 of 5,571 municipalities). Civil-registry foetal deaths: SIM-DOFET is
+      the record-level source where a study needs them.'
   sidra:SB:Abastecimento de água:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saneamento Básico, Abastecimento de água: 39 tables, 2000-2017, finest grain municipal.
@@ -263,73 +275,74 @@ contexts_considered:
       measure where used.'
   sidra:XN:Alimentação:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Alimentação: 80 tables, 2013-2019, finest grain capitals. PNS diet indicators
-      (beans, fruit, soft drinks) by state, 2013 and 2019: incidence risk factors at state grain, two waves; not a determinant
-      of access, treatment or payment.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Alimentação: 80 tables, 2013-2019, finest grain municipal and capitals. PNS diet
+      indicators (beans, fruit, soft drinks) by state, 2013 and 2019: incidence risk factors at state grain, two waves;
+      not a determinant of access, treatment or payment.'
   sidra:XN:Atividade física:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Atividade física: 52 tables, 2013-2019, finest grain capitals. PNS physical activity
-      by state, two waves: incidence risk factor at state grain, not on the care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Atividade física: 52 tables, 2013-2019, finest grain municipal and capitals.
+      PNS physical activity by state, two waves: incidence risk factor at state grain, not on the care pathway.'
   sidra:XN:Características do domicílio e serviços domiciliares de saúde:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde, Características do domicílio e serviços domiciliares de saúde: 14 tables, 2013-2019,
-      finest grain capitals. PNS household characteristics and home visits by state, two waves: primary-care home visits,
-      before the neurosurgical pathway, at state grain.'
+      finest grain municipal and capitals. PNS household characteristics and home visits by state, two waves: primary-care
+      home visits, before the neurosurgical pathway, at state grain.'
   sidra:XN:Cobertura de plano de saúde:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Cobertura de plano de saúde: 44 tables, 2013-2019, finest grain capitals. PNS
-      self-reported plan coverage by state and capital, two waves: the line reads private coverage as the ANS December beneficiary
-      stock by municipality and year, administrative and complete.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Cobertura de plano de saúde: 44 tables, 2013-2019, finest grain municipal and
+      capitals. PNS self-reported plan coverage by state and capital, two waves: the line reads private coverage as the
+      ANS December beneficiary stock by municipality and year, administrative and complete.'
   sidra:XN:Deficiência:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Deficiência: 25 tables, 2013, finest grain state. PNS 2013 disability by type
-      and income, state grain: general impairment, not specific to a line condition, single wave.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Deficiência: 25 tables, 2013, finest grain capitals and state. PNS 2013 disability
+      by type and income, state grain: general impairment, not specific to a line condition, single wave.'
   sidra:XN:Higiene e saúde bucal:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Higiene e saúde bucal: 47 tables, 2013-2019, finest grain capitals. PNS oral
-      hygiene and dental care: no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Higiene e saúde bucal: 47 tables, 2013-2019, finest grain municipal and capitals.
+      PNS oral hygiene and dental care: no pathway to neurosurgical care.'
   sidra:XN:Percepção do estado de saúde:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Percepção do estado de saúde: 27 tables, 2013-2019, finest grain capitals. PNS
-      self-rated health and functional difficulty by state: a general health summary at state grain, not a need measure
-      for a line condition.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Percepção do estado de saúde: 27 tables, 2013-2019, finest grain municipal and
+      capitals. PNS self-rated health and functional difficulty by state: a general health summary at state grain, not a
+      need measure for a line condition.'
   sidra:XN:Saúde da mulher:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Saúde da mulher: 22 tables, 2013-2019, finest grain capitals. PNS women''s preventive
-      exams (Pap smear, mammography): no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Saúde da mulher: 22 tables, 2013-2019, finest grain municipal and capitals. PNS
+      women''s preventive exams (Pap smear, mammography): no pathway to neurosurgical care.'
   sidra:XN:Tabagismo:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Tabagismo: 113 tables, 2013-2019, finest grain capitals. PNS tobacco use by state,
-      two waves: incidence risk factor (stroke, aneurysm rupture) at state grain; the line studies access and outcomes after
-      the event, not incidence by area risk.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Tabagismo: 113 tables, 2013-2019, finest grain municipal and capitals. PNS tobacco
+      use by state, two waves: incidence risk factor (stroke, aneurysm rupture) at state grain; the line studies access
+      and outcomes after the event, not incidence by area risk.'
   sidra:XN:Vida sexual:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde, Vida sexual: 20 tables, 2019, finest grain capitals. PNS 2019 sexual behaviour:
-      no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa Nacional de Saúde, Vida sexual: 20 tables, 2019, finest grain municipal and capitals. PNS 2019 sexual
+      behaviour: no pathway to neurosurgical care.'
   sidra:AA:Alimentação:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Alimentação: 15 tables, 2012-2015, finest grain capitals. PeNSE diet
-      of 9th-grade schoolchildren: a school-age survey at state and capital grain, not the population of the line''s conditions.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Alimentação: 15 tables, 2012-2015, finest grain municipal and capitals.
+      PeNSE diet of 9th-grade schoolchildren: a school-age survey at state and capital grain, not the population of the
+      line''s conditions.'
   sidra:AA:Aquisição de produtos alimentícios:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Aquisição de produtos alimentícios: 1 table, 2012, finest grain capitals.
       PeNSE food purchases by schoolchildren: not on the line''s care pathway.'
   sidra:AA:Asma:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Asma: 3 tables, 2012-2015, finest grain capitals. PeNSE asthma in
-      schoolchildren: unrelated condition.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Asma: 3 tables, 2012-2015, finest grain municipal and capitals. PeNSE
+      asthma in schoolchildren: unrelated condition.'
   sidra:AA:Atividade física:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Atividade física: 12 tables, 2012-2015, finest grain capitals. PeNSE
-      physical activity of schoolchildren: not on the line''s care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Atividade física: 12 tables, 2012-2015, finest grain municipal and
+      capitals. PeNSE physical activity of schoolchildren: not on the line''s care pathway.'
   sidra:AA:Características básicas:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Características básicas: 5 tables, 2012, finest grain capitals. PeNSE
       schoolchildren''s age, sex and race: survey sample description.'
   sidra:AA:Características da escola:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Características da escola: 48 tables, 2012-2015, finest grain capitals.
-      PeNSE school characteristics: not on the line''s care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Características da escola: 48 tables, 2012-2015, finest grain municipal
+      and capitals. PeNSE school characteristics: not on the line''s care pathway.'
   sidra:AA:Comportamento alimentar:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Comportamento alimentar: 1 table, 2012, finest grain capitals. PeNSE
@@ -352,102 +365,105 @@ contexts_considered:
       PeNSE parents'' schooling of schoolchildren: area education enters from the Census where a study uses it.'
   sidra:AA:Higiene e saúde bucal:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Higiene e saúde bucal: 10 tables, 2012-2015, finest grain capitals.
-      PeNSE oral hygiene of schoolchildren: unrelated.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Higiene e saúde bucal: 10 tables, 2012-2015, finest grain municipal
+      and capitals. PeNSE oral hygiene of schoolchildren: unrelated.'
   sidra:AA:Imagem corporal:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Imagem corporal: 11 tables, 2015, finest grain capitals. PeNSE body
-      image of schoolchildren: unrelated.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Imagem corporal: 11 tables, 2015, finest grain municipal and capitals.
+      PeNSE body image of schoolchildren: unrelated.'
   sidra:AA:Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
       3 tables, 2012, finest grain capitals. PeNSE weight attitudes and nutrition of schoolchildren: unrelated.'
   sidra:AA:Informações gerais:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Informações gerais: 15 tables, 2012-2015, finest grain capitals. PeNSE
-      general sample information: survey description.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Informações gerais: 15 tables, 2012-2015, finest grain municipal and
+      capitals. PeNSE general sample information: survey description.'
   sidra:AA:Saúde mental:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Saúde mental: 4 tables, 2012-2015, finest grain capitals. PeNSE mental
-      health of schoolchildren: unrelated to the line''s conditions.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Saúde mental: 4 tables, 2012-2015, finest grain municipal and capitals.
+      PeNSE mental health of schoolchildren: unrelated to the line''s conditions.'
   sidra:AA:Saúde sexual e reprodutiva:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Saúde sexual e reprodutiva: 12 tables, 2012-2015, finest grain capitals.
-      PeNSE sexual and reproductive health of schoolchildren: unrelated.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Saúde sexual e reprodutiva: 12 tables, 2012-2015, finest grain municipal
+      and capitals. PeNSE sexual and reproductive health of schoolchildren: unrelated.'
   sidra:AA:Situações em casa e na escola:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Situações em casa e na escola: 11 tables, 2012-2015, finest grain
-      capitals. PeNSE situations at home and school (bullying, supervision): not on the line''s care pathway.'
+      municipal and capitals. PeNSE situations at home and school (bullying, supervision): not on the line''s care pathway.'
   sidra:AA:Tabaco na escola:
     decision: exclude
     why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Tabaco na escola: 1 table, 2012, finest grain capitals. PeNSE tobacco
       at school: unrelated.'
   sidra:AA:Uso de cigarro:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de cigarro: 9 tables, 2012-2015, finest grain capitals. PeNSE
-      cigarette use of schoolchildren: unrelated to the care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de cigarro: 9 tables, 2012-2015, finest grain municipal and capitals.
+      PeNSE cigarette use of schoolchildren: unrelated to the care pathway.'
   sidra:AA:Uso de drogas:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de drogas: 12 tables, 2012-2015, finest grain capitals. PeNSE
-      drug use of schoolchildren: unrelated to the care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de drogas: 12 tables, 2012-2015, finest grain municipal and capitals.
+      PeNSE drug use of schoolchildren: unrelated to the care pathway.'
   sidra:AA:Uso de serviço de saúde:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de serviço de saúde: 10 tables, 2012-2015, finest grain capitals.
-      PeNSE health-service use of schoolchildren: primary use by adolescents, not neurosurgical access.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de serviço de saúde: 10 tables, 2012-2015, finest grain municipal
+      and capitals. PeNSE health-service use of schoolchildren: primary use by adolescents, not neurosurgical access.'
   sidra:AA:Uso de álcool:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de álcool: 10 tables, 2012-2015, finest grain capitals. PeNSE
-      alcohol use of schoolchildren: unrelated to the care pathway.'
+    why: 'IBGE Pesquisa Nacional de Saúde do Escolar, Uso de álcool: 10 tables, 2012-2015, finest grain municipal and capitals.
+      PeNSE alcohol use of schoolchildren: unrelated to the care pathway.'
   sidra:B5:Características adicionais do mercado de trabalho:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Características adicionais do mercado de trabalho:
-      6 tables, 2012-2025, finest grain capitals. PNAD Contínua labour-market detail by state: work and income are read
-      at municipal grain from the Census where a study adjusts for them.'
+      6 tables, 2012-2025, finest grain municipal and capitals. PNAD Contínua labour-market detail by state: work and income
+      are read at municipal grain from the Census where a study adjusts for them.'
   sidra:B5:Características do domicílio:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Características do domicílio: 21 tables, 2016-2025,
-      finest grain capitals. PNAD Contínua household characteristics by state: coarser than the Census municipal household
-      fields.'
+      finest grain municipal and capitals. PNAD Contínua household characteristics by state: coarser than the Census municipal
+      household fields.'
   sidra:B5:Características gerais da população:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Características gerais da população: 6 tables,
-      2012-2025, finest grain capitals. PNAD Contínua population by sex and age: denominators are POPSVS.'
+      2012-2025, finest grain municipal and capitals. PNAD Contínua population by sex and age: denominators are POPSVS.'
   sidra:B5:Deficiência:
     decision: exclude
-    why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Deficiência: 12 tables, 2022, finest grain capitals.
-      PNAD Contínua 2022 disability by race: general impairment at state grain.'
+    why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Deficiência: 12 tables, 2022, finest grain municipal
+      and capitals. PNAD Contínua 2022 disability by race: general impairment at state grain.'
   sidra:B5:Educação:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Educação: 13 tables, 2016-2025, finest grain
-      capitals. PNAD Contínua schooling by state: area education enters from the Census at municipal grain where used.'
+      municipal and capitals. PNAD Contínua schooling by state: area education enters from the Census at municipal grain
+      where used.'
   sidra:B5:Mercado de trabalho:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Mercado de trabalho: 24 tables, 2012-2025, finest
-      grain capitals. PNAD Contínua unemployment and labour by state: state-grain labour market, not a municipal context.'
+      grain municipal and capitals. PNAD Contínua unemployment and labour by state: state-grain labour market, not a municipal
+      context.'
   sidra:B5:Outras formas de trabalho:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua anual, Outras formas de trabalho: 107 tables, 2016-2022,
-      finest grain capitals. PNAD Contínua domestic and volunteer work: no pathway to neurosurgical care.'
+      finest grain municipal and capitals. PNAD Contínua domestic and volunteer work: no pathway to neurosurgical care.'
   sidra:DD:Rendimento:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua trimestral, Rendimento: 9 tables, 2012-2026, finest
-      grain capitals. PNAD Contínua quarterly real income by state: area income enters from the Census at municipal grain.'
+      grain municipal and capitals. PNAD Contínua quarterly real income by state: area income enters from the Census at
+      municipal grain.'
   sidra:DD:Trabalho:
     decision: exclude
     why: 'IBGE Pesquisa Nacional por Amostra de Domicílios Contínua trimestral, Trabalho: 26 tables, 2012-2026, finest grain
-      capitals. PNAD Contínua quarterly labour status by state: state-grain labour market.'
+      municipal and capitals. PNAD Contínua quarterly labour status by state: state-grain labour market.'
   sidra:PP:Pecuária:
     decision: exclude
-    why: 'IBGE Pesquisa da Pecuária Municipal, Pecuária: 6 tables, 1974-2025, finest grain municipal, partial. Annual municipal
-      livestock herd series: agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Pesquisa da Pecuária Municipal, Pecuária: 6 tables, 1974-2025, finest grain municipal (in some of the studies''
+      places and years only 5,570 of 5,571 municipalities). Annual municipal livestock herd series: agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:ES:Estoques agropecuários:
     decision: exclude
-    why: 'IBGE Pesquisa de Estoques, Estoques agropecuários: 9 tables, 2007-2025, finest grain municipal, partial. Semiannual
-      farm-product stocks: agricultural production and establishments: no pathway from farming structure to the incidence,
-      referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban
-      share.'
+    why: 'IBGE Pesquisa de Estoques, Estoques agropecuários: 9 tables, 2007-2025, finest grain municipal (in some of the
+      studies'' places and years only 2,419 of 5,571 municipalities). Semiannual farm-product stocks: agricultural production
+      and establishments: no pathway from farming structure to the incidence, referral, treatment or payment of neurosurgical
+      conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:PM:Geral:
     decision: exclude
     why: 'IBGE Pesquisa de Informações Básicas Municipais, Geral: 182 tables, 2020-2023, finest grain municipal. MUNIC municipal
@@ -460,47 +476,48 @@ contexts_considered:
       of slums; deprivation enters from the Census.'
   sidra:SH:Hospedagem:
     decision: exclude
-    why: 'IBGE Pesquisa de Serviços de Hospedagem, Hospedagem: 4 tables, 2016, finest grain capitals. Lodging establishments
-      (2011-2016): tourism capacity, no pathway to neurosurgical care.'
+    why: 'IBGE Pesquisa de Serviços de Hospedagem, Hospedagem: 4 tables, 2016, finest grain municipal and capitals. Lodging
+      establishments (2011-2016): tourism capacity, no pathway to neurosurgical care.'
   sidra:PA:Lavouras permanentes:
     decision: exclude
-    why: 'IBGE Produção Agrícola Municipal, Lavouras permanentes: 1 table, 1974-2025, finest grain municipal, partial. Annual
-      municipal permanent-crop series: agricultural production and establishments: no pathway from farming structure to
-      the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the
-      Census urban share.'
+    why: 'IBGE Produção Agrícola Municipal, Lavouras permanentes: 1 table, 1974-2025, finest grain municipal (in some of
+      the studies'' places and years only 5,542 of 5,571 municipalities). Annual municipal permanent-crop series: agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:PA:Lavouras temporárias:
     decision: exclude
-    why: 'IBGE Produção Agrícola Municipal, Lavouras temporárias: 5 tables, 1974-2025, finest grain municipal, partial.
-      Annual municipal temporary-crop series: agricultural production and establishments: no pathway from farming structure
-      to the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is
-      the Census urban share.'
+    why: 'IBGE Produção Agrícola Municipal, Lavouras temporárias: 5 tables, 1974-2025, finest grain municipal (in some of
+      the studies'' places and years only 5,564 of 5,571 municipalities). Annual municipal temporary-crop series: agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:PA:Lavouras temporárias e permanentes:
     decision: exclude
-    why: 'IBGE Produção Agrícola Municipal, Lavouras temporárias e permanentes: 1 table, 1974-2025, finest grain municipal,
-      partial. Annual municipal crop area and output: agricultural production and establishments: no pathway from farming
-      structure to the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs
-      it, is the Census urban share.'
+    why: 'IBGE Produção Agrícola Municipal, Lavouras temporárias e permanentes: 1 table, 1974-2025, finest grain municipal
+      (in some of the studies'' places and years only 5,564 of 5,571 municipalities). Annual municipal crop area and output:
+      agricultural production and establishments: no pathway from farming structure to the incidence, referral, treatment
+      or payment of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:VS:Extração vegetal:
     decision: exclude
-    why: 'IBGE Produção da Extração Vegetal e da Silvicultura, Extração vegetal: 2 tables, 1986-2025, finest grain municipal,
-      partial. Annual plant-extraction output: agricultural production and establishments: no pathway from farming structure
-      to the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is
-      the Census urban share.'
+    why: 'IBGE Produção da Extração Vegetal e da Silvicultura, Extração vegetal: 2 tables, 1986-2025, finest grain municipal
+      (in some of the studies'' places and years only 5,362 of 5,571 municipalities). Annual plant-extraction output: agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:VS:Silvicultura:
     decision: exclude
-    why: 'IBGE Produção da Extração Vegetal e da Silvicultura, Silvicultura: 3 tables, 1986-2025, finest grain municipal,
-      partial. Annual forestry output: agricultural production and establishments: no pathway from farming structure to
-      the incidence, referral, treatment or payment of neurosurgical conditions; rurality, where a study needs it, is the
-      Census urban share.'
+    why: 'IBGE Produção da Extração Vegetal e da Silvicultura, Silvicultura: 3 tables, 1986-2025, finest grain municipal
+      (in some of the studies'' places and years only 3,802 of 5,571 municipalities). Annual forestry output: agricultural
+      production and establishments: no pathway from farming structure to the incidence, referral, treatment or payment
+      of neurosurgical conditions; rurality, where a study needs it, is the Census urban share.'
   sidra:D5:Geral:
     decision: exclude
     why: 'IBGE Áreas Urbanizadas do Brasil, Geral: 2 tables, 2019-2022, finest grain municipal. Urbanised areas and empty
       lots (2019-2022): built-up area mapping; urbanisation enters as the Census urban share.'
   sidra:IQ:Índices de preços:
     decision: exclude
-    why: 'IBGE Índice Nacional de Preços ao Consumidor Amplo 15, Índices de preços: 3 tables, 2006-2026, finest grain municipal,
-      partial. IPCA-15 monthly price index: the line deflates with the IPCA read through price_index as a series, not as
-      a place context; IPCA-15 is a mid-month preview of the same index.'
+    why: 'IBGE Índice Nacional de Preços ao Consumidor Amplo 15, Índices de preços: 3 tables, 2006-2026, finest grain municipal
+      (in some of the studies'' places and years only 2 of 5,565 municipalities). IPCA-15 monthly price index: the line
+      deflates with the IPCA read through price_index as a series, not as a place context; IPCA-15 is a mid-month preview
+      of the same index.'
   sidra:CD:Etnia:
     decision: exclude
     why: 'IBGE Censo Demográfico, Etnia: 1 table, 2022, finest grain state. Indigenous persons by ethnic group, state grain
@@ -1035,17 +1052,17 @@ contexts_considered:
       redundant with literacy at 15 and over, the adult measure the line uses where literacy enters.'
   sidra:CD:Aglomerado subnormal:
     decision: exclude
-    why: 'IBGE Censo Demográfico, Aglomerado subnormal: 20 tables, 2010, finest grain municipal, partial. 2010 residents
-      of informal settlements by literacy and amenities: area deprivation is read from CD:Rendimento and CD:Características
-      do domicílio, which hold 2010 and 2022.'
+    why: 'IBGE Censo Demográfico, Aglomerado subnormal: 20 tables, 2010, finest grain municipal for 323 of 5,565 municipalities.
+      2010 residents of informal settlements by literacy and amenities: area deprivation is read from CD:Rendimento and
+      CD:Características do domicílio, which hold 2010 and 2022.'
   sidra:CD:Atividade:
     decision: exclude
     why: 'IBGE Censo Demográfico, Atividade: 23 tables, 1991-2010, finest grain municipal. Economic activity of persons
       10+ (1991-2010): area socioeconomic position is read from CD:Rendimento (2010 and 2022).'
   sidra:CD:Características gerais dos indígenas:
     decision: exclude
-    why: 'IBGE Censo Demográfico, Características gerais dos indígenas: 1 table, 2010, finest grain municipal, partial.
-      Indigenous persons by location (2010): not modelled; race from the records.'
+    why: 'IBGE Censo Demográfico, Características gerais dos indígenas: 1 table, 2010, finest grain municipal for 4,480
+      of 5,565 municipalities. Indigenous persons by location (2010): not modelled; race from the records.'
   sidra:CD:Deficiência:
     decision: exclude
     why: 'IBGE Censo Demográfico, Deficiência: 12 tables, 2010, finest grain municipal. 2010 Census permanent disability
@@ -1056,8 +1073,8 @@ contexts_considered:
       daily travel, not travel to care, which the line measures from residence to treating hospital.'
   sidra:CD:Emigração:
     decision: exclude
-    why: 'IBGE Censo Demográfico, Emigração: 2 tables, 2010, finest grain municipal, partial. 2010 international emigrants:
-      no pathway to neurosurgical care.'
+    why: 'IBGE Censo Demográfico, Emigração: 2 tables, 2010, finest grain municipal for 5,156 of 5,565 municipalities. 2010
+      international emigrants: no pathway to neurosurgical care.'
   sidra:CD:Registro de nascimento:
     decision: exclude
     why: 'IBGE Censo Demográfico, Registro de nascimento: 3 tables, 2010, finest grain municipal. 2010 birth registration
@@ -1073,12 +1090,12 @@ contexts_considered:
   sidra:IU:População residente em áreas costeiras:
     decision: exclude
     why: 'IBGE Indicadores de Desenvolvimento Sustentável, População residente em áreas costeiras: 1 table, 2010, finest
-      grain municipal, partial. IDS 2010 population of coastal municipalities: no pathway.'
+      grain municipal for 403 of 5,565 municipalities. IDS 2010 population of coastal municipalities: no pathway.'
   sidra:IG:Índices de preços:
     decision: exclude
     why: 'IBGE Índice Nacional de Preços ao Consumidor Amplo Especial, Índices de preços: 1 table, 2006-2010, finest grain
-      municipal, partial. IPCA-E (2006-2010): a special-purpose quarterly variant of IPCA; the line''s deflator is the IPCA
-      series read through price_index.'
+      municipal for 2 of 5,565 municipalities. IPCA-E (2006-2010): a special-purpose quarterly variant of IPCA; the line''s
+      deflator is the IPCA series read through price_index.'
   sidra:IU:Organizações da Sociedade Civil:
     decision: exclude
     why: 'IBGE Indicadores de Desenvolvimento Sustentável, Organizações da Sociedade Civil: 2 tables, 2006-2010, finest
