@@ -15,6 +15,27 @@ contexts: [ans_tiss_hospital_events, ans_tiss_hospital_items, siops_health_spend
 # every context candidate of the scope decided from what its group holds (abnc2027_neuro papers/t10/contexts_considered.yml)
 line: abnc_neuro
 contexts_considered:
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 't10''s private comparison prices the SIGTAP 0403 procedures paid on AIHs against the same procedures in ANS TISS hospital items; outpatient TISS items are another setting (3 of the 131 0403 codes carry an outpatient value, R$ 18.85), so they would compare unlike episodes. Excluded for t10 (decided after the line''s S0 review R2).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Outpatient TISS events, with the beneficiary''s municipality: t10 compares fees per procedure nationally for hospital procedures and makes no population rate, so neither the outpatient setting nor the beneficiary''s residence enters it (line S0 review R2).'
+  field:cnes:teams:
+    decision: exclude
+    why: 'Primary care team coverage (ESF, eAB/eAP) bears on pathways into care, not on what the federal table pays per neurosurgical admission, t10''s quantity; no claim of t10 involves access through primary care (line S0 review R3).'
+  sidra:RC:Óbitos:
+    decision: exclude
+    why: 't10 uses death records only to link 30-day deaths after cranial surgery (SIM-DO, included) and to check the completeness of linkage fields; it makes no regional mortality gradient, so registry death counts as a coverage check do not enter (line S0 review R5).'
+  intake:srag:
+    decision: exclude
+    why: 't10''s claims rest on 2010/2012 against 2024 endpoints and code-level changes 2012-2024; the 2020-2022 pandemic years are not a contrast of the paper, and ICU payment is read from SIH itself, so SRAG ICU notifications do not enter (line S0 review R7).'
+  intake:health_regions:
+    decision: exclude
+    why: 'Override of the line''s include: t10 reports payment nationally, by state and by hospital legal nature; no health-region contrast is made (the unit is the procedure, the admission and the hospital).'
+  sidra:CD:Cor ou raça:
+    decision: exclude
+    why: 'Override of the line''s include: t10 makes no race-specific rate and no imputation of race; its unit is the procedure and its payment.'
   intake:ans:
     decision: exclude
     why: 't10''s unit is the procedure, the admission and the hospital (payment per AIH, by state and legal nature); no per-capita rate or population context enters it, so this group, relevant to a population study, is not used here. (draft note: ANS beneficiaries by municipality, age and sex, assistance coverage (December of each year): private-plan coverage by state and municipality (QT_BENEFICIARIO_ATIVO over population), the main private coverage measure.)'
