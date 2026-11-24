@@ -10,7 +10,7 @@ depth: standard               # survey, standard, deep or exhaustive: presets of
 # related: 3                   # related codes read beside the topic's own, strongest first (0: none)
 # persons: true                # the cohort scan over linked persons (deep and exhaustive)
 # download: 10                 # gigabytes the study may download (years held in the lake are free)
-contexts: [persons_low_income, population_urban, population_resident_census, ans_beneficiaries, cnes_neurosurgeons_professionals, cnes_equipment_ct_sus]   # decided 2026-11-23 (contexts_considered below)
+contexts: [persons_low_income, population_urban, population_resident_census, ans_beneficiaries, cnes_neurosurgeons_professionals, cnes_equipment_ct_sus, cnes_equipment_hemodynamics_xray_sus, cnes_interventional_radiologists_professionals, sim_deaths_ill_defined]   # decided 2026-11-23; the last three 2026-11-24 at S1 (abnc2027_neuro papers/t01/protocol.md)
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
 # every context candidate decided from what its group holds (abnc2027_neuro papers/t01/contexts_considered.yml)
@@ -82,3 +82,39 @@ contexts_considered:
   sidra:XN:Violência:
     decision: exclude
     why: 'PNS table at UF grain (waves 2013 and 2019): survey prevalence of a condition or behaviour with no direct pathway to aneurysm technique choice and no municipal or hospital grain.'
+  field:cnes:equipment:
+    decision: include
+    why: 'Used: SUS angiography suites (cnes_equipment_hemodynamics_xray_sus) by health region and year, the supply of the endovascular route in the model of who receives coiling (C2); SUS CT already included. Dialysis, EEG, mammography, MRI and slit-lamp counts have no pathway to aneurysm technique or outcome.'
+  field:cnes:professionals:
+    decision: include
+    why: 'Used: interventional radiologists (cnes_interventional_radiologists_professionals) beside the neurosurgeons already included, by health region and year: the endovascular and open workforce in C2. The other professions (community agents, nurses, ophthalmologists, orthopaedists, paediatricians, radiotherapists, infectologists, physicians overall) do not bear on which technique a treated aneurysm receives.'
+  field:records:SIM-DO:
+    decision: include
+    why: 'Used: the share of ill-defined underlying causes (sim_deaths_ill_defined) by municipality and year, the certification-quality rival of C5 (SAH deaths that reach treatment, by region). Garbage codes overlap it; deaths by residence are read from SIM records directly.'
+  field:cnes:beds:
+    decision: exclude
+    why: 'Municipal bed counts do not measure the treating hospital: ICU use is read from the stay itself (ICU days) and capability from the treating CNES (habilitation, volume). Residence-municipality beds have no pathway to technique choice beyond the supply fields included.'
+  field:cnes:facilities:
+    decision: exclude
+    why: 'Counts of facilities by type measure primary and outpatient supply; aneurysm treatment happens in a few hundred hospitals identified directly by CNES on the AIH.'
+  field:cnes:radiotherapy_machines:
+    decision: exclude
+    why: 'Radiotherapy units: no bearing on intracranial aneurysm treatment.'
+  field:intake:ans_tiss_hospital_items:
+    decision: exclude
+    why: 'Private-plan hospital items (TUSS) by provider: a private-sector series. The question is treatment paid by the SUS; private coverage enters as ans_beneficiaries.'
+  field:brdwgd:gaussian:
+    decision: exclude
+    why: 'Climate by municipality: seasonality of aneurysm rupture is outside the question (technique, its determinants and outcome, access); no t01 claim is temporal below the year.'
+  field:inmet:climate:
+    decision: exclude
+    why: 'Climate (station series): as field:brdwgd:gaussian, no claim below the year and no pathway to technique or outcome.'
+  field:brdwgd:climate_monthly:
+    decision: exclude
+    why: 'Monthly climate: as field:brdwgd:gaussian.'
+  field:brdwgd:precipitation_months:
+    decision: exclude
+    why: 'Precipitation months: as field:brdwgd:gaussian.'
+  field:brdwgd:temperature_months:
+    decision: exclude
+    why: 'Temperature months: as field:brdwgd:gaussian.'
