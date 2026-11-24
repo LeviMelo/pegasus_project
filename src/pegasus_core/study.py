@@ -215,7 +215,7 @@ class DeclarationError(ValueError):
     """A declaration that cannot be read, with every problem named."""
 
 
-def _line_decisions(path: Path, line: object) -> dict[str, dict]:
+def _line_decisions(path: Path, line: object, lines: Path | None = None) -> dict[str, dict]:
     """The context decisions a research line shares (``studies/lines/<line>.yml`` beside the declaration,
     ``contexts_considered`` in the declaration's form), each marked ``from: line:<line>``. Studies of one line share most
     of their data, so a candidate is decided once for the line, from what it holds; a study writes only what its topic
@@ -224,7 +224,7 @@ def _line_decisions(path: Path, line: object) -> dict[str, dict]:
 
     if not isinstance(line, str) or not line.strip():
         raise DeclarationError(f"line {line!r}: the name of a research line (studies/lines/<line>.yml)")
-    f = path.parent / "lines" / f"{line}.yml"
+    f = (lines or path.parent / "lines") / f"{line}.yml"
     if not f.exists():
         raise DeclarationError(f"line {line!r}: no {f}")
     doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
@@ -237,8 +237,9 @@ def _line_decisions(path: Path, line: object) -> dict[str, dict]:
     return {str(k): {**dict(v), "from": f"line:{line}"} for k, v in considered.items()}
 
 
-def load(path: str | Path) -> Declaration:
-    """Read and validate a study declaration (ARCHITECTURE §3.1). Every problem is reported at once."""
+def load(path: str | Path, lines: str | Path | None = None) -> Declaration:
+    """Read and validate a study declaration (ARCHITECTURE §3.1). Every problem is reported at once. ``lines``: the
+    directory of research-line files (default ``lines/`` beside the declaration), for a draft read from elsewhere."""
     import yaml
 
     path = Path(path)
@@ -357,7 +358,7 @@ def load(path: str | Path) -> Declaration:
     inherited: dict = {}
     if doc.get("line") is not None:
         try:
-            inherited = _line_decisions(path, doc["line"])
+            inherited = _line_decisions(path, doc["line"], Path(lines) if lines is not None else None)
         except DeclarationError as exc:
             problems.append(str(exc))
     if not isinstance(considered, dict):

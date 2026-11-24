@@ -13,597 +13,65 @@ contexts: auto                 # municipal contexts related to the rates (auto: 
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
 # context candidates decided from what each group holds (abnc2027_neuro analysis/s2_contexts.py)
+line: abnc_neuro
 contexts_considered:
-  sidra:EO:Biodiversidade:
-    decision: exclude
-    why: 'biodiversity knowledge indices by taxonomic group: no bearing on stereotactic radiosurgery in people'
-  sidra:CL:Empresas e outras organizações:
-    decision: exclude
-    why: 'business registers (firms, local units, employees, wages): economic structure is carried by the declared
-      GDP per capita and income fields'
-  sidra:CL:Unidades locais:
-    decision: exclude
-    why: 'business registers (firms, local units, employees, wages): economic structure is carried by the declared
-      GDP per capita and income fields'
-  sidra:CA:Agroindústria rural:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  'sidra:CA:Características dos estabelecimentos agropecuários ':
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  'sidra:CA:Características dos produtores agropecuários ':
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Confederação da Agricultura e Pecuária do Brasil (CNA):
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Extração vegetal:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Floricultura:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Horticultura:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Lavouras permanentes:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Lavouras temporárias:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Movimentação financeira:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Pecuária:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Pessoal ocupado:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CA:Silvicultura:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:CD:Aglomerado subnormal:
-    decision: exclude
-    why: 'Census 2022 ''Aglomerado subnormal'' tables (as named by IBGE): not in this paper''s models: socioeconomic
-      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
-      both included from their own groups, and age enters through standardisation'
-  sidra:CD:Atividade:
-    decision: exclude
-    why: 'Census 2022 ''Atividade'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
-      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
-      from their own groups, and age enters through standardisation'
   sidra:CD:Características do domicílio:
     decision: exclude
-    why: 'Census 2022 ''Características do domicílio'' tables (as named by IBGE): not in this paper''s models: socioeconomic
-      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
-      both included from their own groups, and age enters through standardisation'
-  sidra:CD:Características gerais dos indígenas:
-    decision: exclude
-    why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
-      are not modelled separately'
-  sidra:CD:Cor ou raça:
-    decision: exclude
-    why: 'Census 2022 ''Cor ou raça'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
-      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
-      from their own groups, and age enters through standardisation'
-  sidra:CD:Deficiência:
-    decision: exclude
-    why: 'Census disability prevalence by type: not specific to stereotactic radiosurgery and not a confounder of
-      access in this design'
-  sidra:CD:Deslocamento:
-    decision: exclude
-    why: 'commuting to work or school: travel to care is measured directly as distance to the services'
-  sidra:CD:Domicílios:
-    decision: exclude
-    why: 'Census 2022 ''Domicílios'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
-      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
-      from their own groups, and age enters through standardisation'
+    why: 'Census 2022 ''Características do domicílio'' tables (as named by IBGE): not in this paper''s models: socioeconomic position enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included from their own groups, and age enters through standardisation'
   sidra:CD:Educação:
     decision: include
-    why: municipal covariate of the paper's models (literacy 15+; lib/covariates.py), built from the declared fields
-      persons_15_plus, persons_15_plus_literate
-  sidra:CD:Emigração:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Faces de logradouros:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Famílias:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Fecundidade:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Geral:
-    decision: exclude
-    why: 'Census 2022 ''Geral'' tables (as named by IBGE): not in this paper''s models: socioeconomic position enters
-      as the Census low-income share (and literacy where used), urbanisation as the urban share, both included from
-      their own groups, and age enters through standardisation'
-  sidra:CD:Indicadores demográficos:
-    decision: exclude
-    why: 'Census 2022 ''Indicadores demográficos'' tables (as named by IBGE): not in this paper''s models: socioeconomic
-      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
-      both included from their own groups, and age enters through standardisation'
-  sidra:CD:Migração:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Migração e deslocamento:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Mortalidade:
-    decision: exclude
-    why: 'household-reported deaths in the 2022 Census: SIM certificates are the death source'
-  sidra:CD:Nupcialidade:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Nupcialidade e fecundidade:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
+    why: municipal covariate of the paper's models (literacy 15+; lib/covariates.py), built from the declared fields persons_15_plus, persons_15_plus_literate
   sidra:CD:Pessoas:
     decision: include
-    why: municipal covariate of the paper's models (literacy 15+, urban share; lib/covariates.py), built from the
-      declared fields persons_15_plus, persons_15_plus_literate, population_resident_census, population_urban
-  sidra:CD:População indígena:
-    decision: exclude
-    why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
-      are not modelled separately'
-  sidra:CD:População quilombola:
-    decision: exclude
-    why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
-      are not modelled separately'
-  sidra:CD:Registro civil:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Registro de nascimento:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:CD:Religião:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
+    why: municipal covariate of the paper's models (literacy 15+, urban share; lib/covariates.py), built from the declared fields persons_15_plus, persons_15_plus_literate, population_resident_census, population_urban
   sidra:CD:Rendimento:
     decision: include
-    why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared
-      fields persons_income_universe, persons_low_income
-  sidra:CD:Terras indígenas:
-    decision: exclude
-    why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
-      are not modelled separately'
-  sidra:CD:Território:
-    decision: exclude
-    why: 'Census 2022 ''Território'' tables (as named by IBGE): not in this paper''s models: socioeconomic position
-      enters as the Census low-income share (and literacy where used), urbanisation as the urban share, both included
-      from their own groups, and age enters through standardisation'
-  sidra:CD:Territórios quilombolas:
-    decision: exclude
-    why: 'Indigenous and quilombola populations and territories: race enters from the records; these small populations
-      are not modelled separately'
-  sidra:CD:Trabalho e rendimento:
-    decision: exclude
-    why: 'Census 2022 ''Trabalho e rendimento'' tables (as named by IBGE): not in this paper''s models: socioeconomic
-      position enters as the Census low-income share (and literacy where used), urbanisation as the urban share,
-      both included from their own groups, and age enters through standardisation'
-  sidra:CD:Trabalho infantil:
-    decision: exclude
-    why: 'Census migration, fertility, marriage, family, religion, birth registration, street-face and child-labour
-      tables: no pathway to stereotactic radiosurgery'
-  sidra:EL:Geral:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:D9:Geral:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:XF:Geral:
-    decision: exclude
-    why: 'population estimates: denominators come from POPSVS, already declared'
-  sidra:FP:Entidades sem fins lucrativos:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:FP:Fundações e Associações sem fins lucrativos:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:IU:População residente em áreas costeiras:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:C2:Cidades e comunidades sustentáveis:
-    decision: exclude
-    why: an SDG air-quality indicator (particulate level) for urban areas, not by municipality and year
-  sidra:RC:Casamentos:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:RC:Divórcios:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:RC:Nascidos vivos:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:RC:Separações:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:RC:Óbitos:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:RC:Óbitos fetais:
-    decision: exclude
-    why: 'civil-registry marriages, divorces, births and deaths: SIM and SINASC are the vital sources'
-  sidra:SB:Abastecimento de água:
-    decision: exclude
-    why: 'water supply and sewerage: no pathway to stereotactic radiosurgery'
-  sidra:SB:Esgotamento sanitário:
-    decision: exclude
-    why: 'water supply and sewerage: no pathway to stereotactic radiosurgery'
+    why: municipal covariate of the paper's models (low-income share; lib/covariates.py), built from the declared fields persons_income_universe, persons_low_income
   sidra:XN:Acidentes:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
-  sidra:XN:Alimentação:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
-  sidra:XN:Atividade física:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
-  sidra:XN:Características do domicílio e serviços domiciliares de saúde:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
-  sidra:XN:Cobertura de plano de saúde:
-    decision: exclude
-    why: 'PNS plan coverage by state: private coverage enters as the declared municipal ANS coverage share'
-  sidra:XN:Deficiência:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:XN:Doenças crônicas:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
-  sidra:XN:Higiene e saúde bucal:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:XN:Idosos:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
-  sidra:XN:Percepção do estado de saúde:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
-  sidra:XN:Saúde da mulher:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
-  sidra:XN:Tabagismo:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:XN:Uso de serviço de saúde:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:XN:Uso de álcool:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
-  sidra:XN:Vida sexual:
-    decision: exclude
-    why: 'PNS behaviours and conditions by state (diet, activity, oral health, women''s health, sexual life, self-rated
-      health, pets, disability, tobacco): risk factors of incidence, not of the care pathway of stereotactic radiosurgery'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:XN:Violência:
     decision: exclude
-    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state:
-      not on the pathway of stereotactic radiosurgery in this paper'
+    why: 'PNS accidents, alcohol, violence, older adults'' limitations, service use and chronic diseases by state: not on the pathway of stereotactic radiosurgery in this paper'
   sidra:AA:Acidentes, violência e segurança:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Alimentação:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Aquisição de produtos alimentícios:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Asma:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Atividade física:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Características básicas:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Características da escola:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Comportamento alimentar:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Contexto familiar:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Contexto socioeconômico:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Equipamentos de ensino:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Escolaridade materna e paterna:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Higiene e saúde bucal:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Imagem corporal:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Informações gerais:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Saúde mental:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Saúde sexual e reprodutiva:
     decision: exclude
     why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
   sidra:AA:Segurança:
     decision: exclude
     why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Situações em casa e na escola:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Tabaco na escola:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Uso de cigarro:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Uso de drogas:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Uso de serviço de saúde:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:AA:Uso de álcool:
-    decision: exclude
-    why: 'PeNSE: behaviours of 9th-grade schoolchildren, not the population of stereotactic radiosurgery'
-  sidra:B5:Características adicionais do mercado de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Características do domicílio:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Características gerais da população:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Deficiência:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Educação:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
   sidra:B5:Furto e roubo:
     decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Mercado de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:B5:Outras formas de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:DD:Rendimento:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:DD:Trabalho:
-    decision: exclude
-    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried
-      by the declared Census fields at municipal grain'
-  sidra:PP:Pecuária:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:ES:Estoques agropecuários:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:PM:Geral:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:PM:Informações básicas municipais:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
-  sidra:SH:Hospedagem:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
+    why: 'PNAD Contínua labour, income, housing, disability and victimisation by state: income and work are carried by the declared Census fields at municipal grain'
   sidra:IO:Contas Nacionais e Regionais:
     decision: include
-    why: municipal covariate of the paper's models (GDP per capita; lib/covariates.py), built from the declared
-      fields gdp
-  sidra:PA:Lavouras permanentes:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:PA:Lavouras temporárias:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:PA:Lavouras temporárias e permanentes:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:VS:Extração vegetal:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:VS:Silvicultura:
-    decision: exclude
-    why: 'agricultural establishments, crops, livestock, forestry, stocks and pollinators: no pathway to stereotactic
-      radiosurgery; rurality enters through the urban share'
-  sidra:D5:Geral:
-    decision: exclude
-    why: 'individual micro-entrepreneurs, non-profit entities, lodging, coastal municipalities, urbanised areas
-      and municipal administration profiles: no health-service variable for stereotactic radiosurgery; supply comes
-      from CNES'
+    why: municipal covariate of the paper's models (GDP per capita; lib/covariates.py), built from the declared fields gdp
   sidra:PC:Índices de preços:
     decision: exclude
     why: 'national price indices: used as deflators through pegasus_data price_index, not as a place context'
   sidra:IA:Índices de preços:
     decision: exclude
     why: 'national price indices: used as deflators through pegasus_data price_index, not as a place context'
-  sidra:IQ:Índices de preços:
-    decision: exclude
-    why: 'national price indices: used as deflators through pegasus_data price_index, not as a place context'
-  sidra:IG:Índices de preços:
-    decision: exclude
-    why: 'national price indices: used as deflators through pegasus_data price_index, not as a place context'
   intake:ans:
     decision: include
-    why: municipal covariate of the paper's models (private-plan coverage share; lib/covariates.py), built from
-      the declared fields ans_beneficiaries
-  intake:ans_beneficiaries_municipal:
-    decision: exclude
-    why: 'municipal beneficiaries by segment: the declared private-coverage share already carries them'
-  intake:ans_tiss_amb_cons:
-    decision: exclude
-    why: 'private outpatient events (TISS): stereotactic radiosurgery is a SUS question here and TISS has no person
-      identifier'
+    why: municipal covariate of the paper's models (private-plan coverage share; lib/covariates.py), built from the declared fields ans_beneficiaries
   intake:ans_tiss_hosp_cons:
     decision: exclude
     why: 'private hospital events (TISS): not used for stereotactic radiosurgery'
-  intake:bnafar:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:census2010_domicilios:
-    decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
-  intake:census2010_emigracao:
-    decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
-  intake:census2010_mortalidade:
-    decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
-  intake:census2010_pessoas:
-    decision: exclude
-    why: '2010 Census microdata: the Census 2022 is used; 2010 persons still landing'
   intake:health_regions:
     decision: exclude
-    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as
-      a context field
-  intake:inep:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:pni_doses:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:s2id:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:sies:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
+    why: health-region membership is read through pegasus_data geography (memberships) as analysis units, not as a context field
   intake:siops_municipal:
     decision: exclude
-    why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): stereotactic radiosurgery
-      is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not
-      measure'
-  intake:sisagua_control_basic:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_control_other:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_control_outside_standard:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_supply_population:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_surveillance_basic:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_surveillance_cyanobacteria:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_surveillance_other:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sisagua_tanker_population:
-    decision: exclude
-    why: 'drinking-water quality and supply: no pathway to stereotactic radiosurgery'
-  intake:sngpc_compounded:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:sngpc_industrialized:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:srag:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:yellow_fever_epizootics:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
-  intake:yellow_fever_humans:
-    decision: exclude
-    why: 'pharmacy stock, school census, vaccination, disasters, strategic inputs, controlled-drug sales, SARI and
-      yellow fever: no pathway to stereotactic radiosurgery'
+    why: 'SIOPS municipal health spending (total, own resources, personnel, SUS transfers): stereotactic radiosurgery is paid by federal SUS production payment (AIH/APAC) at regional centres, which municipal spending does not measure'

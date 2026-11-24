@@ -13,3 +13,4 @@ depth: standard               # survey, standard, deep or exhaustive: presets of
 contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
+line: abnc_neuro

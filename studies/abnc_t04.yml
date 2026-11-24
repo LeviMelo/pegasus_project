@@ -14,988 +14,110 @@ contexts: [persons_low_income, population_urban, population_resident_census, ans
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
 # every context candidate decided from what its group holds (abnc2027_neuro papers/t04/contexts_considered.yml)
+line: abnc_neuro
 contexts_considered:
   intake:ans:
     decision: include
-    why: 'Used: private medical-hospital beneficiaries (field ans_beneficiaries, December, municipality, over POPSVS), the private_coverage covariate of the admission-outcome
-      models (shunt, death within the stay) and of the BYM2 context model of admission rates (lib/covariates.py, residence municipality of the admission year; 2012-2020
-      take the 2021 stock, flagged).'
-  intake:ans_beneficiaries_municipal:
-    decision: exclude
-    why: 'Quarterly ANS beneficiary counts (all and dental) by municipality, contract type, age and sex: the December medical-hospital stock (ans_beneficiaries) already
-      carries private coverage; the dental series and quarterly detail have no bearing on a congenital anomaly cohort.'
-  intake:ans_tiss_amb_cons:
-    decision: exclude
-    why: 'ANS TISS private outpatient events by provider UF: no procedure or diagnosis code for spina bifida follow-up or imaging; private-sector care of these children
-      is not identifiable (stated as a limitation; CIHA has no postcode).'
+    why: 'Used: private medical-hospital beneficiaries (field ans_beneficiaries, December, municipality, over POPSVS), the private_coverage covariate of the admission-outcome models (shunt, death within the stay) and of the BYM2 context model of admission rates (lib/covariates.py, residence municipality of the admission year; 2012-2020 take the 2021 stock, flagged).'
   intake:ans_tiss_hosp_cons:
     decision: exclude
-    why: 'ANS TISS private hospital events: CID filled by group only, too sparse for Q05 and hydrocephalus in children, so private closures and shunts cannot be counted;
-      private coverage enters as ans_beneficiaries.'
-  intake:bnafar:
-    decision: exclude
-    why: 'Medicine stock positions in BNAFAR/Horus by CNES and municipality (from 2025-03): pharmaceutical stock, outside the 2012-2023 period, not neurosurgical
-      supply.'
-  intake:census2010_domicilios:
-    decision: exclude
-    why: 'Census 2010 household microdata (housing, amenities, goods): a decade before the study end; census 2022 tables give the municipal covariates in use.'
-  intake:census2010_emigracao:
-    decision: exclude
-    why: 'Census 2010 international emigrants: migration flow, no bearing on spina bifida at birth or its care.'
-  intake:census2010_mortalidade:
-    decision: exclude
-    why: 'Census 2010 deaths of household members: self-reported household deaths, superseded by SIM, which the infant-death cohort links to SINASC.'
-  intake:census2010_pessoas:
-    decision: exclude
-    why: 'Census 2010 person microdata (age, education, income, 245 columns, municipality): a 2010 baseline superseded by census 2022 income and literacy, which cover
-      the births of 2012-2023 with one reference; maternal schooling of each birth comes from SINASC.'
+    why: 'ANS TISS private hospital events: CID filled by group only, too sparse for Q05 and hydrocephalus in children, so private closures and shunts cannot be counted; private coverage enters as ans_beneficiaries.'
   intake:health_regions:
     decision: include
-    why: 'Used: municipality to health region and macroregion crosswalk (CODIGO_REGIAO_SAUDE, CODIGO_MACRORREGIAO_SAUDE), the grain of the prevalence-at-birth map,
-      the health-region variation of admission ratios, the health-region random intercept of the shunt model, the treated-outside-home-region flag and the per-100,000
-      supply denominators.'
-  intake:inep:
-    decision: exclude
-    why: 'INEP school census enrolments: schooling of children and adolescents by school, not maternal education at the birth; maternal schooling is recorded in SINASC
-      and area literacy from census 2022.'
-  intake:pni_doses:
-    decision: exclude
-    why: 'National immunisation programme doses by residence: vaccination coverage (the maternal-condition field concerns vaccines, not folic acid); no pathway to
-      neural tube closure or to closure and shunt outcomes.'
-  intake:s2id:
-    decision: exclude
-    why: 'Civil-defence disaster records (S2iD): floods and droughts by municipality; rare events, not a systematic exposure or access variable for national birth
-      and admission rates.'
-  intake:sies:
-    decision: exclude
-    why: 'SIES strategic-input distribution (vaccines, serums): immunisation logistics, no bearing on spina bifida.'
+    why: 'Used: municipality to health region and macroregion crosswalk (CODIGO_REGIAO_SAUDE, CODIGO_MACRORREGIAO_SAUDE), the grain of the prevalence-at-birth map, the health-region variation of admission ratios, the health-region random intercept of the shunt model, the treated-outside-home-region flag and the per-100,000 supply denominators.'
   intake:siops_municipal:
     decision: exclude
-    why: 'SIOPS municipal health spending (own resources, transfers, personnel, tax base): municipal declarations that do not fund paediatric neurosurgery, which
-      is delivered by a few state and university referral hospitals reached through the health region; supply is read from CNES and access from distance to the nearest
-      accredited unit and the outside-region flag.'
-  intake:sisagua_control_basic:
-    decision: exclude
-    why: 'SISAGUA drinking-water control analyses by municipality: distribution-system sampling counts, not an exposure of mothers in the periconceptional window;
-      no established pathway to spina bifida at birth or to its care; sanitation context is not a covariate of this paper.'
-  intake:sisagua_control_other:
-    decision: exclude
-    why: 'SISAGUA drinking-water control analyses by municipality: distribution-system sampling counts, not an exposure of mothers in the periconceptional window;
-      no established pathway to spina bifida at birth or to its care; sanitation context is not a covariate of this paper.'
-  intake:sisagua_control_outside_standard:
-    decision: exclude
-    why: 'SISAGUA drinking-water control analyses by municipality: distribution-system sampling counts, not an exposure of mothers in the periconceptional window;
-      no established pathway to spina bifida at birth or to its care; sanitation context is not a covariate of this paper.'
-  intake:sisagua_supply_population:
-    decision: exclude
-    why: 'SISAGUA population supplied by water system: water logistics, no pathway to this condition.'
-  intake:sisagua_surveillance_basic:
-    decision: exclude
-    why: 'SISAGUA drinking-water surveillance analyses by municipality: sampling counts of water quality, not maternal exposure; no pathway to spina bifida at birth
-      or to its care.'
-  intake:sisagua_surveillance_cyanobacteria:
-    decision: exclude
-    why: 'SISAGUA drinking-water surveillance analyses by municipality: sampling counts of water quality, not maternal exposure; no pathway to spina bifida at birth
-      or to its care.'
-  intake:sisagua_surveillance_other:
-    decision: exclude
-    why: 'SISAGUA drinking-water surveillance analyses by municipality: sampling counts of water quality, not maternal exposure; no pathway to spina bifida at birth
-      or to its care.'
-  intake:sisagua_tanker_population:
-    decision: exclude
-    why: 'SISAGUA tanker-truck supply population: water logistics, no pathway to this condition.'
-  intake:sngpc_compounded:
-    decision: exclude
-    why: 'ANVISA SNGPC compounded-medicine sales by municipality and active ingredient (2019-2021 in the lake): a sales record with no prescribing link, so folic-acid
-      supplementation cannot be measured, and 2012-2018 is absent.'
-  intake:sngpc_industrialized:
-    decision: exclude
-    why: 'ANVISA SNGPC industrialised sales of controlled medicines and antimicrobials (2019-2021): folic acid is not a controlled substance and is not expected there;
-      antiepileptic sales are not exposure in pregnancy, and the years do not cover the birth cohort.'
-  intake:srag:
-    decision: exclude
-    why: 'SARI surveillance cases: respiratory infection burden, with no pathway to prevalence of spina bifida at birth; the pandemic years enter as year terms.'
-  intake:yellow_fever_epizootics:
-    decision: exclude
-    why: 'Yellow-fever epizootics in non-human primates: infectious surveillance, no bearing.'
-  intake:yellow_fever_humans:
-    decision: exclude
-    why: 'Yellow-fever human cases and deaths: infectious surveillance, no bearing.'
+    why: 'SIOPS municipal health spending (own resources, transfers, personnel, tax base): municipal declarations that do not fund paediatric neurosurgery, which is delivered by a few state and university referral hospitals reached through the health region; supply is read from CNES and access from distance to the nearest accredited unit and the outside-region flag.'
   sidra:AA:Acidentes, violência e segurança:
     decision: exclude
-    why: 'School Health Survey (PeNSE, Acidentes, violência e segurança): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy
-      care, and not a municipal covariate of births.'
-  sidra:AA:Alimentação:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Alimentação): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not
-      a municipal covariate of births.'
-  sidra:AA:Aquisição de produtos alimentícios:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Aquisição de produtos alimentícios): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy
-      care, and not a municipal covariate of births.'
-  sidra:AA:Asma:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Asma): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not a municipal
-      covariate of births.'
-  sidra:AA:Atividade física:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Atividade física): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and
-      not a municipal covariate of births.'
-  sidra:AA:Características básicas:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Características básicas): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Características da escola:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Características da escola): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy
-      care, and not a municipal covariate of births.'
-  sidra:AA:Comportamento alimentar:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Comportamento alimentar): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Contexto familiar:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Contexto familiar): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and
-      not a municipal covariate of births.'
-  sidra:AA:Contexto socioeconômico:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Contexto socioeconômico): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Equipamentos de ensino:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Equipamentos de ensino): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Escolaridade materna e paterna:
-    decision: exclude
-    why: 'PeNSE pupils'' reports of their parents'' schooling (9th graders, sample, state and capital grain): not the schooling of the mothers of the 2012-2023 births,
-      which is recorded individually in SINASC (ESCMAE2010).'
-  sidra:AA:Higiene e saúde bucal:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Higiene e saúde bucal): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Imagem corporal:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Imagem corporal): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and
-      not a municipal covariate of births.'
-  sidra:AA:Imagem corporal, atitude em relação ao peso corporal e estado nutricional:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Imagem corporal, atitude em relação ao peso corporal e estado nutricional): 9th-grade pupils aged about 13-17 in school; no
-      data on infants, mothers at birth or pregnancy care, and not a municipal covariate of births.'
-  sidra:AA:Informações gerais:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Informações gerais): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and
-      not a municipal covariate of births.'
-  sidra:AA:Saúde mental:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Saúde mental): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not
-      a municipal covariate of births.'
-  sidra:AA:Saúde sexual e reprodutiva:
-    decision: exclude
-    why: 'PeNSE adolescent sexual and reproductive behaviour (contraception, first intercourse), 9th-grade pupils, sample: adolescent behaviour in school, not pregnancy
-      planning or periconceptional folic acid among the mothers of the cohort.'
+    why: 'School Health Survey (PeNSE, Acidentes, violência e segurança): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not a municipal covariate of births.'
   sidra:AA:Segurança:
     decision: exclude
-    why: 'School Health Survey (PeNSE, Segurança): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not a
-      municipal covariate of births.'
-  sidra:AA:Situações em casa e na escola:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Situações em casa e na escola): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy
-      care, and not a municipal covariate of births.'
-  sidra:AA:Tabaco na escola:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Tabaco na escola): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and
-      not a municipal covariate of births.'
-  sidra:AA:Uso de cigarro:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Uso de cigarro): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not
-      a municipal covariate of births.'
-  sidra:AA:Uso de drogas:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Uso de drogas): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not
-      a municipal covariate of births.'
-  sidra:AA:Uso de serviço de saúde:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Uso de serviço de saúde): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care,
-      and not a municipal covariate of births.'
-  sidra:AA:Uso de álcool:
-    decision: exclude
-    why: 'School Health Survey (PeNSE, Uso de álcool): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not
-      a municipal covariate of births.'
-  sidra:B5:Características adicionais do mercado de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua annual (labour-market extras): household sample with Federation-unit grain at best; income and deprivation come from census 2022 and the ANS
-      coverage at municipal grain.'
-  sidra:B5:Características do domicílio:
-    decision: exclude
-    why: 'PNAD Contínua annual (household characteristics): household sample with Federation-unit grain at best; census 2022 household tables are municipal.'
-  sidra:B5:Características gerais da população:
-    decision: exclude
-    why: 'PNAD Contínua annual (population by sex and age): household sample with Federation-unit grain at best; POPSVS gives municipal age-sex denominators, including
-      residents under one year for the admission rates.'
-  sidra:B5:Deficiência:
-    decision: exclude
-    why: 'PNAD Contínua annual (disability, 2022): household sample with Federation-unit grain at best; disability of the general population, not a covariate of a
-      birth anomaly; the paper measures the condition directly in SINASC and SIH.'
-  sidra:B5:Educação:
-    decision: exclude
-    why: 'PNAD Contínua annual (education): household sample with Federation-unit grain at best; adult educational attainment by state; maternal schooling of each
-      birth is in SINASC and area literacy from census 2022.'
+    why: 'School Health Survey (PeNSE, Segurança): 9th-grade pupils aged about 13-17 in school; no data on infants, mothers at birth or pregnancy care, and not a municipal covariate of births.'
   sidra:B5:Furto e roubo:
     decision: exclude
     why: 'PNAD Contínua annual (theft and robbery victimisation): household sample with Federation-unit grain at best; crime context, no link to this condition.'
-  sidra:B5:Mercado de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua annual (labour market): household sample with Federation-unit grain at best; the economic context is carried by the census low-income share.'
-  sidra:B5:Outras formas de trabalho:
-    decision: exclude
-    why: 'PNAD Contínua annual (other forms of work (unpaid, care)): household sample with Federation-unit grain at best; no bearing on this condition.'
-  sidra:C2:Cidades e comunidades sustentáveis:
-    decision: exclude
-    why: 'One table: mean annual PM2.5; air pollution has no established role in spina bifida prevalence and the table has no municipal series over the birth years.'
-  sidra:CA:Agroindústria rural:
-    decision: exclude
-    why: 'Agricultural census (Agroindústria rural): farm structure, no relation to health-service supply or to the children studied.'
-  'sidra:CA:Características dos estabelecimentos agropecuários ':
-    decision: exclude
-    why: 'Agricultural census 2017 (and 2006): establishment counts by type, including pesticide use, at municipal grain: an ecological pesticide-to-neural-tube-defect
-      reading would rest on farm holdings in two census years, not on maternal residence or exposure, and is not a question of this paper; not used.'
-  'sidra:CA:Características dos produtores agropecuários ':
-    decision: exclude
-    why: 'Agricultural census 2017 (and 2006): establishment counts by type, including pesticide use, at municipal grain: an ecological pesticide-to-neural-tube-defect
-      reading would rest on farm holdings in two census years, not on maternal residence or exposure, and is not a question of this paper; not used.'
-  sidra:CA:Confederação da Agricultura e Pecuária do Brasil (CNA):
-    decision: exclude
-    why: 'Agricultural census (Confederação da Agricultura e Pecuária do Brasil (CNA)): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Extração vegetal:
-    decision: exclude
-    why: 'Agricultural census (Extração vegetal): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Floricultura:
-    decision: exclude
-    why: 'Agricultural census (Floricultura): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Horticultura:
-    decision: exclude
-    why: 'Agricultural census (Horticultura): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Lavouras permanentes:
-    decision: exclude
-    why: 'Agricultural census (Lavouras permanentes): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Lavouras temporárias:
-    decision: exclude
-    why: 'Agricultural census (Lavouras temporárias): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Movimentação financeira:
-    decision: exclude
-    why: 'Agricultural census (Movimentação financeira): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Pecuária:
-    decision: exclude
-    why: 'Agricultural census (Pecuária): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Pessoal ocupado:
-    decision: exclude
-    why: 'Agricultural census (Pessoal ocupado): farm structure, no relation to health-service supply or to the children studied.'
-  sidra:CA:Silvicultura:
-    decision: exclude
-    why: 'Agricultural census (Silvicultura): farm structure, no relation to health-service supply or to the children studied.'
   sidra:CD:Características do domicílio:
     decision: exclude
-    why: 'Census 2022 household tables (water, sewer, waste, bathroom): the sewer share is built in lib/covariates.py but not read by this paper''s models; deprivation
-      enters through the low-income and urban shares, and a sanitation pathway to neural tube closure is not established.'
-  sidra:CD:Cor ou raça:
-    decision: exclude
-    why: 'Census 2022 colour or race shares: the newborn''s race is read individually from SINASC (RACACOR) as a 2012-2022 sensitivity, and an area share would duplicate
-      it at a coarser grain.'
-  sidra:CD:Domicílios:
-    decision: exclude
-    why: 'Census 2022 household counts by species and selected sectors: no content on income, access, services or births.'
+    why: 'Census 2022 household tables (water, sewer, waste, bathroom): the sewer share is built in lib/covariates.py but not read by this paper''s models; deprivation enters through the low-income and urban shares, and a sanitation pathway to neural tube closure is not established.'
   sidra:CD:Educação:
     decision: exclude
     why: Maternal schooling is modelled at the individual level from SINASC; an area literacy term would duplicate it at a coarser grain; not used.
-  sidra:CD:Faces de logradouros:
-    decision: exclude
-    why: 'Census street-block faces in selected sectors: urbanism, not a health or demand variable.'
-  sidra:CD:Famílias:
-    decision: exclude
-    why: 'Census family types: household structure, no demand, supply or access variable for this condition.'
-  sidra:CD:Fecundidade:
-    decision: exclude
-    why: 'Census fertility of women (children born, by schooling and age, 2010 and 2022): a census-year area measure of parity, while the paper holds maternal age,
-      schooling and the births themselves for every year from SINASC; not used.'
-  sidra:CD:Geral:
-    decision: exclude
-    why: 'Census 2022 mixed tables (labour force, religion, quilombola households, establishments in selected sectors): nothing on income, schooling or services that
-      the groups already included do not hold more completely.'
-  sidra:CD:Indicadores demográficos:
-    decision: exclude
-    why: 'One table: ageing index and sex ratio of favela residents only; the paper''s denominators are births and infant residents (POPSVS).'
-  sidra:CD:Migração:
-    decision: exclude
-    why: 'Census migration and nationality: no link to prevalence at birth; care-seeking flows come from SIH residence against hospital municipality.'
-  sidra:CD:Migração e deslocamento:
-    decision: exclude
-    why: 'Census persons who lived outside the municipality: migration history, not care-seeking flows, which are measured from SIH.'
-  sidra:CD:Mortalidade:
-    decision: exclude
-    why: 'One table: census 2022 deaths of former household members, self-reported household mortality; infant deaths come from SIM linked to SINASC.'
-  sidra:CD:Nupcialidade:
-    decision: exclude
-    why: 'Census marital status: no bearing on this condition.'
-  sidra:CD:Nupcialidade e fecundidade:
-    decision: exclude
-    why: 'Census marriage and fertility: no bearing beyond maternal age and the births already read from SINASC.'
   sidra:CD:Pessoas:
     decision: include
-    why: 'Used: census 2022 urban share (population_urban over population_resident_census, municipality), a covariate of the admission-outcome models and of the BYM2
-      context model; the age tables are not read, infant denominators come from POPSVS.'
-  sidra:CD:População indígena:
-    decision: exclude
-    why: 'Census indigenous population: a narrow subgroup, not a municipal covariate of national birth and admission rates; indigenous mothers are a subject of their
-      own.'
-  sidra:CD:População quilombola:
-    decision: exclude
-    why: 'Census quilombola population: a narrow subgroup, not a municipal covariate of national rates.'
-  sidra:CD:Registro civil:
-    decision: exclude
-    why: 'Census birth registration of children up to 5 years (2010, 2022): completeness of civil registration, whereas this paper counts births from SINASC and discusses
-      the recorded-anomaly lower bound as recording, not registration.'
-  sidra:CD:Religião:
-    decision: exclude
-    why: 'Census religion: no bearing on prevalence at birth or on care.'
+    why: 'Used: census 2022 urban share (population_urban over population_resident_census, municipality), a covariate of the admission-outcome models and of the BYM2 context model; the age tables are not read, infant denominators come from POPSVS.'
   sidra:CD:Rendimento:
     decision: include
-    why: 'Used: census 2022 low-income share (persons_low_income over persons_income_universe, municipality), the income covariate behind the income tertile of the
-      closure, shunt and death models and a term of the BYM2 context model.'
-  sidra:CD:Terras indígenas:
-    decision: exclude
-    why: 'Census indigenous lands: a narrow subgroup outside the municipal covariates.'
-  sidra:CD:Território:
-    decision: exclude
-    why: 'Census 2022 area, density and favela counts: density duplicates the urban share and access is measured directly as distance to the nearest accredited unit.'
-  sidra:CD:Territórios quilombolas:
-    decision: exclude
-    why: 'Census quilombola territories: a narrow subgroup, not a municipal covariate.'
-  sidra:CL:Empresas e outras organizações:
-    decision: exclude
-    why: 'Central business register, firms by CNAE section: business structure, no health-supply variable beyond CNES.'
-  sidra:CL:Unidades locais:
-    decision: exclude
-    why: 'Central business register, local units: business structure, no health-supply variable beyond CNES.'
-  sidra:D5:Geral:
-    decision: exclude
-    why: 'Urbanised areas: land cover of urban lots, not a service or demand variable; the urban share is already used.'
-  sidra:D9:Geral:
-    decision: exclude
-    why: 'Individual microentrepreneur registrations: business statistics, no health content.'
-  sidra:DD:Rendimento:
-    decision: exclude
-    why: 'PNAD Contínua quarterly mean earnings of the employed: state-quarter sample, not household deprivation at municipal grain; census low-income share is the
-      income covariate.'
-  sidra:DD:Trabalho:
-    decision: exclude
-    why: 'PNAD Contínua quarterly labour force: employment of the working-age population, not a driver of birth prevalence or infant surgery.'
-  sidra:EL:Geral:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Geral): output series, no relation to spina bifida or its care.'
-  sidra:EO:Biodiversidade:
-    decision: exclude
-    why: 'Biodiversity knowledge indices: ecology, no relation to this condition.'
-  sidra:ES:Estoques agropecuários:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Estoques agropecuários): output series, no relation to spina bifida or its care.'
-  sidra:FP:Entidades sem fins lucrativos:
-    decision: exclude
-    why: 'Non-profit foundations and associations: counts of organisations; philanthropic hospitals are read from CNES.'
-  sidra:FP:Fundações e Associações sem fins lucrativos:
-    decision: exclude
-    why: 'Non-profit foundations and associations: counts of organisations; philanthropic hospitals are read from CNES.'
+    why: 'Used: census 2022 low-income share (persons_low_income over persons_income_universe, municipality), the income covariate behind the income tertile of the closure, shunt and death models and a term of the BYM2 context model.'
   sidra:IA:Índices de preços:
     decision: exclude
     why: 'National consumer price index: national series without municipal grain; costs are not analysed in this paper.'
   sidra:IO:Contas Nacionais e Regionais:
     decision: exclude
-    why: 'Municipal GDP and gross value added: GDP per capita is built in lib/covariates.py but not read by this paper; the census low-income share already carries
-      the income gradient and the two are strongly collinear.'
-  sidra:IQ:Índices de preços:
-    decision: exclude
-    why: 'National consumer price index: national series without municipal grain; costs are not analysed in this paper.'
-  sidra:PA:Lavouras permanentes:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Lavouras permanentes): output series, no relation to spina bifida or its care.'
-  sidra:PA:Lavouras temporárias:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Lavouras temporárias): output series, no relation to spina bifida or its care.'
-  sidra:PA:Lavouras temporárias e permanentes:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Lavouras temporárias e permanentes): output series, no relation to spina bifida or its care.'
+    why: 'Municipal GDP and gross value added: GDP per capita is built in lib/covariates.py but not read by this paper; the census low-income share already carries the income gradient and the two are strongly collinear.'
   sidra:PC:Índices de preços:
     decision: exclude
     why: 'National consumer price index: national series without municipal grain; costs are not analysed in this paper.'
-  sidra:PM:Geral:
-    decision: exclude
-    why: 'MUNIC municipal-management survey 2020-2023, mostly 2021 cross-sections (councils, health plans, programmes): management structure, outside most of the
-      birth years, not supply of neurosurgery, which CNES holds by establishment and month.'
-  sidra:PM:Informações básicas municipais:
-    decision: exclude
-    why: 'MUNIC 2020 housing programmes and informal settlements: urban housing policy, no health content.'
-  sidra:PP:Pecuária:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Pecuária): output series, no relation to spina bifida or its care.'
-  sidra:RC:Casamentos:
-    decision: exclude
-    why: 'Civil-registry marriages: no bearing on this condition.'
-  sidra:RC:Divórcios:
-    decision: exclude
-    why: 'Civil-registry divorces: no bearing on this condition.'
-  sidra:RC:Nascidos vivos:
-    decision: exclude
-    why: 'Civil-registry live births by mother''s age and residence (2003-2024): SINASC is the birth source and the denominator of the prevalence (with every maternal
-      field and the anomaly code); registry births by registration date would only add a second, less complete count.'
-  sidra:RC:Separações:
-    decision: exclude
-    why: 'Civil-registry separations (to 2013): no bearing on this condition.'
-  sidra:RC:Óbitos:
-    decision: exclude
-    why: 'Civil-registry deaths: registration completeness; infant deaths come from SIM, linked to SINASC, and the link''s loss by age at death is measured directly
-      (t04_link_age).'
-  sidra:RC:Óbitos fetais:
-    decision: exclude
-    why: 'Civil-registry fetal deaths: stillbirths with spina bifida are outside the live-born cohort, and a registry count carries no anomaly code.'
-  sidra:SB:Abastecimento de água:
-    decision: exclude
-    why: 'National basic sanitation survey, water supply by municipality (to 2017): provider characteristics, not maternal exposure.'
-  sidra:SB:Esgotamento sanitário:
-    decision: exclude
-    why: 'National basic sanitation survey, sewerage by municipality (to 2017): provider characteristics, with no pathway to neural tube closure.'
-  sidra:SH:Hospedagem:
-    decision: exclude
-    why: 'Lodging survey: tourism sector, no health content.'
-  sidra:VS:Extração vegetal:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Extração vegetal): output series, no relation to spina bifida or its care.'
-  sidra:VS:Silvicultura:
-    decision: exclude
-    why: 'Agricultural, forestry or livestock production (Silvicultura): output series, no relation to spina bifida or its care.'
-  sidra:XF:Geral:
-    decision: exclude
-    why: 'IBGE estimated resident population by municipality, total only: the infant denominators (residents under one year) need age structure, which POPSVS gives.'
   sidra:XN:Acidentes:
     decision: exclude
-    why: 'National Health Survey 2013/2019 (accidents): self-reported adult sample with Federation-unit and capital grain, two waves; no pathway to spina bifida at
-      birth or to its care.'
-  sidra:XN:Alimentação:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (diet): self-reported adult sample with Federation-unit and capital grain, two waves; no folic-acid or periconceptional
-      item at municipal or health-region grain; flour fortification is a national measure and enters as the time trend.'
-  sidra:XN:Atividade física:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (physical activity): self-reported adult sample with Federation-unit and capital grain, two waves; no pathway to this condition.'
-  sidra:XN:Características do domicílio e serviços domiciliares de saúde:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (household characteristics and home health services): self-reported adult sample with Federation-unit and capital grain,
-      two waves; census 2022 household tables are municipal.'
-  sidra:XN:Cobertura de plano de saúde:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (private coverage): self-reported adult sample with Federation-unit and capital grain, two waves; ANS beneficiary counts,
-      already used, cover every municipality every year.'
-  sidra:XN:Deficiência:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (disability): self-reported adult sample with Federation-unit and capital grain, two waves; single-wave adult self-report
-      of intellectual and physical disability; this paper measures the anomaly directly and no item identifies spina bifida.'
+    why: 'National Health Survey 2013/2019 (accidents): self-reported adult sample with Federation-unit and capital grain, two waves; no pathway to spina bifida at birth or to its care.'
   sidra:XN:Doenças crônicas:
     decision: exclude
-    why: 'National Health Survey 2013/2019 (chronic disease): self-reported adult sample with Federation-unit and capital grain, two waves; adult hypertension, diabetes
-      and others; maternal diabetes is not a table here and SINASC does not record it.'
-  sidra:XN:Higiene e saúde bucal:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (oral health): self-reported adult sample with Federation-unit and capital grain, two waves; no bearing on this condition.'
+    why: 'National Health Survey 2013/2019 (chronic disease): self-reported adult sample with Federation-unit and capital grain, two waves; adult hypertension, diabetes and others; maternal diabetes is not a table here and SINASC does not record it.'
   sidra:XN:Idosos:
     decision: exclude
     why: 'National Health Survey 2013/2019 (older adults): self-reported adult sample with Federation-unit and capital grain, two waves; no bearing on a birth anomaly.'
-  sidra:XN:Percepção do estado de saúde:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (self-rated health): self-reported adult sample with Federation-unit and capital grain, two waves; no link to surgical
-      supply or to birth outcomes.'
-  sidra:XN:Saúde da mulher:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (women''s health: screening, menopause, ever-pregnant women by income): self-reported adult sample with Federation-unit
-      and capital grain, two waves; no prenatal-care or folic-acid item (prenatal visits are read for every birth from SINASC), so it adds nothing beyond the individual
-      data.'
-  sidra:XN:Tabagismo:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (tobacco): self-reported adult sample with Federation-unit and capital grain, two waves; maternal smoking is not a table
-      of pregnancy and is not an established determinant of spina bifida.'
   sidra:XN:Uso de serviço de saúde:
     decision: exclude
-    why: 'National Health Survey 2013/2019 (service use): self-reported adult sample with Federation-unit and capital grain, two waves; admissions are in SIH and
-      supply in CNES.'
+    why: 'National Health Survey 2013/2019 (service use): self-reported adult sample with Federation-unit and capital grain, two waves; admissions are in SIH and supply in CNES.'
   sidra:XN:Uso de álcool:
     decision: exclude
-    why: 'National Health Survey 2013/2019 (alcohol use): self-reported adult sample with Federation-unit and capital grain, two waves; adult prevalence, not gestational
-      exposure, and the grain cannot give health-region prevalence.'
-  sidra:XN:Vida sexual:
-    decision: exclude
-    why: 'National Health Survey 2013/2019 (sexual life): self-reported adult sample with Federation-unit and capital grain, two waves; no bearing on this condition.'
+    why: 'National Health Survey 2013/2019 (alcohol use): self-reported adult sample with Federation-unit and capital grain, two waves; adult prevalence, not gestational exposure, and the grain cannot give health-region prevalence.'
   sidra:XN:Violência:
     decision: exclude
     why: 'National Health Survey 2013/2019 (violence): self-reported adult sample with Federation-unit and capital grain, two waves; no bearing on this condition.'
-  sidra:CD:Etnia:
-    decision: exclude
-    why: 'Etnia (Censo Demográfico), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence; its context
-      covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:DR:Meio ambiente:
-    decision: exclude
-    why: 'Meio ambiente (Contas Econômicas Ambientais da Terra: Contabilidade Física), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:DE:Unidades locais:
-    decision: exclude
-    why: 'Unidades locais (Demografia das Empresas e Estatísticas de Empreendedorismo), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Acesso a esgotamento sanitário:
-    decision: exclude
-    why: 'Acesso a esgotamento sanitário (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Acesso a serviço de coleta de lixo doméstico:
-    decision: exclude
-    why: 'Acesso a serviço de coleta de lixo doméstico (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
-  sidra:IU:Acesso a serviços de telefonia:
-    decision: exclude
-    why: 'Acesso a serviços de telefonia (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Acesso a sistema de abastecimento de água:
-    decision: exclude
-    why: 'Acesso a sistema de abastecimento de água (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
-  sidra:IU:Acesso à internet:
-    decision: exclude
-    why: 'Acesso à internet (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Adequação de moradia:
-    decision: exclude
-    why: 'Adequação de moradia (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Agenda 21 Local:
-    decision: exclude
-    why: 'Agenda 21 Local (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Articulações interinstitucionais:
-    decision: exclude
-    why: 'Articulações interinstitucionais (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Balança comercial:
-    decision: exclude
-    why: 'Balança comercial (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
   sidra:IU:Coeficiente de mortalidade por homicídios ou por acidentes de transporte:
     decision: exclude
-    why: 'Coeficiente de mortalidade por homicídios ou por acidentes de transporte (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant
-      admitted with spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation);
-      this group is not a covariate of the paper.'
-  sidra:IU:Comitês de Bacias Hidrográficas:
-    decision: exclude
-    why: 'Comitês de Bacias Hidrográficas (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Concentração de poluentes no ar em áreas urbanas:
-    decision: exclude
-    why: 'Concentração de poluentes no ar em áreas urbanas (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina
-      bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a
-      covariate of the paper.'
-  sidra:IU:Desflorestamento na Amazônia Legal:
-    decision: exclude
-    why: 'Desflorestamento na Amazônia Legal (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:IU:Desmatamento nos Biomas:
-    decision: exclude
-    why: 'Desmatamento nos Biomas (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Doenças relacionadas ao saneamento ambiental inadequado:
-    decision: exclude
-    why: 'Doenças relacionadas ao saneamento ambiental inadequado (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with
-      spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is
-      not a covariate of the paper.'
-  sidra:IU:Esperança de vida ao nascer:
-    decision: exclude
-    why: 'Esperança de vida ao nascer (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Espécies invasoras:
-    decision: exclude
-    why: 'Espécies invasoras (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Existência de conselhos municipais:
-    decision: exclude
-    why: 'Existência de conselhos municipais (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:IU:Frequência escolar:
-    decision: exclude
-    why: 'Frequência escolar (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Incidência de AIDS:
-    decision: exclude
-    why: 'Incidência de AIDS (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Meio ambiente:
-    decision: exclude
-    why: 'Meio ambiente (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Mulheres em trabalhos formais:
-    decision: exclude
-    why: 'Mulheres em trabalhos formais (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Patrimônio cultural:
-    decision: exclude
-    why: 'Patrimônio cultural (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Produto Interno Bruto per capita:
-    decision: exclude
-    why: 'Produto Interno Bruto per capita (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Queimadas e incêndios florestais:
-    decision: exclude
-    why: 'Queimadas e incêndios florestais (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Razão de dependência:
-    decision: exclude
-    why: 'Razão de dependência (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Rendimento domiciliar per capita:
-    decision: exclude
-    why: 'Rendimento domiciliar per capita (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Rendimento médio mensal:
-    decision: exclude
-    why: 'Rendimento médio mensal (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Taxa de alfabetização:
-    decision: exclude
-    why: 'Taxa de alfabetização (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Taxa de fecundidade:
-    decision: exclude
-    why: 'Total fertility rate, state grain: births are counted directly (SINASC live births with Q05 and all live births) at municipal grain, so a state fertility
-      rate adds nothing.'
-  sidra:IU:Taxa de mortalidade infantil:
-    decision: exclude
-    why: 'State infant mortality rate: t04 computes infant death itself (SIM over SINASC, and in-hospital death of the cohort) at finer grain.'
-  sidra:IU:Terras em uso agrossilvipastoril:
-    decision: exclude
-    why: 'Terras em uso agrossilvipastoril (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Uso de agrotóxicos:
-    decision: exclude
-    why: 'Uso de agrotóxicos (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Uso de fertilizantes:
-    decision: exclude
-    why: 'Uso de fertilizantes (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Áreas protegidas:
-    decision: exclude
-    why: 'Áreas protegidas (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:IU:Índice de Gini da distribuição do rendimento:
-    decision: exclude
-    why: 'Índice de Gini da distribuição do rendimento (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
-  sidra:LA:Produção vegetal:
-    decision: exclude
-    why: 'Produção vegetal (Levantamento Sistemático da Produção Agrícola), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
+    why: 'Coeficiente de mortalidade por homicídios ou por acidentes de transporte (Indicadores de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
   sidra:C2:Boa saúde e bem-estar:
     decision: exclude
-    why: 'Boa saúde e bem-estar (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Educação:
-    decision: exclude
-    why: 'Educação (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Educação de qualidade:
-    decision: exclude
-    why: 'Educação de qualidade (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Energia limpa e acessível:
-    decision: exclude
-    why: 'Energia limpa e acessível (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Erradicação da pobreza:
-    decision: exclude
-    why: 'Erradicação da pobreza (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Esgotamento sanitário:
-    decision: exclude
-    why: 'Esgotamento sanitário (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Fome zero e agricultura sustentável:
-    decision: exclude
-    why: 'Fome zero e agricultura sustentável (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:C2:Geral:
-    decision: exclude
-    why: 'Geral (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Igualdade de gênero:
-    decision: exclude
-    why: 'Igualdade de gênero (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or
-      health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Indústria, inovação e infraestrutura:
-    decision: exclude
-    why: 'Indústria, inovação e infraestrutura (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:C2:Mortalidade:
-    decision: exclude
-    why: 'Mortality SDG indicators, state grain: infant and foetal deaths are read from SIM and SIM-DOFET at record level.'
-  sidra:C2:Nascidos vivos:
-    decision: exclude
-    why: 'Live-birth SDG indicators, state grain: SINASC live births are read directly, at municipal grain.'
-  sidra:C2:Parcerias e meios de implementação:
-    decision: exclude
-    why: 'Parcerias e meios de implementação (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
+    why: 'Boa saúde e bem-estar (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
   sidra:C2:Paz, justiça e instituições eficazes:
     decision: exclude
-    why: 'Paz, justiça e instituições eficazes (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:C2:Saúde:
-    decision: exclude
-    why: 'Saúde (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Trabalho decente e crescimento econômico:
-    decision: exclude
-    why: 'Trabalho decente e crescimento econômico (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and
-      the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of
-      the paper.'
-  sidra:C2:Vida na água:
-    decision: exclude
-    why: 'Vida na água (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Água potável e saneamento:
-    decision: exclude
-    why: 'Água potável e saneamento (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:C2:Óbitos:
-    decision: exclude
-    why: 'Death SDG indicators, state grain: deaths are read from SIM at record level.'
-  sidra:AC:Construção civil:
-    decision: exclude
-    why: 'Construção civil (Pesquisa Anual da Indústria da Construção), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PK:Indústria:
-    decision: exclude
-    why: 'Indústria (Pesquisa Industrial Anual - Empresa), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of
-      residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PZ:Indústria:
-    decision: exclude
-    why: 'Indústria (Pesquisa Industrial Mensal - Produção Física), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XY:Indústria:
-    decision: exclude
-    why: 'Indústria (Pesquisa Industrial Mensal de Emprego e Salário), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:MC:Comércio:
-    decision: exclude
-    why: 'Comércio (Pesquisa Mensal de Comércio), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:SC:Serviços:
-    decision: exclude
-    why: 'Serviços (Pesquisa Mensal de Serviços), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XN:Antropometria:
-    decision: exclude
-    why: 'Antropometria (Pesquisa Nacional de Saúde), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XN:Atenção primária à saúde:
-    decision: exclude
-    why: 'Atenção primária à saúde (Pesquisa Nacional de Saúde), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XN:Características do trabalho e apoio social:
-    decision: exclude
-    why: 'Características do trabalho e apoio social (Pesquisa Nacional de Saúde), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XN:Doenças transmissíveis:
-    decision: exclude
-    why: 'Doenças transmissíveis (Pesquisa Nacional de Saúde), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Características da pessoa:
-    decision: exclude
-    why: 'Características da pessoa (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Domicílios:
-    decision: exclude
-    why: 'Domicílios (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Famílias:
-    decision: exclude
-    why: 'Famílias (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Fecundidade:
-    decision: exclude
-    why: 'PNAD fertility tables, state grain: births are counted directly from SINASC at municipal grain.'
-  sidra:PD:Instrução e Educação:
-    decision: exclude
-    why: 'Instrução e Educação (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Internet:
-    decision: exclude
-    why: 'Internet (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region
-      of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Migração e deslocamento:
-    decision: exclude
-    why: 'Migração e deslocamento (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PD:Responsável pelo domicílio/família:
-    decision: exclude
-    why: 'Responsável pelo domicílio/família (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the
-      municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the
-      paper.'
-  sidra:PD:Trabalho e rendimento:
-    decision: exclude
-    why: 'Trabalho e rendimento (Pesquisa Nacional por Amostra de Domicílios), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:B5:Atenção primária à saúde:
-    decision: exclude
-    why: 'Atenção primária à saúde (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with spina bifida and
-      the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of
-      the paper.'
-  sidra:B5:Covid-19:
-    decision: exclude
-    why: 'Covid-19 (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:B5:Rendimento de todas as fontes:
-    decision: exclude
-    why: 'Rendimento de todas as fontes (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
-  sidra:B5:Segurança alimentar:
-    decision: exclude
-    why: 'Food security (PNAD Continua), state grain: folate intake bears on the occurrence of neural tube defects, but t04 studies care after birth, not occurrence,
-      and a state measure cannot be set against municipal admissions; out of scope, stated as such.'
-  sidra:B5:Tecnologia de informação e comunicação:
-    decision: exclude
-    why: 'Tecnologia de informação e comunicação (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with
-      spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is
-      not a covariate of the paper.'
-  sidra:B5:Teletrabalho:
-    decision: exclude
-    why: 'Teletrabalho (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:B5:Turismo:
-    decision: exclude
-    why: 'Turismo (Pesquisa Nacional por Amostra de Domicílios Contínua anual), state grain: t04''s unit is the infant admitted with spina bifida and the municipality
-      or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:DD:População desocupada:
-    decision: exclude
-    why: 'População desocupada (Pesquisa Nacional por Amostra de Domicílios Contínua trimestral), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
-  sidra:AX:Abate de animais:
-    decision: exclude
-    why: 'Abate de animais (Pesquisa Trimestral do Abate de Animais), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health
-      region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:CQ:Couro:
-    decision: exclude
-    why: 'Couro (Pesquisa Trimestral do Couro), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:LT:Leite:
-    decision: exclude
-    why: 'Leite (Pesquisa Trimestral do Leite), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:OF:Aquisição:
-    decision: exclude
-    why: 'Aquisição (Pesquisa de Orçamentos Familiares), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of
-      residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:OF:Despesa:
-    decision: exclude
-    why: 'Despesa (Pesquisa de Orçamentos Familiares), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:OF:Famílias:
-    decision: exclude
-    why: 'Famílias (Pesquisa de Orçamentos Familiares), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence;
-      its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:OF:Rendimento:
-    decision: exclude
-    why: 'Rendimento (Pesquisa de Orçamentos Familiares), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of
-      residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:PO:Ovos de galinha:
-    decision: exclude
-    why: 'Ovos de galinha (Produção de Ovos de Galinha), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of
-      residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
-  sidra:XE:Geral:
-    decision: exclude
-    why: 'IBGE population projection, state grain: the denominators are SINASC live births and the Ministry''s municipal population estimates.'
-  sidra:SI:Construção civil:
-    decision: exclude
-    why: 'Construção civil (Sistema Nacional de Pesquisa de Custos e Índices da Construção Civil), state grain: t04''s unit is the infant admitted with spina bifida
-      and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate
-      of the paper.'
+    why: 'Paz, justiça e instituições eficazes (Objetivos de Desenvolvimento Sustentável), state grain: t04''s unit is the infant admitted with spina bifida and the municipality or health region of residence; its context covariates are municipal (income, private coverage, urbanisation); this group is not a covariate of the paper.'
   field:brdwgd:gaussian:
     decision: exclude
-    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not
-      enter care after birth.'
+    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not enter care after birth.'
   field:intake:ans_tiss_hospital_items:
     decision: exclude
     why: 'Private-plan item prices: t04''s private context is plan coverage, not prices.'
-  field:intake:ans_tiss_hospital_remuneration:
-    decision: exclude
-    why: 'Private-plan remuneration model per event: not part of the question.'
-  field:intake:ans_tiss_outpatient_items:
-    decision: exclude
-    why: 'Private-plan outpatient items: the cohort is hospital admissions.'
-  field:intake:ans_tiss_outpatient_remuneration:
-    decision: exclude
-    why: 'Private-plan outpatient remuneration model: not part of the question.'
   field:inmet:climate:
     decision: exclude
-    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not
-      enter care after birth.'
+    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not enter care after birth.'
   field:brdwgd:climate_monthly:
     decision: exclude
-    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not
-      enter care after birth.'
-  field:cnes:accreditations:
-    decision: include
-    why: 'Neurosurgical accreditation (CNES-HB 1601/1602): the distance from residence to the nearest accredited unit and the treating hospital''s status, read at establishment
-      grain from the CNES-HB records (lib/access, lib/context), finer than this municipal field; the other accreditations of the family are outside t04.'
+    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not enter care after birth.'
   field:cnes:beds:
     decision: exclude
-    why: 'Beds, neonatal ICU beds included: neonatal intensive care could bear on infant survival, but t04 compares infant death by region, hospital volume and accreditation,
-      not by bed supply; stated in the data extent as available and not used.'
+    why: 'Beds, neonatal ICU beds included: neonatal intensive care could bear on infant survival, but t04 compares infant death by region, hospital volume and accreditation, not by bed supply; stated in the data extent as available and not used.'
   field:cnes:radiotherapy_machines:
     decision: exclude
     why: 'Radiotherapy machines: oncology supply, no bearing on spina bifida.'
   field:cnes:professionals:
     decision: exclude
-    why: 'Neurosurgeons per resident were declared but are not modelled: access is measured as distance to an accredited unit and care outside the home region, and
-      hospital capacity as volume; supply counts per resident would add an ecological term the infant-level models do not need.'
+    why: 'Neurosurgeons per resident were declared but are not modelled: access is measured as distance to an accredited unit and care outside the home region, and hospital capacity as volume; supply counts per resident would add an ecological term the infant-level models do not need.'
   field:cnes:equipment:
     decision: exclude
     why: 'CT and other equipment: spina bifida is diagnosed at birth by examination (and before birth by ultrasound), so CT supply does not bear on access to repair.'
   field:cnes:facilities:
     decision: exclude
     why: 'Facility counts by municipality: the hospitals that treat these infants are observed directly from the AIHs, with accreditation and volume.'
-  field:cnes:specialised_services:
-    decision: exclude
-    why: 'Neurology/neurosurgery service classification: accreditation (1601/1602) defines the network and is used.'
-  field:cnes:teams:
-    decision: exclude
-    why: 'Primary-care teams: prenatal care bears on prevention and prenatal diagnosis, which t04 does not study; its cohort starts at the admission after birth.'
-  field:sidra:persons_10_plus:
-    decision: exclude
-    why: 'Census persons aged 10 and over: not a covariate; the cohort is infants and the context is municipal income, coverage and urbanisation.'
-  field:sidra:persons_10_plus_literate:
-    decision: exclude
-    why: 'Census literacy at 10 and over: not a covariate of an infant cohort; income and urbanisation carry the municipal context.'
   field:brdwgd:precipitation_months:
     decision: exclude
-    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not
-      enter care after birth.'
+    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not enter care after birth.'
   field:records:SIM-DO:
     decision: include
-    why: SIM infant deaths (and SIM-DOFET foetal deaths) are read at record level for infant mortality, the Q05 underlying-cause deaths and the birth-death linkage
-      (analysis/t04_infant.py, t04_fetal.py, t04_link_age.py); the municipal certification-quality fields of this family are not read.
+    why: SIM infant deaths (and SIM-DOFET foetal deaths) are read at record level for infant mortality, the Q05 underlying-cause deaths and the birth-death linkage (analysis/t04_infant.py, t04_fetal.py, t04_link_age.py); the municipal certification-quality fields of this family are not read.
   field:brdwgd:temperature_months:
     decision: exclude
-    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not
-      enter care after birth.'
+    why: 'Climate by municipality: t04''s outcomes (repair, infant death, access) are annual and by place of residence; season is not modelled and climate does not enter care after birth.'

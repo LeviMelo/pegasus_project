@@ -661,9 +661,11 @@ def records(code: str, year: int, partition: str | None = None, rows_filter: dic
 # ------------------------------------------------------------------------------------------------- the declaration
 
 
-def _problems(text: str) -> tuple[list[str], dict | None]:
+def _problems(text: str, home: Path | None = None) -> tuple[list[str], dict | None]:
     """A draft declaration's problems as `study.load` reports them, and its effective choices (each preset key's value
-    after its depth), from a file of its own so nothing in the workspace changes."""
+    after its depth), from a file of its own so nothing in the workspace changes. Its research line (``line:``) is
+    read from ``home``'s ``lines/`` (the declaration's directory; default the studies directory): the draft's own
+    temporary directory has none, and every check of a line study failed on it (2026-11-23)."""
     import tempfile
 
     from . import study
@@ -672,7 +674,7 @@ def _problems(text: str) -> tuple[list[str], dict | None]:
         path = Path(tmp) / "draft.yml"
         path.write_text(text, encoding="utf-8")
         try:
-            decl = study.load(path)
+            decl = study.load(path, lines=(home or studies_dir()) / "lines")
         except study.DeclarationError as exc:
             lines = [ln.strip("- ").strip().replace(str(path), "the declaration") for ln in str(exc).splitlines()]
             lines = [ln.removeprefix("the declaration: ") for ln in lines if ln and not ln.endswith(":")]
@@ -693,7 +695,7 @@ def declaration(name: str) -> dict:
 
     path = find(name)
     text = path.read_text(encoding="utf-8")
-    problems, effective = _problems(text)
+    problems, effective = _problems(text, path.parent)
     try:
         doc = yaml.safe_load(text) or {}
     except ValueError:
@@ -765,10 +767,10 @@ def _flow(value):
 
 def save_declaration(name: str, text: str) -> dict:
     """Write a study's declaration once it has no problem; returns its detail as `declaration` gives it."""
-    problems, _ = _problems(text)
+    path = find(name)
+    problems, _ = _problems(text, path.parent)
     if problems:
         raise ValueError("the declaration has problems, not written: " + "; ".join(problems))
-    path = find(name)
     tmp = path.with_suffix(".yml.tmp")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
