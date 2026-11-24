@@ -10,7 +10,180 @@ depth: standard               # survey, standard, deep or exhaustive: presets of
 # related: 3                   # related codes read beside the topic's own, strongest first (0: none)
 # persons: true                # the cohort scan over linked persons (deep and exhaustive)
 # download: 10                 # gigabytes the study may download (years held in the lake are free)
-contexts: auto                 # municipal contexts related to the rates (auto: every declared one)
+contexts: [population_urban, population_resident_census, persons_low_income, persons_income_universe, ans_beneficiaries, cnes_beds_icu_sus, cnes_beds_neurology_sus, cnes_neurosurgeons_professionals, cnes_neurologists_professionals, cnes_interventional_radiologists_professionals, cnes_equipment_hemodynamics_xray_sus, cnes_equipment_ct_sus, sim_deaths_residence, sim_deaths_ill_defined, sim_deaths_garbage_codes]   # decided 2026-11-24 (contexts_considered below; abnc2027_neuro papers/t02/contexts_considered.yml); IPCA via price_index
 # hypotheses:                  # declared tests, e.g. an outbreak or a relation with its lags
 #   - {component: transient, where: [431690], when: 2018, note: a documented outbreak}
 line: abnc_neuro
+# every context candidate the line leaves to the study, decided from what its group holds (abnc2027_neuro t02, 4279037)
+contexts_considered:
+  sidra:CD:Características do domicílio:
+    decision: exclude
+    why: 'Census 2022 household amenities (sewer, water, waste, bathroom; fields households_*). Sanitation has no
+      pathway to a stroke patient reaching an angiography suite in hours. Measured: sewer share runs with urban share
+      (Spearman 0.59, 2024) and weakly with low income (-0.28), so it adds no access dimension that the urban share
+      and income share do not carry (t02_contexts.json census_spearman_2024).'
+  sidra:CD:Educação:
+    decision: exclude
+    why: 'Census literacy 15+ (persons_15_plus_literate over persons_15_plus). Its pathway (recognising stroke
+      symptoms, arriving within the window) is real, but at municipal grain it cannot be told from income: Spearman
+      -0.85 with the low-income share in 2024 (t02_contexts.json). The income share stands for both; the
+      collinearity is stated in Methods.'
+  sidra:CD:Pessoas:
+    decision: include
+    why: 'Used: census urban share (population_urban over population_resident_census, interpolated 2010-2022 by the
+      line convention), a covariate of the reach models: rural residence lengthens the time to a hospital beyond the
+      straight-line distance. Measured: Spearman with low income -0.41, with literacy 0.49, so it is a separate
+      dimension. The age tables are not read: age and sex enter through indirect standardisation and the records.'
+  sidra:CD:Rendimento:
+    decision: include
+    why: 'Used: census low-income share (persons_low_income over persons_income_universe, interpolated), the area
+      socioeconomic covariate of the reach models and of the who-gets-it contrasts (tertiles). It stands for literacy
+      and GDP per capita too (Spearman -0.85 and -0.76).'
+  sidra:RC:Óbitos:
+    decision: include
+    why: 'Used: civil-registry deaths by residence (table 2654, 2003-2024) against SIM deaths by state and year,
+      the registration coverage behind the second need measure (SIM deaths with underlying I63-I64 per population).
+      A low reach in the North and Northeast could be a low need measured on under-registered deaths; the coverage
+      ratio tests that reading.'
+  sidra:XN:Acidentes:
+    decision: exclude
+    why: 'PNS helmet, seat-belt and accident items by state, 2013/2019: injury behaviour, no pathway to ischaemic
+      stroke or its treatment.'
+  sidra:XN:Doenças crônicas:
+    decision: exclude
+    why: 'PNS self-reported chronic disease by state, 2013/2019, including hypertension and stroke diagnosis. Stroke
+      prevalence counts survivors, not incident infarcts eligible for thrombectomy, and the grain is the state in two
+      waves before the code (2023-12). Need is measured at municipal grain from the records: I63 admissions and SIM
+      deaths from I63-I64.'
+  sidra:XN:Idosos:
+    decision: exclude
+    why: 'PNS older-adult limitations, cataract and vaccination by state, 2013/2019: describes ageing; age enters
+      the reach through indirect age-sex standardisation and the stay records.'
+  sidra:XN:Uso de serviço de saúde:
+    decision: exclude
+    why: 'PNS self-reported service use by state, 2013/2019 (urgent care at home, usual source of care). The
+      prehospital pathway matters for thrombectomy, but a state share from two waves before the code cannot enter
+      the within-state distance gradient that is the paper''s main axis; arrival is read from the records (first
+      hospital of the stay, transfer in, the first hospital''s stroke-centre accreditation).'
+  sidra:XN:Uso de álcool:
+    decision: exclude
+    why: 'PNS alcohol use by state, 2013/2019: a stroke risk factor at state grain, no pathway to who is
+      thrombectomised among admitted strokes.'
+  sidra:XN:Violência:
+    decision: exclude
+    why: 'PNS violence experienced, 2019, state grain: no pathway to ischaemic stroke treatment.'
+  sidra:AA:Segurança:
+    decision: exclude
+    why: 'PeNSE 2015, 9th-grade pupils: adolescents; thrombectomy patients are adults (median age about 65).'
+  sidra:B5:Furto e roubo:
+    decision: exclude
+    why: 'PNAD Contínua 2021 theft and robbery victimisation by state: crime, no pathway to stroke care.'
+  sidra:IO:Contas Nacionais e Regionais:
+    decision: exclude
+    why: 'Municipal GDP and value added (2002-2023). GDP per capita measures production, not household means, and
+      runs with the low-income share (Spearman -0.76, 2024; t02_contexts.json); the income share is the area
+      covariate.'
+  sidra:PC:Índices de preços:
+    decision: exclude
+    why: 'INPC, national and metropolitan series: the deflator is the IPCA; INPC adds nothing over 25 months.'
+  sidra:IA:Índices de preços:
+    decision: include
+    why: 'Used: monthly IPCA (price_index, reference December 2025) to state payment per thrombectomy stay in real
+      terms, by billing route (D-12); a deflator, not a place context.'
+  sidra:C2:Boa saúde e bem-estar:
+    decision: exclude
+    why: 'SDG 3 indicators by state (NCD, traffic, maternal, child mortality, pollution): none measures stroke
+      incidence or its treatment at the paper''s grain; stroke need is read from SIM and SIH records.'
+  sidra:C2:Paz, justiça e instituições eficazes:
+    decision: exclude
+    why: 'SDG 16 homicide and birth registration by state: no pathway to stroke treatment.'
+  intake:ans:
+    decision: include
+    why: 'Used: private medical-hospital beneficiaries (ans_beneficiaries, December, municipality) over POPSVS: the
+      private-coverage covariate of the reach models, and the denominator of private thrombectomies per million
+      beneficiaries by state (the private side beside the SUS).'
+  intake:ans_tiss_amb_cons:
+    decision: exclude
+    why: 'Outpatient TISS events by beneficiary municipality: no diagnosis, and thrombectomy is an inpatient
+      procedure.'
+  intake:ans_tiss_hosp_cons:
+    decision: include
+    why: 'Used: private-plan hospital events (ans_tiss_hospital_events, by month, provider state and beneficiary
+      municipality) holding thrombectomy, through the TUSS item (field ans_tiss_hospital_items): the private series
+      beside the SUS one, the rival reading that private care fills where the SUS is absent.'
+  intake:siops_municipal:
+    decision: exclude
+    why: 'SIOPS municipal health spending. Thrombectomy is paid by the federal fee (AIH) at a few referral hospitals
+      that serve many municipalities (50 hospitals in 36 municipalities, 2023-12 to 2025; t02_contexts.json), so the
+      residence municipality''s budget does not buy the procedure whose reach is measured.'
+  intake:srag:
+    decision: exclude
+    why: 'SIVEP-Gripe SRAG notifications. The thrombectomy period (2023-12 to 2025) is after the pandemic; the
+      stroke case-fatality series of 2015-2025 carries 2020-2021 as a level term, with no claim on ICU strain.'
+  field:brdwgd:gaussian:
+    decision: exclude
+    why: 'Gridded temperature and rain by municipality. Season and cold change stroke incidence, but the paper''s
+      quantities are the share of admitted strokes thrombectomised, where season moves numerator and denominator
+      together, and the rollout by month; climate has no pathway to whether an admitted stroke is thrombectomised.'
+  field:intake:ans_tiss_hospital_items:
+    decision: include
+    why: 'Used: TISS hospital items by TUSS code: the private thrombectomy item counted by month and provider state
+      (see intake:ans_tiss_hosp_cons).'
+  field:intake:ans_tiss_outpatient_items:
+    decision: exclude
+    why: 'Outpatient TISS items: thrombectomy is inpatient; no outpatient item places a private thrombectomy.'
+  field:inmet:climate:
+    decision: exclude
+    why: 'Station climate by municipality: as field:brdwgd:gaussian.'
+  field:brdwgd:climate_monthly:
+    decision: exclude
+    why: 'Monthly climate by municipality: as field:brdwgd:gaussian.'
+  field:cnes:beds:
+    decision: include
+    why: 'Used: SUS ICU beds and SUS neurology beds (cnes_beds_icu_sus, cnes_beds_neurology_sus) by health region:
+      the capacity to care for a stroke after thrombectomy, read beside the angiography suites and operators as
+      supply that exists where thrombectomy is not billed. Measured December 2023: neurology beds in 221
+      municipalities, 202 of them without a thrombectomy hospital. Other bed types are not on the pathway.'
+  field:cnes:radiotherapy_machines:
+    decision: exclude
+    why: 'Accelerators, cobalt and brachytherapy: oncology supply.'
+  field:cnes:professionals:
+    decision: include
+    why: 'Used: the operators and the stroke team: interventional radiologists (1,418 in 283 municipalities, 2023),
+      neurosurgeons (7,082 in 590) and neurologists (14,791 in 2,003) by health region; 257 municipalities have an
+      interventional radiologist and no thrombectomy hospital (t02_contexts.json). The other professions are not on
+      the pathway.'
+  field:cnes:equipment:
+    decision: include
+    why: 'Used: SUS angiography (hemodynamics) suites and SUS CT scanners. Thrombectomy needs the suite; the I63
+      diagnosis (and so the denominator) needs a CT. Measured December 2023: 543 SUS suites in 207 municipalities,
+      185 of them without a thrombectomy hospital; 14 of the 36 thrombectomy municipalities show no SUS suite (an
+      anomaly for the ledger: registration or a non-SUS suite). CT SUS in 984 municipalities. MRI is read only as a
+      sensitivity of diagnostic capacity; dialysis, EEG, mammography and slit lamp are off the pathway.'
+  field:cnes:facilities:
+    decision: exclude
+    why: 'Counts of SUS and non-SUS facilities by type: thrombectomy hospitals are observed directly on the AIHs, and
+      capacity is measured by suites, operators and beds; a count of all hospitals does not measure it.'
+  field:cnes:teams:
+    decision: exclude
+    why: 'Primary-care team coverage: acute stroke reaches hospital through emergency services and the mobile urgent
+      care service, not primary care; prevention (hypertension control) bears on incidence, not on the share of
+      admitted strokes thrombectomised.'
+  field:sidra:pns_violence_by_stranger:
+    decision: exclude
+    why: 'PNS violence by a stranger, state: no pathway to stroke treatment.'
+  field:sidra:pns_violence_by_stranger_percent:
+    decision: exclude
+    why: 'As field:sidra:pns_violence_by_stranger.'
+  field:brdwgd:precipitation_months:
+    decision: exclude
+    why: 'Monthly rain by municipality: as field:brdwgd:gaussian.'
+  field:records:SIM-DO:
+    decision: include
+    why: 'Used: deaths by residence and their ill-defined and garbage-code shares (sim_deaths_residence,
+      sim_deaths_ill_defined, sim_deaths_garbage_codes): the certification quality behind the second need measure
+      (SIM deaths from I63-I64 per population) and behind the linked 30-day deaths; with sidra:RC:Óbitos, the
+      reading that low need in a region is under-certification.'
+  field:brdwgd:temperature_months:
+    decision: exclude
+    why: 'Monthly temperature by municipality: as field:brdwgd:gaussian.'
