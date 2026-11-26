@@ -28,3 +28,9 @@ Caveat: the age-0 reference (registered births minus infant deaths) is **not ind
 
 ## What it does not decide
 Whether the account's lower 2023 population (-1.5 to -2 % in places under 100,000 against POPSVS) is right; the 2023 row is a projection. The band effect of 17 against 18 bands is not separated (the `popsvs-5y` fits for the full span did not finish), but account-3 on the 18 bands shows the loss is not the bands. Account-3's better age 0 (registered births minus infant deaths, 2015) is not independent evidence: the account is built with those events.
+
+## Amendment 2026-11-26: `account-6` is `account-9`
+
+`population-account-6` was deleted from the data home to free 3.4 GB; `population-account-9` (same columns, 219,402,300
+rows, 1991-2030) is the version pegasus_data reads. The source `account-6` is now `account-9`, and `hybrid` and
+`tools.RACE_POPULATION` read it. The measurements above were made on account-6 and are not re-run.

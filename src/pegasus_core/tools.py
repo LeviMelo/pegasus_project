@@ -1829,7 +1829,7 @@ def kinds_of(x: leads.Lead) -> set[str]:
 #: the source fields that name what a fit reads (`monolith.assemble`'s key): a session's blocks are the fits of its own
 #: the population a race's expected share is read from: the account's tensor with race slices over the widest years
 #: (1991-2030; ARCHITECTURE §12.3)
-RACE_POPULATION = "account-6"
+RACE_POPULATION = "account-9"
 
 
 def read_composition(y: np.ndarray, mu: np.ndarray, values: list[str], race: bool, years: np.ndarray, places: np.ndarray,

@@ -44,7 +44,7 @@ class EventCounts:
 
 ACCOUNT = ("population_account", "population-account-2")   # the modelled product and its pinned version
 TENSOR = {"account-3": ("population-account-3", 2000, 2023), "account-4": ("population-account-4", 2000, 2030),
-          "account-6": ("population-account-6", 1991, 2030)}   # source: version, years held
+          "account-9": ("population-account-9", 1991, 2030)}   # source: version, years held (account-6 deleted 2026-11-26)
 POPSVS_EDGES = [0, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]   # 18 bands, 80+ closes
 ACCOUNT_EDGES = list(range(0, 81, 5))   # 17 bands: the account's 0-4 holds ages 0 and 1-4, which POPSVS keeps apart
 POPSVS_PLACES = 5570
@@ -97,7 +97,7 @@ def population_key(source: str | None = None) -> dict:
     modifiers add the string and their models' versions."""
     source = source or config.population_source()
     base, mods = split_source(source)
-    model = ACCOUNT[1] if base == "account-2" else TENSOR[base][0] if base in TENSOR else TENSOR["account-6"][0] if base == "hybrid" else None
+    model = ACCOUNT[1] if base == "account-2" else TENSOR[base][0] if base in TENSOR else TENSOR["account-9"][0] if base == "hybrid" else None
     models = ([] if model is None else [model]) + [MODIFIERS[m][1] for m in mods]
     return {} if source == "popsvs" else {"population": source, **({"population_model": "+".join(models)} if models else {})}
 
@@ -153,8 +153,8 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
     if source in TENSOR:
         return _tensor_population(sorted(set(years)), source)
     if source == "hybrid":
-        # POPSVS at every age but 0, the account's age 0 (population-account-6; evaluation 2026-10-05 exposure, hybrid)
-        pop, acc = population(years, series, "popsvs"), _tensor_population(sorted(set(years)), "account-6")
+        # POPSVS at every age but 0, the account's age 0 (population-account-9; evaluation 2026-10-05 exposure, hybrid)
+        pop, acc = population(years, series, "popsvs"), _tensor_population(sorted(set(years)), "account-9")
         con = duckdb.connect()
         con.register("p", pop)
         con.register("a", acc)
@@ -177,7 +177,7 @@ def population(years: range | list[int], series: str = "POPSVS", source: str | N
     if source.startswith("events:"):
         return _events_population(sorted(set(years)), source)
     if source != "popsvs":
-        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-6, hybrid, account-2 "
+        raise KeyError(f"unknown population source {source!r}: popsvs, account-3, account-4, account-9, hybrid, account-2 "
                        "or events:<dataset>:<event>[:codes][;...] (popsvs-5y: a control)")
     import pegasus_data as pg
 
