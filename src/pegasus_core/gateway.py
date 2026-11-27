@@ -1154,10 +1154,12 @@ def _sex_codes(dataset: str, column: str, codes: tuple[str, ...], require: bool 
     import pegasus_data as pg
     from pegasus_data._request import parse_dataset
 
-    system = parse_dataset(dataset)[0]
+    system, series = parse_dataset(dataset)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        labelled = pg.translate(pa.table({column: list(codes)}), system=system).to_pylist()
+        # the series too: SIM's sex codelists are bound per series (CURATED.SIM.DO.SEXO), and the system alone labelled
+        # no code, so every SIM read was refused once its caches went stale (pegasus_data 82a1bba6, 2026-11-27)
+        labelled = pg.translate(pa.table({column: list(codes)}), system=system, series=series).to_pylist()
     out: dict[str, int | None] = {}
     for row in labelled:
         label = str(row.get(f"{column}_label") or "").strip().lower()
