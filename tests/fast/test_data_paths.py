@@ -161,8 +161,10 @@ def test_capture_lists_are_the_declared_population():
 
 def test_years_an_extract_holds_whole_are_free():
     # SIA-PA's serology for 2010-2018 sat extracted on disk while the scope priced it as 175 GB to download
-    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2009, 2015], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
-    assert study._extract_held(it, [2009, 2015]) == [2015]          # the extract starts in 2010
+    # 2012, not 2015: the ADR-0236 store left the split SP/MG/RJ files (PASP1501a ...) to be read again, as their old
+    # per-filter parts had been written one over another, so 2013 on is not held whole until they are (2026-11-27)
+    it = study.Item("SIASUS-PA", "procedure", ["*"], None, [2009, 2012], "", source={"structure": "SIGTAP", "codes": SEROLOGY})
+    assert study._extract_held(it, [2009, 2012]) == [2012]          # the extract starts in 2010
 
 
 def test_a_fit_read_on_a_window_of_its_years():
