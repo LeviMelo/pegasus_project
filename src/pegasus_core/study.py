@@ -648,11 +648,22 @@ def _records(it: Item, years: list[int]) -> int:
         # (the Santa Maria hypothesis's own source left out, 2026-10-11); a code list by its own reader, its field's
         # name ("codes:LINHAA_O") is no column (deep7's probes of SIM-DOFET and SIM-DOREXT failed on it, 2026-10-12)
         area = (tuple(sorted(config.study_area())) if config.study_area() else None)
-        c = (gateway.code_list_counts(it.dataset, it.event, y, src["column"], area=area).counts if listed else
-             gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False,
-                                  codes=tuple(src.get("codes") or ()) if it.extract else (), area=area).counts)
+        if listed:
+            read = gateway.code_list_counts(it.dataset, it.event, y, src["column"], area=area)
+            c = read.counts
+        else:
+            c = gateway.event_counts(it.dataset, it.event, y, classifier=src.get("classifier"), cell=False,
+                                     codes=tuple(src.get("codes") or ()) if it.extract else (), area=area).counts
         if config.study_area() is not None:                 # the study's area's records only
             c = c.filter(pa.array(config.in_area(c.column("u").to_numpy())))
+        elif listed and read.unallocated is not None and read.unallocated.num_rows:
+            # a code list's counts are its placed cells: the records with no valid municipality, sex or age are its
+            # unallocated, and counted here too (SIM-DO S06 2019: 41,139 placed of 41,765, t06b, 2026-11-27)
+            u = read.unallocated
+            c = pa.table({"code": pa.concat_arrays([c.column("code").combine_chunks().cast(pa.string()),
+                                                    u.column("code").combine_chunks().cast(pa.string())]),
+                          "y": pa.concat_arrays([c.column("y").combine_chunks().cast(pa.int64()),
+                                                 u.column("y").combine_chunks().cast(pa.int64())])})
         if prefixes:
             hit = pc.starts_with(c.column("code"), prefixes[0])
             for n in prefixes[1:]:
